@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.4.0.0 (2026-08-08)
+
+F5 — Interviewer digital human. A persona model + admin API configure the interviewer's identity,
+voice knobs, and Foundry prompt-agent binding, with the demo-critical Voice Live metadata shape
+verified in CI (no Azure needed to run or test).
+
+### Added
+- `InterviewerPersona` model + migration `b0fdc500f6d5` with a **partial-unique index**
+  (`enabled = 1 AND is_default = 1`) so exactly one enabled default can exist — the invariant is
+  DB-enforced, not app-enforced.
+- `voice_live_metadata` — a pure, provider-agnostic, 100%-covered builder that owns the exact
+  bytes of `microsoft.voice-live.*` agent metadata: snake_case `session` object, disabled caps as
+  explicit `null` (EOU sub-object omitted when off), 512-char chunking across `.1`/`.2`/… keys,
+  and a `decode_*` inverse for round-trip tests. This is the **guard for the F1 spike Trigger C
+  silent failure** — a camelCase key drift turns Portal Voice mode OFF, and now fails CI here
+  instead of at demo time.
+- `persona_service` — CRUD + one-default enforcement (prefetch-before-flush, SPEC P8) + agent
+  sync status transitions (`none`/`pending`/`synced`/`failed`).
+- `AgentSyncAdapter` protocol with a `mock` provider (CRUD runs with zero Azure) and a
+  coverage-omitted `azure` adapter (DefaultAzureCredential → API-key fallback; create-500 →
+  probe-and-update recovery; immutable-agent `create_version` semantics).
+- Admin persona API (`/admin/personas`) behind a fail-closed shared-bearer-token guard
+  (`require_admin`) — persona config is interviewer-internal and off-limits to candidate sessions
+  (SPEC P3/P4). Sync runs inline; a sync failure is a recorded `agent_sync_status=failed` state,
+  never a 500 (F5 AC #4).
+
+### Config
+- `default_agent_sync_provider` (mock), `foundry_project_endpoint`, `foundry_agent_model`,
+  `foundry_api_key`, `admin_api_token` — all default-empty so the app boots with zero Azure.
+
 ## 0.3.1.0 (2026-08-08)
 
 F1 spike live-validation — ran the `retrieve` contract against a real Foundry IQ knowledge

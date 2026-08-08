@@ -32,3 +32,21 @@ class MockRetrievalAdapter(RetrievalAdapter):
             {"title": "SOP Handbook", "url": "sop://handbook#s2", "page": 7},
         ]
         return citations[:max_citations]
+
+
+class MockAgentSyncAdapter:
+    """Default agent-sync provider — pretends to sync a persona, no Azure (SPEC F5).
+
+    Lets the persona CRUD + sync-bookkeeping flow run end to end in dev/CI: the API can mark a
+    persona synced with deterministic ids without a Foundry project. The real adapter
+    (``AzureAgentSyncAdapter``) registers only when a Foundry endpoint is configured.
+    """
+
+    name = "mock"
+
+    async def sync_persona(self, persona: object, *, locale: str | None = None) -> dict[str, str]:
+        pid = getattr(persona, "id", "mock")
+        return {"agent_id": f"mock-agent-{pid}", "agent_version": "1"}
+
+    async def delete_persona_agent(self, persona: object) -> None:
+        return None

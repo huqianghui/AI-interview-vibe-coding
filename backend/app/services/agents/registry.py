@@ -6,11 +6,16 @@ boots and runs on mocks.
 """
 
 from app.config import get_settings
-from app.services.agents.adapters.mock import MockLLMAdapter, MockRetrievalAdapter
-from app.services.agents.base import LLMAdapter, RetrievalAdapter
+from app.services.agents.adapters.mock import (
+    MockAgentSyncAdapter,
+    MockLLMAdapter,
+    MockRetrievalAdapter,
+)
+from app.services.agents.base import AgentSyncAdapter, LLMAdapter, RetrievalAdapter
 
 _LLM_ADAPTERS: dict[str, LLMAdapter] = {"mock": MockLLMAdapter()}
 _RETRIEVAL_ADAPTERS: dict[str, RetrievalAdapter] = {"mock": MockRetrievalAdapter()}
+_AGENT_SYNC_ADAPTERS: dict[str, AgentSyncAdapter] = {"mock": MockAgentSyncAdapter()}
 
 
 def _register_azure_retrieval() -> None:
@@ -36,7 +41,22 @@ def _register_azure_retrieval() -> None:
     )
 
 
+def _register_azure_agent_sync() -> None:
+    """Register the Azure agent-sync adapter iff a Foundry project endpoint is configured."""
+    settings = get_settings()
+    if not settings.foundry_project_endpoint:
+        return
+    from app.services.agents.adapters.azure_agent_sync import AzureAgentSyncAdapter
+
+    _AGENT_SYNC_ADAPTERS["azure"] = AzureAgentSyncAdapter(
+        endpoint=settings.foundry_project_endpoint,
+        model=settings.foundry_agent_model,
+        api_key=settings.foundry_api_key,
+    )
+
+
 _register_azure_retrieval()
+_register_azure_agent_sync()
 
 
 def get_llm_adapter(name: str | None = None) -> LLMAdapter:
@@ -53,5 +73,15 @@ def get_retrieval_adapter(name: str | None = None) -> RetrievalAdapter:
     if adapter is None:
         raise ValueError(
             f"Unknown retrieval provider {provider!r}. Registered: {sorted(_RETRIEVAL_ADAPTERS)}"
+        )
+    return adapter
+
+
+def get_agent_sync_adapter(name: str | None = None) -> AgentSyncAdapter:
+    provider = name or get_settings().default_agent_sync_provider
+    adapter = _AGENT_SYNC_ADAPTERS.get(provider)
+    if adapter is None:
+        raise ValueError(
+            f"Unknown agent-sync provider {provider!r}. Registered: {sorted(_AGENT_SYNC_ADAPTERS)}"
         )
     return adapter
