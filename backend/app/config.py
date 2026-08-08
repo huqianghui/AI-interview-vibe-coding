@@ -35,7 +35,8 @@ class Settings(BaseSettings):
 
     # Foundry IQ / Azure AI Search retrieval (SOP citations). Empty in dev/CI → mock only.
     azure_search_endpoint: str = ""
-    azure_search_index: str = ""
+    azure_search_index: str = ""  # knowledge base name (URL path segment)
+    azure_search_knowledge_source: str = ""  # KS name in the retrieve body (≠ index; see spike)
     azure_search_api_key: str = ""
 
 

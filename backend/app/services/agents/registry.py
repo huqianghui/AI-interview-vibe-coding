@@ -20,13 +20,18 @@ def _register_azure_retrieval() -> None:
     configured endpoint) so mock-only environments never touch live Foundry IQ config.
     """
     settings = get_settings()
-    if not (settings.azure_search_endpoint and settings.azure_search_index):
+    if not (
+        settings.azure_search_endpoint
+        and settings.azure_search_index
+        and settings.azure_search_knowledge_source
+    ):
         return
     from app.services.agents.adapters.azure_retrieval import AzureRetrievalAdapter
 
     _RETRIEVAL_ADAPTERS["azure"] = AzureRetrievalAdapter(
         endpoint=settings.azure_search_endpoint,
-        index_name=settings.azure_search_index,
+        kb_name=settings.azure_search_index,
+        knowledge_source_name=settings.azure_search_knowledge_source,
         api_key=settings.azure_search_api_key,
     )
 

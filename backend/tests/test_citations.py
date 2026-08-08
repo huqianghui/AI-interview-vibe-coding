@@ -53,3 +53,48 @@ def test_empty_references_is_the_no_match_signal():
 
 def test_non_positive_cap_returns_empty():
     assert shape_citations([_ref("t", "u", "p")], max_citations=0) == []
+
+
+# --- Generalized gate (fields discovered live in the F1 spike) ---
+
+
+def test_field_map_remaps_kb_specific_source_data_fields():
+    # A real KB (spike) exposes domain-specific sourceData fields, not title/url/page.
+    # Map canonical citation fields -> the index's actual field names.
+    refs = [
+        {
+            "sourceData": {
+                "question": "Section 3 heading",
+                "answer": "the answer body text",
+                "source": "handbook",
+            }
+        }
+    ]
+    out = shape_citations(
+        refs,
+        required_fields=("title", "url", "page"),
+        field_map={"title": "question", "url": "source", "page": "answer"},
+    )
+    assert out == [
+        {
+            "title": "Section 3 heading",
+            "url": "handbook",
+            "page": "the answer body text",
+        }
+    ]
+
+
+def test_field_map_still_drops_ref_missing_a_mapped_field():
+    refs = [{"sourceData": {"question": "q", "source": "s"}}]  # no mapped "page" source
+    out = shape_citations(
+        refs,
+        field_map={"title": "question", "url": "source", "page": "answer"},
+    )
+    assert out == []
+
+
+def test_custom_required_fields_subset():
+    # Some indexes only guarantee two fields; the gate stays strict over whatever set we require.
+    refs = [{"sourceData": {"title": "t", "url": "u"}}]
+    out = shape_citations(refs, required_fields=("title", "url"))
+    assert out == [{"title": "t", "url": "u"}]

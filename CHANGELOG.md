@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.3.1.0 (2026-08-08)
+
+F1 spike live-validation — ran the `retrieve` contract against a real Foundry IQ knowledge
+base. **Verdict: GO.** The live run corrected three bugs in the reference contract that would
+each have silently broken every grounded turn.
+
+### Fixed (reference contract bugs, found live)
+- `knowledgeSourceParams.knowledgeSourceName` must be the KB's *knowledge source* name, not the
+  index/KB name (the reference passed the index name → HTTP 400). Added
+  `azure_search_knowledge_source` config + adapter param.
+- `sourceData` is `null` unless the request sends `includeReferenceSourceData: true`; the
+  adapter now always sends it.
+- `sourceData` fields are per-index (no universal `title`/`url`/`page`). The citation gate is
+  now field-configurable (`required_fields` + `field_map`) while keeping the strict
+  all-fields-or-drop invariant.
+
+### Added
+- `backend/scripts/smoke_retrieve.py` — standalone live `retrieve` smoke test (not in CI; reads
+  `AZURE_SEARCH_*` from a gitignored `.env`, auths via key or Azure CLI Entra token).
+- Field-map + custom-required-field tests for the gate; SPIKE.md updated with the live findings
+  and GO verdict.
+
 ## 0.3.0.0 (2026-08-08)
 
 F1 Foundry IQ traceability spike — the code-contract half of de-risking the citation
