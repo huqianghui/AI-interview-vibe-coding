@@ -1,0 +1,7 @@
+# gstack is vendored per-developer (see CLAUDE.md): clone it yourself into
+# .claude/skills/gstack and run ./setup — the setup generates the sibling
+# skill symlink dirs. Neither belongs in version control (nested git repo +
+# absolute-path symlinks).
+.claude/skills/
+.omc/
+.DS_Store

@@ -1,15 +1,17 @@
 #!/bin/bash
-# Block skill usage when gstack is not installed globally.
+# Block skill usage when gstack is not installed in this project.
 
-if [ ! -d "$HOME/.claude/skills/gstack/bin" ]; then
+_PROJ="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
+
+if [ ! -d "$_PROJ/.claude/skills/gstack/bin" ]; then
   cat >&2 <<'MSG'
-BLOCKED: gstack is not installed globally.
+BLOCKED: gstack is not installed in this project.
 
 gstack is required for AI-assisted work in this repo.
 
-Install it:
-  git clone --depth 1 https://github.com/garrytan/gstack.git ~/.claude/skills/gstack
-  cd ~/.claude/skills/gstack && ./setup --team
+Install it (project-level):
+  git clone --depth 1 https://github.com/garrytan/gstack.git .claude/skills/gstack
+  cd .claude/skills/gstack && ./setup
 
 Then restart your AI coding tool.
 MSG
