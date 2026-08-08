@@ -5,16 +5,45 @@ the service, independent of the HTTP layer.
 """
 
 import pytest
+from sqlalchemy import select
 
 from app.interview import state_machine
-from app.interview.questions import QUESTION_COUNT
+from app.interview.questions import QUESTION_COUNT, QUESTIONS, get_question
 from app.interview.state_machine import InterviewStateError
+from app.models.interview import InterviewTurn
 from app.services.anonymous_session_service import create_anonymous_session
+
+
+async def _turns(db, interview_id):
+    return (
+        (
+            await db.execute(
+                select(InterviewTurn)
+                .where(InterviewTurn.interview_session_id == interview_id)
+                .order_by(InterviewTurn.turn_index)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+# Index of the demo question that carries a follow-up, so tests don't hardcode a position.
+_FOLLOW_UP_Q_INDEX = next(i for i, q in enumerate(QUESTIONS) if q.max_follow_ups > 0)
 
 
 async def _candidate(db):
     session, _ = await create_anonymous_session(db, ip_address="1.2.3.4")
     return session
+
+
+async def _answer_until_complete(db, interview, text="a sufficiently long answer for scoring"):
+    """Drive the interview to completion, regardless of how many follow-ups fire (F6 AC #4)."""
+    for _ in range(20):  # generous cap: a bug loops-out instead of hanging the suite
+        if interview.status != "in_progress":
+            break
+        interview = await state_machine.answer_finalized(db, interview, text)
+    return interview
 
 
 @pytest.mark.asyncio
@@ -33,13 +62,14 @@ async def test_full_progression_advances_then_completes(db_session):
     cand = await _candidate(db_session)
     interview = await state_machine.start_interview(db_session, cand.id)
 
-    # Answer every question; each answer advances exactly one question.
-    for i in range(QUESTION_COUNT):
-        assert interview.current_question_index == i
-        interview = await state_machine.answer_finalized(
-            db_session, interview, f"answer number {i} with enough length", source="text"
-        )
+    # A main answer to q1 (no follow-up) advances exactly one question.
+    assert interview.current_question_index == 0
+    interview = await state_machine.answer_finalized(
+        db_session, interview, "answer with enough length", source="text"
+    )
+    assert interview.current_question_index == 1
 
+    interview = await _answer_until_complete(db_session, interview)
     assert interview.status == "completed"
     assert await state_machine.get_current_question(interview) is None
 
@@ -55,6 +85,16 @@ async def test_voice_and_verbal_cue_use_same_event(db_session):
 
 
 @pytest.mark.asyncio
+async def test_answer_with_no_current_question_is_rejected(db_session):
+    # Defensive guard: in_progress but the index has run past the question set (inconsistent state).
+    cand = await _candidate(db_session)
+    interview = await state_machine.start_interview(db_session, cand.id)
+    interview.current_question_index = QUESTION_COUNT + 5
+    with pytest.raises(InterviewStateError):
+        await state_machine.answer_finalized(db_session, interview, "orphan answer")
+
+
+@pytest.mark.asyncio
 async def test_unknown_source_rejected(db_session):
     cand = await _candidate(db_session)
     interview = await state_machine.start_interview(db_session, cand.id)
@@ -66,10 +106,7 @@ async def test_unknown_source_rejected(db_session):
 async def test_cannot_answer_after_completion(db_session):
     cand = await _candidate(db_session)
     interview = await state_machine.start_interview(db_session, cand.id)
-    for _ in range(QUESTION_COUNT):
-        interview = await state_machine.answer_finalized(
-            db_session, interview, "long enough answer"
-        )
+    interview = await _answer_until_complete(db_session, interview)
     with pytest.raises(InterviewStateError):
         await state_machine.answer_finalized(db_session, interview, "too late")
 
@@ -86,12 +123,96 @@ async def test_score_only_after_completed(db_session):
 async def test_score_completed_produces_report_and_flips_status(db_session):
     cand = await _candidate(db_session)
     interview = await state_machine.start_interview(db_session, cand.id)
-    for i in range(QUESTION_COUNT):
-        interview = await state_machine.answer_finalized(
-            db_session, interview, f"answer {i} that is long enough to score"
-        )
+    interview = await _answer_until_complete(db_session, interview)
     report = await state_machine.score_and_finalize(db_session, interview)
     assert report["status"] == "scored"
     assert interview.status == "scored"
+    # Answers are grouped per question, so the report has one entry per question even though a
+    # question generated a follow-up (F6 AC #4).
     assert len(report["per_question"]) == QUESTION_COUNT
     assert report["is_stub"] is True
+
+
+# --- follow-up hook (F6 AC #4) ---------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_follow_up_stays_on_question_then_advances(db_session):
+    cand = await _candidate(db_session)
+    interview = await state_machine.start_interview(db_session, cand.id)
+
+    # Advance to the question that has a follow-up.
+    while interview.current_question_index < _FOLLOW_UP_Q_INDEX:
+        interview = await state_machine.answer_finalized(
+            db_session, interview, "long enough main answer"
+        )
+    fu_question = get_question(_FOLLOW_UP_Q_INDEX)
+    assert fu_question is not None
+
+    # First (main) answer to it must NOT advance — a follow-up is owed.
+    interview = await state_machine.answer_finalized(
+        db_session, interview, "my main answer, sufficiently long"
+    )
+    assert interview.current_question_index == _FOLLOW_UP_Q_INDEX
+
+    # A follow-up interviewer turn was recorded for this question.
+    turns = await _turns(db_session, interview.id)
+    fu_prompts = [
+        t
+        for t in turns
+        if t.question_id == fu_question.id
+        and t.role == "interviewer"
+        and t.turn_kind == "follow_up"
+    ]
+    assert len(fu_prompts) == 1
+    assert fu_prompts[0].content == fu_question.follow_up_prompt
+
+    # The follow-up answer is recorded as a follow_up candidate turn and now advances.
+    prev_index = interview.current_question_index
+    interview = await state_machine.answer_finalized(
+        db_session, interview, "my follow-up elaboration, also long enough"
+    )
+    assert interview.current_question_index == prev_index + 1
+
+    turns = await _turns(db_session, interview.id)
+    fu_answers = [
+        t
+        for t in turns
+        if t.question_id == fu_question.id and t.role == "candidate" and t.turn_kind == "follow_up"
+    ]
+    assert len(fu_answers) == 1
+
+
+@pytest.mark.asyncio
+async def test_follow_up_content_joins_answer_group_for_scoring(db_session):
+    cand = await _candidate(db_session)
+    interview = await state_machine.start_interview(db_session, cand.id)
+    interview = await _answer_until_complete(db_session, interview)
+    report = await state_machine.score_and_finalize(db_session, interview)
+
+    # One scored entry per question, and each distinct question appears once (grouped).
+    scored_qids = [q["question_id"] for q in report["per_question"]]
+    assert len(scored_qids) == QUESTION_COUNT
+    assert len(set(scored_qids)) == QUESTION_COUNT
+
+
+# --- verbal cue as an answer source (F6 AC #3) -----------------------------
+
+
+@pytest.mark.asyncio
+async def test_verbal_cue_source_strips_cue_from_stored_answer(db_session):
+    cand = await _candidate(db_session)
+    interview = await state_machine.start_interview(db_session, cand.id)
+    q1 = get_question(0)
+    assert q1 is not None
+
+    interview = await state_machine.answer_finalized(
+        db_session, interview, "this is my substantive answer, 我答完了", source="verbal_cue"
+    )
+
+    turns = await _turns(db_session, interview.id)
+    answer = next(t for t in turns if t.question_id == q1.id and t.role == "candidate")
+    # The cue phrase is transport signalling, not answer content — it must not be stored/scored.
+    assert answer.source == "verbal_cue"
+    assert "我答完了" not in answer.content
+    assert "substantive answer" in answer.content

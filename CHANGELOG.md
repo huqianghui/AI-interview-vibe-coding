@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.4.1.0 (2026-08-08)
+
+F6 — Turn-by-turn interview state machine, completed to all five ACs. The Step 0 spine (ask →
+answer → advance → report over one channel-agnostic event) gains the follow-up hook and verbal
+end-of-answer cue. No migration: `follow_up` turn_kind already existed and question follow-up
+config is in-code (Step 0 question set).
+
+### Added
+- **Follow-up hook (AC #4).** A question may generate up to `max_follow_ups` follow-up turns
+  (demo default 0/1). After a candidate answers, if a follow-up is owed the state machine records
+  a `follow_up` interviewer turn and stays on the question; the next answer is a `follow_up`
+  candidate turn. Progression (`asking → answering → follow_up×0..N → judged → next`) is derived
+  from recorded turns, so it survives restarts. Demo q2 now carries one follow-up so the hook is
+  exercised end-to-end.
+- **Answer grouping (AC #4).** `scoring.group_answers` groups a question's candidate turns (main +
+  0..N follow-up) into ONE answer, so a question with a follow-up is scored once, not twice — the
+  report keeps exactly one entry per question.
+- **Verbal end-of-answer cue (AC #3).** `interview.verbal_cue` — pure, CI-tested detect/strip for
+  zh + en cue phrases ("我答完了" / "done" / …), matched only as a trailing terminator so
+  cue-like words mid-answer are left intact. When `source=verbal_cue`, the cue is stripped from
+  stored/scored content (it's transport signalling, not answer substance). Silence-timeout
+  advancement remains native Voice Live EOU detection in the transport layer (F9), not backend
+  logic.
+
+### Notes
+- Channel-agnostic contract (P9) unchanged: text, voice, and verbal_cue still converge on the
+  single `answer_finalized(text, source)` event.
+- Interview modules (`state_machine`, `scoring`, `questions`, `verbal_cue`) at 100% coverage.
+
 ## 0.4.0.0 (2026-08-08)
 
 F5 — Interviewer digital human. A persona model + admin API configure the interviewer's identity,

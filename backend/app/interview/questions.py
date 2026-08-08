@@ -14,6 +14,11 @@ from dataclasses import dataclass
 class Question:
     id: str
     prompt: str
+    # F6 follow-up hook: how many follow-up turns this question may generate (demo default 0/1).
+    max_follow_ups: int = 0
+    # Prompt used for the (single) follow-up turn when max_follow_ups > 0. F7 will make this
+    # reference the candidate's prior answer; Step 0 uses a fixed probe.
+    follow_up_prompt: str = "Can you walk me through that in a bit more detail?"
 
 
 QUESTIONS: tuple[Question, ...] = (
@@ -24,6 +29,8 @@ QUESTIONS: tuple[Question, ...] = (
     Question(
         id="q2",
         prompt="Describe a situation where you had to follow a strict procedure. What did you do?",
+        # One follow-up so the state machine's follow-up hook is exercised end-to-end (F6 AC #4).
+        max_follow_ups=1,
     ),
 )
 

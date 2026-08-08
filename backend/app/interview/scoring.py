@@ -31,6 +31,22 @@ class InterviewScore:
     is_stub: bool = True
 
 
+def group_answers(turns: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Group candidate turns into one answer per question (F6 AC #4).
+
+    An **Answer** is the group of a question's candidate turns — the main answer plus any
+    follow-up answers — so a question with a follow-up is scored once, not twice. ``turns`` is a
+    list of ``(question_id, content)`` in turn order; the return preserves first-seen question
+    order with each question's contents joined by a blank line.
+    """
+    grouped: dict[str, list[str]] = {}
+    for question_id, content in turns:
+        grouped.setdefault(question_id, [])
+        if content:
+            grouped[question_id].append(content)
+    return [(qid, "\n\n".join(parts)) for qid, parts in grouped.items()]
+
+
 def score_answer(question_id: str, answer_text: str) -> QuestionScore:
     """Deterministic placeholder judgment based only on answer length.
 
