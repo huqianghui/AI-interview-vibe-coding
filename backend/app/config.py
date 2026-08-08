@@ -26,11 +26,18 @@ class Settings(BaseSettings):
     # Provider selection — mock keeps local dev + CI free of live Azure calls.
     default_llm_provider: str = "mock"
     default_voice_provider: str = "mock"
+    default_retrieval_provider: str = "mock"
 
     # Azure bootstrap/fallback (real values live in ServiceConfig DB table).
     azure_openai_endpoint: str = ""
     azure_openai_api_key: str = ""
     azure_openai_deployment: str = ""
+
+    # Foundry IQ / Azure AI Search retrieval (SOP citations). Empty in dev/CI → mock only.
+    azure_search_endpoint: str = ""
+    azure_search_index: str = ""  # knowledge base name (URL path segment)
+    azure_search_knowledge_source: str = ""  # KS name in the retrieve body (≠ index; see spike)
+    azure_search_api_key: str = ""
 
 
 @lru_cache
