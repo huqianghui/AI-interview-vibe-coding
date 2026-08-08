@@ -5,8 +5,14 @@ finalization all converge on ONE event — ``answer_finalized(db, session, text,
 three producers differ only in how they detect end-of-answer (transport); the progression logic
 is shared through this single entry point, not through a forced shared abstraction.
 
-Step 0 scope: main turns only (no follow-ups yet — the hook is reserved in F6/F7). Status
-lifecycle enforced: created → in_progress → completed → scored.
+Follow-up hook (F6 AC #4): a question may generate up to ``max_follow_ups`` follow-up turns.
+The progression ``asking → answering → (follow_up × 0..N) → judged → next`` is derived from the
+turns already recorded — ``current_question_index`` names the question, and the count of
+follow-up interviewer turns for it tells us whether the next answer is a ``main`` or a
+``follow_up`` and whether another follow-up is owed. All follow-up content joins that question's
+answer group for scoring (see ``app.interview.scoring.group_answers``).
+
+Status lifecycle enforced: created → in_progress → completed → scored.
 """
 
 from datetime import UTC, datetime
@@ -15,7 +21,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.interview.questions import QUESTION_COUNT, get_question
-from app.interview.scoring import score_interview
+from app.interview.scoring import group_answers, score_interview
+from app.interview.verbal_cue import strip_verbal_cue
 from app.models.interview import InterviewSession, InterviewTurn
 
 # Sources that can finalize an answer (P9). All route through answer_finalized().
@@ -60,8 +67,10 @@ async def answer_finalized(
 ) -> InterviewSession:
     """The single channel-agnostic finalization event (P9).
 
-    Records the candidate turn for the current question, then advances: if more questions
-    remain, records the next interviewer turn; otherwise marks the interview completed.
+    Records the candidate turn for the current question. If the question still owes a follow-up,
+    records the follow-up interviewer turn and stays on the same question (the next answer will be
+    a ``follow_up`` turn joining this question's answer group). Otherwise advances: records the
+    next question's interviewer turn, or marks the interview completed when none remain.
     """
     if source not in ANSWER_SOURCES:
         raise InterviewStateError(f"Unknown answer source {source!r}")
@@ -72,36 +81,58 @@ async def answer_finalized(
     if current is None:
         raise InterviewStateError("No current question to answer")
 
+    # A verbal cue ("我答完了"/"done") is transport signalling, not answer content — strip it so
+    # the stored/scored answer is the substance the candidate actually gave.
+    content = strip_verbal_cue(text) if source == "verbal_cue" else text
+
+    follow_ups_asked = await _follow_ups_asked(db, session.id, current.id)
     next_turn_index = await _next_turn_index(db, session.id)
+    # This candidate turn is a follow-up answer iff at least one follow-up has already been asked.
+    turn_kind = "follow_up" if follow_ups_asked > 0 else "main"
     db.add(
         InterviewTurn(
             interview_session_id=session.id,
             question_id=current.id,
             turn_index=next_turn_index,
             role="candidate",
-            turn_kind="main",
+            turn_kind=turn_kind,
             source=source,
-            content=text,
+            content=content,
         )
     )
 
-    session.current_question_index += 1
-    following = get_question(session.current_question_index)
-    if following is not None:
+    if follow_ups_asked < current.max_follow_ups:
+        # Owe another follow-up: ask it and stay on this question.
         db.add(
             InterviewTurn(
                 interview_session_id=session.id,
-                question_id=following.id,
+                question_id=current.id,
                 turn_index=next_turn_index + 1,
                 role="interviewer",
-                turn_kind="main",
+                turn_kind="follow_up",
                 source="text",
-                content=following.prompt,
+                content=current.follow_up_prompt,
             )
         )
     else:
-        session.status = "completed"
-        session.completed_at = _now()
+        # Question fully answered → advance to the next question, or complete.
+        session.current_question_index += 1
+        following = get_question(session.current_question_index)
+        if following is not None:
+            db.add(
+                InterviewTurn(
+                    interview_session_id=session.id,
+                    question_id=following.id,
+                    turn_index=next_turn_index + 1,
+                    role="interviewer",
+                    turn_kind="main",
+                    source="text",
+                    content=following.prompt,
+                )
+            )
+        else:
+            session.status = "completed"
+            session.completed_at = _now()
 
     await db.commit()
     await db.refresh(session)
@@ -146,6 +177,25 @@ async def get_current_question(session: InterviewSession) -> dict | None:
     }
 
 
+async def _follow_ups_asked(db: AsyncSession, session_id: str, question_id: str) -> int:
+    """Count follow-up interviewer turns already asked for ``question_id`` in this session."""
+    rows = (
+        (
+            await db.execute(
+                select(InterviewTurn.id).where(
+                    InterviewTurn.interview_session_id == session_id,
+                    InterviewTurn.question_id == question_id,
+                    InterviewTurn.role == "interviewer",
+                    InterviewTurn.turn_kind == "follow_up",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return len(rows)
+
+
 async def _next_turn_index(db: AsyncSession, session_id: str) -> int:
     turns = (
         (
@@ -162,6 +212,8 @@ async def _next_turn_index(db: AsyncSession, session_id: str) -> int:
 
 
 async def _candidate_answers(db: AsyncSession, session_id: str) -> list[tuple[str, str]]:
+    """Candidate turns as (question_id, content) in turn order, grouped into one answer per
+    question (main + 0..N follow_up joined) — see ``group_answers`` (F6 AC #4)."""
     rows = (
         (
             await db.execute(
@@ -176,7 +228,7 @@ async def _candidate_answers(db: AsyncSession, session_id: str) -> list[tuple[st
         .scalars()
         .all()
     )
-    return [(t.question_id, t.content) for t in rows]
+    return group_answers([(t.question_id, t.content) for t in rows])
 
 
 def _now() -> datetime:

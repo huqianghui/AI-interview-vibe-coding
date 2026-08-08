@@ -31,9 +31,12 @@ async def test_full_thin_slice_flow(client):
     assert body["current_question"]["index"] == 0
     total = body["current_question"]["total"]
 
-    # Answer each question until the interview completes.
+    # Answer until the interview completes (a question may ask a follow-up, so the number of
+    # answers can exceed the question count — F6 AC #4).
     status_body = body
-    for _ in range(total):
+    for _ in range(20):  # generous cap so a bug loops-out instead of hanging
+        if status_body["status"] == "completed":
+            break
         status_body = (
             await client.post(
                 f"/candidate/interview/{interview_id}/answer",
