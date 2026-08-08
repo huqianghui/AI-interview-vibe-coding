@@ -34,3 +34,20 @@ class RetrievalAdapter(Protocol):
     name: str
 
     async def retrieve_citations(self, query: str, *, max_citations: int = 3) -> list[dict]: ...
+
+
+@runtime_checkable
+class AgentSyncAdapter(Protocol):
+    """Syncs an interviewer persona to a Foundry prompt agent (SPEC F5).
+
+    ``sync_persona`` returns ``{agent_id, agent_version}``; ``delete_persona_agent`` is a
+    best-effort teardown. The mock provider fakes both so the CRUD flow runs without Azure.
+    """
+
+    name: str
+
+    async def sync_persona(
+        self, persona: object, *, locale: str | None = None
+    ) -> dict[str, str]: ...
+
+    async def delete_persona_agent(self, persona: object) -> None: ...
