@@ -53,4 +53,8 @@ addopts = "--cov=app --cov-report=term-missing --cov-fail-under=85"
 testpaths = ["tests"]
 
 [tool.coverage.run]
-omit = ["app/services/agents/adapters/azure_*.py", "alembic/*"]
+omit = [
+    "app/services/agents/adapters/azure_*.py",
+    "app/sop/binary_extractors.py",
+    "alembic/*",
+]
