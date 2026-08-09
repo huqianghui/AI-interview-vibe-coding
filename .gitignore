@@ -6,3 +6,8 @@
 .omc/
 .DS_Store
 .gstack/
+# Local SOP blob storage (F1) — uploaded SOP bytes live here in dev; never commit them.
+_sop_storage/
+backend/_sop_storage/
+storage/materials/
+backend/storage/
