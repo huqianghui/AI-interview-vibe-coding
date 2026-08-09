@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.6.0.0 (2026-08-09)
+
+F1 — Knowledge base + traceability. An admin can now upload an SOP document and have it extracted,
+chunked with page/section labels, and stored, so citations can point back to an exact location —
+the traceability the demo leads with. The Foundry IQ retrieval gate (validated live in the F1
+spike) is now wired behind an admin API. Local dev / CI run entirely on mocks; no Azure needed.
+
+### Added
+- **SOP upload + ingestion (AC #1).** `POST /admin/sop/documents` accepts a PDF / DOCX / PPTX /
+  TXT / MD file, extracts text **segment by segment** (per PDF page, per PPTX slide), chunks each
+  segment, and persists one `SopChunk` per chunk carrying that segment's page/section label. The
+  raw bytes go to a pluggable blob store (local filesystem in dev, swappable for Azure Blob),
+  never into the DB and never handed to candidates (P4).
+- **Graceful failure (AC #4).** A corrupt or unsupported file is recorded as `status="failed"`
+  with a 201 response — it never crashes the upload, so a bad file in a batch doesn't take the
+  batch down. Extraction and each binary parser degrade to empty rather than raising.
+- **Document listing.** `GET /admin/sop/documents` returns each ingested document with its chunk
+  count — the admin knowledge-base view.
+- **Citation retrieval (AC #2/#3).** `POST /admin/sop/retrieve` runs a query through the configured
+  retrieval adapter (mock in dev/CI, Foundry IQ with creds) and returns only fully-attributed
+  `{title, url, page}` citations. The strict field gate — drop any citation missing any required
+  field — was proven against a live KB in the F1 spike and is reused unchanged; an empty result is
+  the honest no-match signal, not an error.
+- **Pluggable blob storage.** A local filesystem store (path-traversal guarded) with an `azure`
+  slot for prod; selected by config, cached per process.
+
+### Security
+- All SOP routes are admin-only (shared bearer token, fail-closed). The raw SOP corpus and its blob
+  pointers are interviewer/business internals (P3/P4); candidates only ever see server-mediated
+  citation text later, never these routes.
+
+### Notes
+- Retrieval was validated live against a real Foundry IQ KB during the F1 spike (GO, 2026-08-08);
+  this release wires that proven gate behind the API and adds the ingestion half. The live
+  `retrieve` call and the binary parsers are coverage-omitted (need live creds / optional deps);
+  the extraction dispatch, chunker, field gate, ingestion pipeline, storage, and API are all
+  CI-covered on mocks.
+
 ## 0.5.0.0 (2026-08-09)
 
 F9 — Frontend interview page, the winning-demo path. A candidate can now land on the interview
