@@ -78,6 +78,7 @@ export interface VoiceSession {
   character: string;
   style: string;
   greeting: string | null;
+  avatar_enabled: boolean;
 }
 
 /**

@@ -94,6 +94,7 @@ class VoiceSessionOut(BaseModel):
     character: str
     style: str
     greeting: str | None = None
+    avatar_enabled: bool = False
 
 
 def _to_interview_out(session: InterviewSession, question: dict | None) -> InterviewOut:

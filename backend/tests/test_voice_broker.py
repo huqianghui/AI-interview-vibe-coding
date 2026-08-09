@@ -121,6 +121,25 @@ async def test_create_voice_session_succeeds_for_synced_persona(db_session):
     # session_config is the snake_case Voice Live shape — never candidate-facing rubric data.
     assert "voice" in vs.session_config
     assert "turn_detection" in vs.session_config
+    # Persona has a character → avatar video modality requested (digital-human face).
+    assert vs.avatar_enabled is True
+    assert vs.session_config["modalities"] == ["text", "audio", "avatar"]
+
+
+@pytest.mark.asyncio
+async def test_create_voice_session_no_avatar_when_no_character(db_session):
+    # A persona with no character → voice-only (no avatar modality); the frontend shows the orb.
+    persona = await psvc.create_persona(
+        db_session,
+        name="Interviewer",
+        character="",
+        voice_map='{"zh-CN": "zh-CN-XiaoxiaoNeural"}',
+        is_default=True,
+    )
+    await psvc.mark_sync_succeeded(db_session, persona, agent_id="a", agent_version="1")
+    vs = await voice_broker.create_voice_session(db_session, locale="zh-CN")
+    assert vs.avatar_enabled is False
+    assert "modalities" not in vs.session_config
 
 
 @pytest.mark.asyncio

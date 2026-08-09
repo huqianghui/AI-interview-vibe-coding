@@ -71,6 +71,9 @@ class VoiceSession:
     character: str
     style: str
     greeting: str | None = None
+    # True when the session requests a digital-human avatar video track (the persona has a
+    # character/style). The frontend negotiates a recvonly video transceiver and shows the face.
+    avatar_enabled: bool = False
 
 
 def build_signaling_url(
@@ -154,6 +157,12 @@ async def create_voice_session(
     resolved_locale, _ = resolve_voice(persona.voice_map, effective_locale)
     session_config = build_session(persona, locale=resolved_locale)
 
+    # Request the avatar video modality when the persona has a character configured, so Voice Live
+    # sends a digital-human video track (the frontend negotiates a recvonly video transceiver).
+    avatar_enabled = bool((persona.character or "").strip())
+    if avatar_enabled:
+        session_config["modalities"] = ["text", "audio", "avatar"]
+
     credential: VoiceCredential = await voice_provider.issue_credential(
         endpoint=to_cognitive_services_endpoint(settings.azure_foundry_endpoint),
         api_key=settings.azure_foundry_api_key,
@@ -183,4 +192,5 @@ async def create_voice_session(
         character=persona.character,
         style=persona.style,
         greeting=_greeting_for_locale(persona.greeting_map, resolved_locale),
+        avatar_enabled=avatar_enabled,
     )

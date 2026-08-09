@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.13.0.0 (2026-08-09)
+
+Digital-human avatar video + planning docs brought into the repo. The interviewer can now show an
+actual avatar face (not just the audio orb) when Voice Live sends the digital-human video track,
+and the project's planning trail (design doc, spec draft, autoplan review) now travels with the
+repo instead of living only in local gstack state.
+
+### Added
+- **Avatar video (F5/F9).** When the interviewer persona has a character, the voice broker requests
+  the `avatar` modality (`modalities: [text, audio, avatar]`) and flags `avatar_enabled`. The voice
+  hook negotiates a recvonly video transceiver and attaches the incoming video track to a `<video>`
+  element; the new `AvatarView` shows the avatar face once the track arrives and falls back to the
+  audio orb for voice-only sessions (or while the avatar is still negotiating). So the interview
+  always has a presence, and gets a real face when one is available.
+- **Planning docs in the repo.** `docs/planning/` now holds the design/brainstorm doc, the
+  pre-autoplan spec draft, and the autoplan review — promoted from local `~/.gstack` state so the
+  full planning trail is versioned and reviewable. `docs/IMPLEMENTATION-STATUS.md` maps every
+  feature to its shipped version and live-Azure validation state.
+
+### Notes
+- The avatar face requires Azure Voice Live to send the video track for the session; the
+  voice-only orb remains the fallback and the always-present baseline.
+
 ## 0.12.0.0 (2026-08-09)
 
 F2b + F3b — Admin editors. The business can now edit the interview question set and its scoring

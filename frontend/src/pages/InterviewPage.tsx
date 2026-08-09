@@ -36,7 +36,7 @@ import {
 } from "../api/client";
 import { MicAccessError, useInterviewVoice } from "../hooks/useInterviewVoice";
 import type { TranscriptSegment } from "../types/voice";
-import { AudioOrb } from "../components/AudioOrb";
+import { AvatarView } from "../components/AvatarView";
 import { QuestionProgress } from "../components/QuestionProgress";
 import { MicPermissionDialog } from "../components/MicPermissionDialog";
 import { Transcript } from "../components/Transcript";
@@ -61,6 +61,8 @@ export function InterviewPage() {
 
   const interviewRef = useRef<Interview | null>(null);
   interviewRef.current = interview;
+  // The avatar video element the voice hook attaches a digital-human track to (F5/F9).
+  const avatarVideoRef = useRef<HTMLVideoElement | null>(null);
 
   const onTranscript = useCallback((seg: TranscriptSegment) => {
     setSegments((prev) => {
@@ -74,6 +76,7 @@ export function InterviewPage() {
 
   const voice = useInterviewVoice(interview?.interview_session_id ?? "", {
     locale: i18n.language,
+    videoRef: avatarVideoRef,
     onTranscript,
     onError: (err) => {
       // A mic failure opens the permission dialog; anything else falls the page back to text.
@@ -204,7 +207,11 @@ export function InterviewPage() {
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
           {/* (1) avatar dominant */}
           <div style={{ padding: "24px 0" }}>
-            <AudioOrb audioState={channel === "voice" ? voice.audioState : "idle"} />
+            <AvatarView
+              ref={avatarVideoRef}
+              audioState={channel === "voice" ? voice.audioState : "idle"}
+              isAvatarConnected={channel === "voice" && voice.isAvatarConnected}
+            />
           </div>
 
           {/* (3) progress */}
