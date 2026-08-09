@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.9.0.0 (2026-08-09)
+
+F4 — Scoring engine. The knowledge→scoring chain is closed: a completed interview is now graded
+answer-by-answer against each question's SOP-derived checklist, producing a 4-state judgment per
+item with the SOP quote and the candidate's own words side by side, plus a weighted score and
+grade. This is the SOP-traceable compliance scoring the demo leads with, and it replaces the Step-0
+length-based stub.
+
+### Added
+- **4-state per-item judgment.** Every checklist item is judged `met` / `partially_met` /
+  `not_met` / `violated`, each carrying a rationale, a verbatim span from the candidate's answer,
+  and the SOP source quote + page it's graded against — the traceability that proves the RAG is
+  real.
+- **Weighted score + grade.** Item weights (F3 normalizes them to 100) produce a 0-100 question
+  score (met=full, partially_met=half); the interview score is the mean across graded questions,
+  mapped to an A-F grade.
+- **Anti-hallucination rails (SPEC P7).** An empty or too-short answer can't score high (every item
+  forced to `not_met`); a forbidden item the answer triggers is forced to `violated` with a
+  warning; a judgment the model invents for an item not on the checklist is dropped; and if the
+  model skips an item, scoring retries with a stricter reminder rather than silently under-counting
+  coverage. The short-answer threshold is recalibrated for a single Q&A turn, not the reference's
+  aggregate-transcript number.
+- **Cross-language scoring (AC #4).** The judging prompt states the SOP, the answer, and the
+  rationale may be in different languages and compares by meaning — an English SOP scores a Chinese
+  answer.
+- **Richer report.** The report now carries `total_score`, `grade`, forbidden-item `warnings`, and
+  per-question per-item judgments with both quotes, alongside the existing coverage. Questions
+  without a checklist authored yet still produce a stub row, so the report always covers every
+  question.
+
+### Fixed
+- Provider registry falls back to the mock LLM/retrieval adapter when the configured default isn't
+  registered (carried in from the F3 fix; the scoring path is the second consumer of the LLM
+  adapter and would have hit the same 500).
+
+### Security
+- Scoring runs server-side; the rubric and its weights are never exposed to candidates. The report
+  shows a candidate their own results (scores, judgments, source quotes), never the raw checklist.
+
+### Notes
+- CI + local dev score through the mock LLM (which returns a deterministic per-item judgment); the
+  Azure adapter drives prod. The pure engine — rails, weighting, grade bands — is fully CI-covered
+  without any Azure.
+
 ## 0.8.0.0 (2026-08-09)
 
 F3 — Checklist (rubric). Each interview question can now have an AI-drafted scoring checklist:

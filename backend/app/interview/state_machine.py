@@ -21,9 +21,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.interview.questions import question_at, resolve_questions
-from app.interview.scoring import group_answers, score_interview
+from app.interview.scoring import group_answers
+from app.interview.scoring_engine import grade_for_score
 from app.interview.verbal_cue import strip_verbal_cue
 from app.models.interview import InterviewSession, InterviewTurn
+from app.services import scoring_service
 
 # Sources that can finalize an answer (P9). All route through answer_finalized().
 ANSWER_SOURCES = ("text", "voice", "verbal_cue")
@@ -142,16 +144,64 @@ async def answer_finalized(
 
 
 async def score_and_finalize(db: AsyncSession, session: InterviewSession) -> dict:
-    """Score a completed interview and flip status to ``scored``, returning a report dict.
+    """Score a completed interview against each question's checklist and flip status to ``scored``.
 
-    Step 0 placeholder report (SPEC F8 shape, stub scoring from F4-stub). Only allowed once the
-    interview is ``completed`` (F8 AC #4: report only when scored).
+    F4: each answer is graded against its question's default checklist into a 4-state judgment per
+    item with SOP + answer quotes (the traceable, weighted score the demo leads with). A question
+    with no checklist authored yet falls back to the length-based stub row, so the report always
+    covers every question. Only allowed once ``completed`` (F8 AC #4: report only when scored).
     """
     if session.status not in ("completed", "scored"):
         raise InterviewStateError(f"Cannot score in status {session.status!r}")
 
+    # question_id → prompt text, so the scorer can build a cross-language judging prompt.
+    questions = await resolve_questions(db)
+    prompt_by_id = {q.id: q.prompt for q in questions}
     answers = await _candidate_answers(db, session.id)
-    result = score_interview(answers)
+
+    per_question: list[dict] = []
+    question_scores: list[float] = []
+    all_warnings: list[str] = []
+    any_graded = False
+
+    for question_id, answer_text in answers:
+        result = await scoring_service.score_answer_against_checklist(
+            db,
+            question_id=question_id,
+            question_text=prompt_by_id.get(question_id, ""),
+            answer_text=answer_text,
+        )
+        if result is None:
+            # No checklist authored for this question — length-based stub row.
+            per_question.append(scoring_service.stub_result_dict(question_id, answer_text))
+            continue
+        any_graded = True
+        question_scores.append(result.score)
+        all_warnings.extend(result.warnings)
+        per_question.append(
+            {
+                "question_id": result.question_id,
+                "score": result.score,
+                "coverage_pct": result.coverage_pct,
+                "grade": grade_for_score(result.score),
+                "items": [
+                    {
+                        "kind": it.kind,
+                        "judgment": it.judgment,
+                        "weight": it.weight,
+                        "rationale": it.rationale,
+                        "answer_quote": it.answer_quote,
+                        "source_quote": it.source_quote,
+                        "source_page": it.source_page,
+                    }
+                    for it in result.items
+                ],
+                "is_stub": False,
+            }
+        )
+
+    # Interview-level score = mean of graded question scores; coverage mirrors it (F8 aggregates).
+    total_score = round(sum(question_scores) / len(question_scores), 1) if question_scores else 0.0
 
     session.status = "scored"
     await db.commit()
@@ -160,9 +210,12 @@ async def score_and_finalize(db: AsyncSession, session: InterviewSession) -> dic
     return {
         "interview_session_id": session.id,
         "status": session.status,
-        "coverage_pct": result.coverage_pct,
-        "per_question": result.per_question,
-        "is_stub": result.is_stub,
+        "coverage_pct": total_score,
+        "total_score": total_score,
+        "grade": grade_for_score(total_score) if any_graded else None,
+        "per_question": per_question,
+        "warnings": all_warnings,
+        "is_stub": not any_graded,
     }
 
 
