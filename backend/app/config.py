@@ -43,6 +43,13 @@ class Settings(BaseSettings):
     azure_search_knowledge_source: str = ""  # KS name in the retrieve body (≠ index; see spike)
     azure_search_api_key: str = ""
 
+    # SOP blob storage (F1). Raw uploads live here, never in the DB and never handed to candidates
+    # directly (P4). Local filesystem in dev/CI; a blob backend can be swapped in prod.
+    default_storage_provider: str = "local"
+    material_storage_path: str = "./_sop_storage"
+    # Max upload size (MB) accepted by the SOP ingestion endpoint.
+    material_max_size_mb: int = 25
+
     # Foundry project for interviewer-agent sync (SPEC F5). Empty in dev/CI → no agent sync.
     default_agent_sync_provider: str = "mock"
     foundry_project_endpoint: str = ""
