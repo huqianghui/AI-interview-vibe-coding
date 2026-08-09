@@ -38,6 +38,34 @@ export interface Report {
 
 export type AnswerSource = "text" | "voice" | "verbal_cue";
 
+/** WebRTC connection info brokered by the backend (SPEC F9). Mirrors `VoiceSessionOut`. */
+export interface VoiceSession {
+  interview_session_id: string;
+  signaling_url: string;
+  auth_token: string;
+  auth_type: string;
+  mode: "agent" | "model";
+  model: string;
+  session_config: Record<string, unknown>;
+  persona_id: string;
+  character: string;
+  style: string;
+  greeting: string | null;
+}
+
+/**
+ * Thrown by the voice-session fetch on a non-2xx response, preserving the HTTP status so callers
+ * can distinguish P5's 409 (agent not synced → offer text fallback) from a 503 (voice off).
+ */
+export class VoiceSessionError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "VoiceSessionError";
+    this.status = status;
+  }
+}
+
 function getToken(): string | null {
   return typeof localStorage !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
 }
@@ -90,6 +118,30 @@ export async function submitAnswer(
 
 export async function getReport(interviewId: string): Promise<Report> {
   return request<Report>(`/candidate/interview/${interviewId}/report`, { method: "POST" });
+}
+
+/**
+ * Broker a WebRTC voice session for an in-progress interview (SPEC F9). Throws
+ * {@link VoiceSessionError} (with the HTTP status) on failure so the caller can react to P5's
+ * 409 (agent not synced) vs. a 503 (voice unavailable) — both fall back to the text channel.
+ */
+export async function fetchVoiceSession(
+  interviewId: string,
+  locale: string,
+): Promise<VoiceSession> {
+  const token = getToken();
+  const headers = new Headers({ "Content-Type": "application/json" });
+  if (token) headers.set("X-Anon-Session", token);
+  const resp = await fetch(`${BASE}/candidate/interview/${interviewId}/voice/session`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ locale }),
+  });
+  if (!resp.ok) {
+    const detail = await resp.text().catch(() => "");
+    throw new VoiceSessionError(`${resp.status} ${resp.statusText}: ${detail}`, resp.status);
+  }
+  return (await resp.json()) as VoiceSession;
 }
 
 export const _internal = { TOKEN_KEY, getToken, setToken };

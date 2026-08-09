@@ -8,6 +8,8 @@ Step 0 exposes just enough to prove ask → answer → placeholder report over t
 Voice sources (voice / verbal_cue) share the same answer_finalized event and are accepted here.
 """
 
+from dataclasses import asdict
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -19,6 +21,8 @@ from app.interview import state_machine
 from app.interview.state_machine import ANSWER_SOURCES, InterviewStateError
 from app.models.anonymous_session import AnonymousCandidateSession
 from app.models.interview import InterviewSession
+from app.services import voice_broker
+from app.services.voice_broker import DEFAULT_LOCALE, VoiceAgentNotSynced, VoiceUnavailable
 
 router = APIRouter(prefix="/candidate/interview", tags=["interview"])
 
@@ -47,6 +51,27 @@ class ReportOut(BaseModel):
     coverage_pct: float
     per_question: list[dict]
     is_stub: bool
+
+
+class VoiceSessionOut(BaseModel):
+    """WebRTC connection info the candidate's browser needs to reach Azure Voice Live directly.
+
+    Deliberately excludes any checklist/rubric/SOP content (P3/P12): a voice session is transport
+    setup, not scoring data. ``session_config`` is the snake_case Voice Live config (voice, VAD,
+    avatar) — never candidate-facing citations.
+    """
+
+    interview_session_id: str
+    signaling_url: str
+    auth_token: str
+    auth_type: str
+    mode: str
+    model: str
+    session_config: dict
+    persona_id: str
+    character: str
+    style: str
+    greeting: str | None = None
 
 
 def _to_interview_out(session: InterviewSession, question: dict | None) -> InterviewOut:
@@ -114,3 +139,41 @@ async def report(
     except InterviewStateError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return ReportOut(**result)
+
+
+class VoiceSessionIn(BaseModel):
+    locale: str = DEFAULT_LOCALE
+
+
+@router.post("/{interview_id}/voice/session", response_model=VoiceSessionOut)
+async def voice_session(
+    interview_id: str,
+    body: VoiceSessionIn | None = None,
+    candidate: AnonymousCandidateSession = Depends(get_anonymous_session),
+    db: AsyncSession = Depends(get_db),
+) -> VoiceSessionOut:
+    """Broker a direct-to-Azure WebRTC voice session for an in-progress interview (SPEC F9).
+
+    Ownership-guarded like every other candidate route. Voice is only meaningful while the
+    interview is live, so a non-``in_progress`` interview is a 409 (the candidate should be on the
+    report screen, not connecting a mic). P5: a persona whose Foundry agent is not synced yields a
+    409 (``VOICE_AGENT_NOT_SYNCED``) so the frontend falls back to text-only continuation (P6b)
+    instead of connecting to an ungrounded model-mode session.
+    """
+    session = await _owned_interview(db, interview_id, candidate)
+    if session.status != "in_progress":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot start voice in status {session.status!r}",
+        )
+    locale = (body.locale if body else None) or DEFAULT_LOCALE
+    try:
+        vs = await voice_broker.create_voice_session(db, locale=locale)
+    except VoiceAgentNotSynced as exc:
+        # 409 (not 5xx): a recorded not-ready state, surfaced so the UI can offer text fallback.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except VoiceUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
+    return VoiceSessionOut(interview_session_id=session.id, **asdict(vs))

@@ -2,16 +2,43 @@
 
 In-memory SQLite + get_db override so tests never touch a real DB or live Azure.
 This is the seam the test-double strategy (SPEC P2) hooks into.
+
+A developer's local ``backend/.env`` may point the default providers at real Azure
+(``DEFAULT_LLM_PROVIDER=azure_openai`` etc.) and carry live endpoints/keys. Tests must be immune
+to that so local runs match CI (where no ``.env`` exists) — SPEC P2. We pin the provider selection
+to ``mock`` and blank the Azure creds in ``os.environ`` BEFORE any ``app`` import, because
+``get_settings()`` is import-time cached (via ``app.main`` / the agent registry) and env vars take
+precedence over the ``.env`` file in pydantic-settings.
 """
 
-import pytest
-import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+import os
 
-import app.models  # noqa: F401 — registers all ORM classes on Base.metadata
-from app.db import Base, get_db
-from app.main import app
+# Must run before the `app.*` imports below — see module docstring.
+os.environ.update(
+    {
+        "DEFAULT_LLM_PROVIDER": "mock",
+        "DEFAULT_RETRIEVAL_PROVIDER": "mock",
+        "DEFAULT_AGENT_SYNC_PROVIDER": "mock",
+        "DEFAULT_VOICE_PROVIDER": "mock",
+        "AZURE_SEARCH_ENDPOINT": "",
+        "AZURE_FOUNDRY_ENDPOINT": "",
+        "AZURE_FOUNDRY_API_KEY": "",
+        "FOUNDRY_PROJECT_ENDPOINT": "",
+    }
+)
+
+import pytest  # noqa: E402
+import pytest_asyncio  # noqa: E402
+from httpx import ASGITransport, AsyncClient  # noqa: E402
+from sqlalchemy.ext.asyncio import (  # noqa: E402
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+
+import app.models  # noqa: F401,E402 — registers all ORM classes on Base.metadata
+from app.db import Base, get_db  # noqa: E402
+from app.main import app  # noqa: E402
 
 
 @pytest_asyncio.fixture
