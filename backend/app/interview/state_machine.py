@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.interview.memory import build_follow_up_prompt
 from app.interview.questions import question_at, resolve_questions
 from app.interview.scoring import group_answers
 from app.interview.scoring_engine import build_narrative, grade_for_score
@@ -106,7 +107,12 @@ async def answer_finalized(
     )
 
     if follow_ups_asked < current.max_follow_ups:
-        # Owe another follow-up: ask it and stay on this question.
+        # Owe another follow-up: ask it and stay on this question. F7 memory moment — the follow-up
+        # references what the candidate just said (from this turn's content), so the interviewer
+        # visibly remembers across turns rather than asking a canned probe.
+        follow_up_text = build_follow_up_prompt(
+            current.follow_up_prompt, content, locale=_infer_locale(content)
+        )
         db.add(
             InterviewTurn(
                 interview_session_id=session.id,
@@ -115,7 +121,7 @@ async def answer_finalized(
                 role="interviewer",
                 turn_kind="follow_up",
                 source="text",
-                content=current.follow_up_prompt,
+                content=follow_up_text,
             )
         )
     else:
@@ -232,12 +238,45 @@ async def get_current_question(db: AsyncSession, session: InterviewSession) -> d
     q = question_at(questions, session.current_question_index)
     if q is None:
         return None
+    # F7: when a follow-up is pending for this question, show ITS prompt (which cites the
+    # candidate's prior answer) instead of the base question — that's the visible memory moment.
+    prompt = await _pending_follow_up_prompt(db, session.id, q.id) or q.prompt
     return {
         "question_id": q.id,
-        "prompt": q.prompt,
+        "prompt": prompt,
         "index": session.current_question_index,
         "total": len(questions),
     }
+
+
+async def _pending_follow_up_prompt(
+    db: AsyncSession, session_id: str, question_id: str
+) -> str | None:
+    """The latest follow-up interviewer prompt for this question if it's still awaiting an answer.
+
+    A follow-up is pending when the count of interviewer follow-up turns exceeds the count of
+    candidate follow-up answers for the question — i.e. the last thing said was the follow-up.
+    """
+    turns = (
+        (
+            await db.execute(
+                select(InterviewTurn)
+                .where(
+                    InterviewTurn.interview_session_id == session_id,
+                    InterviewTurn.question_id == question_id,
+                    InterviewTurn.turn_kind == "follow_up",
+                )
+                .order_by(InterviewTurn.turn_index)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    asked = [t for t in turns if t.role == "interviewer"]
+    answered = [t for t in turns if t.role == "candidate"]
+    if len(asked) > len(answered):
+        return asked[-1].content
+    return None
 
 
 async def _follow_ups_asked(db: AsyncSession, session_id: str, question_id: str) -> int:
@@ -296,3 +335,14 @@ async def _candidate_answers(db: AsyncSession, session_id: str) -> list[tuple[st
 
 def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _infer_locale(text: str) -> str:
+    """Rough locale for the follow-up lead-in: zh-CN if the answer is mostly CJK, else en-US.
+
+    The follow-up should read back in the candidate's language; a per-answer heuristic avoids
+    threading bank/persona locale through the finalize path for what is a cosmetic lead-in.
+    """
+    cjk = sum(1 for ch in text if "一" <= ch <= "鿿")
+    letters = sum(1 for ch in text if ch.isalpha())
+    return "zh-CN" if cjk and cjk >= letters else "en-US"
