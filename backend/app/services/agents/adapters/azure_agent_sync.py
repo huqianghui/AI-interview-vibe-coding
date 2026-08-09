@@ -22,6 +22,7 @@ import asyncio
 import time
 from typing import Any
 
+from app.services.agents.knowledge_tool import build_agent_tools
 from app.services.agents.voice_live_metadata import build_voice_live_metadata
 
 # Entra scope used to probe for a usable DefaultAzureCredential before falling back to API key.
@@ -56,11 +57,22 @@ class AzureAgentSyncAdapter:
     name = "azure"
 
     def __init__(
-        self, *, endpoint: str, model: str = _MODEL_ENV_DEFAULT, api_key: str = ""
+        self,
+        *,
+        endpoint: str,
+        model: str = _MODEL_ENV_DEFAULT,
+        api_key: str = "",
+        search_endpoint: str = "",
+        search_index: str = "",
+        knowledge_source_name: str = "",
     ) -> None:
         self._endpoint = endpoint
         self._model = model
         self._api_key = api_key
+        # SOP knowledge-base binding (P15). Empty → the agent syncs with no knowledge tool.
+        self._search_endpoint = search_endpoint
+        self._search_index = search_index
+        self._knowledge_source_name = knowledge_source_name
 
     # -- public API ---------------------------------------------------------
 
@@ -73,12 +85,19 @@ class AzureAgentSyncAdapter:
         agent_name = self._agent_name(persona)
         instructions = persona.prompt_fragment or f"You are {persona.name}, an interviewer."
         metadata = build_voice_live_metadata(persona, locale=locale, modified_at=int(time.time()))
+        tools = build_agent_tools(
+            search_endpoint=self._search_endpoint,
+            index_name=self._search_index,
+            knowledge_source_name=self._knowledge_source_name,
+        )
 
         client = self._project_client()
         try:
-            result = await self._create_version(client, agent_name, instructions, metadata)
+            result = await self._create_version(client, agent_name, instructions, metadata, tools)
         except Exception as exc:  # noqa: BLE001 — normalize any SDK error into a recovery attempt
-            result = await self._recover_or_raise(client, agent_name, instructions, metadata, exc)
+            result = await self._recover_or_raise(
+                client, agent_name, instructions, metadata, tools, exc
+            )
 
         return {
             "agent_id": str(result.get("id") or agent_name),
@@ -96,14 +115,23 @@ class AzureAgentSyncAdapter:
         return f"interviewer-{persona.id}"
 
     async def _create_version(
-        self, client: Any, agent_name: str, instructions: str, metadata: dict[str, str]
+        self,
+        client: Any,
+        agent_name: str,
+        instructions: str,
+        metadata: dict[str, str],
+        tools: list[dict[str, Any]],
     ) -> dict[str, Any]:
         from azure.ai.projects.models import PromptAgentDefinition
 
+        # Attach the SOP knowledge-source tool when configured so the agent is grounded (P15).
+        definition_kwargs: dict[str, Any] = {"model": self._model, "instructions": instructions}
+        if tools:
+            definition_kwargs["tools"] = tools
         created = await asyncio.to_thread(
             client.agents.create_version,
             agent_name=agent_name,
-            definition=PromptAgentDefinition(model=self._model, instructions=instructions),
+            definition=PromptAgentDefinition(**definition_kwargs),
             metadata=metadata,
         )
         return {
@@ -117,6 +145,7 @@ class AzureAgentSyncAdapter:
         agent_name: str,
         instructions: str,
         metadata: dict[str, str],
+        tools: list[dict[str, Any]],
         original: Exception,
     ) -> dict[str, Any]:
         """On a create failure, if the agent already exists, retry as an update; else raise.
@@ -135,7 +164,7 @@ class AzureAgentSyncAdapter:
                 "with API-key auth, pre-create the agent in the Foundry Portal first."
             ) from original
         # Agent exists — a new version (update) is allowed under API-key auth.
-        return await self._create_version(client, agent_name, instructions, metadata)
+        return await self._create_version(client, agent_name, instructions, metadata, tools)
 
     def _project_client(self) -> Any:
         from azure.ai.projects import AIProjectClient

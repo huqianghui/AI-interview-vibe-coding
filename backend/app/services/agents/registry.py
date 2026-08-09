@@ -56,6 +56,11 @@ def _register_azure_agent_sync() -> None:
         endpoint=settings.foundry_project_endpoint,
         model=settings.foundry_agent_model,
         api_key=settings.foundry_api_key,
+        # Bind the SOP knowledge base so the agent's answers/follow-ups stay SOP-grounded (P15).
+        # Reuses the F1 Search config; empty values → no knowledge tool (ungrounded agent).
+        search_endpoint=settings.azure_search_endpoint,
+        search_index=settings.azure_search_index,
+        knowledge_source_name=settings.azure_search_knowledge_source,
     )
 
 
