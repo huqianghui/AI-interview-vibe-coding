@@ -5,6 +5,8 @@ dependency + credentials are present, so a bare `pip install -e .` (no azure ext
 boots and runs on mocks.
 """
 
+import logging
+
 from app.config import get_settings
 from app.services.agents.adapters.mock import (
     MockAgentSyncAdapter,
@@ -12,6 +14,8 @@ from app.services.agents.adapters.mock import (
     MockRetrievalAdapter,
 )
 from app.services.agents.base import AgentSyncAdapter, LLMAdapter, RetrievalAdapter
+
+logger = logging.getLogger(__name__)
 
 _LLM_ADAPTERS: dict[str, LLMAdapter] = {"mock": MockLLMAdapter()}
 _RETRIEVAL_ADAPTERS: dict[str, RetrievalAdapter] = {"mock": MockRetrievalAdapter()}
@@ -60,20 +64,46 @@ _register_azure_agent_sync()
 
 
 def get_llm_adapter(name: str | None = None) -> LLMAdapter:
-    provider = name or get_settings().default_llm_provider
+    """Resolve an LLM adapter by name, or by the configured default.
+
+    A configured DEFAULT that isn't registered (e.g. ``azure_openai`` set in ``.env`` but the azure
+    LLM adapter isn't wired/available yet) degrades to ``mock`` with a warning rather than 500ing
+    every request. An EXPLICIT unknown ``name`` still raises — that's a programmer/typo error.
+    """
+    if name is not None:
+        adapter = _LLM_ADAPTERS.get(name)
+        if adapter is None:
+            raise ValueError(f"Unknown LLM provider {name!r}. Registered: {sorted(_LLM_ADAPTERS)}")
+        return adapter
+    provider = get_settings().default_llm_provider
     adapter = _LLM_ADAPTERS.get(provider)
     if adapter is None:
-        raise ValueError(f"Unknown LLM provider {provider!r}. Registered: {sorted(_LLM_ADAPTERS)}")
+        logger.warning(
+            "Configured LLM provider %r is not registered; falling back to mock. Registered: %s",
+            provider,
+            sorted(_LLM_ADAPTERS),
+        )
+        return _LLM_ADAPTERS["mock"]
     return adapter
 
 
 def get_retrieval_adapter(name: str | None = None) -> RetrievalAdapter:
-    provider = name or get_settings().default_retrieval_provider
+    """Resolve a retrieval adapter by name, or by the configured default (mock fallback on the
+    default path, explicit-unknown raises — same policy as :func:`get_llm_adapter`)."""
+    if name is not None:
+        adapter = _RETRIEVAL_ADAPTERS.get(name)
+        if adapter is None:
+            raise ValueError(
+                f"Unknown retrieval provider {name!r}. Registered: {sorted(_RETRIEVAL_ADAPTERS)}"
+            )
+        return adapter
+    provider = get_settings().default_retrieval_provider
     adapter = _RETRIEVAL_ADAPTERS.get(provider)
     if adapter is None:
-        raise ValueError(
-            f"Unknown retrieval provider {provider!r}. Registered: {sorted(_RETRIEVAL_ADAPTERS)}"
+        logger.warning(
+            "Configured retrieval provider %r is not registered; falling back to mock.", provider
         )
+        return _RETRIEVAL_ADAPTERS["mock"]
     return adapter
 
 

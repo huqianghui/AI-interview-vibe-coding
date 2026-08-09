@@ -14,6 +14,20 @@ class MockLLMAdapter(LLMAdapter):
 
     async def complete(self, prompt: str, *, json_mode: bool = False) -> str:
         if json_mode:
+            # A checklist-drafting prompt (F3) gets a checklist-shaped JSON so the parse+normalize
+            # path is exercised deterministically in CI; any other json_mode call gets the generic
+            # stub. Detection is by the drafting prompt's own marker text, not the caller.
+            if "scoring checklist" in prompt.lower():
+                return (
+                    '{"items": ['
+                    '{"kind": "required", "text": "Identifies the correct procedure", '
+                    '"weight": 50, "source_quote": "Follow the documented steps in order.", '
+                    '"source_page": "p.1"}, '
+                    '{"kind": "recommended", "text": "Explains the reasoning", "weight": 30}, '
+                    '{"kind": "forbidden", "text": "Skips the safety check", '
+                    '"source_quote": "Never bypass the safety check.", "source_page": "p.2"}'
+                    "]}"
+                )
             return '{"result": "mock", "note": "deterministic mock completion"}'
         return "This is a mock interviewer response."
 
