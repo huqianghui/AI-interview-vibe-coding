@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.5.0.0 (2026-08-09)
+
+F9 — Frontend interview page, the winning-demo path. A candidate can now land on the interview
+page, get a spoken/typed interview from the digital-human interviewer, and reach a report — the
+F5 persona + F6 state machine finally have a face. Voice runs over a direct browser-to-Azure
+WebRTC connection; the backend only brokers a short-lived credential, so candidate audio never
+touches our servers.
+
+### Added
+- **Interview page (F9 AC #1-2).** Candidate lands anonymously, sees the interviewer as a
+  state-reactive audio orb (idle / listening / speaking / muted), a question-progress dot-stepper
+  (answered / active / remaining), and the current question pinned above the transcript. Layout
+  follows the P11 hierarchy: presence dominant, question always visible, transcript secondary.
+- **Two answer channels, one event (P9).** Text and voice both finalize through the backend's
+  single `answer_finalized(text, source)` contract — text submits with `source=text`, voice with
+  `source=voice`. A candidate can switch channels per question.
+- **Voice hook (F9 AC #5).** `useInterviewVoice` opens an `RTCPeerConnection` (no ICE servers —
+  Azure handles TURN), a `voice-live-events` data channel for transcripts/VAD, and a signaling
+  WebSocket for the SDP handshake. A dropped connection auto-reconnects up to 3 times with
+  1s/2s/4s backoff, then surfaces a clear failure and falls back to text.
+- **Manual "I'm done answering" control + orientation beat (P13).** A pre-Q1 orientation screen
+  sets expectations ("you'll answer N questions, take your time"), and the candidate always has an
+  explicit end-of-answer button — never solely at the mercy of a silence heuristic.
+- **Mic-permission recovery (F9 AC #4).** A denied microphone shows a retry / use-text-instead
+  dialog; text input never stops working, so a blocked mic can't block the interview.
+- **Scoring + report beats (P10).** After the last answer, a "analyzing answer N of M against the
+  SOP" screen leads into a report-ready reveal.
+- **Azure Voice Live broker (backend).** A new `POST /candidate/interview/{id}/voice/session`
+  endpoint issues the browser everything it needs to reach Azure Voice Live directly: the signaling
+  URL and a short-lived bearer. Credential issuance is Entra-first (Microsoft Entra / managed
+  identity) with an API-key STS fallback, verified live against the Foundry endpoint on the GA
+  `2026-07-15` api-version at the `/voice-live/realtime` path.
+
+### Security & robustness
+- **P5 gate — voice is rejected, not silently degraded.** An interviewer persona whose Foundry
+  agent isn't synced yields a 409, and the page falls back to text (P6b) rather than connecting to
+  an ungrounded model-mode session. The reference project's silent model-mode fallback is not
+  inherited.
+- **P3 / P12 — no rubric leak.** The voice-session response carries only transport + persona-
+  cosmetic fields (voice, VAD, avatar, character, greeting). No checklist, rubric, weight, or SOP
+  text ever reaches a candidate; citations stay out of the live Q&A entirely (they belong to the
+  report phase). A CI test asserts the absence.
+- Ownership-guarded (a candidate can only broker voice for their own interview) and
+  anonymous-session-gated, matching the rest of the candidate API.
+
+### Notes
+- Local dev / CI run on a mock voice provider — the whole page + broker flow is exercisable with
+  zero Azure. The Azure credential path is coverage-omitted (needs a live endpoint) but was
+  smoke-tested end to end against the real resource.
+- Tests immune to a developer's `backend/.env`: provider selection is pinned to mock in the test
+  harness so local runs match CI (SPEC P2).
+
 ## 0.4.1.0 (2026-08-08)
 
 F6 — Turn-by-turn interview state machine, completed to all five ACs. The Step 0 spine (ask →
