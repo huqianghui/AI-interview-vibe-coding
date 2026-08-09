@@ -50,3 +50,14 @@ def test_default_provider_is_mock():
 def test_unknown_provider_raises():
     with pytest.raises(ValueError, match="Unknown LLM provider"):
         get_llm_adapter("nonexistent")
+
+
+def test_configured_default_falls_back_to_mock(monkeypatch):
+    # A configured default that isn't registered (e.g. azure_openai set in .env before the azure
+    # LLM adapter is wired) must degrade to mock, not 500 every request. Explicit-name still raises.
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "default_llm_provider", "azure_openai")
+    monkeypatch.setattr(get_settings(), "default_retrieval_provider", "azure")
+    assert get_llm_adapter().name == "mock"
+    assert get_retrieval_adapter().name == "mock"
