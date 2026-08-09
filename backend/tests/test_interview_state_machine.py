@@ -8,10 +8,15 @@ import pytest
 from sqlalchemy import select
 
 from app.interview import state_machine
-from app.interview.questions import QUESTION_COUNT, QUESTIONS, get_question
+from app.interview.questions import FALLBACK_QUESTIONS, question_at
 from app.interview.state_machine import InterviewStateError
 from app.models.interview import InterviewTurn
 from app.services.anonymous_session_service import create_anonymous_session
+
+# These unit tests run against a bare in-memory DB with no seeded bank, so the state machine
+# resolves the built-in fallback set. Bind the expected shape to that (not a DB bank).
+QUESTIONS = FALLBACK_QUESTIONS
+QUESTION_COUNT = len(FALLBACK_QUESTIONS)
 
 
 async def _turns(db, interview_id):
@@ -52,7 +57,7 @@ async def test_start_sets_in_progress_and_first_question(db_session):
     interview = await state_machine.start_interview(db_session, cand.id)
     assert interview.status == "in_progress"
     assert interview.current_question_index == 0
-    q = await state_machine.get_current_question(interview)
+    q = await state_machine.get_current_question(db_session, interview)
     assert q["index"] == 0
     assert q["total"] == QUESTION_COUNT
 
@@ -71,7 +76,7 @@ async def test_full_progression_advances_then_completes(db_session):
 
     interview = await _answer_until_complete(db_session, interview)
     assert interview.status == "completed"
-    assert await state_machine.get_current_question(interview) is None
+    assert await state_machine.get_current_question(db_session, interview) is None
 
 
 @pytest.mark.asyncio
@@ -146,7 +151,7 @@ async def test_follow_up_stays_on_question_then_advances(db_session):
         interview = await state_machine.answer_finalized(
             db_session, interview, "long enough main answer"
         )
-    fu_question = get_question(_FOLLOW_UP_Q_INDEX)
+    fu_question = question_at(QUESTIONS, _FOLLOW_UP_Q_INDEX)
     assert fu_question is not None
 
     # First (main) answer to it must NOT advance — a follow-up is owed.
@@ -203,7 +208,7 @@ async def test_follow_up_content_joins_answer_group_for_scoring(db_session):
 async def test_verbal_cue_source_strips_cue_from_stored_answer(db_session):
     cand = await _candidate(db_session)
     interview = await state_machine.start_interview(db_session, cand.id)
-    q1 = get_question(0)
+    q1 = question_at(QUESTIONS, 0)
     assert q1 is not None
 
     interview = await state_machine.answer_finalized(
