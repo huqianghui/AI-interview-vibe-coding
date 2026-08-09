@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from app.api import (
     admin_checklist,
     admin_personas,
+    admin_questions,
     admin_sop,
     candidate_session,
     health,
@@ -44,3 +45,4 @@ app.include_router(interview.router)
 app.include_router(admin_personas.router)
 app.include_router(admin_sop.router)
 app.include_router(admin_checklist.router)
+app.include_router(admin_questions.router)

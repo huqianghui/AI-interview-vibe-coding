@@ -80,3 +80,53 @@ async def test_checklist_never_exposed_to_candidate(client, db_session):
     flat = str(listing.json()).lower()
     for leaked in ("checklist", "rubric", "weight", "source_quote", "forbidden", "expected_points"):
         assert leaked not in flat
+
+
+# --- F3b editing (AC F3 #4) ------------------------------------------------
+
+
+async def test_edit_checklist_items_renormalizes_and_round_trips(client, db_session):
+    question_id = await _seed_question(db_session)
+    draft = await client.post(f"/admin/checklists/questions/{question_id}/draft", headers=AUTH)
+    checklist_id = draft.json()["checklist_id"]
+
+    # Replace items with an edited set whose weights don't sum to 100; server re-normalizes.
+    resp = await client.put(
+        f"/admin/checklists/{checklist_id}/items",
+        headers=AUTH,
+        json={
+            "items": [
+                {
+                    "kind": "required",
+                    "text": "cites the SOP step",
+                    "weight": 3,
+                    "source_quote": "Follow the steps.",
+                    "source_page": "p.1",
+                },
+                {"kind": "required", "text": "verifies the outcome", "weight": 1},
+                {"kind": "forbidden", "text": "skips the check", "weight": 50},
+            ]
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["weights_sum"] == 100  # re-normalized
+    forbidden = [i for i in body["items"] if i["kind"] == "forbidden"]
+    assert forbidden and forbidden[0]["weight"] == 0
+
+    # Round-trip: GET returns the edited set.
+    got = (await client.get(f"/admin/checklists/questions/{question_id}", headers=AUTH)).json()
+    assert [i["text"] for i in got["items"]] == [
+        "cites the SOP step",
+        "verifies the outcome",
+        "skips the check",
+    ]
+
+
+async def test_edit_items_requires_token(client):
+    assert (await client.put("/admin/checklists/x/items", json={"items": []})).status_code == 401
+
+
+async def test_edit_unknown_checklist_404(client):
+    resp = await client.put("/admin/checklists/nope/items", headers=AUTH, json={"items": []})
+    assert resp.status_code == 404

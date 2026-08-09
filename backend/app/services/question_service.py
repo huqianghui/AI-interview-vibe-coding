@@ -31,6 +31,10 @@ class QuestionBankConflict(QuestionError):
     """Raised when an operation would violate the one-enabled-default-bank invariant."""
 
 
+class QuestionNotFound(QuestionError):
+    """Raised when a question id does not exist."""
+
+
 async def create_bank(
     db: AsyncSession,
     *,
@@ -113,6 +117,67 @@ async def list_questions_for_bank(
         stmt = stmt.where(Question.enabled.is_(True))
     stmt = stmt.order_by(Question.order_index)
     return (await db.execute(stmt)).scalars().all()
+
+
+# --- F2b admin editing -----------------------------------------------------
+
+
+async def get_bank(db: AsyncSession, bank_id: str) -> QuestionBank:
+    bank = (
+        await db.execute(select(QuestionBank).where(QuestionBank.id == bank_id))
+    ).scalar_one_or_none()
+    if bank is None:
+        raise QuestionBankNotFound(bank_id)
+    return bank
+
+
+async def get_question(db: AsyncSession, question_id: str) -> Question:
+    q = (await db.execute(select(Question).where(Question.id == question_id))).scalar_one_or_none()
+    if q is None:
+        raise QuestionNotFound(question_id)
+    return q
+
+
+async def update_question(db: AsyncSession, question_id: str, **changes: object) -> Question:
+    """Patch a question's editable fields (text, language, expected_points, enabled, follow-up)."""
+    q = await get_question(db, question_id)
+    for field, value in changes.items():
+        setattr(q, field, value)
+    await db.commit()
+    await db.refresh(q)
+    return q
+
+
+async def delete_question(db: AsyncSession, question_id: str) -> None:
+    q = await get_question(db, question_id)
+    await db.delete(q)
+    await db.commit()
+
+
+async def reorder_questions(db: AsyncSession, bank_id: str, ordered_ids: list[str]) -> None:
+    """Set ``order_index`` to match ``ordered_ids`` (the new display order for the bank).
+
+    Only reorders questions actually in the bank; ids not in the bank are ignored, and any bank
+    question omitted from ``ordered_ids`` keeps its relative order after the listed ones.
+    """
+    await get_bank(db, bank_id)  # 404 if the bank doesn't exist
+    rows = {
+        q.id: q
+        for q in (await db.execute(select(Question).where(Question.bank_id == bank_id)))
+        .scalars()
+        .all()
+    }
+    index = 0
+    for qid in ordered_ids:
+        q = rows.pop(qid, None)
+        if q is not None:
+            q.order_index = index
+            index += 1
+    # Preserve any unlisted questions after the explicitly-ordered ones.
+    for q in sorted(rows.values(), key=lambda x: x.order_index):
+        q.order_index = index
+        index += 1
+    await db.commit()
 
 
 async def set_default_bank(db: AsyncSession, bank_id: str) -> QuestionBank:
