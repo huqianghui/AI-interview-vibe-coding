@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.11.2.0 (2026-08-09)
+
+Fix — the interviewer agent syncs against the **project-scoped** Foundry endpoint. Verified live:
+an interviewer agent now creates, reads back, and deletes against the real Foundry project. This
+clears the F5/P16 exit criterion for agent sync — the automatable metadata shape already passed CI,
+and now the actual create round-trips against a live project.
+
+### Fixed
+- **Project-scoped endpoint.** `AzureAgentSyncAdapter` now builds the endpoint the SDK requires —
+  `https://{account}.services.ai.azure.com/api/projects/{project}` — from the account endpoint plus
+  the project name. The bare account endpoint returned 404 on every agents call (caught in a live
+  sync, not by CI). Added a `project` parameter, wired from `azure_foundry_default_project`, and a
+  unit test for the scoping (bare → scoped, already-scoped → unchanged, no-project → as-is).
+
+### Validated live (2026-08-09)
+- Interviewer agent create → get → delete against the `avarda-demo-prj` Foundry project via
+  `DefaultAzureCredential` (az login). The MCPTool + `PromptAgentDefinition(tools=…)` shapes from
+  v0.11.1.0 also build cleanly against the installed `azure-ai-projects` 2.4.0 SDK.
+- Still pending: the KB MCP binding end to end needs Azure AI Search credentials (endpoint + index
+  + a RemoteTool connection), which aren't in the current environment — the tool shape is correct
+  and CI-tested, but the live agent↔KB retrieval call is unverified until those creds are present.
+
 ## 0.11.1.0 (2026-08-09)
 
 Fix — the interviewer agent binds its SOP knowledge base over **MCP**, matching how AI Foundry

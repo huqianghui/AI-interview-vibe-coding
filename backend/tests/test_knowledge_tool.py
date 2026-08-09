@@ -53,3 +53,23 @@ def test_build_agent_tools_list_and_empty():
     tools = build_agent_tools(search_endpoint="https://s", index_name="kb", connection_id="c")
     assert len(tools) == 1 and tools[0]["type"] == "mcp"
     assert build_agent_tools(search_endpoint="", index_name="") == []
+
+
+# --- agent project-endpoint scoping (live-caught 404 fix) ------------------
+
+
+def test_project_endpoint_scoping():
+    from app.services.agents.adapters.azure_agent_sync import AzureAgentSyncAdapter as A
+
+    # Bare Foundry endpoint + project → project-scoped form the SDK requires.
+    assert (
+        A._project_endpoint("https://acct.services.ai.azure.com/", "proj")
+        == "https://acct.services.ai.azure.com/api/projects/proj"
+    )
+    # Already project-scoped → unchanged.
+    already = "https://acct.services.ai.azure.com/api/projects/proj"
+    assert A._project_endpoint(already, "proj") == already
+    # No project → left as-is (caller owns whether it works).
+    assert A._project_endpoint("https://acct.services.ai.azure.com/", "") == (
+        "https://acct.services.ai.azure.com"
+    )
