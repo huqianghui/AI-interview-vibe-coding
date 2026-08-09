@@ -66,6 +66,11 @@ class ReportOut(BaseModel):
     coverage_pct: float
     per_question: list[dict]
     is_stub: bool
+    # F4 scored-report fields (present once questions are graded against a checklist; None/empty
+    # for the stub path). Per-item judgments + SOP/answer quotes live inside per_question entries.
+    total_score: float | None = None
+    grade: str | None = None
+    warnings: list[str] = []
 
 
 class VoiceSessionOut(BaseModel):
