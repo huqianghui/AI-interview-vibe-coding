@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.10.0.0 (2026-08-09)
+
+F8 — Interview report. The scored interview now renders as a real report: a headline grade + score
+gauge, a one-line strength/gap narrative, and — the demo's money shot — a rubric item's SOP source
+quote shown side by side with the candidate's own words. Full per-question, per-item detail is one
+click away. This turns the F4 scoring data into something a business leader reads at a glance.
+
+### Added
+- **Executive view (P14).** A circular score gauge with the A-F grade at its center, a 1-2 sentence
+  narrative summarizing strengths and the main gap, forbidden-item warnings, and a side-by-side
+  panel putting the SOP source quote next to the candidate's answer — the most legible proof that
+  the scoring is grounded in the SOP, not invented.
+- **Detail view.** Progressively disclosed per-question accordion; each item shows a colour-coded
+  4-state judgment chip (met / partially met / not met / violated), its weight, the rationale, and
+  both quotes.
+- **Report narrative (backend).** A deterministic strength/gap summary built from the same per-item
+  judgments the detail view shows, so the headline and the breakdown never disagree.
+- **`ScoreGauge` component.** A dependency-free SVG gauge; colour tracks the grade band.
+
+### Changed
+- The interview page's scored phase, previously a flat coverage-percent list, now renders the full
+  report. A question with no checklist authored still falls back to the minimal list.
+- The report payload carries the new `narrative` field alongside the F4 `total_score` / `grade` /
+  `warnings` / per-item judgments.
+
+### Notes
+- Bilingual (zh-CN + en-US) throughout, including the 4-state judgment labels.
+- The narrative is deterministic (no extra LLM round-trip) so the headline is reproducible and free
+  of latency at report time.
+
 ## 0.9.0.0 (2026-08-09)
 
 F4 — Scoring engine. The knowledge→scoring chain is closed: a completed interview is now graded

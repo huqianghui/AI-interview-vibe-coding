@@ -5,6 +5,7 @@ import pytest
 from app.interview.scoring_engine import (
     RubricItem,
     ScoringIncomplete,
+    build_narrative,
     enforce_and_score,
     grade_for_score,
 )
@@ -115,3 +116,33 @@ def test_grade_bands():
     assert grade_for_score(60) == "C"
     assert grade_for_score(45) == "D"
     assert grade_for_score(10) == "F"
+
+
+def test_build_narrative_strengths_and_gap():
+    # F8: narrative reads the same judgments the detail view shows — strengths + a main gap.
+    rubric = _rubric()
+    judgments = [
+        {"item_id": "i1", "judgment": "met", "rationale": "did the procedure"},
+        {"item_id": "i2", "judgment": "not_met"},
+        {"item_id": "i3", "judgment": "not_met"},
+    ]
+    result = enforce_and_score("q1", _LONG, rubric, judgments)
+    text = build_narrative([result])
+    assert "Demonstrated" in text
+    assert "did the procedure" in text
+
+
+def test_build_narrative_flags_violation():
+    rubric = _rubric()
+    judgments = [
+        {"item_id": "i1", "judgment": "met"},
+        {"item_id": "i2", "judgment": "met"},
+        {"item_id": "i3", "judgment": "met", "rationale": "bypassed safety"},  # forbidden→violated
+    ]
+    result = enforce_and_score("q1", _LONG, rubric, judgments)
+    text = build_narrative([result])
+    assert "forbidden" in text.lower()
+
+
+def test_build_narrative_empty_when_nothing_graded():
+    assert build_narrative([]) == ""

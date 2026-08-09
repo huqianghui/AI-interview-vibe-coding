@@ -169,3 +169,38 @@ def grade_for_score(score: float) -> str:
     if score >= 40:
         return "D"
     return "F"
+
+
+def build_narrative(results: list[QuestionResult]) -> str:
+    """A 1-2 sentence strength/gap summary for the report's executive headline (F8 / P14).
+
+    Deterministic (no LLM): strengths are the ``met`` rubric items, gaps are ``not_met`` /
+    ``violated`` ones, drawn from across the graded questions. A demo headline that reads from the
+    same judgments the detail view shows, so the two views never disagree. Empty when nothing was
+    graded (the caller then shows no narrative rather than a hollow sentence).
+    """
+    met: list[str] = []
+    gaps: list[str] = []
+    violations: list[str] = []
+    for r in results:
+        for it in r.items:
+            label = it.rationale or it.item_id
+            if it.judgment == "met" and it.kind != "forbidden":
+                met.append(label)
+            elif it.judgment == "violated":
+                violations.append(label)
+            elif it.judgment == "not_met" and it.kind == "required":
+                gaps.append(label)
+    if not (met or gaps or violations):
+        return ""
+
+    parts: list[str] = []
+    if met:
+        parts.append(f"Demonstrated {len(met)} of the expected points, including {met[0]}.")
+    else:
+        parts.append("Did not clearly demonstrate the expected points.")
+    if violations:
+        parts.append(f"Triggered a forbidden item: {violations[0]}.")
+    elif gaps:
+        parts.append(f"Main gap: {gaps[0]}.")
+    return " ".join(parts)

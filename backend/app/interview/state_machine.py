@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.interview.questions import question_at, resolve_questions
 from app.interview.scoring import group_answers
-from app.interview.scoring_engine import grade_for_score
+from app.interview.scoring_engine import build_narrative, grade_for_score
 from app.interview.verbal_cue import strip_verbal_cue
 from app.models.interview import InterviewSession, InterviewTurn
 from app.services import scoring_service
@@ -162,6 +162,7 @@ async def score_and_finalize(db: AsyncSession, session: InterviewSession) -> dic
     per_question: list[dict] = []
     question_scores: list[float] = []
     all_warnings: list[str] = []
+    graded_results: list = []
     any_graded = False
 
     for question_id, answer_text in answers:
@@ -178,6 +179,7 @@ async def score_and_finalize(db: AsyncSession, session: InterviewSession) -> dic
         any_graded = True
         question_scores.append(result.score)
         all_warnings.extend(result.warnings)
+        graded_results.append(result)
         per_question.append(
             {
                 "question_id": result.question_id,
@@ -213,6 +215,7 @@ async def score_and_finalize(db: AsyncSession, session: InterviewSession) -> dic
         "coverage_pct": total_score,
         "total_score": total_score,
         "grade": grade_for_score(total_score) if any_graded else None,
+        "narrative": build_narrative(graded_results) if any_graded else "",
         "per_question": per_question,
         "warnings": all_warnings,
         "is_stub": not any_graded,
