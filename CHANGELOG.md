@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.8.0.0 (2026-08-09)
+
+F3 — Checklist (rubric). Each interview question can now have an AI-drafted scoring checklist:
+required / recommended / forbidden items, each weighted and tied back to the SOP text it came from.
+This is the rubric F4 scores against, and the source attribution is the traceability the demo
+leads with. Admin-only — the rubric is never shown to candidates.
+
+### Added
+- **Checklist + item models.** `checklist` (per question, versioned, default flag) and
+  `checklist_item` (kind, text, weight, source_quote, source_document, source_page, order). Items
+  are first-class rows so each one is independently source-attributable and (F3b) editable.
+- **AI drafting (AC #1).** `POST /admin/checklists/questions/{id}/draft` retrieves the question's
+  SOP passages, asks the LLM to draft items with source quotes, gates the untrusted output (valid
+  kinds only), and persists them. When the LLM yields nothing usable, it falls back to deriving
+  required items from the question's expected points, so drafting is deterministic and useful with
+  zero Azure.
+- **Weights always total 100 (AC #3).** Item weights are normalized to sum to exactly 100 using
+  largest-remainder rounding (never 99/101). Forbidden items are gates, not scored weight, so they
+  sit at 0 and don't consume the budget.
+- **Source-attributed items (AC #2).** Every item carries its kind, weight, and the SOP source
+  (verbatim quote + page) it was drawn from.
+- **Read endpoint.** `GET /admin/checklists/questions/{id}` returns the current default checklist
+  with its items and weight total.
+
+### Fixed
+- **Provider registry no longer 500s on an unwired default.** When the configured default LLM or
+  retrieval provider isn't registered (e.g. `azure_openai` set in the environment before the Azure
+  adapter is wired), the registry now degrades to the mock provider with a warning instead of
+  raising on every request. An explicitly-requested unknown provider still raises (that's a bug,
+  not a deploy state).
+
+### Security
+- **No rubric leak (P3).** Checklists are admin-only and never appear in any candidate-scoped
+  response, even after one is drafted for a question — a test asserts the candidate question list
+  stays clean of checklist/rubric/weight/source fields.
+
+### Notes
+- Business editing of drafted checklists (F3b) is post-demo; drafting + read ship now.
+- The real LLM drafting path runs through the same adapter seam as the rest of the app; CI + local
+  dev use the mock adapter (which returns a checklist-shaped draft), the Azure adapter drives prod.
+
 ## 0.7.0.0 (2026-08-09)
 
 F2 — Question bank. Interview questions now live in the database as an ordered, language-tagged
