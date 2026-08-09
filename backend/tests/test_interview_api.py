@@ -139,9 +139,7 @@ async def test_voice_session_404_for_unowned_interview(client):
 async def test_voice_session_503_when_no_persona(client):
     # No persona configured at all → Voice Live unavailable (503), candidate stays on text.
     headers, interview_id = await _start_interview(client)
-    resp = await client.post(
-        f"/candidate/interview/{interview_id}/voice/session", headers=headers
-    )
+    resp = await client.post(f"/candidate/interview/{interview_id}/voice/session", headers=headers)
     assert resp.status_code == 503
 
 
@@ -152,9 +150,7 @@ async def test_voice_session_409_when_persona_not_synced(client, db_session):
 
     await psvc.create_persona(db_session, name="Interviewer", is_default=True)
     headers, interview_id = await _start_interview(client)
-    resp = await client.post(
-        f"/candidate/interview/{interview_id}/voice/session", headers=headers
-    )
+    resp = await client.post(f"/candidate/interview/{interview_id}/voice/session", headers=headers)
     assert resp.status_code == 409
 
 
@@ -211,7 +207,5 @@ async def test_voice_session_409_after_completion(client, db_session):
                 json={"text": "a sufficiently detailed answer", "source": "text"},
             )
         ).json()
-    resp = await client.post(
-        f"/candidate/interview/{interview_id}/voice/session", headers=headers
-    )
+    resp = await client.post(f"/candidate/interview/{interview_id}/voice/session", headers=headers)
     assert resp.status_code == 409
