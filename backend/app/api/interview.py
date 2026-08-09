@@ -21,7 +21,7 @@ from app.interview import state_machine
 from app.interview.state_machine import ANSWER_SOURCES, InterviewStateError
 from app.models.anonymous_session import AnonymousCandidateSession
 from app.models.interview import InterviewSession
-from app.services import voice_broker
+from app.services import question_service, voice_broker
 from app.services.voice_broker import DEFAULT_LOCALE, VoiceAgentNotSynced, VoiceUnavailable
 
 router = APIRouter(prefix="/candidate/interview", tags=["interview"])
@@ -32,6 +32,21 @@ class QuestionOut(BaseModel):
     prompt: str
     index: int
     total: int
+
+
+class BankQuestionOut(BaseModel):
+    """Candidate-safe question projection (SPEC F2 AC #2). NO expected_points/rubric (P3)."""
+
+    question_id: str
+    text: str
+    order_index: int
+    language: str
+
+
+class QuestionListOut(BaseModel):
+    bank_id: str | None
+    language: str | None
+    questions: list[BankQuestionOut]
 
 
 class InterviewOut(BaseModel):
@@ -94,13 +109,42 @@ async def _owned_interview(
     return session
 
 
+@router.get("/questions", response_model=QuestionListOut)
+async def list_questions(
+    candidate: AnonymousCandidateSession = Depends(get_anonymous_session),
+    db: AsyncSession = Depends(get_db),
+) -> QuestionListOut:
+    """Candidate-facing ordered question list from the default bank (SPEC F2 AC #2).
+
+    Projects each question to a candidate-safe shape — ``expected_points`` (which links to the
+    scoring rubric) is never included (SPEC P3). An empty list when no bank is seeded.
+    """
+    bank = await question_service.get_default_bank(db)
+    if bank is None:
+        return QuestionListOut(bank_id=None, language=None, questions=[])
+    rows = await question_service.list_questions_for_bank(db, bank.id, enabled_only=True)
+    return QuestionListOut(
+        bank_id=bank.id,
+        language=bank.language,
+        questions=[
+            BankQuestionOut(
+                question_id=q.id,
+                text=q.text,
+                order_index=q.order_index,
+                language=q.language,
+            )
+            for q in rows
+        ],
+    )
+
+
 @router.post("/start", response_model=InterviewOut)
 async def start(
     candidate: AnonymousCandidateSession = Depends(get_anonymous_session),
     db: AsyncSession = Depends(get_db),
 ) -> InterviewOut:
     session = await state_machine.start_interview(db, candidate.id)
-    question = await state_machine.get_current_question(session)
+    question = await state_machine.get_current_question(db, session)
     return _to_interview_out(session, question)
 
 
@@ -123,7 +167,7 @@ async def answer(
         session = await state_machine.answer_finalized(db, session, body.text, body.source)
     except InterviewStateError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    question = await state_machine.get_current_question(session)
+    question = await state_machine.get_current_question(db, session)
     return _to_interview_out(session, question)
 
 
