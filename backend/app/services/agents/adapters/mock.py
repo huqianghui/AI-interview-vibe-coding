@@ -2,11 +2,54 @@
 
 Deterministic outputs so tests can assert on them. The interview flow talks only to the
 adapter protocols, so swapping in Azure adapters later changes nothing upstream.
+
+The mock ``complete`` recognises the two structured prompts the app sends (checklist drafting,
+answer scoring) by a marker in the prompt text and returns a correctly-shaped JSON for each, so the
+real parse + validation paths (F3 weight normalization, F4 rails) run in CI with zero Azure. Any
+other ``json_mode`` call gets a generic stub.
 """
 
+import json
+import re
 from collections.abc import AsyncIterator
 
 from app.services.agents.base import LLMAdapter, RetrievalAdapter
+
+# item_id lines in the F4 scoring prompt look like: "[<id>] (<kind>) <text>".
+_SCORING_ITEM_RE = re.compile(r"^\[([^\]]+)\]\s*\(([^)]+)\)", re.MULTILINE)
+
+
+def _mock_checklist_draft() -> str:
+    return (
+        '{"items": ['
+        '{"kind": "required", "text": "Identifies the correct procedure", '
+        '"weight": 50, "source_quote": "Follow the documented steps in order.", '
+        '"source_page": "p.1"}, '
+        '{"kind": "recommended", "text": "Explains the reasoning", "weight": 30}, '
+        '{"kind": "forbidden", "text": "Skips the safety check", '
+        '"source_quote": "Never bypass the safety check.", "source_page": "p.2"}'
+        "]}"
+    )
+
+
+def _mock_scoring_judgments(prompt: str) -> str:
+    """Emit a judgment for every checklist item parsed from the scoring prompt.
+
+    Deterministic: required/recommended → met, forbidden → not_met (nothing triggered). This
+    exercises the F4 rails + weighting for real; tests that want other states inject their own LLM.
+    """
+    judgments = []
+    for item_id, kind in _SCORING_ITEM_RE.findall(prompt):
+        judgment = "not_met" if kind.strip() == "forbidden" else "met"
+        judgments.append(
+            {
+                "item_id": item_id,
+                "judgment": judgment,
+                "rationale": "mock judgment",
+                "answer_quote": "mock quote",
+            }
+        )
+    return json.dumps({"judgments": judgments})
 
 
 class MockLLMAdapter(LLMAdapter):
@@ -14,20 +57,11 @@ class MockLLMAdapter(LLMAdapter):
 
     async def complete(self, prompt: str, *, json_mode: bool = False) -> str:
         if json_mode:
-            # A checklist-drafting prompt (F3) gets a checklist-shaped JSON so the parse+normalize
-            # path is exercised deterministically in CI; any other json_mode call gets the generic
-            # stub. Detection is by the drafting prompt's own marker text, not the caller.
-            if "scoring checklist" in prompt.lower():
-                return (
-                    '{"items": ['
-                    '{"kind": "required", "text": "Identifies the correct procedure", '
-                    '"weight": 50, "source_quote": "Follow the documented steps in order.", '
-                    '"source_page": "p.1"}, '
-                    '{"kind": "recommended", "text": "Explains the reasoning", "weight": 30}, '
-                    '{"kind": "forbidden", "text": "Skips the safety check", '
-                    '"source_quote": "Never bypass the safety check.", "source_page": "p.2"}'
-                    "]}"
-                )
+            lowered = prompt.lower()
+            if "scoring checklist" in lowered:
+                return _mock_checklist_draft()
+            if "scoring one interview answer" in lowered:
+                return _mock_scoring_judgments(prompt)
             return '{"result": "mock", "note": "deterministic mock completion"}'
         return "This is a mock interviewer response."
 
