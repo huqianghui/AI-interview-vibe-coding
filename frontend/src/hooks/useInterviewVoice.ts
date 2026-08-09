@@ -25,6 +25,8 @@ export class MicAccessError extends Error {
   }
 }
 
+import type { RefObject } from "react";
+
 export interface UseInterviewVoiceOptions {
   locale?: string;
   onTranscript?: (segment: TranscriptSegment) => void;
@@ -32,6 +34,9 @@ export interface UseInterviewVoiceOptions {
   onAudioStateChange?: (state: AudioState) => void;
   onResponseDone?: () => void;
   onError?: (error: Error) => void;
+  /** Attached via `ontrack` when Voice Live sends a digital-human avatar video track. When set,
+   * the hook negotiates a recvonly video transceiver so the avatar face isn't silently dropped. */
+  videoRef?: RefObject<HTMLVideoElement | null>;
 }
 
 const MAX_RECONNECT = 3;
@@ -43,6 +48,8 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
   const [connectionState, setConnectionState] = useState<VoiceConnectionState>("disconnected");
   const [audioState, setAudioState] = useState<AudioState>("idle");
   const [isMuted, setIsMuted] = useState(false);
+  // True once a real avatar video track has arrived via ontrack; drives AvatarView video-vs-orb.
+  const [isAvatarConnected, setIsAvatarConnected] = useState(false);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const signalingWsRef = useRef<WebSocket | null>(null);
@@ -177,13 +184,26 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
       pcRef.current = pc;
       micStream.getTracks().forEach((track) => pc.addTrack(track, micStream));
 
+      // Step 3b: negotiate a recvonly video transceiver so a digital-human avatar video track from
+      // Voice Live (when the session requests the avatar modality) isn't silently dropped.
+      pc.addTransceiver("video", { direction: "recvonly" });
+
       // Step 4: data channel BEFORE createOffer.
       const dc = pc.createDataChannel("voice-live-events");
       dataChannelRef.current = dc;
       dc.onmessage = handleDataChannelMessage;
 
-      // Step 5: remote audio playback.
+      // Step 5: remote audio + avatar-video playback.
       pc.ontrack = (event) => {
+        if (event.track.kind === "video") {
+          const videoEl = optionsRef.current.videoRef?.current;
+          if (videoEl) {
+            videoEl.srcObject = event.streams[0] ?? null;
+            videoEl.play().catch(() => undefined);
+          }
+          setIsAvatarConnected(true);
+          return;
+        }
         if (event.track.kind !== "audio") return;
         const audio = document.createElement("audio");
         audio.srcObject = event.streams[0] ?? null;
@@ -325,6 +345,7 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
     setConn("disconnected");
     setAudioState("idle");
     setIsMuted(false);
+    setIsAvatarConnected(false);
   }, [cleanup, setConn]);
 
   const toggleMute = useCallback(() => {
@@ -364,5 +385,6 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
     isMuted,
     connectionState,
     audioState,
+    isAvatarConnected,
   };
 }
