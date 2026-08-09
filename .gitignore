@@ -11,3 +11,6 @@ _sop_storage/
 backend/_sop_storage/
 storage/materials/
 backend/storage/
+# Local dev SQLite DB — never commit.
+*.db
+backend/*.db
