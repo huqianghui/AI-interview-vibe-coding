@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db
 from app.dependencies import require_admin
 from app.services import checklist_service
-from app.services.checklist_service import QuestionNotFound
+from app.services.checklist_service import ChecklistNotFound, QuestionNotFound
 
 router = APIRouter(
     prefix="/admin/checklists", tags=["admin-checklists"], dependencies=[Depends(require_admin)]
@@ -82,4 +82,44 @@ async def get_checklist(question_id: str, db: AsyncSession = Depends(get_db)) ->
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="No checklist for this question"
         )
+    return await _checklist_out(db, checklist)
+
+
+class ChecklistItemIn(BaseModel):
+    kind: str  # required | recommended | forbidden
+    text: str
+    weight: int = 0
+    source_quote: str = ""
+    source_page: str | None = None
+
+
+class ChecklistEditIn(BaseModel):
+    items: list[ChecklistItemIn]
+
+
+@router.put("/{checklist_id}/items", response_model=ChecklistOut)
+async def edit_items(
+    checklist_id: str, body: ChecklistEditIn, db: AsyncSession = Depends(get_db)
+) -> ChecklistOut:
+    """Replace a checklist's items with an edited set (F3b / F3 AC #4).
+
+    Weights are re-normalized to sum 100 (forbidden items → 0); invalid-kind rows are dropped. The
+    saved checklist is returned so the editor round-trips (save → reload).
+    """
+    raw = [
+        {
+            "kind": it.kind,
+            "text": it.text,
+            "weight": it.weight,
+            "source_quote": it.source_quote,
+            "source_page": it.source_page,
+        }
+        for it in body.items
+    ]
+    try:
+        checklist = await checklist_service.update_items(db, checklist_id, raw)
+    except ChecklistNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Checklist not found"
+        ) from exc
     return await _checklist_out(db, checklist)

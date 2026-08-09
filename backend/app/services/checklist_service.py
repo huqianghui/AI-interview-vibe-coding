@@ -163,6 +163,49 @@ async def list_items(db: AsyncSession, checklist_id: str) -> Sequence[ChecklistI
     )
 
 
+class ChecklistNotFound(ChecklistError):
+    """Raised when a checklist id does not exist."""
+
+
+async def update_items(db: AsyncSession, checklist_id: str, raw_items: list[dict]) -> Checklist:
+    """Replace a checklist's items with an edited set (F3b). Weights are re-normalized to 100.
+
+    Business editing (F3 AC #4): the caller sends the full desired item set (kind/text/weight/
+    source_quote/source_page); this validates kinds, drops invalid rows, normalizes weights to sum
+    100 (forbidden items → 0), and replaces the checklist's rows atomically. Raises
+    :class:`ChecklistNotFound` if the checklist is gone.
+    """
+    checklist = (
+        await db.execute(select(Checklist).where(Checklist.id == checklist_id))
+    ).scalar_one_or_none()
+    if checklist is None:
+        raise ChecklistNotFound(checklist_id)
+
+    items = parse_draft_items(raw_items)
+    normalize_weights(items)
+
+    # Replace: delete existing rows, then write the edited set.
+    for existing in await list_items(db, checklist_id):
+        await db.delete(existing)
+    await db.flush()
+    for it in items:
+        db.add(
+            ChecklistItem(
+                checklist_id=checklist_id,
+                kind=it.kind,
+                text=it.text,
+                weight=it.weight,
+                source_quote=it.source_quote,
+                source_document_id=it.source_document_id,
+                source_page=it.source_page,
+                order_index=it.order_index,
+            )
+        )
+    await db.commit()
+    await db.refresh(checklist)
+    return checklist
+
+
 async def _default_checklists(db: AsyncSession, question_id: str) -> list[Checklist]:
     return list(
         (
