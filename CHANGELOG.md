@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.11.1.0 (2026-08-09)
+
+Fix — the interviewer agent binds its SOP knowledge base over **MCP**, matching how AI Foundry
+actually connects a Knowledge Base to an agent (the Portal's "Knowledge" section, Preview). The
+v0.11.0.0 binding used an `azure_ai_search` tool shape that the live Foundry contract rejects; this
+corrects it to the reference project's live-verified MCPTool contract before it could bite at demo
+time (SPEC P15/P16).
+
+### Fixed
+- **Knowledge binding is now an MCPTool.** The agent carries an MCPTool pointing at the KB's
+  `/knowledgebases/{index}/mcp` endpoint, filtered to the single `knowledge_base_retrieve` tool,
+  with `require_approval="never"`. Authentication rides on a **RemoteTool** project connection
+  (`project_connection_id`) — a CognitiveSearch/ApiKey connection returns 403, the trap the
+  reference hit live. New `foundry_kb_mcp_connection` config names that connection.
+- The pure tool-shape builder (`agents/knowledge_tool`) and its CI tests now assert the MCP URL and
+  MCPTool fields; the SDK `MCPTool` construction stays in the coverage-omitted Azure adapter.
+
 ## 0.11.0.0 (2026-08-09)
 
 F7 — Session memory + Foundry IQ knowledge binding. The interviewer now visibly remembers: a
