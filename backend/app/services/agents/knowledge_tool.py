@@ -1,55 +1,60 @@
-"""Foundry-agent knowledge-source tool definition (SPEC F1/P15) — pure, CI-tested.
+"""Foundry-agent knowledge-source MCP tool (SPEC F1/P15) — pure shape, CI-tested.
 
 Binding the SOP knowledge base to the interviewer's Foundry prompt agent is what lets the agent's
-answers and follow-ups stay grounded in the SOP (not just the candidate-facing retrieve API from
-F1). Per SPEC P15, the agent↔knowledge-source connection is a distinct dependency from the
-citation-retrieve shape, and it drifts across preview versions — so, exactly like the Voice Live
-metadata, this module owns the **shape** of the tool definition and is verified in CI, while the
-live SDK call that attaches it lives in the coverage-omitted azure adapter.
+answers and follow-ups stay SOP-grounded. AI Foundry connects a Knowledge Base to an agent via the
+**MCP protocol** (the Portal's "Knowledge" section, Preview), NOT an ``AzureAISearchTool`` — the KB
+exposes a ``/knowledgebases/{index}/mcp`` endpoint and the agent carries an **MCPTool** pointing at
+it. This module owns the shape (verified against the reference project's live-tested contract, per
+SPEC P16); the live SDK ``MCPTool`` construction + the RemoteTool connection it authenticates
+through live in the coverage-omitted azure adapter.
 
-``build_knowledge_tool`` returns the tool-definition dict the agent create/version call carries
-(Azure AI Search knowledge source: endpoint + index + knowledge-source name + auth mode). It
-returns ``None`` when no KB is configured, so an agent syncs fine with no knowledge source (the
-demo degrades to an ungrounded-but-working interviewer rather than failing).
+Contract facts the reference learned the hard way (and P15/P16 warn drift silently unbinds the KB):
+- The tool is an **MCPTool**: ``server_label`` + ``server_url`` (the MCP endpoint) +
+  ``require_approval="never"`` + ``allowed_tools={"tool_names": ["knowledge_base_retrieve"]}``.
+- Auth is a **RemoteTool** project connection (``project_connection_id``), NOT a CognitiveSearch
+  connection — an ApiKey-type connection returns 403. Finding/creating that connection needs the
+  ARM control plane and lives in the adapter; this builder just names the endpoint + filter.
+- ``knowledge_base_retrieve`` is the single MCP tool name the KB exposes.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-# Tool type + kind strings for the Azure AI Search knowledge source. Isolated as constants because,
-# like the Voice Live snake_case keys, a drift here silently unbinds the KB (P15/P16).
-KNOWLEDGE_TOOL_TYPE = "azure_ai_search"
-KNOWLEDGE_SOURCE_KIND = "search_index"
+# The MCP tool the Foundry IQ knowledge base exposes; the agent is filtered to just this one.
+KB_MCP_TOOL_NAME = "knowledge_base_retrieve"
+# Must track the Foundry IQ / AI Search API version (same PREVIEW contract as the retrieve call).
+SEARCH_API_VERSION = "2026-05-01-preview"
 
 
-def build_knowledge_tool(
+def build_kb_mcp_url(search_endpoint: str, index_name: str) -> str:
+    """The KB's MCP endpoint: ``{endpoint}/knowledgebases/{index}/mcp?api-version=…`` (pure)."""
+    endpoint = (search_endpoint or "").rstrip("/")
+    return f"{endpoint}/knowledgebases/{index_name}/mcp?api-version={SEARCH_API_VERSION}"
+
+
+def build_knowledge_mcp_tool(
     *,
     search_endpoint: str,
     index_name: str,
-    knowledge_source_name: str,
-    auth_mode: str = "entra",
+    connection_id: str | None = None,
+    server_label: str | None = None,
 ) -> dict[str, Any] | None:
-    """Build the agent knowledge-source tool definition, or None if the KB isn't configured.
+    """Build the MCPTool definition for the SOP KB, or None if the KB isn't configured.
 
-    ``index_name`` is the KB name in the URL path; ``knowledge_source_name`` is the distinct
-    knowledge-source name used in the retrieve body (the F1-spike distinction — they are NOT the
-    same, and conflating them 400s the live API). ``auth_mode`` is ``entra`` (managed identity /
-    ``az login``) or ``key`` — the resources in play disable key auth, so entra is the default.
+    ``connection_id`` is the RemoteTool project-connection name that authenticates the MCP call
+    (omitted → the adapter must supply/resolve it; a missing connection fails auth at runtime, per
+    the reference). ``server_label`` defaults to a stable per-index label.
     """
-    if not (search_endpoint and index_name and knowledge_source_name):
+    if not (search_endpoint and index_name):
         return None
     return {
-        "type": KNOWLEDGE_TOOL_TYPE,
-        KNOWLEDGE_TOOL_TYPE: {
-            "endpoint": search_endpoint,
-            "index_name": index_name,
-            "knowledge_source": {
-                "name": knowledge_source_name,
-                "kind": KNOWLEDGE_SOURCE_KIND,
-            },
-            "auth_mode": auth_mode,
-        },
+        "type": "mcp",
+        "server_label": server_label or f"knowledge-base-{index_name}",
+        "server_url": build_kb_mcp_url(search_endpoint, index_name),
+        "require_approval": "never",
+        "allowed_tools": {"tool_names": [KB_MCP_TOOL_NAME]},
+        "project_connection_id": connection_id,
     }
 
 
@@ -57,18 +62,13 @@ def build_agent_tools(
     *,
     search_endpoint: str,
     index_name: str,
-    knowledge_source_name: str,
-    auth_mode: str = "entra",
+    connection_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """The agent's ``tools`` list — a single knowledge-source tool when configured, else empty.
+    """The agent's ``tools`` list — a single KB MCPTool when configured, else empty.
 
-    A list (not the bare tool) so callers pass it straight to the agent definition's ``tools=``,
-    and so a future second tool is an append, not a shape change.
+    Empty when the KB isn't configured, so the agent syncs ungrounded rather than failing.
     """
-    tool = build_knowledge_tool(
-        search_endpoint=search_endpoint,
-        index_name=index_name,
-        knowledge_source_name=knowledge_source_name,
-        auth_mode=auth_mode,
+    tool = build_knowledge_mcp_tool(
+        search_endpoint=search_endpoint, index_name=index_name, connection_id=connection_id
     )
     return [tool] if tool else []

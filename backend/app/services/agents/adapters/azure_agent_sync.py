@@ -64,15 +64,16 @@ class AzureAgentSyncAdapter:
         api_key: str = "",
         search_endpoint: str = "",
         search_index: str = "",
-        knowledge_source_name: str = "",
+        mcp_connection_id: str = "",
     ) -> None:
         self._endpoint = endpoint
         self._model = model
         self._api_key = api_key
-        # SOP knowledge-base binding (P15). Empty → the agent syncs with no knowledge tool.
+        # SOP knowledge-base binding via MCP (P15). Empty search config → no knowledge tool. The
+        # MCP RemoteTool connection id authenticates the KB's MCP endpoint (ApiKey conn → 403).
         self._search_endpoint = search_endpoint
         self._search_index = search_index
-        self._knowledge_source_name = knowledge_source_name
+        self._mcp_connection_id = mcp_connection_id
 
     # -- public API ---------------------------------------------------------
 
@@ -88,7 +89,7 @@ class AzureAgentSyncAdapter:
         tools = build_agent_tools(
             search_endpoint=self._search_endpoint,
             index_name=self._search_index,
-            knowledge_source_name=self._knowledge_source_name,
+            connection_id=self._mcp_connection_id or None,
         )
 
         client = self._project_client()
@@ -114,6 +115,22 @@ class AzureAgentSyncAdapter:
     def _agent_name(self, persona: Any) -> str:
         return f"interviewer-{persona.id}"
 
+    def _to_mcp_tool(self, tool: dict[str, Any]) -> Any:
+        """Convert the pure MCP tool dict (from knowledge_tool) into an SDK ``MCPTool`` object.
+
+        RemoteTool connection (``project_connection_id``) authenticates the KB's MCP endpoint — a
+        CognitiveSearch/ApiKey connection returns 403, per the reference's live findings.
+        """
+        from azure.ai.projects.models import MCPTool, MCPToolFilter
+
+        return MCPTool(
+            server_label=tool["server_label"],
+            server_url=tool["server_url"],
+            require_approval=tool.get("require_approval", "never"),
+            allowed_tools=MCPToolFilter(tool_names=tool["allowed_tools"]["tool_names"]),
+            project_connection_id=tool.get("project_connection_id"),
+        )
+
     async def _create_version(
         self,
         client: Any,
@@ -124,10 +141,12 @@ class AzureAgentSyncAdapter:
     ) -> dict[str, Any]:
         from azure.ai.projects.models import PromptAgentDefinition
 
-        # Attach the SOP knowledge-source tool when configured so the agent is grounded (P15).
+        # Attach the SOP knowledge base as an MCPTool when configured so the agent is grounded
+        # (P15). The pure builder yields dicts; convert to SDK MCPTool objects here.
         definition_kwargs: dict[str, Any] = {"model": self._model, "instructions": instructions}
-        if tools:
-            definition_kwargs["tools"] = tools
+        sdk_tools = [self._to_mcp_tool(t) for t in tools]
+        if sdk_tools:
+            definition_kwargs["tools"] = sdk_tools
         created = await asyncio.to_thread(
             client.agents.create_version,
             agent_name=agent_name,

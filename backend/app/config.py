@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     azure_search_index: str = ""  # knowledge base name (URL path segment)
     azure_search_knowledge_source: str = ""  # KS name in the retrieve body (≠ index; see spike)
     azure_search_api_key: str = ""
+    # RemoteTool project-connection name that authenticates the agent's MCP call to the KB (P15).
+    # NOT a CognitiveSearch/ApiKey connection (those 403). Empty → adapter resolves/creates it.
+    foundry_kb_mcp_connection: str = ""
 
     # SOP blob storage (F1). Raw uploads live here, never in the DB and never handed to candidates
     # directly (P4). Local filesystem in dev/CI; a blob backend can be swapped in prod.
