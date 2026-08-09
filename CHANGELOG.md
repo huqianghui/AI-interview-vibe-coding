@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.13.1.0 (2026-08-09)
+
+Docs — `CLAUDE.md` now instructs future gstack planning documents to be promoted into the repo
+`docs/planning/` (versioned, reviewable) rather than left only in local `~/.gstack` state. Codifies
+the convention used to bring the existing planning trail into the repo in v0.13.0.0, so specs,
+design docs, plans, and reviews keep travelling with the project. Machine-local logs stay in
+`~/.gstack` by design.
+
 ## 0.13.0.0 (2026-08-09)
 
 Digital-human avatar video + planning docs brought into the repo. The interviewer can now show an
