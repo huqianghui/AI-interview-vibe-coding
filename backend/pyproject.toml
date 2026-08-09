@@ -25,6 +25,9 @@ azure = [
     "openai>=1.54",
     "azure-ai-projects>=1.0.0b4",
     "azure-identity>=1.19",
+    # Async DefaultAzureCredential (azure.identity.aio) used by the Voice Live broker's Entra
+    # path needs an async HTTP transport; azure-core pulls it in only when present.
+    "aiohttp>=3.10",
     "azure-storage-blob>=12.24",
     "azure-ai-voicelive>=1.0.0b3",
     "pdfplumber>=0.11",

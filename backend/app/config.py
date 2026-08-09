@@ -49,6 +49,22 @@ class Settings(BaseSettings):
     foundry_agent_model: str = "gpt-4o"
     foundry_api_key: str = ""
 
+    # Voice Live WebRTC broker (SPEC F9). The candidate's browser connects directly to Azure
+    # Voice Live over WebRTC; the backend only brokers a short-lived credential (STS bearer) +
+    # the signaling URL. Audio never transits the backend. `mock` keeps CI/dev free of Azure:
+    # the broker returns a placeholder signaling config so the frontend flow is exercisable
+    # without a live endpoint. `azure` does the real STS key→bearer exchange.
+    # Provider selection reuses `default_voice_provider` (declared above).
+    # Azure Foundry / Voice Live resource (same cognitive-services resource brokers voice).
+    # Left empty in CI; the live values live only in the gitignored backend/.env.
+    azure_foundry_endpoint: str = ""
+    azure_foundry_api_key: str = ""
+    azure_foundry_default_project: str = ""
+    voice_live_default_model: str = "gpt-4o"
+    # Voice Live / Foundry Agents GA api-version. Matches the reference project's proven value
+    # (GA 2026-07-13, azure-ai-voicelive SDK 1.3.0) — do NOT regress to an older preview literal.
+    voice_live_api_version: str = "2026-07-15"
+
 
 @lru_cache
 def get_settings() -> Settings:
