@@ -56,6 +56,7 @@ def _register_azure_agent_sync() -> None:
         endpoint=settings.foundry_project_endpoint,
         model=settings.foundry_agent_model,
         api_key=settings.foundry_api_key,
+        project=settings.azure_foundry_default_project,
         # Bind the SOP knowledge base as an MCPTool so the agent's answers/follow-ups stay
         # SOP-grounded (P15). Reuses the F1 Search config; empty values → no tool (ungrounded).
         search_endpoint=settings.azure_search_endpoint,

@@ -62,11 +62,16 @@ class AzureAgentSyncAdapter:
         endpoint: str,
         model: str = _MODEL_ENV_DEFAULT,
         api_key: str = "",
+        project: str = "",
         search_endpoint: str = "",
         search_index: str = "",
         mcp_connection_id: str = "",
     ) -> None:
-        self._endpoint = endpoint
+        # The SDK's AIProjectClient needs the PROJECT-scoped endpoint
+        # (…/api/projects/{project}), not the bare Foundry account endpoint — the bare form 404s on
+        # every agents call (caught live 2026-08-09). Build it from endpoint + project when a
+        # project is given and the endpoint isn't already project-scoped.
+        self._endpoint = self._project_endpoint(endpoint, project)
         self._model = model
         self._api_key = api_key
         # SOP knowledge-base binding via MCP (P15). Empty search config → no knowledge tool. The
@@ -111,6 +116,19 @@ class AzureAgentSyncAdapter:
         await asyncio.to_thread(client.agents.delete, agent_name=self._agent_name(persona))
 
     # -- internals ----------------------------------------------------------
+
+    @staticmethod
+    def _project_endpoint(endpoint: str, project: str) -> str:
+        """Return the project-scoped Foundry endpoint the SDK requires.
+
+        ``https://{acct}.services.ai.azure.com/`` + project → ``…/api/projects/{project}``. Left
+        as-is when already project-scoped or when no project is configured (the caller then owns
+        whether that endpoint works).
+        """
+        base = (endpoint or "").rstrip("/")
+        if not base or not project or "/api/projects/" in base:
+            return base
+        return f"{base}/api/projects/{project}"
 
     def _agent_name(self, persona: Any) -> str:
         return f"interviewer-{persona.id}"
