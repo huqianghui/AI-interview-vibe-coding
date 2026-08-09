@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.11.0.0 (2026-08-09)
+
+F7 — Session memory + Foundry IQ knowledge binding. The interviewer now visibly remembers: a
+follow-up question quotes what the candidate just said, then probes deeper. And the interviewer's
+Foundry agent is bound to the SOP knowledge base, so its answers and follow-ups are grounded in the
+SOP, not just the candidate-facing citation API. This is the last of the nine core features — the
+interview flow is complete.
+
+### Added
+- **Memory-aware follow-ups (F7).** When a question owes a follow-up, the interviewer's prompt now
+  opens by quoting the candidate's own prior answer ("You mentioned '…' — can you walk me through
+  that?") before asking the deeper probe. The candidate sees this follow-up as their current
+  question, so the memory moment is visible, and the quote is exactly what they said (sourced from
+  the recorded turn). Bilingual lead-in.
+- **Foundry IQ bound to the interviewer agent (P15).** The interviewer's Foundry prompt agent is
+  now synced with the SOP knowledge base attached as an Azure AI Search knowledge-source tool, so
+  the agent's own answers stay SOP-grounded. The tool definition is a pure, CI-tested shape (the
+  index name and the distinct knowledge-source name are kept separate — the F1-spike distinction
+  that a live 400 punished); an unconfigured KB simply syncs an ungrounded agent rather than
+  failing.
+
+### Notes
+- Voice interviews additionally get memory "for free" from the Foundry prompt-agent's built-in
+  conversation memory; the follow-up synthesis here is the deterministic, transport-agnostic
+  version that also drives the text channel and CI.
+- The live agent↔knowledge-source binding runs through the coverage-omitted Azure adapter (needs a
+  live Foundry project); the tool-definition shape and the follow-up synthesis are fully CI-covered.
+
 ## 0.10.0.0 (2026-08-09)
 
 F8 — Interview report. The scored interview now renders as a real report: a headline grade + score

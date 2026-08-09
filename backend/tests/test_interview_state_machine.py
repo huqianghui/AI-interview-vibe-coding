@@ -160,7 +160,8 @@ async def test_follow_up_stays_on_question_then_advances(db_session):
     )
     assert interview.current_question_index == _FOLLOW_UP_Q_INDEX
 
-    # A follow-up interviewer turn was recorded for this question.
+    # A follow-up interviewer turn was recorded for this question. F7: the follow-up references
+    # the candidate's prior answer AND still carries the base probe.
     turns = await _turns(db_session, interview.id)
     fu_prompts = [
         t
@@ -170,7 +171,8 @@ async def test_follow_up_stays_on_question_then_advances(db_session):
         and t.turn_kind == "follow_up"
     ]
     assert len(fu_prompts) == 1
-    assert fu_prompts[0].content == fu_question.follow_up_prompt
+    assert fu_question.follow_up_prompt in fu_prompts[0].content
+    assert "my main answer" in fu_prompts[0].content  # cites what the candidate actually said
 
     # The follow-up answer is recorded as a follow_up candidate turn and now advances.
     prev_index = interview.current_question_index

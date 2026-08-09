@@ -132,6 +132,34 @@ async def test_scored_report_surfaces_f4_fields(client, db_session):
 
 
 @pytest.mark.asyncio
+async def test_follow_up_visibly_cites_prior_answer(client):
+    # F7 AC #1/#2: the follow-up shown to the candidate cites what they actually said. Uses the
+    # fallback question set (q2 carries a follow-up).
+    headers = await _new_candidate_headers(client)
+    start = (await client.post("/candidate/interview/start", headers=headers)).json()
+    interview_id = start["interview_session_id"]
+    # Answer q1 (no follow-up) to advance to q2.
+    await client.post(
+        f"/candidate/interview/{interview_id}/answer",
+        headers=headers,
+        json={"text": "My relevant experience is in SRE on-call.", "source": "text"},
+    )
+    # Answer q2's main question with a distinctive phrase; the follow-up must quote it.
+    distinctive = "I double-check the runbook before every deploy."
+    body = (
+        await client.post(
+            f"/candidate/interview/{interview_id}/answer",
+            headers=headers,
+            json={"text": distinctive, "source": "text"},
+        )
+    ).json()
+    assert body["status"] == "in_progress"
+    assert body["current_question"] is not None
+    # The candidate now sees a follow-up that cites their own words.
+    assert distinctive in body["current_question"]["prompt"]
+
+
+@pytest.mark.asyncio
 async def test_answer_rejects_bad_source(client):
     headers = await _new_candidate_headers(client)
     interview_id = (await client.post("/candidate/interview/start", headers=headers)).json()[
