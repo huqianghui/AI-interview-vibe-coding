@@ -1,5 +1,8 @@
 """FastAPI application entrypoint."""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from app.api import admin_personas, admin_sop, candidate_session, health, interview
@@ -7,7 +10,26 @@ from app.config import get_settings
 
 settings = get_settings()
 
-app = FastAPI(title=settings.app_name, debug=settings.debug)
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Seed the demo default question bank on boot (idempotent, best-effort).
+
+    A no-op when a default bank already exists, so it's safe on every start. Wrapped so a seed
+    failure (e.g. tables not yet migrated in an unusual boot order) never blocks app startup.
+    """
+    from app.db import async_session_factory
+    from app.services.question_seed import seed_default_bank
+
+    try:
+        async with async_session_factory() as session:
+            await seed_default_bank(session)
+    except Exception:  # noqa: BLE001 — seeding is best-effort; never block startup
+        pass
+    yield
+
+
+app = FastAPI(title=settings.app_name, debug=settings.debug, lifespan=lifespan)
 
 app.include_router(health.router)
 app.include_router(candidate_session.router)

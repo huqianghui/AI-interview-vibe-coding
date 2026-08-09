@@ -13,6 +13,42 @@ async def _new_candidate_headers(client) -> dict:
     return {"X-Anon-Session": resp.json()["token"]}
 
 
+# --- F2 candidate question list (AC #2, P3 no-leak) ------------------------
+
+
+@pytest.mark.asyncio
+async def test_questions_requires_anon_session(client):
+    assert (await client.get("/candidate/interview/questions")).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_questions_empty_when_no_bank(client):
+    headers = await _new_candidate_headers(client)
+    resp = await client.get("/candidate/interview/questions", headers=headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["bank_id"] is None
+    assert body["questions"] == []
+
+
+@pytest.mark.asyncio
+async def test_questions_returns_ordered_bank_without_rubric(client, db_session):
+    # AC #1/#2: seeded bank, 10 ordered questions. P3: no expected_points/rubric in the payload.
+    from app.services import question_seed
+
+    await question_seed.seed_default_bank(db_session)
+    headers = await _new_candidate_headers(client)
+    resp = await client.get("/candidate/interview/questions", headers=headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["questions"]) == 10
+    assert [q["order_index"] for q in body["questions"]] == list(range(10))
+    # P3: candidate payload must not carry rubric-linked fields.
+    flat = str(body).lower()
+    for leaked in ("expected_points", "checklist", "rubric", "weight"):
+        assert leaked not in flat
+
+
 @pytest.mark.asyncio
 async def test_start_requires_anon_session(client):
     resp = await client.post("/candidate/interview/start")

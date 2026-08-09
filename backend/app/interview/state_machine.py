@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.interview.questions import QUESTION_COUNT, get_question
+from app.interview.questions import question_at, resolve_questions
 from app.interview.scoring import group_answers, score_interview
 from app.interview.verbal_cue import strip_verbal_cue
 from app.models.interview import InterviewSession, InterviewTurn
@@ -44,7 +44,8 @@ async def start_interview(db: AsyncSession, candidate_session_id: str) -> Interv
     db.add(session)
     await db.flush()  # assign session.id before writing the turn (avoids a second round-trip)
 
-    first = get_question(0)
+    questions = await resolve_questions(db)
+    first = question_at(questions, 0)
     if first is not None:
         db.add(
             InterviewTurn(
@@ -77,7 +78,8 @@ async def answer_finalized(
     if session.status != "in_progress":
         raise InterviewStateError(f"Cannot answer in status {session.status!r}")
 
-    current = get_question(session.current_question_index)
+    questions = await resolve_questions(db)
+    current = question_at(questions, session.current_question_index)
     if current is None:
         raise InterviewStateError("No current question to answer")
 
@@ -117,7 +119,7 @@ async def answer_finalized(
     else:
         # Question fully answered → advance to the next question, or complete.
         session.current_question_index += 1
-        following = get_question(session.current_question_index)
+        following = question_at(questions, session.current_question_index)
         if following is not None:
             db.add(
                 InterviewTurn(
@@ -164,16 +166,21 @@ async def score_and_finalize(db: AsyncSession, session: InterviewSession) -> dic
     }
 
 
-async def get_current_question(session: InterviewSession) -> dict | None:
-    """The question the candidate should answer now, or None if the interview is over."""
-    q = get_question(session.current_question_index)
+async def get_current_question(db: AsyncSession, session: InterviewSession) -> dict | None:
+    """The question the candidate should answer now, or None if the interview is over.
+
+    Candidate-safe projection (SPEC P3): only ``question_id`` / ``prompt`` / position — never the
+    question's ``expected_points`` (those link to the rubric and stay interviewer-internal).
+    """
+    questions = await resolve_questions(db)
+    q = question_at(questions, session.current_question_index)
     if q is None:
         return None
     return {
         "question_id": q.id,
         "prompt": q.prompt,
         "index": session.current_question_index,
-        "total": QUESTION_COUNT,
+        "total": len(questions),
     }
 
 

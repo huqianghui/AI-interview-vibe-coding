@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.7.0.0 (2026-08-09)
+
+F2 — Question bank. Interview questions now live in the database as an ordered, language-tagged
+bank instead of a hardcoded pair. A candidate can fetch the ordered question list up front, and the
+interview runs off the enabled default bank — the state machine reads from it with the Step-0
+hardcoded set kept only as a zero-data fallback. Ten seeded demo questions ship by default.
+
+### Added
+- **Question bank + questions (AC #1).** New `question_bank` (name, description, language, enabled,
+  is_default) and `question` (bank, order_index, text, language, expected_points, follow-up hook)
+  models. Exactly one enabled default bank is DB-enforced (partial-unique index), mirroring the
+  interviewer-persona invariant, so the interview always resolves "the" bank without guesswork.
+- **Seeded demo bank.** Ten generic, role-agnostic questions are seeded as the default bank on
+  first boot (idempotent — a no-op once a default exists). The interview immediately runs over them.
+- **Candidate question list (AC #2).** `GET /candidate/interview/questions` returns the default
+  bank's enabled questions in order. The interview state machine reads the same bank, so what a
+  candidate previews is what they'll be asked.
+- **Language respected (AC #4).** Bank and per-question language fields flow through to the API.
+
+### Changed
+- The interview state machine now resolves its questions from the default bank per turn (was a
+  hardcoded in-code set). Progression, the follow-up hook, and answer grouping (F6) are unchanged —
+  the follow-up columns moved onto the question row. With no bank seeded, a built-in two-question
+  fallback keeps the spine runnable.
+
+### Security
+- **No rubric leak (P3).** A question's `expected_points` links to the scoring rubric and is never
+  included in any candidate-facing response — the candidate question list and the in-interview
+  question projection both omit it. A test asserts the absence.
+
+### Notes
+- Admin create/edit/reorder of banks (F2b) is post-demo; the service layer already supports it
+  (`create_bank` / `add_question` / `set_default_bank`), the demo ships seed + read only.
+- Real client SOP-derived questions and their expected_points load at deploy time; the repo carries
+  only neutral placeholders.
+
 ## 0.6.0.0 (2026-08-09)
 
 F1 — Knowledge base + traceability. An admin can now upload an SOP document and have it extracted,
