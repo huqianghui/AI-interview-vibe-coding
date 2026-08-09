@@ -106,3 +106,112 @@ async def test_missing_interview_is_404(client):
         json={"text": "x", "source": "text"},
     )
     assert resp.status_code == 404
+
+
+# --- Voice session (SPEC F9) ------------------------------------------------
+
+
+async def _start_interview(client) -> tuple[dict, str]:
+    headers = await _new_candidate_headers(client)
+    interview_id = (await client.post("/candidate/interview/start", headers=headers)).json()[
+        "interview_session_id"
+    ]
+    return headers, interview_id
+
+
+@pytest.mark.asyncio
+async def test_voice_session_requires_anon_session(client):
+    resp = await client.post("/candidate/interview/whatever/voice/session")
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_voice_session_404_for_unowned_interview(client):
+    _headers_a, interview_id = await _start_interview(client)
+    headers_b = await _new_candidate_headers(client)
+    resp = await client.post(
+        f"/candidate/interview/{interview_id}/voice/session", headers=headers_b
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_voice_session_503_when_no_persona(client):
+    # No persona configured at all → Voice Live unavailable (503), candidate stays on text.
+    headers, interview_id = await _start_interview(client)
+    resp = await client.post(
+        f"/candidate/interview/{interview_id}/voice/session", headers=headers
+    )
+    assert resp.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_voice_session_409_when_persona_not_synced(client, db_session):
+    # P5: an unsynced interviewer agent must be rejected (409), not degraded to model mode.
+    from app.services import persona_service as psvc
+
+    await psvc.create_persona(db_session, name="Interviewer", is_default=True)
+    headers, interview_id = await _start_interview(client)
+    resp = await client.post(
+        f"/candidate/interview/{interview_id}/voice/session", headers=headers
+    )
+    assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_voice_session_succeeds_for_synced_persona(client, db_session):
+    from app.services import persona_service as psvc
+
+    persona = await psvc.create_persona(
+        db_session,
+        name="Interviewer",
+        character="lisa",
+        style="casual",
+        voice_map='{"zh-CN": "zh-CN-XiaoxiaoNeural"}',
+        is_default=True,
+    )
+    await psvc.mark_sync_succeeded(db_session, persona, agent_id="agent-9", agent_version="1")
+
+    headers, interview_id = await _start_interview(client)
+    resp = await client.post(
+        f"/candidate/interview/{interview_id}/voice/session",
+        headers=headers,
+        json={"locale": "zh-CN"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["interview_session_id"] == interview_id
+    assert body["mode"] == "agent"
+    assert body["auth_type"] == "bearer"
+    assert body["signaling_url"].startswith("wss://")
+    # P3/P12: no checklist/rubric/SOP content ever appears in a candidate voice payload.
+    flat = str(body).lower()
+    for leaked in ("checklist", "rubric", "weight", "source_quote"):
+        assert leaked not in flat
+
+
+@pytest.mark.asyncio
+async def test_voice_session_409_after_completion(client, db_session):
+    # Voice only makes sense while in_progress; a completed interview is a 409.
+    from app.services import persona_service as psvc
+
+    persona = await psvc.create_persona(db_session, name="I", is_default=True)
+    await psvc.mark_sync_succeeded(db_session, persona, agent_id="a", agent_version="1")
+
+    headers, interview_id = await _start_interview(client)
+    # Drive to completion.
+    status_body = {"status": "in_progress"}
+    for _ in range(20):
+        if status_body["status"] == "completed":
+            break
+        status_body = (
+            await client.post(
+                f"/candidate/interview/{interview_id}/answer",
+                headers=headers,
+                json={"text": "a sufficiently detailed answer", "source": "text"},
+            )
+        ).json()
+    resp = await client.post(
+        f"/candidate/interview/{interview_id}/voice/session", headers=headers
+    )
+    assert resp.status_code == 409
