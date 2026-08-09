@@ -22,10 +22,32 @@ export interface Interview {
   current_question: Question | null;
 }
 
+/** One rubric item's graded result (F4). Present on scored (non-stub) question entries. */
+export interface ScoredItem {
+  kind: string; // required | recommended | forbidden
+  judgment: string; // met | partially_met | not_met | violated
+  weight: number;
+  rationale: string;
+  answer_quote: string;
+  source_quote: string;
+  source_page: string | null;
+}
+
+/**
+ * One question's result. A scored entry (is_stub false) carries score/grade/items; a stub entry
+ * (no checklist authored) carries just judgment/rationale. Both shapes share question_id.
+ */
 export interface QuestionScore {
   question_id: string;
-  judgment: string;
-  rationale: string;
+  is_stub?: boolean;
+  // Scored fields:
+  score?: number;
+  coverage_pct?: number;
+  grade?: string;
+  items?: ScoredItem[];
+  // Stub fields:
+  judgment?: string;
+  rationale?: string;
 }
 
 export interface Report {
@@ -34,6 +56,11 @@ export interface Report {
   coverage_pct: number;
   per_question: QuestionScore[];
   is_stub: boolean;
+  // F4/F8 scored-report fields (null/empty for the stub path).
+  total_score?: number | null;
+  grade?: string | null;
+  narrative?: string;
+  warnings?: string[];
 }
 
 export type AnswerSource = "text" | "voice" | "verbal_cue";

@@ -25,8 +25,6 @@ import {
   Text,
   Textarea,
   Title2,
-  Title3,
-  tokens,
 } from "@fluentui/react-components";
 import {
   getReport,
@@ -42,6 +40,7 @@ import { AudioOrb } from "../components/AudioOrb";
 import { QuestionProgress } from "../components/QuestionProgress";
 import { MicPermissionDialog } from "../components/MicPermissionDialog";
 import { Transcript } from "../components/Transcript";
+import { ReportView } from "../components/ReportView";
 
 type Phase = "idle" | "orientation" | "interviewing" | "scoring" | "scored";
 type Channel = "text" | "voice";
@@ -308,33 +307,7 @@ export function InterviewPage() {
         </Card>
       )}
 
-      {phase === "scored" && report && (
-        <Card>
-          <CardHeader
-            header={
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <Text weight="semibold" style={{ color: tokens.colorPaletteGreenForeground1 }}>
-                  {t("transition.reportReady")}
-                </Text>
-                <Title3>{t("reportTitle")}</Title3>
-              </div>
-            }
-          />
-          <Body1 style={{ display: "block" }}>
-            {t("coverage")}: {report.coverage_pct}%
-          </Body1>
-          <ul>
-            {report.per_question.map((s) => (
-              <li key={s.question_id}>
-                <Text weight="semibold">{s.question_id}</Text>: {s.judgment} — {s.rationale}
-              </li>
-            ))}
-          </ul>
-          {report.is_stub && (
-            <Body1 style={{ display: "block", opacity: 0.6 }}>{t("stubNote")}</Body1>
-          )}
-        </Card>
-      )}
+      {phase === "scored" && report && <ReportView report={report} />}
 
       {error && (
         <Body1 role="alert" style={{ display: "block", marginTop: 16, color: "#b00" }}>

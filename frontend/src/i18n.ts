@@ -54,6 +54,21 @@ export const resources = {
         scoring: "Analyzing answer {{n}} of {{total}} against the SOP…",
         reportReady: "Your report is ready.",
       },
+      report: {
+        title: "Interview report",
+        sopSource: "SOP source",
+        candidateAnswer: "Candidate answer",
+        showDetail: "Show detailed breakdown",
+        hideDetail: "Hide detailed breakdown",
+        questionN: "Question {{n}}",
+        weight: "weight",
+        judgment: {
+          met: "Met",
+          partially_met: "Partially met",
+          not_met: "Not met",
+          violated: "Violated",
+        },
+      },
     },
   },
   "zh-CN": {
@@ -101,6 +116,21 @@ export const resources = {
       transition: {
         scoring: "正在按 SOP 分析第 {{n}} / {{total}} 个回答…",
         reportReady: "你的报告已就绪。",
+      },
+      report: {
+        title: "面试报告",
+        sopSource: "SOP 出处",
+        candidateAnswer: "候选人回答",
+        showDetail: "展开详细拆解",
+        hideDetail: "收起详细拆解",
+        questionN: "第 {{n}} 题",
+        weight: "权重",
+        judgment: {
+          met: "达标",
+          partially_met: "部分达标",
+          not_met: "未达标",
+          violated: "违规",
+        },
       },
     },
   },
