@@ -8,6 +8,7 @@ from app.db import Base
 from app.models.anonymous_session import AnonymousCandidateSession
 from app.models.interview import InterviewSession, InterviewTurn
 from app.models.persona import InterviewerPersona
+from app.models.question import Question, QuestionBank
 from app.models.sop import SopChunk, SopDocument
 
 __all__ = [
@@ -16,6 +17,8 @@ __all__ = [
     "InterviewSession",
     "InterviewTurn",
     "InterviewerPersona",
+    "Question",
+    "QuestionBank",
     "SopDocument",
     "SopChunk",
 ]
