@@ -42,7 +42,7 @@ FALLBACK_QUESTIONS: tuple[Question, ...] = (
 )
 
 
-def _parse_points(raw: str | None) -> tuple[str, ...]:
+def parse_points(raw: str | None) -> tuple[str, ...]:
     if not raw:
         return ()
     try:
@@ -72,7 +72,7 @@ async def resolve_questions(db: AsyncSession) -> tuple[Question, ...]:
             prompt=row.text,
             max_follow_ups=row.max_follow_ups,
             follow_up_prompt=row.follow_up_prompt,
-            expected_points=_parse_points(row.expected_points),
+            expected_points=parse_points(row.expected_points),
         )
         for row in rows
     )
