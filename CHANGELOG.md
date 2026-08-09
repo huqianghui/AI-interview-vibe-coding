@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.12.0.0 (2026-08-09)
+
+F2b + F3b — Admin editors. The business can now edit the interview question set and its scoring
+checklists through an admin UI, not just the seeded defaults. This closes the last of the SPEC
+scope; the interview app now covers all nine features plus both admin editors.
+
+### Added
+- **Question-bank editor (F2b).** Admin API + a `/admin` page: create banks, set the default,
+  add / edit / delete / reorder questions. Questions carry their `expected_points` here (the
+  interviewer-internal rubric link) — admin-only, never on a candidate response (P3).
+- **Checklist editor (F3b, F3 AC #4).** Draft a checklist from the SOP, then edit its items
+  (kind / text / weight / source) and save. Weights are re-normalized to sum 100 on every save
+  (forbidden items → 0), so an edited rubric stays valid; the editor round-trips (save → reload).
+- **Admin page** at `/admin`, gated by the shared admin bearer token (entered once, held in
+  sessionStorage). Three panels: banks, the selected bank's questions, and the selected question's
+  checklist. Utilitarian internal tool, separate from the candidate demo surface.
+
+### Notes
+- The admin API client (`api/admin.ts`) is deliberately separate from the candidate client so the
+  admin bearer token can never ride on a candidate call.
+- Service layer for both editors already existed (`question_service`, `checklist_service`); this
+  adds the missing edit/delete/reorder/update operations, the admin routes, and the UI.
+
 ## 0.11.2.0 (2026-08-09)
 
 Fix — the interviewer agent syncs against the **project-scoped** Foundry endpoint. Verified live:
