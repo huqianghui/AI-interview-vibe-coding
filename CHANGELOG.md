@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.14.0.0 (2026-08-09)
+
+Playwright end-to-end tests. The winning-demo path is now covered by real-browser E2E, on top of
+the existing unit/component tests — driving both servers (backend + frontend) against mock
+providers, so the full candidate and admin flows are verified in an actual Chromium, with zero
+Azure.
+
+### Added
+- **Playwright E2E suite** (`frontend/e2e/`), 4 specs run serially against a fresh migrated SQLite
+  DB and a known admin token:
+  - Candidate text interview: land → orientation → answer → **F7 memory follow-up quoting the
+    candidate's own words** → report.
+  - P3 boundary: the candidate page never exposes checklist/rubric/expected_points.
+  - Admin editor: sign in → create a default bank → add a question → draft its checklist
+    (weights = 100), then a candidate interviews against it and reaches a **scored** report — the
+    executive view's grade gauge and the SOP-source-beside-answer evidence are asserted, and the
+    detail view discloses per-item judgments.
+  - Voice with no microphone falls back to the mic-permission dialog (F9 AC #4) — never hangs.
+- **`playwright.config.ts`** boots the backend (fresh DB + migrations + admin token + mock
+  providers) and the frontend (vite dev proxying `/api` to the E2E backend) as managed web servers.
+- **CI `e2e` job** installs both stacks + `chromium` and runs `npm run e2e` on every PR.
+
+### Notes
+- `E2E_API_TARGET` lets the frontend proxy point at the E2E backend port; vitest excludes `e2e/` so
+  unit and E2E layers stay separate.
+- Everything runs on mock providers — no Azure needed to run the E2E suite in CI or locally.
+
 ## 0.13.1.0 (2026-08-09)
 
 Docs — `CLAUDE.md` now instructs future gstack planning documents to be promoted into the repo
