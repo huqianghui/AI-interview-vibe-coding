@@ -93,6 +93,45 @@ async def test_full_thin_slice_flow(client):
 
 
 @pytest.mark.asyncio
+async def test_scored_report_surfaces_f4_fields(client, db_session):
+    # With a checklist drafted, the report exposes total_score/grade + per-item judgments (F4).
+    from app.services import checklist_service, question_service
+
+    bank = await question_service.create_bank(db_session, name="B", is_default=True)
+    q = await question_service.add_question(
+        db_session, bank_id=bank.id, text="Describe the safety procedure.", order_index=0
+    )
+    await checklist_service.draft_checklist(db_session, q.id)
+
+    headers = await _new_candidate_headers(client)
+    interview_id = (await client.post("/candidate/interview/start", headers=headers)).json()[
+        "interview_session_id"
+    ]
+    status_body = {"status": "in_progress"}
+    for _ in range(20):
+        if status_body["status"] == "completed":
+            break
+        status_body = (
+            await client.post(
+                f"/candidate/interview/{interview_id}/answer",
+                headers=headers,
+                json={
+                    "text": "I followed each documented step and checked safety.",
+                    "source": "text",
+                },
+            )
+        ).json()
+
+    report = (
+        await client.post(f"/candidate/interview/{interview_id}/report", headers=headers)
+    ).json()
+    assert report["is_stub"] is False
+    assert report["total_score"] is not None
+    assert report["grade"] in ("A", "B", "C", "D", "F")
+    assert report["per_question"][0]["items"]  # per-item judgments present in the API payload
+
+
+@pytest.mark.asyncio
 async def test_answer_rejects_bad_source(client):
     headers = await _new_candidate_headers(client)
     interview_id = (await client.post("/candidate/interview/start", headers=headers)).json()[
