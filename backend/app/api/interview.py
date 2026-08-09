@@ -71,6 +71,8 @@ class ReportOut(BaseModel):
     total_score: float | None = None
     grade: str | None = None
     warnings: list[str] = []
+    # F8 executive-headline narrative (1-2 sentences, strengths + main gap). Empty for stub path.
+    narrative: str = ""
 
 
 class VoiceSessionOut(BaseModel):
