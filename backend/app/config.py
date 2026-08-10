@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     # utils/encryption). Set a real ENCRYPTION_KEY in prod so secrets survive restarts/rotation.
     encryption_key: str = ""
     algorithm: str = "HS256"
+    # JWT access-token lifetime for the user/admin auth system (default 24h).
+    access_token_expire_minutes: int = 60 * 24
+    # Default admin seeded on boot (only when password is set — avoids a known-credential admin).
+    seed_admin_username: str = "admin"
+    seed_admin_password: str = ""
     anon_session_ttl_minutes: int = 120
     # Admin bearer token for persona/config admin routes (SPEC §67 role=admin). A single shared
     # token is enough for the PoC (no admin user-management UI yet); empty in dev disables the
