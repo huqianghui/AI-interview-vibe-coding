@@ -17,12 +17,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db import get_db
-from app.dependencies import require_admin
+from app.dependencies import require_role
 from app.models.sop import SopChunk, SopDocument
 from app.services import sop_ingestion
 from app.services.agents.registry import get_retrieval_adapter
 
-router = APIRouter(prefix="/admin/sop", tags=["admin-sop"], dependencies=[Depends(require_admin)])
+router = APIRouter(
+    prefix="/admin/sop", tags=["admin-sop"], dependencies=[Depends(require_role("admin"))]
+)
 
 
 class SopDocumentOut(BaseModel):

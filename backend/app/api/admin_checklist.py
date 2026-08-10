@@ -11,12 +11,14 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.dependencies import require_admin
+from app.dependencies import require_role
 from app.services import checklist_service
 from app.services.checklist_service import ChecklistNotFound, QuestionNotFound
 
 router = APIRouter(
-    prefix="/admin/checklists", tags=["admin-checklists"], dependencies=[Depends(require_admin)]
+    prefix="/admin/checklists",
+    tags=["admin-checklists"],
+    dependencies=[Depends(require_role("admin"))],
 )
 
 

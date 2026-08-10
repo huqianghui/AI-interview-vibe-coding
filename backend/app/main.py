@@ -11,6 +11,8 @@ from app.api import (
     admin_personas,
     admin_questions,
     admin_sop,
+    admin_users,
+    auth,
     candidate_session,
     health,
     interview,
@@ -33,11 +35,17 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from app.db import async_session_factory
     from app.services.config_overlay import apply_master_config_to_settings
     from app.services.question_seed import seed_default_bank
+    from app.services.user_seed import seed_default_admin
 
     try:
         async with async_session_factory() as session:
             await seed_default_bank(session)
     except Exception:  # noqa: BLE001 — seeding is best-effort; never block startup
+        pass
+    try:
+        async with async_session_factory() as session:
+            await seed_default_admin(session)
+    except Exception:  # noqa: BLE001 — admin seed is best-effort; never block startup
         pass
     try:
         async with async_session_factory() as session:
@@ -57,3 +65,5 @@ app.include_router(admin_sop.router)
 app.include_router(admin_checklist.router)
 app.include_router(admin_questions.router)
 app.include_router(admin_config.router)
+app.include_router(auth.router)
+app.include_router(admin_users.router)

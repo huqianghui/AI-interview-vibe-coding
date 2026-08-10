@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.dependencies import require_admin
+from app.dependencies import require_role
 from app.services import question_service as svc
 from app.services.question_service import (
     QuestionBankConflict,
@@ -20,7 +20,9 @@ from app.services.question_service import (
 )
 
 router = APIRouter(
-    prefix="/admin/question-banks", tags=["admin-questions"], dependencies=[Depends(require_admin)]
+    prefix="/admin/question-banks",
+    tags=["admin-questions"],
+    dependencies=[Depends(require_role("admin"))],
 )
 
 
