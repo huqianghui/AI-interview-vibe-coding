@@ -14,3 +14,8 @@ backend/storage/
 # Local dev SQLite DB — never commit.
 *.db
 backend/*.db
+# Playwright E2E artifacts
+frontend/playwright-report/
+frontend/test-results/
+frontend/.playwright/
+backend/e2e.db
