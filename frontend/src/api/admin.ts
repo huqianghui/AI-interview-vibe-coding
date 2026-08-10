@@ -130,3 +130,39 @@ export const editChecklistItems = (
     method: "PUT",
     body: JSON.stringify({ items }),
   });
+
+// ── Azure AI Foundry config (runtime source of truth) ──────────────────
+// The saved master config is what the backend reads at runtime (DB > .env > code default). The
+// API key is write-only: responses only carry a masked form, never the stored secret.
+
+export interface AiFoundryConfig {
+  endpoint: string;
+  masked_key: string;
+  default_project: string;
+  model_or_deployment: string;
+  is_active: boolean;
+}
+
+export interface AiFoundryConfigInput {
+  endpoint: string;
+  api_key: string; // empty preserves the existing stored key
+  default_project: string;
+  model_or_deployment: string;
+}
+
+export interface ConnectionTestResult {
+  success: boolean;
+  message: string;
+}
+
+export const getAiFoundryConfig = () =>
+  adminRequest<AiFoundryConfig>("/admin/config/ai-foundry");
+
+export const updateAiFoundryConfig = (input: AiFoundryConfigInput) =>
+  adminRequest<AiFoundryConfig>("/admin/config/ai-foundry", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+
+export const testAiFoundryConfig = () =>
+  adminRequest<ConnectionTestResult>("/admin/config/ai-foundry/test", { method: "POST" });

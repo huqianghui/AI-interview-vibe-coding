@@ -19,6 +19,14 @@ afterEach(() => {
   sessionStorage.clear();
 });
 
+const EMPTY_CFG = {
+  endpoint: "",
+  masked_key: "",
+  default_project: "",
+  model_or_deployment: "",
+  is_active: false,
+};
+
 describe("AdminPage", () => {
   it("gates on the admin token, then lists banks after sign-in", async () => {
     const user = userEvent.setup();
@@ -32,6 +40,7 @@ describe("AdminPage", () => {
         is_default: true,
       },
     ]);
+    vi.spyOn(admin, "getAiFoundryConfig").mockResolvedValue(EMPTY_CFG);
 
     renderPage();
     // Token gate is shown first.
@@ -58,5 +67,42 @@ describe("AdminPage", () => {
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/401/));
     // Still on the gate (not authed).
     expect(screen.getByTestId("admin-token-input")).toBeInTheDocument();
+  });
+
+  it("loads the AI Foundry config (masked key) and saves an update", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(admin, "listBanks").mockResolvedValue([]);
+    vi.spyOn(admin, "getAiFoundryConfig").mockResolvedValue({
+      endpoint: "https://demo.services.ai.azure.com",
+      masked_key: "****1234",
+      default_project: "demo-prj",
+      model_or_deployment: "gpt-4o-mini",
+      is_active: true,
+    });
+    const update = vi
+      .spyOn(admin, "updateAiFoundryConfig")
+      .mockResolvedValue({ ...EMPTY_CFG, endpoint: "https://demo.services.ai.azure.com" });
+
+    renderPage();
+    await user.type(screen.getByTestId("admin-token-input"), "secret-token");
+    await user.click(screen.getByTestId("admin-login"));
+
+    // The saved endpoint loads into the panel and the key shows masked (never the raw secret).
+    await waitFor(() =>
+      expect(screen.getByTestId("cfg-endpoint")).toHaveValue("https://demo.services.ai.azure.com"),
+    );
+    expect(screen.getByTestId("cfg-key")).toHaveValue(""); // key never prefilled
+    expect(screen.getByTestId("cfg-key")).toHaveAttribute("placeholder", expect.stringContaining("****1234"));
+
+    // Change the model and save → the client is called with the new value + empty key (preserve).
+    await user.clear(screen.getByTestId("cfg-model"));
+    await user.type(screen.getByTestId("cfg-model"), "gpt-5.4-mini");
+    await user.click(screen.getByTestId("cfg-save"));
+
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({ model_or_deployment: "gpt-5.4-mini", api_key: "" }),
+    );
+    await waitFor(() => expect(screen.getByTestId("cfg-status")).toHaveTextContent(/saved/i));
   });
 });

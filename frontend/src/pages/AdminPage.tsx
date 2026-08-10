@@ -18,7 +18,7 @@ import {
   Title3,
 } from "@fluentui/react-components";
 import * as admin from "../api/admin";
-import type { AdminQuestion, Bank, Checklist } from "../api/admin";
+import type { AdminQuestion, AiFoundryConfig, Bank, Checklist } from "../api/admin";
 
 export function AdminPage() {
   const [token, setToken] = useState(admin.getAdminToken());
@@ -34,6 +34,14 @@ export function AdminPage() {
   const [newBankName, setNewBankName] = useState("");
   const [newQuestionText, setNewQuestionText] = useState("");
 
+  // Azure AI Foundry config (runtime source of truth). api_key is write-only; masked on load.
+  const [cfg, setCfg] = useState<AiFoundryConfig | null>(null);
+  const [cfgEndpoint, setCfgEndpoint] = useState("");
+  const [cfgProject, setCfgProject] = useState("");
+  const [cfgModel, setCfgModel] = useState("");
+  const [cfgKey, setCfgKey] = useState("");
+  const [cfgStatus, setCfgStatus] = useState<string | null>(null);
+
   const guard = useCallback(async (fn: () => Promise<void>) => {
     setError(null);
     try {
@@ -48,9 +56,25 @@ export function AdminPage() {
     [guard],
   );
 
+  const refreshConfig = useCallback(
+    () =>
+      guard(async () => {
+        const c = await admin.getAiFoundryConfig();
+        setCfg(c);
+        setCfgEndpoint(c.endpoint);
+        setCfgProject(c.default_project);
+        setCfgModel(c.model_or_deployment);
+        setCfgKey(""); // never prefill the (masked) key; empty = keep existing
+      }),
+    [guard],
+  );
+
   useEffect(() => {
-    if (authed) void refreshBanks();
-  }, [authed, refreshBanks]);
+    if (authed) {
+      void refreshBanks();
+      void refreshConfig();
+    }
+  }, [authed, refreshBanks, refreshConfig]);
 
   const onLogin = () =>
     guard(async () => {
@@ -109,6 +133,79 @@ export function AdminPage() {
   return (
     <div style={{ maxWidth: 900, margin: "0 auto", padding: 24, display: "grid", gap: 20 }}>
       <Title2 as="h1">Admin — question banks & checklists</Title2>
+
+      {/* Azure AI Foundry config — the runtime source of truth (DB > .env > default) */}
+      <Card>
+        <CardHeader header={<Title3>Azure AI Foundry connection</Title3>} />
+        <Body1 style={{ display: "block", marginBottom: 8 }}>
+          Saved here and used at runtime — overrides <code>.env</code>. The API key is write-only;
+          leave it blank to keep the existing key.
+        </Body1>
+        <div style={{ display: "grid", gap: 8, maxWidth: 560 }}>
+          <Input
+            value={cfgEndpoint}
+            placeholder="Endpoint (https://…services.ai.azure.com)"
+            onChange={(_, d) => setCfgEndpoint(d.value)}
+            data-testid="cfg-endpoint"
+          />
+          <Input
+            value={cfgProject}
+            placeholder="Default project"
+            onChange={(_, d) => setCfgProject(d.value)}
+            data-testid="cfg-project"
+          />
+          <Input
+            value={cfgModel}
+            placeholder="Model / deployment (e.g. gpt-4o-mini)"
+            onChange={(_, d) => setCfgModel(d.value)}
+            data-testid="cfg-model"
+          />
+          <Input
+            type="password"
+            value={cfgKey}
+            placeholder={
+              cfg?.masked_key ? `API key (saved: ${cfg.masked_key})` : "API key"
+            }
+            onChange={(_, d) => setCfgKey(d.value)}
+            data-testid="cfg-key"
+          />
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <Button
+              appearance="primary"
+              data-testid="cfg-save"
+              onClick={() =>
+                guard(async () => {
+                  setCfgStatus(null);
+                  await admin.updateAiFoundryConfig({
+                    endpoint: cfgEndpoint.trim(),
+                    api_key: cfgKey,
+                    default_project: cfgProject.trim(),
+                    model_or_deployment: cfgModel.trim(),
+                  });
+                  setCfgStatus("Saved.");
+                  await refreshConfig();
+                })
+              }
+            >
+              Save
+            </Button>
+            <Button
+              data-testid="cfg-test"
+              onClick={() =>
+                guard(async () => {
+                  const r = await admin.testAiFoundryConfig();
+                  setCfgStatus(r.message);
+                })
+              }
+            >
+              Test connection
+            </Button>
+            {cfgStatus && (
+              <Text data-testid="cfg-status">{cfgStatus}</Text>
+            )}
+          </div>
+        </div>
+      </Card>
 
       {/* Banks */}
       <Card>

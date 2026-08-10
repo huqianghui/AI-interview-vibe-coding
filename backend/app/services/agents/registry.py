@@ -65,8 +65,19 @@ def _register_azure_agent_sync() -> None:
     )
 
 
-_register_azure_retrieval()
-_register_azure_agent_sync()
+def refresh_azure_adapters() -> None:
+    """(Re)register the Azure adapters from the current settings.
+
+    Called at import time (below) and again by the config overlay after the DB master config is
+    applied to the settings singleton, so a runtime config change takes effect without a restart.
+    Each helper is a no-op unless its endpoint/credentials are present, so this stays safe on
+    mock-only environments.
+    """
+    _register_azure_retrieval()
+    _register_azure_agent_sync()
+
+
+refresh_azure_adapters()
 
 
 def get_llm_adapter(name: str | None = None) -> LLMAdapter:

@@ -10,6 +10,7 @@ from app.models.checklist import Checklist, ChecklistItem
 from app.models.interview import InterviewSession, InterviewTurn
 from app.models.persona import InterviewerPersona
 from app.models.question import Question, QuestionBank
+from app.models.service_config import ServiceConfig
 from app.models.sop import SopChunk, SopDocument
 
 __all__ = [
@@ -22,6 +23,7 @@ __all__ = [
     "InterviewerPersona",
     "Question",
     "QuestionBank",
+    "ServiceConfig",
     "SopDocument",
     "SopChunk",
 ]
