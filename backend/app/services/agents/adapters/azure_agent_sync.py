@@ -13,9 +13,15 @@ Key contract facts (learned the hard way in the reference):
 - The Voice Live metadata SHAPE is owned by the pure, CI-tested ``voice_live_metadata`` builder —
   this module only transports it. That split is why the demo-critical snake_case invariant is
   verified without a live Azure call (see docs/SPIKE-F1-foundry-iq.md Trigger C).
+- Create can hit transient connection drops; those are retried with exponential backoff
+  (:func:`_is_transient_error`, ported from the reference's create loop) before recovery/raise.
 
 The SDK is synchronous; every call is wrapped in ``asyncio.to_thread`` so it never blocks the
 event loop.
+
+Reverse-sync (pull Portal edits back via ``agents.get`` metadata) and metadata-only updates are
+deferred to the editor UI phase (#29), where they have a consumer — porting them now would be
+coverage-omitted code nothing calls.
 """
 
 import asyncio
@@ -37,6 +43,28 @@ _MODEL_ENV_DEFAULT = "gpt-4o"
 
 class AgentSyncError(RuntimeError):
     """Raised when a persona cannot be synced to a Foundry prompt agent."""
+
+
+# Create can hit transient connection drops against the Foundry endpoint; retry those a few times
+# with exponential backoff before giving up (ported from the reference's create_agent retry loop).
+_MAX_CREATE_ATTEMPTS = 3
+_TRANSIENT_MARKERS = (
+    "RemoteDisconnected",
+    "Connection aborted",
+    "ConnectionError",
+    "ConnectionResetError",
+)
+
+
+def _is_transient_error(exc: BaseException) -> bool:
+    """True when an SDK error looks like a transient connection drop worth retrying.
+
+    Pure + unit-testable: classifies by the exception's string form (the SDK raises various
+    connection error types), matching the reference's transient-marker set. A 500/auth error is
+    NOT transient — those flow to the pre-created-agent recovery path instead.
+    """
+    text = str(exc)
+    return any(marker in text for marker in _TRANSIENT_MARKERS)
 
 
 class AzureAgentSyncAdapter:
@@ -86,17 +114,38 @@ class AzureAgentSyncAdapter:
         )
 
         client = self._project_client()
-        try:
-            result = await self._create_version(client, agent_name, instructions, metadata, tools)
-        except Exception as exc:  # noqa: BLE001 — normalize any SDK error into a recovery attempt
-            result = await self._recover_or_raise(
-                client, agent_name, instructions, metadata, tools, exc
-            )
-
+        result = await self._create_with_retry(client, agent_name, instructions, metadata, tools)
         return {
             "agent_id": str(result.get("id") or agent_name),
             "agent_version": str(result.get("version") or ""),
         }
+
+    async def _create_with_retry(  # pragma: no cover — needs a live Foundry endpoint
+        self,
+        client: Any,
+        agent_name: str,
+        instructions: str,
+        metadata: dict[str, str],
+        tools: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Create the agent version, retrying transient connection drops with 2s/4s backoff.
+
+        A transient error (:func:`_is_transient_error`) is retried up to ``_MAX_CREATE_ATTEMPTS``;
+        a non-transient failure (500/auth/etc.) goes straight to the pre-created-agent recovery
+        path — API-key auth can update a Portal-created agent but cannot create a new one.
+        """
+        for attempt in range(1, _MAX_CREATE_ATTEMPTS + 1):
+            try:
+                return await self._create_version(client, agent_name, instructions, metadata, tools)
+            except Exception as exc:  # noqa: BLE001 — classify, then retry or recover
+                if _is_transient_error(exc) and attempt < _MAX_CREATE_ATTEMPTS:
+                    await asyncio.sleep(2**attempt)  # 2s, 4s
+                    continue
+                return await self._recover_or_raise(
+                    client, agent_name, instructions, metadata, tools, exc
+                )
+        # Unreachable: the loop either returns or the final attempt hits the else branch above.
+        raise AgentSyncError(f"Could not create agent {agent_name!r} after retries")
 
     async def delete_persona_agent(self, persona: Any) -> None:
         """Best-effort delete of the persona's Foundry agent (used when a persona is removed)."""
