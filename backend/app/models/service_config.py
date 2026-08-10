@@ -29,6 +29,10 @@ class ServiceConfig(TimestampMixin, Base):
     api_key_encrypted: Mapped[str] = mapped_column(Text, default="", nullable=False)
     model_or_deployment: Mapped[str] = mapped_column(String(100), default="", nullable=False)
     default_project: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    # Foundry IQ knowledge base (F1 SOP retrieval). `knowledge_base` is the KB name (URL path
+    # segment); `knowledge_source` is the KS name in the retrieve body (distinct from the KB name).
+    knowledge_base: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    knowledge_source: Mapped[str] = mapped_column(String(200), default="", nullable=False)
     is_master: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # Who last saved it (admin identity; the shared-token PoC stores "admin").
