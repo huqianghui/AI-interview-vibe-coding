@@ -25,7 +25,7 @@ export class AdminApiError extends Error {
   }
 }
 
-async function adminRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function adminRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
   headers.set("Authorization", `Bearer ${getAdminToken()}`);
