@@ -24,9 +24,8 @@ from typing import Any
 
 from app.services.agents.knowledge_tool import build_agent_tools
 from app.services.agents.voice_live_metadata import build_voice_live_metadata
+from app.services.azure_auth import FOUNDRY_SCOPE, get_sync_credential_probed
 
-# Entra scope used to probe for a usable DefaultAzureCredential before falling back to API key.
-_FOUNDRY_SCOPE = "https://ai.azure.com/.default"
 # Fallback only — the registry always passes settings.foundry_agent_model (which itself resolves
 # DB > .env > code default). Kept as a neutral literal for the bare-constructor case.
 _MODEL_ENV_DEFAULT = "gpt-4o"
@@ -208,15 +207,11 @@ class AzureAgentSyncAdapter:
     def _project_client(self) -> Any:
         from azure.ai.projects import AIProjectClient
 
-        # 1) Prefer Entra ID — required to create new agents.
-        try:
-            from azure.identity import DefaultAzureCredential
-
-            credential = DefaultAzureCredential()
-            credential.get_token(_FOUNDRY_SCOPE)  # probe; raises if unusable
+        # 1) Prefer Entra ID — required to create new agents. The probe + cached-credential logic
+        # lives in azure_auth; a non-None return means Entra can serve the Foundry scope.
+        credential = get_sync_credential_probed(FOUNDRY_SCOPE)
+        if credential is not None:
             return AIProjectClient(endpoint=self._endpoint, credential=credential)
-        except Exception:  # noqa: BLE001 — fall through to API key
-            pass
 
         # 2) Fall back to API key (read/update/delete of existing agents only).
         if self._api_key:

@@ -17,9 +17,10 @@ Selection mirrors the agent registry: :func:`get_voice_provider` resolves by nam
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from app.config import get_settings
+from app.services.azure_auth import COGNITIVE_SERVICES_SCOPE, get_azure_credential_cached
 from app.utils.azure_endpoints import endpoint_host
 
 
@@ -57,10 +58,6 @@ class MockVoiceProvider:
         )
 
 
-# Azure Cognitive Services token scope — the audience Voice Live validates the bearer against.
-COGNITIVE_SERVICES_SCOPE = "https://cognitiveservices.azure.com/.default"
-
-
 class AzureVoiceProvider:
     """Real Voice Live credential issuance — **Entra (AAD) first, STS key fallback**.
 
@@ -79,13 +76,6 @@ class AzureVoiceProvider:
     """
 
     name = "azure"
-
-    def __init__(self) -> None:
-        # Cached across calls: DefaultAzureCredential caches tokens internally until near expiry,
-        # so reusing one instance avoids re-probing the whole credential chain (env → managed
-        # identity/IMDS → CLI) on every session. Matters under the reconnect path, which can issue
-        # several credentials in a burst. The registry keeps this provider a singleton.
-        self._credential: Any = None
 
     # Azure-only paths below need a live endpoint, so they are coverage-omitted (pragma).
     async def issue_credential(  # pragma: no cover
@@ -112,17 +102,15 @@ class AzureVoiceProvider:
     async def _try_entra_token(self) -> str | None:  # pragma: no cover
         """Get a Cognitive Services AAD bearer, or None if Entra auth is unavailable.
 
-        Reuses a cached credential so azure-identity's internal token cache serves repeat calls
-        without re-probing the credential chain. Not closed per-call (the instance is long-lived).
+        Delegates to the shared cached async credential (azure_auth) so the reconnect burst reuses
+        one instance and azure-identity's token cache serves repeat calls without re-probing the
+        credential chain. The instance is process-lived (not closed per-call).
         """
-        if self._credential is None:
-            try:
-                from azure.identity.aio import DefaultAzureCredential
-            except ImportError:
-                return None
-            self._credential = DefaultAzureCredential()
+        credential = get_azure_credential_cached()
+        if credential is None:
+            return None
         try:
-            token = await self._credential.get_token(COGNITIVE_SERVICES_SCOPE)
+            token = await credential.get_token(COGNITIVE_SERVICES_SCOPE)
             return token.token
         except Exception:
             return None
