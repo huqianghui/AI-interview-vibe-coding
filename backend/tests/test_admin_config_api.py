@@ -32,8 +32,17 @@ def _restore_settings():
         "azure_foundry_api_key",
         "azure_foundry_default_project",
         "voice_live_default_model",
+        "azure_openai_endpoint",
+        "azure_openai_api_key",
+        "azure_openai_deployment",
+        "azure_search_endpoint",
+        "azure_search_api_key",
+        "azure_search_index",
+        "azure_search_knowledge_source",
         "default_voice_provider",
         "default_agent_sync_provider",
+        "default_llm_provider",
+        "default_retrieval_provider",
     ]
     saved = {f: getattr(s, f) for f in fields}
     yield
@@ -113,12 +122,17 @@ async def test_overlay_makes_db_win_over_default(db_session, _restore_settings):
     # Precondition: no azure agent-sync adapter registered on a mock-only boot.
     registry._AGENT_SYNC_ADAPTERS.pop("azure", None)
 
+    registry._LLM_ADAPTERS.pop("azure_openai", None)
+    registry._RETRIEVAL_ADAPTERS.pop("azure", None)
+
     await config_service.upsert_master_config(
         db_session,
         endpoint="https://demo.services.ai.azure.com",
         api_key="k",
         default_project="demo-prj",
         model_or_deployment="gpt-5.4",
+        knowledge_base="sop-kb",
+        knowledge_source="sop-ks",
         updated_by="admin",
     )
     applied = await apply_master_config_to_settings(db_session)
@@ -129,11 +143,58 @@ async def test_overlay_makes_db_win_over_default(db_session, _restore_settings):
     assert settings.voice_live_default_model == "gpt-5.4"
     assert settings.foundry_project_endpoint == "https://demo.services.ai.azure.com"
     assert settings.default_agent_sync_provider == "azure"
-    # And the azure agent-sync adapter got (re)registered against the overlaid settings.
+    # LLM path flipped + azure_openai fields overlaid → azure_openai adapter registered.
+    assert settings.default_llm_provider == "azure_openai"
+    assert settings.azure_openai_deployment == "gpt-5.4"
+    assert "azure_openai" in registry._LLM_ADAPTERS
+    # Retrieval path flipped + kb/ks mapped to search settings → azure retrieval adapter registered.
+    assert settings.default_retrieval_provider == "azure"
+    assert settings.azure_search_index == "sop-kb"
+    assert settings.azure_search_knowledge_source == "sop-ks"
+    assert "azure" in registry._RETRIEVAL_ADAPTERS
     assert "azure" in registry._AGENT_SYNC_ADAPTERS
 
-    # Cleanup the adapter we caused to register so other tests see the mock-only baseline.
+    # Cleanup adapters we caused to register so other tests see the mock-only baseline.
     registry._AGENT_SYNC_ADAPTERS.pop("azure", None)
+    registry._LLM_ADAPTERS.pop("azure_openai", None)
+    registry._RETRIEVAL_ADAPTERS.pop("azure", None)
+
+
+async def test_overlay_skips_retrieval_without_kb(db_session, _restore_settings):
+    """No kb/ks → retrieval provider stays unflipped (guards on all three search fields)."""
+    from app.services.agents import registry
+
+    settings = get_settings()
+    registry._RETRIEVAL_ADAPTERS.pop("azure", None)
+    await config_service.upsert_master_config(
+        db_session,
+        endpoint="https://demo.services.ai.azure.com",
+        api_key="k",
+        default_project="demo-prj",
+        model_or_deployment="gpt-5.4",
+        updated_by="admin",  # no kb/ks
+    )
+    await apply_master_config_to_settings(db_session)
+    assert settings.default_retrieval_provider != "azure"
+    assert "azure" not in registry._RETRIEVAL_ADAPTERS
+
+
+async def test_kb_ks_persist_through_put_get(client, _restore_settings):
+    await client.put(
+        "/admin/config/ai-foundry",
+        headers=AUTH,
+        json={
+            "endpoint": "https://demo.services.ai.azure.com",
+            "api_key": "k",
+            "default_project": "demo-prj",
+            "model_or_deployment": "gpt-4o-mini",
+            "knowledge_base": "sop-kb",
+            "knowledge_source": "sop-ks",
+        },
+    )
+    got = (await client.get("/admin/config/ai-foundry", headers=AUTH)).json()
+    assert got["knowledge_base"] == "sop-kb"
+    assert got["knowledge_source"] == "sop-ks"
 
 
 async def test_overlay_noop_when_unconfigured(db_session):
@@ -168,3 +229,92 @@ async def test_put_rejects_non_azure_endpoint_422(client, _restore_settings):
     got = (await client.get("/admin/config/ai-foundry", headers=AUTH)).json()
     assert got["endpoint"] == "https://good.services.ai.azure.com"
     assert got["masked_key"] == "****9999"
+
+
+# --- Dropdown endpoints (mocked httpx — no live Azure) ---------------------------------------
+
+
+class _FakeResp:
+    def __init__(self, status_code: int, payload: dict):
+        self.status_code = status_code
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+class _FakeAsyncClient:
+    """Stub httpx.AsyncClient whose .get returns queued responses in order."""
+
+    _responses: list = []
+
+    def __init__(self, *a, **k):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def get(self, *a, **k):
+        return _FakeAsyncClient._responses.pop(0)
+
+
+async def _seed(client, *, kb="", ks=""):
+    await client.put(
+        "/admin/config/ai-foundry",
+        headers=AUTH,
+        json={
+            "endpoint": "https://demo.services.ai.azure.com",
+            "api_key": "k",
+            "default_project": "demo-prj",
+            "model_or_deployment": "gpt-4o-mini",
+            "knowledge_base": kb,
+            "knowledge_source": ks,
+        },
+    )
+
+
+async def test_model_deployments_from_project_api(client, _restore_settings, monkeypatch):
+    await _seed(client)
+    _FakeAsyncClient._responses = [
+        _FakeResp(200, {"data": [{"name": "gpt-5.4-mini", "modelName": "gpt-5.4-mini"}]})
+    ]
+    monkeypatch.setattr("app.api.admin_config.httpx.AsyncClient", _FakeAsyncClient)
+    resp = await client.get("/admin/config/ai-foundry/model-deployments", headers=AUTH)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body[0]["value"] == "gpt-5.4-mini"
+
+
+async def test_model_deployments_db_fallback_on_error(client, _restore_settings, monkeypatch):
+    await _seed(client)
+    # Both the project-scoped and legacy calls fail → fall back to the saved model.
+    _FakeAsyncClient._responses = [_FakeResp(500, {}), _FakeResp(500, {})]
+    monkeypatch.setattr("app.api.admin_config.httpx.AsyncClient", _FakeAsyncClient)
+    body = (await client.get("/admin/config/ai-foundry/model-deployments", headers=AUTH)).json()
+    assert body == [{"value": "gpt-4o-mini", "label": "gpt-4o-mini"}]
+
+
+async def test_knowledge_bases_list(client, _restore_settings, monkeypatch):
+    await _seed(client)
+    _FakeAsyncClient._responses = [
+        _FakeResp(200, {"value": [{"name": "sop-kb", "description": "SOP KB"}]})
+    ]
+    monkeypatch.setattr("app.api.admin_config.httpx.AsyncClient", _FakeAsyncClient)
+    body = (await client.get("/admin/config/ai-foundry/knowledge-bases", headers=AUTH)).json()
+    assert body == [{"value": "sop-kb", "label": "SOP KB"}]
+
+
+async def test_knowledge_bases_empty_on_error(client, _restore_settings, monkeypatch):
+    await _seed(client)
+    _FakeAsyncClient._responses = [_FakeResp(500, {})]
+    monkeypatch.setattr("app.api.admin_config.httpx.AsyncClient", _FakeAsyncClient)
+    body = (await client.get("/admin/config/ai-foundry/knowledge-bases", headers=AUTH)).json()
+    assert body == []
+
+
+async def test_dropdowns_require_admin(client):
+    assert (await client.get("/admin/config/ai-foundry/model-deployments")).status_code == 401
+    assert (await client.get("/admin/config/ai-foundry/knowledge-bases")).status_code == 401
