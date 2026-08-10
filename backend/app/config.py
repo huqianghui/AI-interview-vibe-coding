@@ -1,8 +1,11 @@
 """Application settings.
 
-DB-backed ServiceConfig is the source of truth for Azure credentials at runtime; these
-env-backed settings are bootstrap/fallback plus non-secret app config. Local dev runs fully
-on mock providers (see services/agents), so none of the Azure_* values are required to boot.
+Runtime config precedence for Azure credentials/models is **DB > .env > code default**:
+the ``service_configs`` master row (set via the admin config page) is overlaid onto this settings
+singleton at startup and after each save (see ``services/config_overlay``), so production reads the
+user's saved config; ``.env`` fills any gaps in dev; the code defaults below are the last resort.
+Local dev runs fully on mock providers (see services/agents), so none of the Azure_* values are
+required to boot.
 """
 
 from functools import lru_cache
@@ -20,6 +23,10 @@ class Settings(BaseSettings):
 
     # Auth
     secret_key: str = "dev-only-change-me"
+    # Fernet key (urlsafe-base64 32 bytes) encrypting at-rest secrets in `service_configs` (the
+    # admin-saved Azure API key). Empty in dev → a key is derived from `secret_key` (dev-only, see
+    # utils/encryption). Set a real ENCRYPTION_KEY in prod so secrets survive restarts/rotation.
+    encryption_key: str = ""
     algorithm: str = "HS256"
     anon_session_ttl_minutes: int = 120
     # Admin bearer token for persona/config admin routes (SPEC §67 role=admin). A single shared
@@ -56,6 +63,10 @@ class Settings(BaseSettings):
     # Foundry project for interviewer-agent sync (SPEC F5). Empty in dev/CI → no agent sync.
     default_agent_sync_provider: str = "mock"
     foundry_project_endpoint: str = ""
+    # Model the interviewer Foundry agent runs on. MUST name a deployment that exists on the target
+    # Azure resource. Neutral code default; the real value comes from the DB master config (admin
+    # page) in prod, or FOUNDRY_AGENT_MODEL in .env for dev. NB: `gpt-4o` is NOT deployed on the
+    # demo resource — set a deployed model (e.g. gpt-4o-mini, gpt-5.4-mini) via config or .env.
     foundry_agent_model: str = "gpt-4o"
     foundry_api_key: str = ""
 
@@ -70,6 +81,8 @@ class Settings(BaseSettings):
     azure_foundry_endpoint: str = ""
     azure_foundry_api_key: str = ""
     azure_foundry_default_project: str = ""
+    # Model Voice Live runs the session on. Same deployment constraint + precedence as
+    # foundry_agent_model. Neutral code default; real value from DB master config or .env.
     voice_live_default_model: str = "gpt-4o"
     # Voice Live / Foundry Agents GA api-version. Matches the reference project's proven value
     # (GA 2026-07-13, azure-ai-voicelive SDK 1.3.0) — do NOT regress to an older preview literal.

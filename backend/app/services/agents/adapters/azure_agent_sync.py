@@ -27,6 +27,8 @@ from app.services.agents.voice_live_metadata import build_voice_live_metadata
 
 # Entra scope used to probe for a usable DefaultAzureCredential before falling back to API key.
 _FOUNDRY_SCOPE = "https://ai.azure.com/.default"
+# Fallback only — the registry always passes settings.foundry_agent_model (which itself resolves
+# DB > .env > code default). Kept as a neutral literal for the bare-constructor case.
 _MODEL_ENV_DEFAULT = "gpt-4o"
 
 

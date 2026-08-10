@@ -12,6 +12,7 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "python-jose[cryptography]>=3.3",
+    "cryptography>=43.0",  # Fernet encryption for at-rest secrets (service_configs API keys)
     "passlib[bcrypt]>=1.7",
     "python-multipart>=0.0.12",
     "httpx>=0.27",
