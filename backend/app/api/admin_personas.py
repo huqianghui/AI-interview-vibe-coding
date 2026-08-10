@@ -15,13 +15,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.dependencies import require_admin
+from app.dependencies import require_role
 from app.models.persona import InterviewerPersona
 from app.services import persona_service as svc
 from app.services.agents.registry import get_agent_sync_adapter
 
 router = APIRouter(
-    prefix="/admin/personas", tags=["admin-personas"], dependencies=[Depends(require_admin)]
+    prefix="/admin/personas", tags=["admin-personas"], dependencies=[Depends(require_role("admin"))]
 )
 
 

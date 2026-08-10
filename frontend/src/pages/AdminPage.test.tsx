@@ -1,10 +1,11 @@
-/** AdminPage (SPEC F2b/F3b): token gate, then bank list + create. Admin API mocked. */
+/** AdminPage (Phase 1 + F2b/F3b): login gate, then bank list + config. Admin/auth API mocked. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import { AdminPage } from "./AdminPage";
 import * as admin from "../api/admin";
+import * as auth from "../api/auth";
 
 function renderPage() {
   return render(
@@ -12,6 +13,32 @@ function renderPage() {
       <AdminPage />
     </FluentProvider>,
   );
+}
+
+const ADMIN_USER = {
+  id: "u1",
+  username: "admin",
+  email: "admin@local",
+  full_name: "Admin",
+  role: "admin",
+  is_active: true,
+  preferred_language: "zh-CN",
+};
+
+/** Mock a successful admin login (login stores a token; me() returns an admin). */
+function mockAdminLogin() {
+  vi.spyOn(auth, "login").mockImplementation(async () => {
+    auth.setToken("jwt-token");
+    return "jwt-token";
+  });
+  vi.spyOn(auth, "me").mockResolvedValue(ADMIN_USER);
+}
+
+/** Fill username/password and click 登录. */
+async function signIn(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(screen.getByTestId("admin-username-input"), "admin");
+  await user.type(screen.getByTestId("admin-password-input"), "pw");
+  await user.click(screen.getByTestId("admin-login"));
 }
 
 afterEach(() => {
@@ -30,8 +57,9 @@ const EMPTY_CFG = {
 };
 
 describe("AdminPage", () => {
-  it("gates on the admin token, then lists banks after sign-in", async () => {
+  it("gates on login, then lists banks after admin sign-in", async () => {
     const user = userEvent.setup();
+    mockAdminLogin();
     const listBanks = vi.spyOn(admin, "listBanks").mockResolvedValue([
       {
         bank_id: "b1",
@@ -45,34 +73,50 @@ describe("AdminPage", () => {
     vi.spyOn(admin, "getAiFoundryConfig").mockResolvedValue(EMPTY_CFG);
 
     renderPage();
-    // Token gate is shown first.
-    expect(screen.getByTestId("admin-token-input")).toBeInTheDocument();
+    // Login gate is shown first.
+    expect(screen.getByTestId("admin-username-input")).toBeInTheDocument();
 
-    await user.type(screen.getByTestId("admin-token-input"), "secret-token");
-    await user.click(screen.getByTestId("admin-login"));
+    await signIn(user);
 
     // After sign-in the bank list renders.
     await waitFor(() => expect(screen.getByText("Demo Bank")).toBeInTheDocument());
     expect(listBanks).toHaveBeenCalled();
-    // Token was persisted for subsequent admin calls.
-    expect(admin.getAdminToken()).toBe("secret-token");
+    expect(auth.getToken()).toBe("jwt-token");
   });
 
-  it("shows an error when the token is rejected", async () => {
+  it("shows an error when login credentials are rejected", async () => {
     const user = userEvent.setup();
-    vi.spyOn(admin, "listBanks").mockRejectedValue(new admin.AdminApiError("401 Unauthorized", 401));
+    vi.spyOn(auth, "login").mockRejectedValue(new auth.AuthError("用户名或密码错误", 401));
 
     renderPage();
-    await user.type(screen.getByTestId("admin-token-input"), "wrong");
+    await user.type(screen.getByTestId("admin-username-input"), "admin");
+    await user.type(screen.getByTestId("admin-password-input"), "wrong");
     await user.click(screen.getByTestId("admin-login"));
 
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/401/));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/密码错误/));
     // Still on the gate (not authed).
-    expect(screen.getByTestId("admin-token-input")).toBeInTheDocument();
+    expect(screen.getByTestId("admin-username-input")).toBeInTheDocument();
+  });
+
+  it("rejects a non-admin user (role gate on the client)", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(auth, "login").mockImplementation(async () => {
+      auth.setToken("jwt-token");
+      return "jwt-token";
+    });
+    vi.spyOn(auth, "me").mockResolvedValue({ ...ADMIN_USER, role: "user" });
+
+    renderPage();
+    await signIn(user);
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/管理员/));
+    expect(screen.getByTestId("admin-username-input")).toBeInTheDocument();
+    expect(auth.getToken()).toBe(""); // token cleared on role rejection
   });
 
   it("loads the AI Foundry config (masked key) and saves an update", async () => {
     const user = userEvent.setup();
+    mockAdminLogin();
     vi.spyOn(admin, "listBanks").mockResolvedValue([]);
     vi.spyOn(admin, "getAiFoundryConfig").mockResolvedValue({
       endpoint: "https://demo.services.ai.azure.com",
@@ -88,8 +132,7 @@ describe("AdminPage", () => {
       .mockResolvedValue({ ...EMPTY_CFG, endpoint: "https://demo.services.ai.azure.com" });
 
     renderPage();
-    await user.type(screen.getByTestId("admin-token-input"), "secret-token");
-    await user.click(screen.getByTestId("admin-login"));
+    await signIn(user);
 
     // The saved endpoint loads into the panel and the key shows masked (never the raw secret).
     await waitFor(() =>
@@ -112,6 +155,7 @@ describe("AdminPage", () => {
 
   it("loads model + knowledge-base options from the Foundry API into dropdowns", async () => {
     const user = userEvent.setup();
+    mockAdminLogin();
     vi.spyOn(admin, "listBanks").mockResolvedValue([]);
     vi.spyOn(admin, "getAiFoundryConfig").mockResolvedValue({
       ...EMPTY_CFG,
@@ -126,8 +170,7 @@ describe("AdminPage", () => {
       .mockResolvedValue([{ value: "sop-kb", label: "SOP KB" }]);
 
     renderPage();
-    await user.type(screen.getByTestId("admin-token-input"), "secret-token");
-    await user.click(screen.getByTestId("admin-login"));
+    await signIn(user);
 
     // Before loading: text-input fallbacks are shown, not dropdowns.
     await waitFor(() => expect(screen.getByTestId("cfg-model")).toBeInTheDocument());

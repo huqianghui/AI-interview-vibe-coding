@@ -12,6 +12,7 @@ from app.models.persona import InterviewerPersona
 from app.models.question import Question, QuestionBank
 from app.models.service_config import ServiceConfig
 from app.models.sop import SopChunk, SopDocument
+from app.models.user import User
 
 __all__ = [
     "Base",
@@ -26,4 +27,5 @@ __all__ = [
     "ServiceConfig",
     "SopDocument",
     "SopChunk",
+    "User",
 ]

@@ -2,16 +2,15 @@
 
 import pytest
 
-from app.config import get_settings
+from app.config import get_settings  # noqa: F401 — used by later tests in this module
 
-ADMIN_TOKEN = "test-admin-token"
-AUTH = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
+AUTH: dict = {}
 
 
 @pytest.fixture(autouse=True)
-def _admin_token(monkeypatch, tmp_path):
-    settings = get_settings()
-    monkeypatch.setattr(settings, "admin_api_token", ADMIN_TOKEN)
+def _admin_token(monkeypatch, tmp_path, admin_auth):
+    AUTH.clear()
+    AUTH.update(admin_auth)
     # Keep uploaded bytes in a temp dir, not the repo.
     from app.services import storage
 

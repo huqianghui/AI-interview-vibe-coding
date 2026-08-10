@@ -29,13 +29,15 @@ export default defineConfig({
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: [
     {
-      // Fresh DB + migrations, then boot the API with a known admin token on mock providers.
+      // Fresh DB + migrations, then boot the API on mock providers with a seeded admin user
+      // (admin/e2e-admin-pw) — the admin E2E logs in via the real JWT login.
       // PY_BIN/ALEMBIC_BIN let CI use PATH tools (`python`/`alembic`); locally they default to the
       // backend virtualenv so `npm run e2e` works without activating it.
       command:
         "cd ../backend && rm -f e2e.db && " +
         'DATABASE_URL=sqlite+aiosqlite:///./e2e.db "${ALEMBIC_BIN:-.venv/bin/alembic}" upgrade head && ' +
-        "DATABASE_URL=sqlite+aiosqlite:///./e2e.db ADMIN_API_TOKEN=e2e-admin-token " +
+        "DATABASE_URL=sqlite+aiosqlite:///./e2e.db " +
+        "SEED_ADMIN_USERNAME=admin SEED_ADMIN_PASSWORD=e2e-admin-pw " +
         "DEFAULT_LLM_PROVIDER=mock DEFAULT_RETRIEVAL_PROVIDER=mock DEFAULT_VOICE_PROVIDER=mock " +
         `"\${PY_BIN:-.venv/bin/python}" -m uvicorn app.main:app --host 127.0.0.1 --port ${BACKEND_PORT}`,
       port: BACKEND_PORT,
