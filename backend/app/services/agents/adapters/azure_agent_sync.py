@@ -22,9 +22,13 @@ import asyncio
 import time
 from typing import Any
 
+from app.services.agents.foundry_client import (
+    FoundryClientError,
+    build_project_client,
+    project_endpoint,
+)
 from app.services.agents.knowledge_tool import build_agent_tools
 from app.services.agents.voice_live_metadata import build_voice_live_metadata
-from app.services.azure_auth import FOUNDRY_SCOPE, get_sync_credential_probed
 
 # Fallback only — the registry always passes settings.foundry_agent_model (which itself resolves
 # DB > .env > code default). Kept as a neutral literal for the bare-constructor case.
@@ -33,23 +37,6 @@ _MODEL_ENV_DEFAULT = "gpt-4o"
 
 class AgentSyncError(RuntimeError):
     """Raised when a persona cannot be synced to a Foundry prompt agent."""
-
-
-class _ApiKeyTokenCredential:
-    """Minimal TokenCredential stub so AIProjectClient accepts API-key auth.
-
-    The SDK constructor requires a ``get_token`` method; real request auth is handled by the
-    AzureKeyCredentialPolicy header, so this only needs to return a well-formed AccessToken.
-    """
-
-    def __init__(self, api_key: str) -> None:
-        self._api_key = api_key
-
-    def get_token(self, *scopes: str, **kwargs: Any) -> Any:
-        from azure.core.credentials import AccessToken
-
-        # Far-future expiry; the token itself is never sent (header policy carries the key).
-        return AccessToken(self._api_key, int(time.time()) + 3600)
 
 
 class AzureAgentSyncAdapter:
@@ -72,7 +59,7 @@ class AzureAgentSyncAdapter:
         # (…/api/projects/{project}), not the bare Foundry account endpoint — the bare form 404s on
         # every agents call (caught live 2026-08-09). Build it from endpoint + project when a
         # project is given and the endpoint isn't already project-scoped.
-        self._endpoint = self._project_endpoint(endpoint, project)
+        self._endpoint = project_endpoint(endpoint, project)
         self._model = model
         self._api_key = api_key
         # SOP knowledge-base binding via MCP (P15). Empty search config → no knowledge tool. The
@@ -117,19 +104,6 @@ class AzureAgentSyncAdapter:
         await asyncio.to_thread(client.agents.delete, agent_name=self._agent_name(persona))
 
     # -- internals ----------------------------------------------------------
-
-    @staticmethod
-    def _project_endpoint(endpoint: str, project: str) -> str:
-        """Return the project-scoped Foundry endpoint the SDK requires.
-
-        ``https://{acct}.services.ai.azure.com/`` + project → ``…/api/projects/{project}``. Left
-        as-is when already project-scoped or when no project is configured (the caller then owns
-        whether that endpoint works).
-        """
-        base = (endpoint or "").rstrip("/")
-        if not base or not project or "/api/projects/" in base:
-            return base
-        return f"{base}/api/projects/{project}"
 
     def _agent_name(self, persona: Any) -> str:
         return f"interviewer-{persona.id}"
@@ -205,29 +179,12 @@ class AzureAgentSyncAdapter:
         return await self._create_version(client, agent_name, instructions, metadata, tools)
 
     def _project_client(self) -> Any:
-        from azure.ai.projects import AIProjectClient
+        """Build the project-scoped ``AIProjectClient`` (Entra-first, API-key fallback).
 
-        # 1) Prefer Entra ID — required to create new agents. The probe + cached-credential logic
-        # lives in azure_auth; a non-None return means Entra can serve the Foundry scope.
-        credential = get_sync_credential_probed(FOUNDRY_SCOPE)
-        if credential is not None:
-            return AIProjectClient(endpoint=self._endpoint, credential=credential)
-
-        # 2) Fall back to API key (read/update/delete of existing agents only).
-        if self._api_key:
-            from azure.core.credentials import AzureKeyCredential
-            from azure.core.pipeline.policies import AzureKeyCredentialPolicy
-
-            # AIProjectClient's constructor type-checks for a TokenCredential (needs get_token).
-            # Real auth happens via the AzureKeyCredentialPolicy header; this stub only satisfies
-            # the constructor (ported from the reference's _ApiKeyTokenCredential).
-            return AIProjectClient(
-                endpoint=self._endpoint,
-                credential=_ApiKeyTokenCredential(self._api_key),
-                authentication_policy=AzureKeyCredentialPolicy(
-                    credential=AzureKeyCredential(self._api_key), name="api-key"
-                ),
-            )
-        raise AgentSyncError(
-            "No usable Foundry credential: DefaultAzureCredential failed and no API key set."
-        )
+        Delegates to the shared :mod:`foundry_client` builder so the credential decision lives in
+        one place; normalizes its error into an :class:`AgentSyncError` for this adapter's callers.
+        """
+        try:
+            return build_project_client(self._endpoint, self._api_key)
+        except FoundryClientError as exc:
+            raise AgentSyncError(str(exc)) from exc
