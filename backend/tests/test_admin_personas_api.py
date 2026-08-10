@@ -2,17 +2,14 @@
 
 import pytest
 
-from app.config import get_settings
-
-ADMIN_TOKEN = "test-admin-token"
-AUTH = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
+AUTH: dict = {}
 
 
 @pytest.fixture(autouse=True)
-def _admin_token(monkeypatch):
-    """Configure the shared admin token for the duration of each test (guard fails closed)."""
-    settings = get_settings()
-    monkeypatch.setattr(settings, "admin_api_token", ADMIN_TOKEN)
+def _admin_token(admin_auth):
+    """Populate AUTH with a real admin JWT header (see conftest.admin_auth)."""
+    AUTH.clear()
+    AUTH.update(admin_auth)
     yield
 
 

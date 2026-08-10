@@ -2,15 +2,14 @@
 
 import pytest
 
-from app.config import get_settings
-
-ADMIN_TOKEN = "test-admin-token"
-AUTH = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
+# Populated per-test by the autouse fixture with a real admin JWT header (see conftest.admin_auth).
+AUTH: dict = {}
 
 
 @pytest.fixture(autouse=True)
-def _admin_token(monkeypatch):
-    monkeypatch.setattr(get_settings(), "admin_api_token", ADMIN_TOKEN)
+def _admin_token(admin_auth):
+    AUTH.clear()
+    AUTH.update(admin_auth)
     yield
 
 

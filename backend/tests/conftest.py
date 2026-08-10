@@ -71,3 +71,24 @@ async def client(db_session):
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+@pytest_asyncio.fixture
+async def admin_auth(db_session):
+    """Create an admin user in the test DB and return a real JWT auth header.
+
+    Replaces the old shared-token admin auth for routes now gated by require_role("admin").
+    """
+    from app.models.user import User
+    from app.services.auth_service import create_access_token, get_password_hash
+
+    admin = User(
+        username="test-admin",
+        email="test-admin@local",
+        hashed_password=get_password_hash("pw"),
+        role="admin",
+    )
+    db_session.add(admin)
+    await db_session.commit()
+    await db_session.refresh(admin)
+    return {"Authorization": f"Bearer {create_access_token(data={'sub': admin.id})}"}
