@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.17.0.0 (2026-08-10)
+
+Real user/admin login replaces the shared admin token. Admins now sign in with a username and
+password and get a JWT; the `/admin` editor is gated by an actual admin role, not a pasted secret.
+This is Phase 1 of the Foundry-agent interviewer refactor (epic #26), ported from
+AI-avatar-vibe-coding and adapted to this repo.
+
+### Added
+- **User model + JWT auth** (`app/models/user.py`, migration `9a62a4b063ec`): users with role
+  `admin`/`user`, bcrypt-hashed passwords, active flag.
+- **Auth API** (`app/api/auth.py`): `POST /auth/login` (returns a JWT), `GET /auth/me`,
+  `POST /auth/refresh`. `app/services/auth_service.py` handles hashing (bcrypt, used directly) + JWT
+  (HS256, 24h). `get_current_user` / `require_role("admin")` dependencies.
+- **Admin user management** (`app/api/admin_users.py`): list (search/role/active filters), get,
+  patch, soft-delete — admin-only, cannot delete your own account.
+- **Login UI** (`/admin`): username/password form calling the real login + an admin-role check;
+  `frontend/src/api/auth.ts` client. The candidate anonymous-session path is untouched.
+- **Optional default-admin seed on boot** — set `SEED_ADMIN_USERNAME`/`SEED_ADMIN_PASSWORD` to seed
+  one admin; skipped when no password is set (no known-credential admin ships by default).
+
+### Changed
+- The existing `/admin/*` routes (personas, SOP, checklists, question banks) now require
+  `require_role("admin")` (real JWT) instead of the shared `ADMIN_API_TOKEN`.
+
+### Notes
+- Two independent auth systems by design: candidate `AnonymousCandidateSession` (interview path,
+  unchanged) and the new user/admin JWT (editor/config). Backend 280 tests / 87% cov; frontend 29
+  tests; E2E 4 (login flow). All on mocks.
+- Part of epic #26; the self-made config/LLM machinery is superseded and removed in Phase 2 (#28).
+
 ## 0.16.0.0 (2026-08-10)
 
 Point the app at your own AI Foundry from the admin page — no `.env`, no restart. The `/admin` Azure
