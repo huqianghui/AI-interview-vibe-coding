@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.16.0.0 (2026-08-10)
+
+Point the app at your own AI Foundry from the admin page — no `.env`, no restart. The `/admin` Azure
+config panel now loads your resource's real model deployments and Foundry IQ knowledge bases and lets
+you pick them from dropdowns; saving wires the interviewer agent, LLM scoring, and SOP retrieval to
+that Azure config live. This completes the real-Azure integration (epic #18): upload SOP → AI
+question bank + rubric → digital-human interview → SOP-cited scored report can now run end to end on
+a customer's own Azure, all configured through the UI.
+
+### Added
+- **Config-page dropdowns.** The Azure panel gets a "Load models & knowledge bases" button that calls
+  the two backend endpoints and renders model + knowledge-base as dropdowns (with a text-input
+  fallback when a list is empty or the resource is unreachable), plus a knowledge-source field. The
+  API key stays write-only/masked. Selecting and saving persists model + knowledge base + knowledge
+  source to the DB config, which the overlay applies immediately.
+
+### Notes
+- Epic #18 (real-Azure integration) is complete: #19 (LLM adapter) + #20 (overlay + API endpoints) +
+  #21 (this UI). Frontend 23 tests; backend 266 tests / ~88% cov; E2E 4 specs — all on mocks.
+- Live-Azure validation (real model dropdown, real agent conversation, real SOP-cited scored report)
+  is a manual Layer-3 check against a Foundry resource; see `docs/VERIFICATION.md`.
+
 ## 0.15.2.0 (2026-08-10)
 
 The saved config page now drives real LLM scoring and SOP retrieval, and remembers which Foundry IQ

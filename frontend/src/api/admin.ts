@@ -140,6 +140,8 @@ export interface AiFoundryConfig {
   masked_key: string;
   default_project: string;
   model_or_deployment: string;
+  knowledge_base: string;
+  knowledge_source: string;
   is_active: boolean;
 }
 
@@ -148,11 +150,18 @@ export interface AiFoundryConfigInput {
   api_key: string; // empty preserves the existing stored key
   default_project: string;
   model_or_deployment: string;
+  knowledge_base: string;
+  knowledge_source: string;
 }
 
 export interface ConnectionTestResult {
   success: boolean;
   message: string;
+}
+
+export interface ConfigOption {
+  value: string;
+  label: string;
 }
 
 export const getAiFoundryConfig = () =>
@@ -166,3 +175,10 @@ export const updateAiFoundryConfig = (input: AiFoundryConfigInput) =>
 
 export const testAiFoundryConfig = () =>
   adminRequest<ConnectionTestResult>("/admin/config/ai-foundry/test", { method: "POST" });
+
+// Dropdown options pulled from the real Foundry resource (see backend #20 endpoints).
+export const listModelDeployments = () =>
+  adminRequest<ConfigOption[]>("/admin/config/ai-foundry/model-deployments");
+
+export const listKnowledgeBases = () =>
+  adminRequest<ConfigOption[]>("/admin/config/ai-foundry/knowledge-bases");

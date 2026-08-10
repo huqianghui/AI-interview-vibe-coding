@@ -12,13 +12,15 @@ import {
   Button,
   Card,
   CardHeader,
+  Dropdown,
   Input,
+  Option,
   Text,
   Title2,
   Title3,
 } from "@fluentui/react-components";
 import * as admin from "../api/admin";
-import type { AdminQuestion, AiFoundryConfig, Bank, Checklist } from "../api/admin";
+import type { AdminQuestion, AiFoundryConfig, Bank, Checklist, ConfigOption } from "../api/admin";
 
 export function AdminPage() {
   const [token, setToken] = useState(admin.getAdminToken());
@@ -39,8 +41,13 @@ export function AdminPage() {
   const [cfgEndpoint, setCfgEndpoint] = useState("");
   const [cfgProject, setCfgProject] = useState("");
   const [cfgModel, setCfgModel] = useState("");
+  const [cfgKb, setCfgKb] = useState("");
+  const [cfgKs, setCfgKs] = useState("");
   const [cfgKey, setCfgKey] = useState("");
   const [cfgStatus, setCfgStatus] = useState<string | null>(null);
+  // Options pulled from the real Foundry resource; empty until "Load options" fetches them.
+  const [modelOptions, setModelOptions] = useState<ConfigOption[]>([]);
+  const [kbOptions, setKbOptions] = useState<ConfigOption[]>([]);
 
   const guard = useCallback(async (fn: () => Promise<void>) => {
     setError(null);
@@ -64,10 +71,27 @@ export function AdminPage() {
         setCfgEndpoint(c.endpoint);
         setCfgProject(c.default_project);
         setCfgModel(c.model_or_deployment);
+        setCfgKb(c.knowledge_base);
+        setCfgKs(c.knowledge_source);
         setCfgKey(""); // never prefill the (masked) key; empty = keep existing
       }),
     [guard],
   );
+
+  // Pull the real model deployments + knowledge bases from the saved Foundry resource.
+  const loadOptions = () =>
+    guard(async () => {
+      setCfgStatus(null);
+      const [models, kbs] = await Promise.all([
+        admin.listModelDeployments(),
+        admin.listKnowledgeBases(),
+      ]);
+      setModelOptions(models);
+      setKbOptions(kbs);
+      setCfgStatus(
+        `Loaded ${models.length} model(s), ${kbs.length} knowledge base(s).`,
+      );
+    });
 
   useEffect(() => {
     if (authed) {
@@ -155,12 +179,6 @@ export function AdminPage() {
             data-testid="cfg-project"
           />
           <Input
-            value={cfgModel}
-            placeholder="Model / deployment (e.g. gpt-4o-mini)"
-            onChange={(_, d) => setCfgModel(d.value)}
-            data-testid="cfg-model"
-          />
-          <Input
             type="password"
             value={cfgKey}
             placeholder={
@@ -169,6 +187,64 @@ export function AdminPage() {
             onChange={(_, d) => setCfgKey(d.value)}
             data-testid="cfg-key"
           />
+          <Button data-testid="cfg-load-options" onClick={loadOptions}>
+            Load models & knowledge bases
+          </Button>
+
+          {/* Model: dropdown once options are loaded, else a text input fallback. */}
+          {modelOptions.length > 0 ? (
+            <Dropdown
+              aria-label="Model deployment"
+              data-testid="cfg-model-dropdown"
+              selectedOptions={cfgModel ? [cfgModel] : []}
+              value={cfgModel}
+              onOptionSelect={(_, d) => setCfgModel(d.optionValue ?? "")}
+            >
+              {modelOptions.map((o) => (
+                <Option key={o.value} value={o.value}>
+                  {o.label}
+                </Option>
+              ))}
+            </Dropdown>
+          ) : (
+            <Input
+              value={cfgModel}
+              placeholder="Model / deployment (e.g. gpt-4o-mini) — or Load options above"
+              onChange={(_, d) => setCfgModel(d.value)}
+              data-testid="cfg-model"
+            />
+          )}
+
+          {/* Knowledge base: dropdown once loaded, else text input. */}
+          {kbOptions.length > 0 ? (
+            <Dropdown
+              aria-label="Knowledge base"
+              data-testid="cfg-kb-dropdown"
+              selectedOptions={cfgKb ? [cfgKb] : []}
+              value={cfgKb}
+              onOptionSelect={(_, d) => setCfgKb(d.optionValue ?? "")}
+            >
+              {kbOptions.map((o) => (
+                <Option key={o.value} value={o.value}>
+                  {o.label}
+                </Option>
+              ))}
+            </Dropdown>
+          ) : (
+            <Input
+              value={cfgKb}
+              placeholder="Foundry IQ knowledge base — or Load options above"
+              onChange={(_, d) => setCfgKb(d.value)}
+              data-testid="cfg-kb"
+            />
+          )}
+          <Input
+            value={cfgKs}
+            placeholder="Knowledge source name (≠ knowledge base)"
+            onChange={(_, d) => setCfgKs(d.value)}
+            data-testid="cfg-ks"
+          />
+
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <Button
               appearance="primary"
@@ -181,6 +257,8 @@ export function AdminPage() {
                     api_key: cfgKey,
                     default_project: cfgProject.trim(),
                     model_or_deployment: cfgModel.trim(),
+                    knowledge_base: cfgKb.trim(),
+                    knowledge_source: cfgKs.trim(),
                   });
                   setCfgStatus("Saved.");
                   await refreshConfig();
