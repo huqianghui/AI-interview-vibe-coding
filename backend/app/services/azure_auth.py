@@ -75,16 +75,6 @@ def _get_credential_sync() -> Any:
         return None
 
 
-def get_token_credential_sync() -> Any:
-    """Return a cached sync ``DefaultAzureCredential`` for SDKs that accept a ``TokenCredential``.
-
-    No scope probe — use this when the SDK does its own token acquisition. When you need to
-    confirm Entra works for a specific scope *before* choosing it over an API key, use
-    :func:`get_sync_credential_probed`.
-    """
-    return _get_credential_sync()
-
-
 def get_sync_credential_probed(scope: str = FOUNDRY_SCOPE) -> Any:
     """Return the cached sync credential **iff** a token for ``scope`` can be obtained, else None.
 

@@ -14,11 +14,14 @@ or test; every live path is coverage-omitted and exercised only against real res
   Foundry, Search, ARM). Both prior duplicated call sites (agent-sync, voice) now delegate.
 - **Foundry IQ connection discovery + RemoteTool creation** (`app/services/agents/foundry_connections.py`
   + `foundry_client.py`, Phase 2.2) — the genuine gap: the app can now **obtain a usable
-  `project_connection_id`**. Lists AI Search connections + knowledge bases (feeds the config
-  dropdowns), and finds-or-creates the KB's RemoteTool connection via the ARM control plane
-  (`category=RemoteTool`, `authType=ProjectManagedIdentity` — no stored secret) so the MCPTool
-  authenticates instead of 403ing. Shared Entra-first `AIProjectClient` builder extracted so the
-  adapter and the connections service use one seam.
+  `project_connection_id`**. Lists AI Search connections + knowledge bases (the `/admin` config KB
+  dropdown now populates from the real resource through this shared path), and finds-or-creates the
+  KB's RemoteTool connection via the ARM control plane (`category=RemoteTool`,
+  `authType=ProjectManagedIdentity` — no stored secret) so the MCPTool authenticates instead of
+  403ing. Shared Entra-first `AIProjectClient` builder extracted so the adapter and the connections
+  service use one seam. Auto-resolving the connection during a persona sync (an ARM write) is
+  deferred to the editor UI phase that triggers that sync; until then the agent uses the configured
+  connection id.
 - **Agent chat via the Responses API** (`app/services/agent_chat_service.py`, Phase 2.3):
   `chat_with_agent` / `stream_agent_response` drive the hosted Prompt Agent
   (`responses.create` + `agent_reference`, `previous_response_id` for multi-turn); `agent_name=None`
@@ -44,9 +47,17 @@ or test; every live path is coverage-omitted and exercised only against real res
   training-`skill` / `meta-skill` concepts (grep-verified).
 
 ### Tests
-- Backend: 320 pass, 86.70% coverage (new: `azure_auth`, `foundry_connections`,
+- Backend: 327 pass, 88.43% coverage (new: `azure_auth`, `foundry_client`, `foundry_connections`,
   `agent_chat_service`, `azure_agent_sync` pure-helper suites; restored `config_service` +
   `admin_config_api` retargeted to the JWT `admin_auth` fixture). Frontend: 29 pass; E2E: 4/4.
+
+### For contributors
+- Pre-landing review (7 specialists) fixes folded in before merge: the synchronous Entra
+  credential probe in `build_project_client` now runs off the event loop (`asyncio.to_thread`) at
+  all five async call sites (it was blocking the FastAPI loop on every discovery/sync request);
+  added the missing pure-helper tests the coverage audit flagged (`_build_openai_request`,
+  `_ApiKeyTokenCredential`, `_get_credential_sync` real body); removed the unused
+  `get_token_credential_sync`.
 
 ## 0.17.0.0 (2026-08-10)
 

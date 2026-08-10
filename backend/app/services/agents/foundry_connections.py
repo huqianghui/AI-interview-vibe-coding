@@ -10,13 +10,17 @@ this project's single SOP knowledge base.
 Two capabilities:
 
 1. **Discovery (read):** list the project's AI Search connections and the Foundry IQ knowledge
-   bases behind them, so the admin config UI can populate its model/KB dropdowns from the real
-   resource (Phase 2.4 consumes these).
+   bases behind them. **Wired:** the admin config KB dropdown (``admin_config.list_knowledge_bases``)
+   calls :func:`list_knowledge_bases` to populate from the real resource.
 2. **RemoteTool find-or-create (write):** resolve the KB's MCPTool auth. MCPTool auth requires a
    **RemoteTool** project connection, NOT a CognitiveSearch/ApiKey connection (which 403s). The
    Portal does not always pre-create that RemoteTool connection for a KB, so we find an existing
    one (by metadata or normalized MCP target) and, failing that, create one via the ARM control
-   plane (the data-plane connections API has no create — PUT/POST return 405).
+   plane (the data-plane connections API has no create — PUT/POST return 405). **Deferred to
+   Phase 3 (#29):** wiring :func:`resolve_remote_tool_connection` into ``azure_agent_sync`` so a
+   persona sync auto-resolves/creates the connection id — that path performs an ARM *write* per
+   sync, so it lands with the editor UI that actually triggers a persona sync, not before. Until
+   then the adapter takes the connection id from the ``foundry_kb_mcp_connection`` setting.
 
 Auth: discovery uses the project client (Entra-first via :mod:`foundry_client`); Search
 data-plane and ARM calls use Entra bearers from :mod:`azure_auth` (never a stored secret). All
@@ -236,7 +240,12 @@ async def list_search_connections(  # pragma: no cover
 
         from app.services.agents.foundry_client import build_project_client, project_endpoint
 
-        client = build_project_client(project_endpoint(endpoint, project), api_key)
+        # build_project_client does a synchronous Entra probe (get_token — a network round-trip,
+        # or an az-CLI subprocess on local dev), so it must run off the event loop like the SDK
+        # calls below it.
+        client = await asyncio.to_thread(
+            build_project_client, project_endpoint(endpoint, project), api_key
+        )
         connections = await asyncio.to_thread(
             client.connections.list, connection_type=ConnectionType.AZURE_AI_SEARCH
         )
@@ -273,7 +282,10 @@ async def list_knowledge_bases(  # pragma: no cover
 
         from app.services.agents.foundry_client import build_project_client, project_endpoint
 
-        client = build_project_client(project_endpoint(endpoint, project), api_key)
+        # Off the event loop: build_project_client's Entra probe is a blocking network/az-CLI call.
+        client = await asyncio.to_thread(
+            build_project_client, project_endpoint(endpoint, project), api_key
+        )
         if connection_name:
             conn = await asyncio.to_thread(
                 client.connections.get, name=connection_name, include_credentials=True
@@ -341,7 +353,10 @@ async def resolve_remote_tool_connection(  # pragma: no cover
 
         from app.services.agents.foundry_client import build_project_client, project_endpoint
 
-        client = build_project_client(project_endpoint(endpoint, project), api_key)
+        # Off the event loop: build_project_client's Entra probe is a blocking network/az-CLI call.
+        client = await asyncio.to_thread(
+            build_project_client, project_endpoint(endpoint, project), api_key
+        )
         connections = list(await asyncio.to_thread(client.connections.list))
     except ImportError:
         logger.info("azure-ai-projects not installed; cannot resolve RemoteTool connection")

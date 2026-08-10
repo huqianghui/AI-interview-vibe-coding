@@ -5,10 +5,13 @@ fail-fast agent-reference validation and the settings-based runtime-config resol
 decide whether a request is even attempted and with which deployment.
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from app.services.agent_chat_service import (
     AgentChatError,
+    _build_openai_request,
     _foundry_runtime_config,
     _validate_agent_reference,
 )
@@ -62,3 +65,57 @@ class TestFoundryRuntimeConfig:
         endpoint, _, api_key, _ = _foundry_runtime_config()
         assert endpoint == "https://fallback.example"
         assert api_key == "k-azure"
+
+
+class TestBuildOpenAIRequest:
+    """The kwargs-assembly logic: agent_reference shape, previous_response_id, agent-vs-plain mode.
+
+    Mocks the runtime config + the (live) project client so the pure request shaping is exercised
+    without Azure.
+    """
+
+    _CFG = ("https://ep.example", "proj", "key", "gpt-5.4")
+
+    def _patches(self):
+        mock_client = MagicMock()
+        mock_client.get_openai_client.return_value = "openai-client-sentinel"
+        return (
+            patch(
+                "app.services.agent_chat_service._foundry_runtime_config", return_value=self._CFG
+            ),
+            patch(
+                "app.services.agents.foundry_client.build_project_client", return_value=mock_client
+            ),
+            patch(
+                "app.services.agents.foundry_client.project_endpoint",
+                return_value="https://ep.example/api/projects/proj",
+            ),
+        )
+
+    def test_agent_mode_includes_agent_reference(self):
+        p1, p2, p3 = self._patches()
+        with p1, p2, p3:
+            client, kwargs, endpoint = _build_openai_request("interviewer-1", "3", "hi", None)
+        assert client == "openai-client-sentinel"
+        assert endpoint == "https://ep.example"
+        assert kwargs["model"] == "gpt-5.4"
+        assert kwargs["input"] == [{"role": "user", "content": "hi"}]
+        assert kwargs["extra_body"]["agent_reference"] == {
+            "name": "interviewer-1",
+            "version": "3",
+            "type": "agent_reference",
+        }
+        assert "previous_response_id" not in kwargs
+
+    def test_plain_model_mode_omits_agent_reference(self):
+        p1, p2, p3 = self._patches()
+        with p1, p2, p3:
+            _, kwargs, _ = _build_openai_request(None, None, "hi", "resp_123")
+        assert "extra_body" not in kwargs  # no agent_reference in plain-model mode
+        assert kwargs["previous_response_id"] == "resp_123"
+
+    def test_invalid_reference_raises_before_client_build(self):
+        # A blank version fails fast in agent mode — before any client construction.
+        p1, p2, p3 = self._patches()
+        with p1, p2, p3, pytest.raises(AgentChatError, match="Agent version is required"):
+            _build_openai_request("interviewer-1", "", "hi", None)

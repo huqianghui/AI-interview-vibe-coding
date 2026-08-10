@@ -293,18 +293,25 @@ async def test_model_deployments_db_fallback_on_error(client, _restore_settings,
 
 async def test_knowledge_bases_list(client, _restore_settings, monkeypatch):
     await _seed(client)
-    _FakeAsyncClient._responses = [
-        _FakeResp(200, {"value": [{"name": "sop-kb", "description": "SOP KB"}]})
-    ]
-    monkeypatch.setattr("app.api.admin_config.httpx.AsyncClient", _FakeAsyncClient)
+
+    # The endpoint delegates to foundry_connections.list_knowledge_bases (Phase 2.2); mock that
+    # shared discovery function rather than the raw httpx call it makes internally.
+    async def _fake_kbs(**_kwargs):
+        return [{"name": "sop-kb", "description": "SOP KB"}]
+
+    monkeypatch.setattr("app.api.admin_config.foundry_connections.list_knowledge_bases", _fake_kbs)
     body = (await client.get("/admin/config/ai-foundry/knowledge-bases", headers=AUTH)).json()
     assert body == [{"value": "sop-kb", "label": "SOP KB"}]
 
 
 async def test_knowledge_bases_empty_on_error(client, _restore_settings, monkeypatch):
     await _seed(client)
-    _FakeAsyncClient._responses = [_FakeResp(500, {})]
-    monkeypatch.setattr("app.api.admin_config.httpx.AsyncClient", _FakeAsyncClient)
+
+    # Discovery is best-effort: foundry_connections.list_knowledge_bases returns [] on any failure.
+    async def _empty_kbs(**_kwargs):
+        return []
+
+    monkeypatch.setattr("app.api.admin_config.foundry_connections.list_knowledge_bases", _empty_kbs)
     body = (await client.get("/admin/config/ai-foundry/knowledge-bases", headers=AUTH)).json()
     assert body == []
 

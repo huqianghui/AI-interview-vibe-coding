@@ -113,7 +113,9 @@ class AzureAgentSyncAdapter:
             connection_id=self._mcp_connection_id or None,
         )
 
-        client = self._project_client()
+        # _project_client does a synchronous Entra probe (blocking network/az-CLI call), so build it
+        # off the event loop like the SDK calls it wraps.
+        client = await asyncio.to_thread(self._project_client)
         result = await self._create_with_retry(client, agent_name, instructions, metadata, tools)
         return {
             "agent_id": str(result.get("id") or agent_name),
@@ -149,7 +151,7 @@ class AzureAgentSyncAdapter:
 
     async def delete_persona_agent(self, persona: Any) -> None:
         """Best-effort delete of the persona's Foundry agent (used when a persona is removed)."""
-        client = self._project_client()
+        client = await asyncio.to_thread(self._project_client)
         await asyncio.to_thread(client.agents.delete, agent_name=self._agent_name(persona))
 
     # -- internals ----------------------------------------------------------

@@ -98,6 +98,28 @@ class TestGetBearerToken:
             mock_cred.get_token.assert_called_once_with(SEARCH_SCOPE)
 
 
+class TestGetCredentialSync:
+    """Exercise the real _get_credential_sync body (not mocked away) — TTL cache + ctor + except."""
+
+    def teardown_method(self):
+        _reset_caches()
+
+    def test_caches_instance_within_ttl(self):
+        _reset_caches()
+        sentinel = MagicMock()
+        with patch("azure.identity.DefaultAzureCredential", return_value=sentinel) as ctor:
+            first = azure_auth._get_credential_sync()
+            second = azure_auth._get_credential_sync()
+            assert first is sentinel and second is sentinel
+            ctor.assert_called_once()  # second call is a TTL cache hit, not a re-construct
+
+    def test_returns_none_and_clears_cache_on_init_failure(self):
+        _reset_caches()
+        with patch("azure.identity.DefaultAzureCredential", side_effect=Exception("no login")):
+            assert azure_auth._get_credential_sync() is None
+        assert azure_auth._credential_instance is None  # except branch cleared the singleton
+
+
 class TestGetSyncCredentialProbed:
     def teardown_method(self):
         _reset_caches()
