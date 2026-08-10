@@ -24,6 +24,10 @@ os.environ.update(
         "AZURE_FOUNDRY_ENDPOINT": "",
         "AZURE_FOUNDRY_API_KEY": "",
         "FOUNDRY_PROJECT_ENDPOINT": "",
+        # A fixed test Fernet key so at-rest encryption works deterministically in CI (which has no
+        # .env and defaults debug=off, where encryption now fails closed without a key). Not a real
+        # secret — a throwaway key used only by the test suite.
+        "ENCRYPTION_KEY": "v_ftieq-S7JwF27OzZw7kUFzULt1FF_rY2vn0jEkfYQ=",
     }
 )
 
