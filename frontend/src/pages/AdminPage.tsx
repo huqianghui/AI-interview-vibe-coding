@@ -21,10 +21,12 @@ import {
 } from "@fluentui/react-components";
 import * as admin from "../api/admin";
 import type { AdminQuestion, AiFoundryConfig, Bank, Checklist, ConfigOption } from "../api/admin";
+import * as auth from "../api/auth";
 
 export function AdminPage() {
-  const [token, setToken] = useState(admin.getAdminToken());
-  const [authed, setAuthed] = useState(Boolean(admin.getAdminToken()));
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [authed, setAuthed] = useState(Boolean(auth.getToken()));
   const [error, setError] = useState<string | null>(null);
 
   const [banks, setBanks] = useState<Bank[]>([]);
@@ -102,8 +104,12 @@ export function AdminPage() {
 
   const onLogin = () =>
     guard(async () => {
-      admin.setAdminToken(token.trim());
-      await admin.listBanks(); // validate the token
+      await auth.login(username.trim(), password);
+      const user = await auth.me();
+      if (!user || user.role !== "admin") {
+        auth.clearToken();
+        throw new Error("需要管理员权限");
+      }
       setAuthed(true);
     });
 
@@ -128,21 +134,29 @@ export function AdminPage() {
   if (!authed) {
     return (
       <div style={{ maxWidth: 420, margin: "0 auto", padding: 24 }}>
-        <Title2 as="h1">Admin</Title2>
+        <Title2 as="h1">Admin 登录</Title2>
         <Body1 style={{ display: "block", margin: "12px 0" }}>
-          Enter the admin token to edit question banks and checklists.
+          用管理员账号登录以编辑题库、清单与配置。
         </Body1>
         <Input
+          value={username}
+          placeholder="用户名"
+          onChange={(_, d) => setUsername(d.value)}
+          style={{ width: "100%", marginBottom: 8 }}
+          data-testid="admin-username-input"
+        />
+        <Input
           type="password"
-          value={token}
-          placeholder="Admin bearer token"
-          onChange={(_, d) => setToken(d.value)}
+          value={password}
+          placeholder="密码"
+          onChange={(_, d) => setPassword(d.value)}
+          onKeyDown={(e) => e.key === "Enter" && onLogin()}
           style={{ width: "100%" }}
-          data-testid="admin-token-input"
+          data-testid="admin-password-input"
         />
         <div style={{ marginTop: 12 }}>
           <Button appearance="primary" onClick={onLogin} data-testid="admin-login">
-            Sign in
+            登录
           </Button>
         </div>
         {error && (

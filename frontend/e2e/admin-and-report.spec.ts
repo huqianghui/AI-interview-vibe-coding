@@ -9,14 +9,18 @@ import { test, expect } from "@playwright/test";
  * 3. The voice channel with no real mic surfaces the mic-permission dialog (F9 AC #4 fallback).
  */
 
-const ADMIN_TOKEN = "e2e-admin-token"; // matches playwright.config webServer ADMIN_API_TOKEN
+// Seeded admin (playwright.config SEED_ADMIN_USERNAME/PASSWORD).
+const ADMIN_USER = "admin";
+const ADMIN_PW = "e2e-admin-pw";
 
 test("admin authors a bank + checklist, candidate gets a scored report", async ({ page }) => {
-  // --- Admin: sign in ---
+  // --- Admin: sign in with the real login ---
   await page.goto("/admin");
-  await page.getByTestId("admin-token-input").fill(ADMIN_TOKEN);
+  await page.getByTestId("admin-username-input").fill(ADMIN_USER);
+  await page.getByTestId("admin-password-input").fill(ADMIN_PW);
   await page.getByTestId("admin-login").click();
-  await expect(page.getByText(/Question banks/i)).toBeVisible();
+  // Logged in → the admin editor heading renders (specific, avoids matching the "Question banks" card).
+  await expect(page.getByRole("heading", { name: /question banks & checklists/i })).toBeVisible();
 
   // --- Admin: create a default bank ---
   const bankName = `E2E SOP Bank ${Date.now()}`;

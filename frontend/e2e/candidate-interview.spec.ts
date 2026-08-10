@@ -12,13 +12,20 @@ import { test, expect, request as pwRequest } from "@playwright/test";
  * sibling test left as default.
  */
 
-const ADMIN_TOKEN = "e2e-admin-token";
-
 test.beforeAll(async () => {
   // Author a fresh default bank whose question carries a follow-up, so the F7 memory moment is
   // guaranteed to fire regardless of test order.
   const api = await pwRequest.newContext({ baseURL: "http://127.0.0.1:8100" });
-  const auth = { Authorization: `Bearer ${ADMIN_TOKEN}`, "Content-Type": "application/json" };
+  // Log in as the seeded admin to get a real JWT (admin routes are require_role("admin")).
+  const token = (
+    await (
+      await api.post("/auth/login", {
+        headers: { "Content-Type": "application/json" },
+        data: { username: "admin", password: "e2e-admin-pw" },
+      })
+    ).json()
+  ).access_token;
+  const auth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
   const bank = await (
     await api.post("/admin/question-banks", {
       headers: auth,
