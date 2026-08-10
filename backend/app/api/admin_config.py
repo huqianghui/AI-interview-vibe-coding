@@ -35,6 +35,8 @@ class AiFoundryConfigIn(BaseModel):
     api_key: str = ""
     default_project: str = Field(default="", max_length=200)
     model_or_deployment: str = Field(default="", max_length=100)
+    knowledge_base: str = Field(default="", max_length=200)
+    knowledge_source: str = Field(default="", max_length=200)
 
 
 class AiFoundryConfigOut(BaseModel):
@@ -42,12 +44,19 @@ class AiFoundryConfigOut(BaseModel):
     masked_key: str
     default_project: str
     model_or_deployment: str
+    knowledge_base: str
+    knowledge_source: str
     is_active: bool
 
 
 class ConnectionTestResult(BaseModel):
     success: bool
     message: str
+
+
+class Option(BaseModel):
+    value: str
+    label: str
 
 
 def _to_out(master, masked_key: str) -> AiFoundryConfigOut:
@@ -57,6 +66,8 @@ def _to_out(master, masked_key: str) -> AiFoundryConfigOut:
             masked_key="",
             default_project="",
             model_or_deployment="",
+            knowledge_base="",
+            knowledge_source="",
             is_active=False,
         )
     return AiFoundryConfigOut(
@@ -64,6 +75,8 @@ def _to_out(master, masked_key: str) -> AiFoundryConfigOut:
         masked_key=masked_key,
         default_project=master.default_project,
         model_or_deployment=master.model_or_deployment,
+        knowledge_base=master.knowledge_base,
+        knowledge_source=master.knowledge_source,
         is_active=master.is_active,
     )
 
@@ -88,6 +101,8 @@ async def update_ai_foundry_config(
             api_key=body.api_key,
             default_project=body.default_project,
             model_or_deployment=body.model_or_deployment,
+            knowledge_base=body.knowledge_base,
+            knowledge_source=body.knowledge_source,
             updated_by="admin",
         )
     except InvalidEndpointError as exc:
@@ -129,3 +144,93 @@ async def test_ai_foundry_config(db: AsyncSession = Depends(get_db)) -> Connecti
         return ConnectionTestResult(success=False, message=f"Endpoint returned {resp.status_code}.")
     except httpx.HTTPError as exc:
         return ConnectionTestResult(success=False, message=f"Connection failed: {exc}")
+
+
+@router.get("/ai-foundry/model-deployments", response_model=list[Option])
+async def list_model_deployments(db: AsyncSession = Depends(get_db)) -> list[Option]:
+    """List the resource's real model deployments for the config-page dropdown.
+
+    Tries the AI Foundry project-scoped deployments API, then the legacy Azure OpenAI deployments
+    API, then falls back to the saved model. Fail-soft: any error → saved model or []; never 500.
+    """
+    master = await config_service.get_master_config(db)
+    api_key = await config_service.get_decrypted_key(db)
+    if master and master.endpoint and api_key:
+        base = master.endpoint.rstrip("/")
+        headers = {"api-key": api_key}
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            if master.default_project:
+                try:
+                    url = f"{base}/api/projects/{master.default_project}/deployments?api-version=v1"
+                    r = await client.get(url, headers=headers)
+                    if r.status_code == 200:
+                        body = r.json()
+                        items = body.get("data", body.get("value", []))
+                        out = [
+                            Option(value=d["name"], label=f"{d['name']} ({d.get('modelName', '')})")
+                            for d in items
+                            if d.get("name")
+                        ]
+                        if out:
+                            return out
+                except (httpx.HTTPError, KeyError, ValueError) as exc:
+                    logger.warning("Foundry deployments API failed: %s", exc)
+            try:
+                url = f"{base}/openai/deployments?api-version=2024-10-21"
+                r = await client.get(url, headers=headers)
+                if r.status_code == 200:
+                    return [
+                        Option(value=d["id"], label=f"{d['id']} ({d.get('model', '')})")
+                        for d in r.json().get("data", [])
+                        if d.get("id")
+                    ]
+            except (httpx.HTTPError, KeyError, ValueError) as exc:
+                logger.warning("Azure OpenAI deployments API failed: %s", exc)
+    if master and master.model_or_deployment:
+        return [Option(value=master.model_or_deployment, label=master.model_or_deployment)]
+    return []
+
+
+@router.get("/ai-foundry/knowledge-bases", response_model=list[Option])
+async def list_knowledge_bases(db: AsyncSession = Depends(get_db)) -> list[Option]:
+    """List the resource's Foundry IQ knowledge bases for the config-page dropdown.
+
+    api-key first, retry once with Entra on 401/403. Fail-soft: any error → []; never 500.
+    """
+    master = await config_service.get_master_config(db)
+    api_key = await config_service.get_decrypted_key(db)
+    if not (master and master.endpoint):
+        return []
+    base = master.endpoint.rstrip("/")
+    params = {"api-version": "2026-05-01-preview"}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            headers = {"api-key": api_key} if api_key else await _search_entra_headers()
+            r = await client.get(f"{base}/knowledgebases", params=params, headers=headers)
+            if r.status_code in (401, 403) and api_key:
+                r = await client.get(
+                    f"{base}/knowledgebases", params=params, headers=await _search_entra_headers()
+                )
+            if r.status_code == 200:
+                value = r.json().get("value", [])
+                return [
+                    Option(value=kb["name"], label=kb.get("description") or kb["name"])
+                    for kb in value
+                    if kb.get("name")
+                ]
+            logger.warning("Foundry IQ knowledgebases API returned %s", r.status_code)
+    except (httpx.HTTPError, KeyError, ValueError) as exc:
+        logger.warning("Foundry IQ knowledgebases API failed: %s", exc)
+    return []
+
+
+async def _search_entra_headers() -> dict[str, str]:
+    """Entra bearer for the AI Search / Foundry IQ scope (fallback when no api-key)."""
+    from azure.identity.aio import DefaultAzureCredential
+
+    cred = DefaultAzureCredential()
+    try:
+        token = await cred.get_token("https://search.azure.com/.default")
+        return {"Authorization": f"Bearer {token.token}"}
+    finally:
+        await cred.close()
