@@ -56,9 +56,27 @@ async def apply_master_config_to_settings(db: AsyncSession) -> bool:
         master.model_or_deployment or settings.voice_live_default_model
     )
 
-    # Flip the two providers this row configures to their real adapters.
+    # LLM scoring / checklist-draft path (AzureLLMAdapter registers under "azure_openai" when
+    # endpoint + deployment are set). Foundry and Azure OpenAI share the resource endpoint.
+    settings.azure_openai_endpoint = master.endpoint
+    settings.azure_openai_api_key = api_key
+    settings.azure_openai_deployment = master.model_or_deployment
+
+    # SOP retrieval path (Foundry IQ). kb -> the URL path segment; ks -> the retrieve-body name.
+    # Registry guards on endpoint/index/knowledge_source, so only overlay when kb+ks are set.
+    if master.knowledge_base and master.knowledge_source:
+        settings.azure_search_endpoint = master.endpoint
+        settings.azure_search_api_key = api_key
+        settings.azure_search_index = master.knowledge_base
+        settings.azure_search_knowledge_source = master.knowledge_source
+
+    # Flip the providers this row configures to their real adapters.
     settings.default_voice_provider = "azure"
     settings.default_agent_sync_provider = "azure"
+    if master.model_or_deployment:
+        settings.default_llm_provider = "azure_openai"
+    if master.knowledge_base and master.knowledge_source:
+        settings.default_retrieval_provider = "azure"
 
     # Rebuild the Azure adapters against the freshly-overlaid settings.
     from app.services.agents.registry import refresh_azure_adapters
@@ -66,8 +84,9 @@ async def apply_master_config_to_settings(db: AsyncSession) -> bool:
     refresh_azure_adapters()
 
     logger.info(
-        "Applied master AI Foundry config (endpoint set, project=%s, model=%s)",
+        "Applied master AI Foundry config (endpoint set, project=%s, model=%s, kb=%s)",
         master.default_project or "<none>",
         master.model_or_deployment or "<default>",
+        master.knowledge_base or "<none>",
     )
     return True

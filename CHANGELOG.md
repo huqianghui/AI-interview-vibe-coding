@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.15.2.0 (2026-08-10)
+
+The saved config page now drives real LLM scoring and SOP retrieval, and remembers which Foundry IQ
+knowledge base to use. Saving an AI Foundry config with a model + knowledge base flips the LLM and
+retrieval providers to Azure and re-registers the adapters live — so an interview scored after a save
+uses the real model, and follow-ups/citations pull from the real Foundry IQ knowledge base, no
+restart. Two new admin endpoints list the resource's real model deployments and knowledge bases so
+the config page can offer them as dropdowns (wired into the UI in the next release).
+
+### Added
+- **Knowledge-base config** — `service_configs` gains `knowledge_base` + `knowledge_source` columns
+  (migration `562c9adccffb`); `PUT /admin/config/ai-foundry` persists them and `GET` returns them.
+- **`GET /admin/config/ai-foundry/model-deployments`** — lists the resource's model deployments
+  (Foundry project-scoped API → legacy Azure OpenAI API → saved-model fallback; fail-soft, never 500).
+- **`GET /admin/config/ai-foundry/knowledge-bases`** — lists Foundry IQ knowledge bases (api-key
+  first, Entra fallback on 401/403; fail-soft).
+
+### Changed
+- **Config overlay now covers LLM + retrieval.** Applying the saved master config also overlays the
+  Azure OpenAI fields (endpoint/key/deployment) and, when a knowledge base + source are set, the
+  Foundry IQ search fields, then flips `default_llm_provider` to `azure_openai` and
+  `default_retrieval_provider` to `azure` and re-registers those adapters.
+
+### Notes
+- Part of epic #18 (real-Azure integration), issue #20. The config-page dropdowns that consume the
+  two new endpoints land in #21. Backend 266 tests / ~88% cov; migration reversible.
+
 ## 0.15.1.0 (2026-08-10)
 
 Real Azure OpenAI LLM adapter. Interview scoring and "Draft from SOP" checklist generation can now

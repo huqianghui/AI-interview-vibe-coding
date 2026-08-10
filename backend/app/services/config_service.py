@@ -89,6 +89,8 @@ async def upsert_master_config(
     default_project: str,
     model_or_deployment: str,
     updated_by: str,
+    knowledge_base: str = "",
+    knowledge_source: str = "",
 ) -> ServiceConfig:
     """Create or update the master AI Foundry row.
 
@@ -112,6 +114,8 @@ async def upsert_master_config(
     master.endpoint = endpoint
     master.default_project = default_project
     master.model_or_deployment = model_or_deployment
+    master.knowledge_base = knowledge_base
+    master.knowledge_source = knowledge_source
     master.is_active = True
     master.updated_by = updated_by
     if api_key:
