@@ -24,6 +24,8 @@ const EMPTY_CFG = {
   masked_key: "",
   default_project: "",
   model_or_deployment: "",
+  knowledge_base: "",
+  knowledge_source: "",
   is_active: false,
 };
 
@@ -77,6 +79,8 @@ describe("AdminPage", () => {
       masked_key: "****1234",
       default_project: "demo-prj",
       model_or_deployment: "gpt-4o-mini",
+      knowledge_base: "",
+      knowledge_source: "",
       is_active: true,
     });
     const update = vi
@@ -104,5 +108,40 @@ describe("AdminPage", () => {
       expect.objectContaining({ model_or_deployment: "gpt-5.4-mini", api_key: "" }),
     );
     await waitFor(() => expect(screen.getByTestId("cfg-status")).toHaveTextContent(/saved/i));
+  });
+
+  it("loads model + knowledge-base options from the Foundry API into dropdowns", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(admin, "listBanks").mockResolvedValue([]);
+    vi.spyOn(admin, "getAiFoundryConfig").mockResolvedValue({
+      ...EMPTY_CFG,
+      endpoint: "https://demo.services.ai.azure.com",
+      is_active: true,
+    });
+    const listModels = vi
+      .spyOn(admin, "listModelDeployments")
+      .mockResolvedValue([{ value: "gpt-5.4-mini", label: "gpt-5.4-mini (gpt-5.4-mini)" }]);
+    const listKbs = vi
+      .spyOn(admin, "listKnowledgeBases")
+      .mockResolvedValue([{ value: "sop-kb", label: "SOP KB" }]);
+
+    renderPage();
+    await user.type(screen.getByTestId("admin-token-input"), "secret-token");
+    await user.click(screen.getByTestId("admin-login"));
+
+    // Before loading: text-input fallbacks are shown, not dropdowns.
+    await waitFor(() => expect(screen.getByTestId("cfg-model")).toBeInTheDocument());
+    expect(screen.queryByTestId("cfg-model-dropdown")).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId("cfg-load-options"));
+
+    // After loading: the API was called and dropdowns replace the text inputs.
+    await waitFor(() => expect(screen.getByTestId("cfg-model-dropdown")).toBeInTheDocument());
+    expect(screen.getByTestId("cfg-kb-dropdown")).toBeInTheDocument();
+    expect(listModels).toHaveBeenCalled();
+    expect(listKbs).toHaveBeenCalled();
+    await waitFor(() =>
+      expect(screen.getByTestId("cfg-status")).toHaveTextContent(/1 model.*1 knowledge base/i),
+    );
   });
 });
