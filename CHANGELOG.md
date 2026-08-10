@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.15.1.0 (2026-08-10)
+
+Real Azure OpenAI LLM adapter. Interview scoring and "Draft from SOP" checklist generation can now
+run against a real model deployment instead of the deterministic mock — so a scored report reflects
+an actual model judgment. The adapter registers under the `azure_openai` provider and stays dormant
+until selected (via `DEFAULT_LLM_PROVIDER=azure_openai` or the forthcoming config-page overlay); the
+mock stays the default, so nothing changes for dev/CI.
+
+### Added
+- **`AzureLLMAdapter`** (`app/services/agents/adapters/azure_llm.py`) implementing the `LLMAdapter`
+  protocol: `complete(prompt, *, json_mode)` runs an Azure OpenAI chat completion on the configured
+  deployment (json_mode → `response_format={"type":"json_object"}`), returning the raw content
+  string. Auth is API-key-first with an Entra (`DefaultAzureCredential`) fallback, api-version pinned
+  `2024-06-01`. Registered by `registry._register_azure_llm()` (from `refresh_azure_adapters()`) only
+  when `azure_openai_endpoint` + `azure_openai_deployment` are set.
+
+### Notes
+- Part of epic #18 (real-Azure integration). The adapter is the F3/F4 half; wiring it into the
+  runtime path (overlay flips `default_llm_provider` from the saved DB config) lands in #20.
+- Backend 259 tests / ~90% cov. The live adapter is coverage-omitted (`azure_*.py`) like the other
+  Azure adapters — exercised against real Azure, unit-tested with a mocked client.
+
 ## 0.15.0.0 (2026-08-10)
 
 DB-backed Azure service config + admin config page. The AI Foundry connection (endpoint, API key,

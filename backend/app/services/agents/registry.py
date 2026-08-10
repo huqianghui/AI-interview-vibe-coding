@@ -45,6 +45,24 @@ def _register_azure_retrieval() -> None:
     )
 
 
+def _register_azure_llm() -> None:
+    """Register the Azure OpenAI LLM adapter iff an endpoint + deployment are configured.
+
+    Guards on the azure_openai_* settings (which the config overlay fills from the DB master row).
+    Empty → not registered, so mock-only environments never construct a live client.
+    """
+    settings = get_settings()
+    if not (settings.azure_openai_endpoint and settings.azure_openai_deployment):
+        return
+    from app.services.agents.adapters.azure_llm import AzureLLMAdapter
+
+    _LLM_ADAPTERS["azure_openai"] = AzureLLMAdapter(
+        endpoint=settings.azure_openai_endpoint,
+        deployment=settings.azure_openai_deployment,
+        api_key=settings.azure_openai_api_key,
+    )
+
+
 def _register_azure_agent_sync() -> None:
     """Register the Azure agent-sync adapter iff a Foundry project endpoint is configured."""
     settings = get_settings()
@@ -75,6 +93,7 @@ def refresh_azure_adapters() -> None:
     """
     _register_azure_retrieval()
     _register_azure_agent_sync()
+    _register_azure_llm()
 
 
 refresh_azure_adapters()
