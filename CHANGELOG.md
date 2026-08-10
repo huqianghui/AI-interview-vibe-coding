@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.15.0.0 (2026-08-10)
+
+DB-backed Azure service config + admin config page. The AI Foundry connection (endpoint, API key,
+project, model) is now configurable at runtime and saved to the database, so an operator points the
+app at their own Foundry project through the UI instead of editing `.env`. This closes a real gap:
+`config.py` already claimed "DB-backed ServiceConfig is the source of truth" but that table was never
+built — the model default `gpt-4o` (not deployed on the demo resource) then 404'd with no runtime
+override. Config now resolves **DB > .env > code default**.
+
+### Added
+- **`service_configs` table + master AI Foundry row** (`app/models/service_config.py`, migration
+  `9aa4493d2167`). A single master row holds endpoint / encrypted API key / default project /
+  model, right-sized to this project's 4 services (LLM, retrieval, agent-sync, voice-live).
+- **Admin config API** (`app/api/admin_config.py`, `require_admin`): `GET/PUT /admin/config/ai-foundry`
+  (key write-only, returned masked) + `POST /admin/config/ai-foundry/test` (lightweight connectivity
+  probe). `config_service` handles upsert + Fernet encryption; an empty key on save **preserves** the
+  stored secret.
+
+### Security
+- **Endpoint allowlist (credential-exfil guard).** The saved endpoint must be an `https` first-party
+  Azure host (`*.services.ai.azure.com`, `*.openai.azure.com`, `*.cognitiveservices.azure.com`,
+  `*.search.windows.net`); anything else is rejected with **422** before the row is touched. Without
+  this, an admin-token holder could point the endpoint at an arbitrary host and, because an empty key
+  preserves the stored secret, make `/test` send the decrypted Azure key there (or probe internal
+  metadata IPs). Now the key can only ever leave for an allowlisted Azure host.
+- **Fail-closed encryption.** With `debug` off and `ENCRYPTION_KEY` unset, the app now refuses to
+  encrypt/decrypt instead of falling back to a key derived from `SECRET_KEY` (which is a committed dev
+  default) — so at-rest encryption of the stored API key is never silently cosmetic in production.
+  Dev (`debug=true`) keeps the derived-key convenience.
+- **Runtime overlay** (`app/services/config_overlay.py`): the saved master row is overlaid onto the
+  `get_settings()` singleton at startup and after each save, then the Azure adapters are
+  re-registered — so a config change takes effect **without a restart**. `registry.refresh_azure_adapters()`
+  is the re-register seam.
+- **Fernet encryption util** (`app/utils/encryption.py`) for at-rest secrets; `ENCRYPTION_KEY`
+  setting (derives a stable dev key from `SECRET_KEY` when unset). `cryptography` is now a direct dep.
+- **Admin config panel** in `/admin` (`AdminPage.tsx` + `api/admin.ts`): endpoint / project / model /
+  write-only key inputs with Save + Test connection.
+- **`backend/.env.example`** (committed, secret-free) documenting every knob for a live run, with the
+  model-deployment gotcha called out; root `.gitignore` now also refuses `.env`/`.env.*` (allows
+  `.env.example`) as defense-in-depth for this public repo.
+
+### Notes
+- Precedence is **DB > .env > code default**: production reads the saved config; `.env` fills gaps in
+  dev; the neutral code default (`gpt-4o`) is the last resort. The earlier stop-gap of hardcoding
+  `gpt-4o-mini` was reverted in favor of this real config layer.
+- Backend 241 tests / ~90% cov; frontend 22 unit + 4 E2E. All on mock providers — zero Azure to
+  build, test, or run the config page (the live effect is a Layer-3 manual check).
+
 ## 0.14.0.0 (2026-08-09)
 
 Playwright end-to-end tests. The winning-demo path is now covered by real-browser E2E, on top of

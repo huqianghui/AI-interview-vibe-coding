@@ -2,11 +2,13 @@
 
 Maps each SPEC feature to what's actually built, the version it shipped in, and its live-Azure
 validation state. The spec of record is [`../SPEC.md`](../SPEC.md); the planning trail is in
-[`planning/`](planning/); per-release detail is in [`../CHANGELOG.md`](../CHANGELOG.md).
+[`planning/`](planning/); per-release detail is in [`../CHANGELOG.md`](../CHANGELOG.md). To actually
+**verify** the requirements and run the system, see [`VERIFICATION.md`](VERIFICATION.md).
 
-Status as of **v0.13.0.0**. Backend: 230 tests, ~91% coverage. Frontend: 21 tests. Every merge
-passed CI (ruff check + ruff format + pytest; tsc + vitest + eslint). Local dev / CI run entirely
-on mock providers — zero Azure needed to build or test.
+Status as of **v0.15.0.0**. Backend: 241 tests, ~90% coverage. Frontend: 22 unit/component tests +
+4 Playwright E2E tests (real Chromium). Every merge passed CI (ruff check + ruff format + pytest;
+tsc + vitest + eslint + Playwright E2E). Local dev / CI run entirely on mock providers — zero Azure
+needed to build or test.
 
 ## Core features (F1–F9)
 
@@ -36,6 +38,20 @@ on mock providers — zero Azure needed to build or test.
 | Voice-only presence (audio orb + persona voice) | ✅ Done | v0.5.0.0 |
 | **Avatar video track** (digital-human face) | ✅ Done | v0.13.0.0 — broker requests the `avatar` modality; the voice hook negotiates a recvonly video transceiver and `AvatarView` shows the video, falling back to the orb. |
 
+## End-to-end tests (v0.14.0.0)
+
+Real-browser Playwright coverage of the winning-demo path, on top of the unit/component tests.
+Both servers (backend + frontend) boot as managed web servers against a fresh migrated SQLite DB
+and mock providers, so the full candidate + admin flows run in an actual Chromium with **zero
+Azure**. Run locally with `cd frontend && npm run e2e`; CI runs it on every PR (the `e2e` job).
+
+| E2E spec | Covers | Asserts |
+|---|---|---|
+| Candidate text interview | F6/F7/F8/F9 | land → orientation → answer → **F7 follow-up quoting the candidate's own words** → report reveal. |
+| P3 boundary | P3 | candidate page never exposes `checklist` / `rubric` / `expected_points` / `weight` / `source_quote`. |
+| Admin authors bank + checklist → scored report | F2b/F3b/F3/F4/F8 | admin sign-in → default bank → question → **checklist draft (weights = 100)** → candidate reaches a **scored** exec report (grade gauge + SOP-source-beside-answer evidence) + per-item detail. |
+| Voice with no mic | F9 AC#4 | voice channel with no microphone surfaces the mic-permission / voice-unavailable notice — never hangs. |
+
 ## Live-Azure validation (against `avarda-demo-prj`, 2026-08-09)
 
 The SPEC P15/P16 exit criteria — "the agent↔knowledge-source connection is a distinct dependency
@@ -55,6 +71,20 @@ that an automatable check can pass while the live service rejects." Validated li
 
 - Full **voice WebRTC audio round-trip** in a real browser (mic in, avatar audio/video out). Code +
   credentials are in place; verified through the signaling handshake, not a live human conversation.
-- **Deploy note:** `FOUNDRY_AGENT_MODEL` / `VOICE_LIVE_DEFAULT_MODEL` default to `gpt-4o`, which is
-  NOT deployed on the demo resource. Set them to a deployed model (e.g. `gpt-5.4-mini`,
-  `gpt-4o-mini`) for a real run.
+
+### Deploy configuration (v0.15.0.0)
+
+Runtime config precedence is **DB > .env > code default**:
+
+- **DB-backed config (source of truth)** — the AI Foundry endpoint / API key / project / model are
+  set in the `/admin` **Azure config** panel and saved to the `service_configs` master row (key
+  Fernet-encrypted). They're overlaid onto settings at startup and after each save, so production
+  reads the operator's saved config without touching `.env` and without a restart. Set
+  `ENCRYPTION_KEY` in prod so the stored key survives restarts.
+- **`.env` (dev fallback)** — fills gaps when no DB row exists. `backend/.env.example` (committed,
+  secret-free) documents every knob. Copy to `backend/.env` (gitignored) and fill in real values.
+  Leaving the providers as `mock` needs zero Azure.
+- **Model deployments (gotcha)** — the model MUST be a deployment that exists on the target resource.
+  `gpt-4o` (the neutral code default) is NOT deployed on the demo resource and 404s on agent-create /
+  Voice Live; deployed there: `gpt-5.4-mini`, `gpt-4o-mini`, `gpt-5.4`, `gpt-5`. Set a deployed model
+  in the config page (or `FOUNDRY_AGENT_MODEL` / `VOICE_LIVE_DEFAULT_MODEL` in `.env`).

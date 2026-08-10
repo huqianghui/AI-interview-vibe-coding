@@ -14,6 +14,11 @@ backend/storage/
 # Local dev SQLite DB — never commit.
 *.db
 backend/*.db
+# Env files carry live Azure endpoints/keys — never commit (PUBLIC repo). Only .env.example is
+# tracked. Defense-in-depth alongside backend/.gitignore.
+.env
+.env.*
+!.env.example
 # Playwright E2E artifacts
 frontend/playwright-report/
 frontend/test-results/

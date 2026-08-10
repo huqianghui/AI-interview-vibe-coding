@@ -28,6 +28,12 @@ living specification is [`../../SPEC.md`](../../SPEC.md) at the repo root — st
 
 `design-office-hours` → `spec-draft-preautoplan` → (`/autoplan` review) → **`SPEC.md`** (committed, authoritative).
 
+## Post-spec feature specs
+
+- [`spec-real-azure-integration.md`](spec-real-azure-integration.md) — Phase 1 real-Azure integration
+  via the `/admin` DB config page (model + Foundry IQ knowledge-base dropdowns from the Foundry API,
+  real agent + LLM + retrieval, P1 security fix). Filed as epic #18 with children #19 / #20 / #21.
+
 ## What was intentionally NOT promoted
 
 The gstack project dir also holds machine-local, per-developer working state that does **not**
