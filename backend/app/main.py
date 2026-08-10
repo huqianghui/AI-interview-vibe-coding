@@ -7,7 +7,6 @@ from fastapi import FastAPI
 
 from app.api import (
     admin_checklist,
-    admin_config,
     admin_personas,
     admin_questions,
     admin_sop,
@@ -33,7 +32,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     so a previously-saved config is live on boot — also best-effort, never blocks startup.
     """
     from app.db import async_session_factory
-    from app.services.config_overlay import apply_master_config_to_settings
     from app.services.question_seed import seed_default_bank
     from app.services.user_seed import seed_default_admin
 
@@ -47,11 +45,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             await seed_default_admin(session)
     except Exception:  # noqa: BLE001 — admin seed is best-effort; never block startup
         pass
-    try:
-        async with async_session_factory() as session:
-            await apply_master_config_to_settings(session)
-    except Exception:  # noqa: BLE001 — config overlay is best-effort; never block startup
-        pass
     yield
 
 
@@ -64,6 +57,5 @@ app.include_router(admin_personas.router)
 app.include_router(admin_sop.router)
 app.include_router(admin_checklist.router)
 app.include_router(admin_questions.router)
-app.include_router(admin_config.router)
 app.include_router(auth.router)
 app.include_router(admin_users.router)
