@@ -65,6 +65,26 @@ def _register_azure_agent_sync() -> None:
     )
 
 
+def _register_foundry_llm() -> None:
+    """Register the real Foundry LLM adapter iff a Foundry project endpoint is configured.
+
+    Backs scoring + checklist drafting with a real model (via the Responses API), replacing the
+    self-made azure_openai chat-completions adapter removed in Phase 2.0. Guards on
+    ``foundry_project_endpoint`` for symmetry with the agent-sync adapter that shares the resource.
+    """
+    settings = get_settings()
+    if not settings.foundry_project_endpoint:
+        return
+    from app.services.agents.adapters.foundry_llm import FoundryLLMAdapter
+
+    _LLM_ADAPTERS["azure"] = FoundryLLMAdapter(
+        endpoint=settings.foundry_project_endpoint,
+        project=settings.azure_foundry_default_project,
+        api_key=settings.foundry_api_key,
+        model=settings.foundry_agent_model,
+    )
+
+
 def refresh_azure_adapters() -> None:
     """(Re)register the Azure adapters from the current settings.
 
@@ -75,6 +95,7 @@ def refresh_azure_adapters() -> None:
     """
     _register_azure_retrieval()
     _register_azure_agent_sync()
+    _register_foundry_llm()
 
 
 refresh_azure_adapters()

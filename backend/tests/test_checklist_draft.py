@@ -4,6 +4,7 @@ and the expected_points fallback — all pure, no LLM/DB."""
 from app.interview.checklist_draft import (
     DraftItem,
     fallback_items_from_points,
+    gate_source_citations,
     normalize_weights,
     parse_draft_items,
     weights_sum,
@@ -72,3 +73,54 @@ def test_fallback_items_from_points():
     items = fallback_items_from_points(("point one", "point two", ""))
     assert [i.text for i in items] == ["point one", "point two"]
     assert all(i.kind == "required" for i in items)
+
+
+# --- SOP citation gating (Phase 5): no half-attributed quote ships ----------
+
+
+def test_gate_keeps_complete_citation():
+    items = [DraftItem(kind="required", text="x", source_quote="Do the thing.", source_page="p.3")]
+    gate_source_citations(items)
+    assert items[0].source_quote == "Do the thing."
+    assert items[0].source_page == "p.3"
+
+
+def test_gate_strips_quote_without_page():
+    items = [
+        DraftItem(
+            kind="required",
+            text="x",
+            source_quote="Hallucinated quote.",
+            source_page=None,
+            source_document_id="doc1",
+        )
+    ]
+    gate_source_citations(items)
+    assert items[0].source_quote == ""
+    assert items[0].source_page is None
+    assert items[0].source_document_id is None
+
+
+def test_gate_strips_page_without_quote():
+    items = [DraftItem(kind="required", text="x", source_quote="", source_page="p.5")]
+    gate_source_citations(items)
+    assert items[0].source_quote == ""
+    assert items[0].source_page is None
+
+
+def test_gate_leaves_fully_unsourced_item_untouched():
+    # A recommended item with no SOP anchor is a legitimate shape — not stripped, not dropped.
+    items = [DraftItem(kind="recommended", text="explains reasoning")]
+    gate_source_citations(items)
+    assert items[0].source_quote == ""
+    assert items[0].source_page is None
+    assert items[0].kind == "recommended"  # item kept
+
+
+def test_gate_never_drops_items():
+    items = [
+        DraftItem(kind="required", text="a", source_quote="q", source_page=None),  # partial
+        DraftItem(kind="required", text="b", source_quote="Q", source_page="p.1"),  # complete
+    ]
+    result = gate_source_citations(items)
+    assert len(result) == 2  # both survive; only attribution changes

@@ -120,9 +120,10 @@ async def test_overlay_makes_db_win_over_default(db_session, _restore_settings):
     from app.services.agents import registry
 
     settings = get_settings()
-    # Precondition: no azure agent-sync adapter registered on a mock-only boot.
+    # Precondition: no azure adapters registered on a mock-only boot.
     registry._AGENT_SYNC_ADAPTERS.pop("azure", None)
     registry._RETRIEVAL_ADAPTERS.pop("azure", None)
+    registry._LLM_ADAPTERS.pop("azure", None)
 
     await config_service.upsert_master_config(
         db_session,
@@ -142,6 +143,9 @@ async def test_overlay_makes_db_win_over_default(db_session, _restore_settings):
     assert settings.voice_live_default_model == "gpt-5.4"
     assert settings.foundry_project_endpoint == "https://demo.services.ai.azure.com"
     assert settings.default_agent_sync_provider == "azure"
+    # LLM path flipped → real Foundry scoring adapter registered (Phase 5).
+    assert settings.default_llm_provider == "azure"
+    assert "azure" in registry._LLM_ADAPTERS
     # Retrieval path flipped + kb/ks mapped to search settings → azure retrieval adapter registered.
     assert settings.default_retrieval_provider == "azure"
     assert settings.azure_search_index == "sop-kb"
@@ -152,6 +156,7 @@ async def test_overlay_makes_db_win_over_default(db_session, _restore_settings):
     # Cleanup adapters we caused to register so other tests see the mock-only baseline.
     registry._AGENT_SYNC_ADAPTERS.pop("azure", None)
     registry._RETRIEVAL_ADAPTERS.pop("azure", None)
+    registry._LLM_ADAPTERS.pop("azure", None)
 
 
 async def test_overlay_skips_retrieval_without_kb(db_session, _restore_settings):

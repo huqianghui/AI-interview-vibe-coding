@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.interview.checklist_draft import (
     ChecklistDraft,
     fallback_items_from_points,
+    gate_source_citations,
     normalize_weights,
     parse_draft_items,
 )
@@ -100,6 +101,10 @@ async def draft_checklist(
         _build_draft_prompt(question.text, sop_snippets), json_mode=True
     )
     items = parse_draft_items(_parse_llm_items(raw_output), source_document_id=None)
+    # Gate the LLM's (untrusted) SOP citations: a half-attributed quote/page pair is stripped so no
+    # partial citation reaches the report (Phase 5). Only the LLM branch — fallback items below get
+    # their page from trusted retrieval code, not the model.
+    items = gate_source_citations(items)
 
     # 3. Fallback: if the LLM gave nothing usable, derive required items from expected_points.
     if not items:
