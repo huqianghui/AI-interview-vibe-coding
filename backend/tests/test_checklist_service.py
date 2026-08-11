@@ -90,3 +90,42 @@ async def test_redrafting_demotes_prior_default(db_session):
 async def test_draft_unknown_question_raises(db_session):
     with pytest.raises(svc.QuestionNotFound):
         await svc.draft_checklist(db_session, "no-such-question")
+
+
+@pytest.mark.asyncio
+async def test_draft_gates_partial_llm_citation(db_session, monkeypatch):
+    """A drafted item whose LLM citation is half-present (quote, no page) keeps the item but strips
+    the attribution (Phase 5) — no partial SOP citation reaches the report."""
+
+    class _PartialCiteLLM:
+        name = "partial"
+
+        async def complete(self, prompt, *, json_mode=False):
+            # One complete citation + one partial (quote, no page) + one fully unsourced.
+            return (
+                '{"items": ['
+                '{"kind": "required", "text": "grounded item", "weight": 40,'
+                ' "source_quote": "Follow the documented steps.", "source_page": "p.1"},'
+                '{"kind": "required", "text": "hallucinated cite", "weight": 30,'
+                ' "source_quote": "This quote has no page."},'
+                '{"kind": "recommended", "text": "unsourced point", "weight": 30}'
+                "]}"
+            )
+
+        async def stream(self, prompt):
+            yield ""
+
+    monkeypatch.setattr(svc, "get_llm_adapter", lambda name=None: _PartialCiteLLM())
+
+    q = await _question(db_session)
+    checklist = await svc.draft_checklist(db_session, q.id)
+    items = {i.text: i for i in await svc.list_items(db_session, checklist.id)}
+
+    # All three items kept (never dropped for a bad citation).
+    assert set(items) == {"grounded item", "hallucinated cite", "unsourced point"}
+    # Complete citation survives.
+    assert items["grounded item"].source_quote == "Follow the documented steps."
+    assert items["grounded item"].source_page == "p.1"
+    # Partial citation stripped.
+    assert items["hallucinated cite"].source_quote == ""
+    assert items["hallucinated cite"].source_page is None

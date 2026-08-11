@@ -114,6 +114,30 @@ def parse_draft_items(
     return items
 
 
+def gate_source_citations(items: list[DraftItem]) -> list[DraftItem]:
+    """Strip a half-attributed SOP citation so no partial claim ships to the report (Phase 5).
+
+    The drafting LLM's ``source_quote`` / ``source_page`` are untrusted. Reusing the F1 strict
+    full-field gate (:func:`app.services.agents.citations.shape_citations`), a citation is kept only
+    when BOTH quote and page are present and truthy; a partial pair (the hallucination-shaped case,
+    e.g. a quote with no page) has both fields — and ``source_document_id`` — cleared.
+
+    The item itself is NEVER dropped: an item with neither field is a legitimate unsourced item (a
+    recommended point with no SOP anchor), and dropping items would silently reduce checklist
+    coverage against the P7 "never under-count" spirit. Only the attribution is stripped. Mutates
+    and returns the same list.
+    """
+    from app.services.agents.citations import shape_citations
+
+    for it in items:
+        ref = [{"sourceData": {"quote": it.source_quote, "page": it.source_page}}]
+        if not shape_citations(ref, required_fields=("quote", "page")):
+            it.source_quote = ""
+            it.source_page = None
+            it.source_document_id = None
+    return items
+
+
 def fallback_items_from_points(expected_points: tuple[str, ...]) -> list[DraftItem]:
     """Build required items from ``expected_points`` when the LLM yields nothing usable.
 
