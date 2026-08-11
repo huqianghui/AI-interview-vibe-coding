@@ -18,6 +18,7 @@ const SAMPLE: personas.PersonaOut = {
   greeting_map: '{"zh-CN":"你好"}',
   enabled: true,
   is_default: true,
+  tools_config: "[]",
   turn_detection: "azure_semantic_vad",
   eou_detection: true,
   noise_suppression: true,

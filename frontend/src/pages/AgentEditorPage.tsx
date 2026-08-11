@@ -218,6 +218,8 @@ export function AgentEditorPage() {
             isNew={isNew}
             onRetrySync={retrySync}
             retrying={retrying}
+            tools={form.tools}
+            onToolsChange={(tools) => patchForm({ tools })}
           />
         )
       }

@@ -36,6 +36,7 @@ const PERSONA: personas.PersonaOut = {
   greeting_map: '{"zh-CN":"你好"}',
   enabled: true,
   is_default: true,
+  tools_config: "[]",
   turn_detection: "azure_semantic_vad",
   eou_detection: true,
   noise_suppression: true,
@@ -202,6 +203,29 @@ describe("AgentEditorPage", () => {
     const payload = update.mock.calls[0][1];
     expect(payload.character).toBe("harry");
     expect(payload.style).toBe("business"); // harry's first tile / default style
+  });
+
+  it("adding a tool via the Add menu saves it into tools_config", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    mockDiscovery();
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([PERSONA]);
+    vi.spyOn(personas, "getPersona").mockResolvedValue(PERSONA);
+    const update = vi.spyOn(personas, "updatePersona").mockResolvedValue(PERSONA);
+
+    renderPage();
+    await signIn(user);
+    await pickPersona(user, "p1");
+    await waitFor(() => expect(screen.getByTestId("persona-name")).toHaveValue("Demo Interviewer"));
+
+    // Add ▾ → Code interpreter (a supported, connection-free tool).
+    await user.click(screen.getByTestId("tools-add-menu"));
+    await user.click(await screen.findByTestId("tools-add-code-interpreter"));
+    await user.click(screen.getByTestId("persona-save"));
+
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    const payload = update.mock.calls[0][1];
+    expect(JSON.parse(payload.tools_config!)).toEqual([{ type: "code_interpreter" }]);
   });
 
   it("retry-sync calls retrySyncPersona", async () => {

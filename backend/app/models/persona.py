@@ -59,6 +59,11 @@ class InterviewerPersona(TimestampMixin, Base):
     voice_temperature: Mapped[float] = mapped_column(Float, default=0.8, nullable=False)
     playback_speed: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
 
+    # Per-persona agent tools (SPEC F5) — JSON array of tool dicts synced into the Foundry prompt
+    # agent's `tools`. Executed by the Foundry runtime, not here; this app only carries the config.
+    # e.g. [{"type":"code_interpreter"},{"type":"web_search"},{"type":"mcp","server_url":...}].
+    tools_config: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+
     # Foundry agent binding + sync bookkeeping --------------------------------
     agent_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     agent_version: Mapped[str | None] = mapped_column(String(64), nullable=True)

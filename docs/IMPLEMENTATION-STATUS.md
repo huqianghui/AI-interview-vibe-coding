@@ -51,6 +51,7 @@ a fused text/voice interview flow, in phases (branch-per-phase, independently re
 | Voice-only presence (audio orb + persona voice) | ✅ Done | v0.5.0.0 |
 | **Avatar video track** (digital-human face) | ✅ Done | v0.13.0.0 — broker requests the `avatar` modality; the voice hook negotiates a recvonly video transceiver and `AvatarView` shows the video, falling back to the orb. |
 | **Foundry-portal avatar editor** (real-face roster + layout parity) | ✅ Done | v0.22.0.0 — `/admin/agent` matches the AI Foundry portal Playground: full Azure roster (6 video + 27 photo) with real MS-Learn-CDN face thumbnails, top-bar persona switcher + left definition sections + center `AvatarPreview`, style slugs use Azure real names (`casual-sitting`), passed through to Voice Live. |
+| **Foundry-portal agent Tools** (per-persona, real sync) | ✅ Done | v0.23.0.0 — Tools section + "Select a tool" dialog (Configured/Catalog/Custom) matching the portal. `code_interpreter` / `web_search` / public `mcp` really sync into the persona's Foundry agent (`tools_config` → gated → SDK tools); the rest are Preview cards. Connection-auth tools (OpenAPI/A2A/protected MCP/Bing/Search) + MS-hosted connectors deferred. |
 
 ## End-to-end tests (v0.14.0.0)
 

@@ -34,6 +34,7 @@ from app.services.agents.foundry_client import (
     project_endpoint,
 )
 from app.services.agents.knowledge_tool import build_agent_tools
+from app.services.agents.persona_tools import build_persona_tools
 from app.services.agents.voice_live_metadata import build_voice_live_metadata
 
 # Fallback only — the registry always passes settings.foundry_agent_model (which itself resolves
@@ -111,6 +112,7 @@ class AzureAgentSyncAdapter:
             search_endpoint=self._search_endpoint,
             index_name=self._search_index,
             connection_id=self._mcp_connection_id or None,
+            persona_tools=build_persona_tools(getattr(persona, "tools_config", None)),
         )
 
         # _project_client does a synchronous Entra probe (blocking network/az-CLI call), so build it
@@ -160,20 +162,46 @@ class AzureAgentSyncAdapter:
         return f"interviewer-{persona.id}"
 
     def _to_mcp_tool(self, tool: dict[str, Any]) -> Any:
-        """Convert the pure MCP tool dict (from knowledge_tool) into an SDK ``MCPTool`` object.
+        """Convert an MCP tool dict into an SDK ``MCPTool`` object.
 
-        RemoteTool connection (``project_connection_id``) authenticates the KB's MCP endpoint — a
-        CognitiveSearch/ApiKey connection returns 403, per the reference's live findings.
+        Used for both the SOP KB (with a RemoteTool ``project_connection_id`` that authenticates
+        the KB's MCP endpoint — a CognitiveSearch/ApiKey connection returns 403) and for per-persona
+        public MCP servers (no connection id). ``allowed_tools`` is optional (a persona MCP may
+        allow all of the server's tools).
         """
         from azure.ai.projects.models import MCPTool, MCPToolFilter
 
-        return MCPTool(
-            server_label=tool["server_label"],
-            server_url=tool["server_url"],
-            require_approval=tool.get("require_approval", "never"),
-            allowed_tools=MCPToolFilter(tool_names=tool["allowed_tools"]["tool_names"]),
-            project_connection_id=tool.get("project_connection_id"),
-        )
+        kwargs: dict[str, Any] = {
+            "server_label": tool["server_label"],
+            "server_url": tool["server_url"],
+            "require_approval": tool.get("require_approval", "never"),
+        }
+        allowed = tool.get("allowed_tools")
+        if allowed and allowed.get("tool_names"):
+            kwargs["allowed_tools"] = MCPToolFilter(tool_names=allowed["tool_names"])
+        if tool.get("project_connection_id"):
+            kwargs["project_connection_id"] = tool["project_connection_id"]
+        return MCPTool(**kwargs)
+
+    def _to_sdk_tool(self, tool: dict[str, Any]) -> Any:
+        """Dispatch a pure tool dict to its SDK tool object by ``type``.
+
+        Supported (see persona_tools.SUPPORTED_TOOL_TYPES): mcp → MCPTool, code_interpreter →
+        CodeInterpreterTool, web_search → WebSearchTool. The gate upstream guarantees only these
+        reach here, so an unknown type is a programming error, not user input.
+        """
+        ttype = tool.get("type")
+        if ttype == "mcp":
+            return self._to_mcp_tool(tool)
+        if ttype == "code_interpreter":
+            from azure.ai.projects.models import CodeInterpreterTool
+
+            return CodeInterpreterTool()
+        if ttype == "web_search":
+            from azure.ai.projects.models import WebSearchTool
+
+            return WebSearchTool()
+        raise AgentSyncError(f"Unsupported tool type for sync: {ttype!r}")
 
     async def _create_version(
         self,
@@ -188,7 +216,7 @@ class AzureAgentSyncAdapter:
         # Attach the SOP knowledge base as an MCPTool when configured so the agent is grounded
         # (P15). The pure builder yields dicts; convert to SDK MCPTool objects here.
         definition_kwargs: dict[str, Any] = {"model": self._model, "instructions": instructions}
-        sdk_tools = [self._to_mcp_tool(t) for t in tools]
+        sdk_tools = [self._to_sdk_tool(t) for t in tools]
         if sdk_tools:
             definition_kwargs["tools"] = sdk_tools
         created = await asyncio.to_thread(

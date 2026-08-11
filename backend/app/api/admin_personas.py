@@ -45,6 +45,7 @@ class PersonaCreate(VoiceKnobs):
     greeting_map: str = "{}"
     enabled: bool = True
     is_default: bool = False
+    tools_config: str = "[]"
 
 
 class PersonaUpdate(BaseModel):
@@ -56,6 +57,7 @@ class PersonaUpdate(BaseModel):
     greeting_map: str | None = None
     enabled: bool | None = None
     is_default: bool | None = None
+    tools_config: str | None = None
     turn_detection: str | None = None
     eou_detection: bool | None = None
     noise_suppression: bool | None = None
@@ -76,6 +78,7 @@ class PersonaOut(BaseModel):
     greeting_map: str
     enabled: bool
     is_default: bool
+    tools_config: str
     turn_detection: str
     eou_detection: bool
     noise_suppression: bool

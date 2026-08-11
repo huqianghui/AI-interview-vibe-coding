@@ -21,8 +21,10 @@ import {
 import { AgentSyncStatusCard } from "./AgentSyncStatusCard";
 import { ModelSelect } from "./ModelSelect";
 import { KnowledgeStatus } from "./KnowledgeStatus";
+import { ToolsSection } from "./ToolsSection";
 import type { AgentSyncStatus } from "../../api/personas";
 import type { PersonaFormState } from "../../pages/agentEditorForm";
+import type { ToolConfig } from "../../data/agentTools";
 
 const useStyles = makeStyles({
   root: { display: "flex", flexDirection: "column" },
@@ -48,6 +50,8 @@ export interface AgentDefinitionPanelProps {
   isNew: boolean;
   onRetrySync?: () => void;
   retrying?: boolean;
+  tools: ToolConfig[];
+  onToolsChange: (tools: ToolConfig[]) => void;
 }
 
 export function AgentDefinitionPanel({
@@ -61,6 +65,8 @@ export function AgentDefinitionPanel({
   isNew,
   onRetrySync,
   retrying,
+  tools,
+  onToolsChange,
 }: AgentDefinitionPanelProps) {
   const styles = useStyles();
   const voiceModeOn = Boolean(form.character);
@@ -159,9 +165,20 @@ export function AgentDefinitionPanel({
 
       <Divider />
 
+      {/* Tools (per-persona, synced to the Foundry agent) */}
+      <div className={styles.section}>
+        <Title3>Tools</Title3>
+        <Text size={200} className={styles.hint}>
+          Give the agent extra capabilities. Executed in the Foundry runtime; synced with the agent.
+        </Text>
+        <ToolsSection tools={tools} onChange={onToolsChange} />
+      </div>
+
+      <Divider />
+
       {/* Knowledge (read-only status) */}
       <div className={styles.section}>
-        <Title3>Knowledge &amp; tools</Title3>
+        <Title3>Knowledge</Title3>
         <KnowledgeStatus />
       </div>
     </div>

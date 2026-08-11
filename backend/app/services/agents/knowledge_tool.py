@@ -63,12 +63,17 @@ def build_agent_tools(
     search_endpoint: str,
     index_name: str,
     connection_id: str | None = None,
+    persona_tools: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """The agent's ``tools`` list — a single KB MCPTool when configured, else empty.
+    """The agent's ``tools`` list — the SOP KB MCPTool (when configured) + any per-persona tools.
 
-    Empty when the KB isn't configured, so the agent syncs ungrounded rather than failing.
+    The KB tool is always first and independent of persona config (grounding is not opt-out). The
+    KB is empty when unconfigured, so the agent still syncs (ungrounded) rather than failing.
+    ``persona_tools`` must already be gated to supported types (see ``build_persona_tools``).
     """
     tool = build_knowledge_mcp_tool(
         search_endpoint=search_endpoint, index_name=index_name, connection_id=connection_id
     )
-    return [tool] if tool else []
+    tools = [tool] if tool else []
+    tools.extend(persona_tools or [])
+    return tools

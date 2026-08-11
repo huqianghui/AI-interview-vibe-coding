@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.23.0.0 (2026-08-11)
+
+The `/admin/agent` editor gains a **Tools** capability matching the Azure AI Foundry portal's agent
+Tools UI. Because a persona syncs to a real Foundry prompt agent, a selected tool really lands in
+that agent's definition — execution stays in the Foundry runtime; this app only carries the config.
+
+### Added
+- **Per-persona agent tools** — `interviewer_personas.tools_config` (JSON array), threaded through
+  `PersonaCreate/Update/Out` and synced into the Foundry prompt agent's `tools`.
+- **`persona_tools.py`** (pure, CI-tested): parses + gates the config to the tool types this app can
+  actually emit today — `code_interpreter`, `web_search`, and a public `mcp` server — dropping the
+  rest so an unsupported/half-configured tool never syncs.
+- **Tools UI** (Fluent v9): a left-panel **Tools** section (`ToolsSection`) with an "Add ▾" menu
+  (Web search / Code interpreter quick toggles + "Add tools…") and a **"Select a tool" dialog**
+  (`ToolPicker`) mirroring the portal — Configured / Catalog / Custom tabs, search, and the full card
+  set (File search, Azure AI Search, Grounding with Bing, Computer Use, Work IQ, Fabric, SharePoint,
+  OpenAPI, MCP, A2A). Supported tools add + sync for real; the rest carry a **Preview** badge and are
+  not selectable (portal parity without fake function). Custom → MCP prompts for a server URL.
+- Tests: `test_persona_tools.py`, `ToolPicker.test.tsx`, plus tools round-trip assertions in the
+  backend persona API and the frontend editor page.
+
+### Changed
+- The agent SDK converter (`azure_agent_sync._to_sdk_tool`) dispatches by tool `type` — MCPTool
+  (KB + public persona MCP), `CodeInterpreterTool`, `WebSearchTool`. `build_agent_tools` merges the
+  SOP KB tool (always first) with the persona's gated tools.
+
+### Deferred (follow-up issue)
+- Connection-authenticated tools (protected MCP, OpenAPI spec, A2A, Bing grounding, Azure AI Search)
+  and Microsoft-hosted connectors (Work IQ, Fabric, SharePoint, Computer Use) — shown as Preview
+  cards; wiring them needs RemoteTool connection resolution / spec parsing not yet generalized.
+
 ## 0.22.0.0 (2026-08-11)
 
 The `/admin/agent` editor now matches the Azure AI Foundry portal Playground: real digital-human

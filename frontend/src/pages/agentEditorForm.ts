@@ -11,6 +11,7 @@ import {
   type PersonaCreate,
   type PersonaOut,
 } from "../api/personas";
+import { parseToolsConfig, stringifyToolsConfig, type ToolConfig } from "../data/agentTools";
 
 /** Locales this project supports (mirrors i18n SUPPORTED_LANGUAGES). */
 export const EDITOR_LOCALES = ["zh-CN", "en-US"] as const;
@@ -34,6 +35,7 @@ export interface PersonaFormState {
   proactive_engagement: boolean;
   voice_temperature: number;
   playback_speed: number;
+  tools: ToolConfig[];
 }
 
 /** A blank persona for the "New persona" flow (backend-default voice knobs). */
@@ -55,6 +57,7 @@ export function emptyPersonaForm(): PersonaFormState {
     proactive_engagement: false,
     voice_temperature: 0.8,
     playback_speed: 1.0,
+    tools: [],
   };
 }
 
@@ -77,6 +80,7 @@ export function personaToForm(p: PersonaOut): PersonaFormState {
     proactive_engagement: p.proactive_engagement,
     voice_temperature: p.voice_temperature,
     playback_speed: p.playback_speed,
+    tools: parseToolsConfig(p.tools_config),
   };
 }
 
@@ -99,5 +103,6 @@ export function formToPayload(form: PersonaFormState): PersonaCreate {
     proactive_engagement: form.proactive_engagement,
     voice_temperature: form.voice_temperature,
     playback_speed: form.playback_speed,
+    tools_config: stringifyToolsConfig(form.tools),
   };
 }

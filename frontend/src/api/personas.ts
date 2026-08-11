@@ -23,6 +23,7 @@ export interface PersonaOut {
   greeting_map: string; // JSON string: {"zh-CN": "greeting", ...}
   enabled: boolean;
   is_default: boolean;
+  tools_config: string; // JSON string: array of tool config dicts synced to the Foundry agent
   turn_detection: string;
   eou_detection: boolean;
   noise_suppression: boolean;
