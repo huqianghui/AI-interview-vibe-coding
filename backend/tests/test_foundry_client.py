@@ -7,7 +7,14 @@ accepts, so a regression in its expiry math or key passthrough would break API-k
 
 import time
 
+import pytest
+
 from app.services.agents.foundry_client import _ApiKeyTokenCredential
+
+# These assert the real azure-core AccessToken's construction (token value + expiry), so they need
+# the SDK. CI installs only ``.[dev]`` (no azure extra) — skip there; they run on a dev box set up
+# for live-Azure testing. build_project_client itself is coverage-omitted for the same reason.
+pytest.importorskip("azure.core.credentials")
 
 
 class TestApiKeyTokenCredential:
