@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.19.0.0 (2026-08-10)
+
+A Foundry-portal-style Agent editor. Admins get a new `/admin/agent` page that looks and configures
+like the Azure AI Foundry prompt-agent editor: a left persona nav, a center agent-definition column
+(digital-human preview, identity, model, instructions, knowledge status), and a gear-triggered
+Configuration rail (language, speech voice + greeting per language, interim/proactive toggles, an
+avatar picker grid, and advanced audio knobs). Pick an interviewer, edit its instructions and voice,
+choose a digital-human avatar, and save — the backend creates/updates the Foundry agent behind it.
+This is Phase 3 of epic #26; built native Fluent v9 (this repo has no Radix/Tailwind to port).
+
+### Added
+- **`/admin/agent` editor** (`pages/AgentEditorPage.tsx` + `components/agent-editor/*`): login-gated
+  like `/admin`; persona nav (enabled dot, default badge, agent-sync chip, "New persona"); center
+  `AgentDefinitionPanel` (AvatarView preview, identity name/enabled/default, `AgentSyncStatusCard`
+  with retry-sync, model dropdown, voice-mode toggle, instructions, knowledge status); an
+  `OverlayDrawer` `ConfigurationRail` (language → per-locale voice + greeting, interim/proactive,
+  `AvatarGrid`, advanced turn-detection/EOU/noise/echo/temperature/playback).
+- **Persona API client** (`api/personas.ts`): list/get/create/update/set-default/retry-sync over the
+  shared `adminRequest`, with `voice_map`/`greeting_map` JSON-string ⇄ record helpers.
+- **Avatar picker** (`data/avatarCharacters.ts` + `AvatarGrid`): a small roster of Voice Live video
+  avatars (lisa/harry/meg/jeff) writing the persona `character`/`style` fields the backend already
+  maps to the Voice Live avatar config.
+
+### Notes
+- Model dropdown lists the resource's real deployments and the knowledge status shows the real
+  configured Foundry IQ base (both via the existing admin config endpoints, Entra-backed live).
+  Per-persona model + knowledge overrides are intentionally not persisted (no backend field) — model
+  is informational, knowledge is bound from the global config; both link back to `/admin`.
+- Editor preview is static (no live WebRTC in the editor) — orb + selected character/style label +
+  greeting; the live avatar face is the interview page (F9).
+- Frontend 29 → 43 tests; typecheck + lint (`--max-warnings 0`) + build + E2E (4) all green.
+- Builds on Phase 2 (v0.18.0.0); this Phase 3 is additive frontend.
+
 ## 0.18.0.0 (2026-08-10)
 
 Phase 2 of the Foundry-agent interviewer refactor (epic #26, issue #28): the Azure-integration

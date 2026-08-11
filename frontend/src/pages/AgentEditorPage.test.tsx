@@ -1,0 +1,233 @@
+/** AgentEditorPage (Phase 3): login gate → persona list → edit; regions, dropdowns, save, avatar. */
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { FluentProvider, webLightTheme } from "@fluentui/react-components";
+import { AgentEditorPage } from "./AgentEditorPage";
+import * as personas from "../api/personas";
+import * as admin from "../api/admin";
+import * as auth from "../api/auth";
+
+function renderPage() {
+  return render(
+    <FluentProvider theme={webLightTheme}>
+      <AgentEditorPage />
+    </FluentProvider>,
+  );
+}
+
+const ADMIN_USER = {
+  id: "u1",
+  username: "admin",
+  email: "admin@local",
+  full_name: "Admin",
+  role: "admin",
+  is_active: true,
+  preferred_language: "zh-CN",
+};
+
+const PERSONA: personas.PersonaOut = {
+  id: "p1",
+  name: "Demo Interviewer",
+  character: "lisa",
+  style: "casual",
+  prompt_fragment: "You are an interviewer.",
+  voice_map: '{"zh-CN":"zh-CN-XiaoxiaoNeural"}',
+  greeting_map: '{"zh-CN":"你好"}',
+  enabled: true,
+  is_default: true,
+  turn_detection: "azure_semantic_vad",
+  eou_detection: true,
+  noise_suppression: true,
+  echo_cancellation: true,
+  interim_response: true,
+  proactive_engagement: false,
+  voice_temperature: 0.8,
+  playback_speed: 1.0,
+  agent_id: "interviewer-p1",
+  agent_version: "3",
+  agent_sync_status: "synced",
+  agent_sync_error: null,
+};
+
+function mockAdminLogin() {
+  vi.spyOn(auth, "login").mockImplementation(async () => {
+    auth.setToken("jwt-token");
+    return "jwt-token";
+  });
+  vi.spyOn(auth, "me").mockResolvedValue(ADMIN_USER);
+}
+
+/** Stub the discovery endpoints the definition panel loads (model + KB config). */
+function mockDiscovery() {
+  vi.spyOn(admin, "listModelDeployments").mockResolvedValue([
+    { value: "gpt-5.4-mini", label: "gpt-5.4-mini" },
+  ]);
+  vi.spyOn(admin, "getAiFoundryConfig").mockResolvedValue({
+    endpoint: "https://demo.services.ai.azure.com",
+    masked_key: "",
+    default_project: "demo-prj",
+    model_or_deployment: "gpt-5.4-mini",
+    knowledge_base: "sop-kb",
+    knowledge_source: "sop-ks",
+    is_active: true,
+  });
+}
+
+async function signIn(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(screen.getByTestId("agent-username-input"), "admin");
+  await user.type(screen.getByTestId("agent-password-input"), "pw");
+  await user.click(screen.getByTestId("agent-login"));
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  sessionStorage.clear();
+});
+
+describe("AgentEditorPage", () => {
+  it("gates on login, then lists personas after admin sign-in", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    mockDiscovery();
+    const listSpy = vi.spyOn(personas, "listPersonas").mockResolvedValue([PERSONA]);
+
+    renderPage();
+    expect(screen.getByTestId("agent-username-input")).toBeInTheDocument();
+    await signIn(user);
+
+    await waitFor(() => expect(screen.getByText("Demo Interviewer")).toBeInTheDocument());
+    expect(listSpy).toHaveBeenCalled();
+    expect(screen.getByTestId("editor-empty")).toBeInTheDocument(); // nothing selected yet
+  });
+
+  it("rejects a non-admin user", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(auth, "login").mockImplementation(async () => {
+      auth.setToken("jwt-token");
+      return "jwt-token";
+    });
+    vi.spyOn(auth, "me").mockResolvedValue({ ...ADMIN_USER, role: "user" });
+
+    renderPage();
+    await signIn(user);
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/管理员/));
+    expect(auth.getToken()).toBe("");
+  });
+
+  it("selecting a persona renders the definition panel + config drawer regions", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    mockDiscovery();
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([PERSONA]);
+    vi.spyOn(personas, "getPersona").mockResolvedValue(PERSONA);
+
+    renderPage();
+    await signIn(user);
+    await user.click(await screen.findByTestId("persona-item-p1"));
+
+    // Center definition panel populated from the persona.
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-name")).toHaveValue("Demo Interviewer"),
+    );
+    expect(screen.getByTestId("persona-instructions")).toHaveValue("You are an interviewer.");
+    // Model dropdown populated from discovery.
+    await waitFor(() => expect(screen.getByTestId("model-dropdown")).toBeInTheDocument());
+    // KB status shows the configured base.
+    await waitFor(() => expect(screen.getByTestId("knowledge-kb")).toHaveTextContent("sop-kb"));
+    // Agent sync status.
+    expect(screen.getByTestId("agent-sync-badge")).toHaveTextContent(/synced/i);
+
+    // Open the configuration drawer → rail regions present.
+    await user.click(screen.getByTestId("open-config-drawer"));
+    await waitFor(() => expect(screen.getByTestId("configuration-rail-body")).toBeInTheDocument());
+    expect(screen.getByTestId("config-language")).toBeInTheDocument();
+    expect(screen.getByTestId("avatar-grid")).toBeInTheDocument();
+  });
+
+  it("save calls updatePersona with edited fields (maps stringified)", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    mockDiscovery();
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([PERSONA]);
+    vi.spyOn(personas, "getPersona").mockResolvedValue(PERSONA);
+    const update = vi.spyOn(personas, "updatePersona").mockResolvedValue(PERSONA);
+
+    renderPage();
+    await signIn(user);
+    await user.click(await screen.findByTestId("persona-item-p1"));
+    await waitFor(() => expect(screen.getByTestId("persona-name")).toHaveValue("Demo Interviewer"));
+
+    const name = screen.getByTestId("persona-name");
+    await user.clear(name);
+    await user.type(name, "Renamed");
+    await user.click(screen.getByTestId("persona-save"));
+
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    const [id, payload] = update.mock.calls[0];
+    expect(id).toBe("p1");
+    expect(payload.name).toBe("Renamed");
+    expect(typeof payload.voice_map).toBe("string"); // maps serialized back to JSON strings
+    expect(JSON.parse(payload.voice_map!)["zh-CN"]).toBe("zh-CN-XiaoxiaoNeural");
+  });
+
+  it("avatar grid selection sets character/style on save", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    mockDiscovery();
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([PERSONA]);
+    vi.spyOn(personas, "getPersona").mockResolvedValue(PERSONA);
+    const update = vi.spyOn(personas, "updatePersona").mockResolvedValue(PERSONA);
+
+    renderPage();
+    await signIn(user);
+    await user.click(await screen.findByTestId("persona-item-p1"));
+    await waitFor(() => expect(screen.getByTestId("persona-name")).toHaveValue("Demo Interviewer"));
+
+    await user.click(screen.getByTestId("open-config-drawer"));
+    await user.click(await screen.findByTestId("avatar-option-harry"));
+    await user.click(screen.getByTestId("persona-save"));
+
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    const payload = update.mock.calls[0][1];
+    expect(payload.character).toBe("harry");
+    expect(payload.style).toBe("casual"); // harry's first style
+  });
+
+  it("retry-sync calls retrySyncPersona", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    mockDiscovery();
+    const failed = { ...PERSONA, agent_sync_status: "failed" as const, agent_sync_error: "boom" };
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([failed]);
+    vi.spyOn(personas, "getPersona").mockResolvedValue(failed);
+    const retry = vi.spyOn(personas, "retrySyncPersona").mockResolvedValue(PERSONA);
+
+    renderPage();
+    await signIn(user);
+    await user.click(await screen.findByTestId("persona-item-p1"));
+    await waitFor(() => expect(screen.getByTestId("agent-sync-error")).toHaveTextContent("boom"));
+
+    await user.click(screen.getByTestId("agent-retry-sync"));
+    await waitFor(() => expect(retry).toHaveBeenCalledWith("p1"));
+  });
+
+  it("New persona shows an empty form and creates on save", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    mockDiscovery();
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([]);
+    const create = vi.spyOn(personas, "createPersona").mockResolvedValue(PERSONA);
+
+    renderPage();
+    await signIn(user);
+    await user.click(await screen.findByTestId("persona-new"));
+
+    await waitFor(() => expect(screen.getByTestId("persona-name")).toHaveValue(""));
+    await user.type(screen.getByTestId("persona-name"), "Fresh");
+    await user.click(screen.getByTestId("persona-save"));
+
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    expect(create.mock.calls[0][0].name).toBe("Fresh");
+  });
+});
