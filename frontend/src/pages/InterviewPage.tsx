@@ -28,6 +28,7 @@ import {
 } from "@fluentui/react-components";
 import {
   getReport,
+  resumeInterview,
   startInterview,
   submitAnswer,
   VoiceSessionError,
@@ -35,6 +36,7 @@ import {
   type Report,
 } from "../api/client";
 import { MicAccessError, useInterviewVoice } from "../hooks/useInterviewVoice";
+import { collectVoiceAnswer } from "./interviewVoiceAnswer";
 import type { TranscriptSegment } from "../types/voice";
 import { AvatarView } from "../components/AvatarView";
 import { QuestionProgress } from "../components/QuestionProgress";
@@ -63,6 +65,12 @@ export function InterviewPage() {
   interviewRef.current = interview;
   // The avatar video element the voice hook attaches a digital-human track to (F5/F9).
   const avatarVideoRef = useRef<HTMLVideoElement | null>(null);
+  // Final voice-transcript segment ids already POSTed, so a turn with multiple final segments
+  // (candidate paused mid-answer) submits ALL of them once — not just the latest (content-loss fix).
+  const submittedSegmentIds = useRef<Set<string>>(new Set());
+  // The prompt text last spoken aloud in voice mode, so we don't re-speak it on every re-render
+  // (keyed on the text so a follow-up on the same question_id is still spoken).
+  const spokenQuestionId = useRef<string | null>(null);
 
   const onTranscript = useCallback((seg: TranscriptSegment) => {
     setSegments((prev) => {
@@ -138,13 +146,11 @@ export function InterviewPage() {
       const iv = interviewRef.current;
       if (!iv) return;
       voice.commitAnswer();
-      // The candidate's spoken words for this turn (latest final user segment) become the answer.
-      const spoken = [...segments].reverse().find((s) => s.role === "user" && s.isFinal);
-      const updated = await submitAnswer(
-        iv.interview_session_id,
-        spoken?.content ?? "",
-        "voice",
-      );
+      // ALL of this turn's not-yet-submitted final user segments join into the answer (content-loss
+      // fix); mark them submitted so the next turn starts clean.
+      const { text: spoken, ids } = collectVoiceAnswer(segments, submittedSegmentIds.current);
+      ids.forEach((id) => submittedSegmentIds.current.add(id));
+      const updated = await submitAnswer(iv.interview_session_id, spoken, "voice");
       await advanceOrComplete(updated);
     });
 
@@ -153,6 +159,7 @@ export function InterviewPage() {
     setMicDialogOpen(false);
     try {
       await voice.connect(i18n.language);
+      setVoiceUnavailable(false); // a successful (re)connect clears a prior transient failure
     } catch (err) {
       if (err instanceof MicAccessError) {
         setMicRetried((prev) => prev || micDialogOpen);
@@ -165,6 +172,27 @@ export function InterviewPage() {
     }
   }, [voice, i18n.language, micDialogOpen]);
 
+  // Resume an in-progress interview on mount (edge b): a reload lands back on the pending question
+  // instead of stranding it behind a fresh /start. No saved/live interview → stay on the idle
+  // screen. Runs once.
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const iv = await resumeInterview();
+        if (active && iv) {
+          setInterview(iv);
+          setPhase("interviewing");
+        }
+      } catch {
+        /* nothing resumable — idle screen */
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   // Tear down the voice connection when the page unmounts (mic + WebRTC + signaling socket).
   useEffect(() => {
     return () => {
@@ -172,6 +200,24 @@ export function InterviewPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Voice mode: speak the backend-authoritative question text (Phase 4 voice→turn sub-design).
+  // When a new prompt is current and voice is connected, have Voice Live read it verbatim rather
+  // than let the agent autonomously generate — the backend keeps the question pointer. Keyed on the
+  // prompt TEXT, not question_id, so a follow-up (same question_id, new prompt) is spoken too.
+  const currentPrompt = interview?.current_question?.prompt ?? "";
+  useEffect(() => {
+    if (
+      channel === "voice" &&
+      voice.connectionState === "connected" &&
+      currentPrompt &&
+      spokenQuestionId.current !== currentPrompt
+    ) {
+      if (voice.speakQuestion(currentPrompt)) {
+        spokenQuestionId.current = currentPrompt;
+      }
+    }
+  }, [channel, voice, currentPrompt]);
 
   const q = interview?.current_question ?? null;
   const scoringNarr = t("transition.scoring", {
@@ -302,6 +348,15 @@ export function InterviewPage() {
           {/* (4) transcript secondary — (5) sources panel intentionally omitted during live Q&A (P12) */}
           <Transcript segments={segments} />
         </div>
+      )}
+
+      {/* Edge (a): an interview with no question to show (empty bank / defensive backend null).
+          A defined end state, not a blank page — never leave the candidate on a broken screen. */}
+      {(phase === "orientation" || phase === "interviewing") && !q && (
+        <Card>
+          <CardHeader header={<Text weight="semibold">{t("noQuestions.title")}</Text>} />
+          <Body1 style={{ display: "block" }}>{t("noQuestions.body")}</Body1>
+        </Card>
       )}
 
       {/* Scoring-in-progress beat (P10) */}

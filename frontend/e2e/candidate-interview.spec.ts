@@ -100,3 +100,24 @@ test("candidate never sees rubric/checklist content (P3)", async ({ page }) => {
     expect(body.toLowerCase()).not.toContain(leaked);
   }
 });
+
+test("candidate resumes an in-progress interview after a page reload (F6 edge b)", async ({
+  page,
+}) => {
+  await page.goto("/interview");
+  await page.getByRole("button", { name: /开始面试|start interview/i }).click();
+  await page.getByRole("button", { name: /我准备好了|i'm ready/i }).click();
+  await expect(page.getByTestId("question-progress")).toBeVisible();
+
+  // Answer once so the interview is genuinely mid-flight, then reload the page.
+  await page.getByRole("textbox").fill("My first answer, of ample length for scoring.");
+  await page.getByRole("button", { name: /提交回答|submit answer/i }).click();
+  await page.waitForTimeout(250);
+
+  await page.reload();
+
+  // Resumes straight into the interview (question + answer box), NOT back to the Start screen.
+  await expect(page.getByTestId("question-progress")).toBeVisible();
+  await expect(page.getByRole("textbox")).toBeVisible();
+  await expect(page.getByRole("button", { name: /开始面试|start interview/i })).toHaveCount(0);
+});

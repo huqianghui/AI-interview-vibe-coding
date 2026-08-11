@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.20.0.0 (2026-08-11)
+
+The interview flow, fused and hardened. A candidate can answer each question by text OR voice and
+reload the page without losing their place; in voice mode the digital human now speaks the actual
+interview question (not an improvised one); and a few sharp edges are gone. Phase 4 of epic #26 —
+an audit confirmed the turn-by-turn spine (ask one question at a time, backend decides follow-up
+vs next, ends when the bank is exhausted) was already built, so this release closes the real gaps
+that audit found rather than rebuilding it.
+
+### Added
+- **Resume after reload.** Your in-progress interview survives a browser refresh: the app persists
+  the interview id and re-reads the pending question (new `GET /candidate/interview/{id}`), landing
+  you back where you were instead of restarting from question 1. Starting again mid-interview
+  resumes the same session rather than orphaning it.
+- **A defined "no questions" screen** instead of a blank page if an interview has no questions.
+
+### Changed
+- **Voice speaks the real question.** In voice mode the interviewer now reads the backend's
+  authoritative question text verbatim, instead of letting the agent generate its own utterance —
+  so what you hear matches the question being scored (Phase 4 voice→turn design).
+- **Voice answers keep everything you said.** If you pause mid-answer (producing several final
+  transcript segments), all of them are now submitted as one answer; previously only the last
+  fragment was kept.
+- **The "Answer by voice" button recovers.** A transient voice failure no longer disables voice for
+  the rest of the interview — a successful reconnect re-enables it.
+
+### Notes
+- The turn-by-turn state machine remains the single decision-maker for follow-up vs next (it never
+  bypasses to the agent); text and voice both converge on one `answer_finalized` event.
+- Backend ~290 tests / ~87% cov (resume, multi-follow-up, empty-bank terminal, voice-source over
+  HTTP, voice-fail-then-text); frontend 34 tests; E2E 5 (added a real-browser reload-resume).
+- Live voice round-trip (the digital human speaking the injected question) is a manual Layer-3
+  check against Azure Voice Live; the wiring is unit-covered where jsdom allows.
+- Builds on epic #26 Phases 1–3 (v0.17–v0.19).
+
 ## 0.19.0.0 (2026-08-10)
 
 A Foundry-portal-style Agent editor. Admins get a new `/admin/agent` page that looks and configures

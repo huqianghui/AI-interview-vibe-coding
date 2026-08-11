@@ -36,8 +36,41 @@ class InterviewStateError(Exception):
     """Raised on an illegal state transition (e.g. answering a completed interview)."""
 
 
+async def find_resumable_interview(
+    db: AsyncSession, candidate_session_id: str
+) -> InterviewSession | None:
+    """The candidate's most recent still-in-progress interview, or None.
+
+    Lets ``start_interview`` resume instead of orphaning an in-progress session on a page reload
+    (edge case b). Ordered by creation so the latest wins if more than one somehow exists.
+    """
+    return (
+        (
+            await db.execute(
+                select(InterviewSession)
+                .where(
+                    InterviewSession.candidate_session_id == candidate_session_id,
+                    InterviewSession.status == "in_progress",
+                )
+                .order_by(InterviewSession.created_at.desc())
+            )
+        )
+        .scalars()
+        .first()
+    )
+
+
 async def start_interview(db: AsyncSession, candidate_session_id: str) -> InterviewSession:
-    """Create a session and record the first interviewer turn (asking question 1)."""
+    """Start a new interview — or resume the candidate's existing in-progress one.
+
+    Resuming (edge case b) prevents a reload from stranding a live interview behind a second,
+    disconnected session. Only a fresh start records the first interviewer turn (asking question 1);
+    a resumed session already has its turns, and ``get_current_question`` replays the pending one.
+    """
+    existing = await find_resumable_interview(db, candidate_session_id)
+    if existing is not None:
+        return existing
+
     session = InterviewSession(
         candidate_session_id=candidate_session_id,
         status="in_progress",
@@ -61,6 +94,12 @@ async def start_interview(db: AsyncSession, candidate_session_id: str) -> Interv
                 content=first.prompt,
             )
         )
+    else:
+        # No questions resolved at all (only reachable if FALLBACK_QUESTIONS is emptied — see
+        # questions.resolve_questions). Nothing to ask → the interview is immediately complete
+        # rather than a live session with no question (edge case a: a defined terminal state).
+        session.status = "completed"
+        session.completed_at = _now()
     await db.commit()
     await db.refresh(session)
     return session

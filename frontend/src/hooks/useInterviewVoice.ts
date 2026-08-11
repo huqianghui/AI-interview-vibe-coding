@@ -369,6 +369,32 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
     }
   }, []);
 
+  /** Speak the backend-provided question text verbatim (SPEC Phase 4 voice→turn sub-design).
+   *
+   * The backend keeps the question pointer authoritative, so voice must SPEAK its text, not let
+   * the agent generate its own. We inject the question as an assistant conversation item and ask
+   * Voice Live to read it exactly, rather than firing a bare `response.create` (which would make
+   * the agent autonomously produce whatever its generic instructions yield). Returns true if the
+   * request was sent (a live socket exists). Live-path behaviour is Layer-3 verified. */
+  const speakQuestion = useCallback((text: string): boolean => {
+    const ws = signalingWsRef.current;
+    if (!text || ws?.readyState !== WebSocket.OPEN) return false;
+    ws.send(
+      JSON.stringify({
+        type: "conversation.item.create",
+        item: { type: "message", role: "assistant", content: [{ type: "text", text }] },
+      }),
+    );
+    // Read the injected text verbatim — not an agent-generated turn.
+    ws.send(
+      JSON.stringify({
+        type: "response.create",
+        response: { instructions: `Read this question aloud verbatim, then stop:\n${text}` },
+      }),
+    );
+    return true;
+  }, []);
+
   useEffect(() => {
     return () => {
       intentionalCloseRef.current = true;
@@ -382,6 +408,7 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
     disconnect,
     toggleMute,
     commitAnswer,
+    speakQuestion,
     isMuted,
     connectionState,
     audioState,

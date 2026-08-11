@@ -128,9 +128,48 @@ export async function ensureSession(): Promise<string> {
   return body.token;
 }
 
+const INTERVIEW_KEY = "interview_session_id";
+
+function getSavedInterviewId(): string | null {
+  return typeof localStorage !== "undefined" ? localStorage.getItem(INTERVIEW_KEY) : null;
+}
+
+function saveInterviewId(id: string): void {
+  if (typeof localStorage !== "undefined") localStorage.setItem(INTERVIEW_KEY, id);
+}
+
+function clearSavedInterviewId(): void {
+  if (typeof localStorage !== "undefined") localStorage.removeItem(INTERVIEW_KEY);
+}
+
+/** Start an interview — or resume the candidate's in-progress one (the backend reuses it), and
+ * persist the id so a page reload can resume via {@link resumeInterview}. */
 export async function startInterview(): Promise<Interview> {
   await ensureSession();
-  return request<Interview>("/candidate/interview/start", { method: "POST" });
+  const iv = await request<Interview>("/candidate/interview/start", { method: "POST" });
+  saveInterviewId(iv.interview_session_id);
+  return iv;
+}
+
+/** Resume a persisted in-progress interview on reload, or null if none/over (SPEC F6 edge b).
+ * Reads the saved id and GETs its current state; a completed/missing/not-owned interview clears
+ * the saved id and returns null so the page falls back to the idle start screen. */
+export async function resumeInterview(): Promise<Interview | null> {
+  const id = getSavedInterviewId();
+  if (!id) return null;
+  const token = getToken();
+  if (!token) return null;
+  try {
+    const iv = await request<Interview>(`/candidate/interview/${id}`);
+    if (iv.status !== "in_progress" || !iv.current_question) {
+      clearSavedInterviewId();
+      return null;
+    }
+    return iv;
+  } catch {
+    clearSavedInterviewId(); // 404 (not found / not owned) → nothing to resume
+    return null;
+  }
 }
 
 export async function submitAnswer(
