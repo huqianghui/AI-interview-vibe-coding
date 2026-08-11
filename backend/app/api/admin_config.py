@@ -5,8 +5,8 @@ encrypted) to the ``service_configs`` master row and overlaid onto the settings 
 takes effect immediately (no restart) — see ``app.services.config_overlay``. This is what lets
 production read the user's own config instead of ``.env``.
 
-All routes require the admin bearer token (``require_admin``). The API key is write-only: responses
-return only a masked value, never the stored token.
+All routes require an admin JWT (``require_role("admin")`` — Phase 1 auth, same guard as the other
+admin routers). The API key is write-only: responses return only a masked value, never the token.
 """
 
 import logging
@@ -17,15 +17,16 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.dependencies import require_admin
+from app.dependencies import require_role
 from app.services import config_service
+from app.services.agents import foundry_connections
 from app.services.config_overlay import apply_master_config_to_settings
 from app.services.config_service import InvalidEndpointError
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
-    prefix="/admin/config", tags=["admin-config"], dependencies=[Depends(require_admin)]
+    prefix="/admin/config", tags=["admin-config"], dependencies=[Depends(require_role("admin"))]
 )
 
 
@@ -195,42 +196,19 @@ async def list_model_deployments(db: AsyncSession = Depends(get_db)) -> list[Opt
 async def list_knowledge_bases(db: AsyncSession = Depends(get_db)) -> list[Option]:
     """List the resource's Foundry IQ knowledge bases for the config-page dropdown.
 
-    api-key first, retry once with Entra on 401/403. Fail-soft: any error → []; never 500.
+    Delegates to :func:`foundry_connections.list_knowledge_bases` (Phase 2.2) — the shared
+    discovery path (resolve the AI Search connection via the project client, then call the Search
+    data-plane API with Entra-first / api-key-fallback auth). Fail-soft: any error → []; never 500.
     """
     master = await config_service.get_master_config(db)
-    api_key = await config_service.get_decrypted_key(db)
     if not (master and master.endpoint):
         return []
-    base = master.endpoint.rstrip("/")
-    params = {"api-version": "2026-05-01-preview"}
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            headers = {"api-key": api_key} if api_key else await _search_entra_headers()
-            r = await client.get(f"{base}/knowledgebases", params=params, headers=headers)
-            if r.status_code in (401, 403) and api_key:
-                r = await client.get(
-                    f"{base}/knowledgebases", params=params, headers=await _search_entra_headers()
-                )
-            if r.status_code == 200:
-                value = r.json().get("value", [])
-                return [
-                    Option(value=kb["name"], label=kb.get("description") or kb["name"])
-                    for kb in value
-                    if kb.get("name")
-                ]
-            logger.warning("Foundry IQ knowledgebases API returned %s", r.status_code)
-    except (httpx.HTTPError, KeyError, ValueError) as exc:
-        logger.warning("Foundry IQ knowledgebases API failed: %s", exc)
-    return []
-
-
-async def _search_entra_headers() -> dict[str, str]:
-    """Entra bearer for the AI Search / Foundry IQ scope (fallback when no api-key)."""
-    from azure.identity.aio import DefaultAzureCredential
-
-    cred = DefaultAzureCredential()
-    try:
-        token = await cred.get_token("https://search.azure.com/.default")
-        return {"Authorization": f"Bearer {token.token}"}
-    finally:
-        await cred.close()
+    api_key = await config_service.get_decrypted_key(db)
+    kbs = await foundry_connections.list_knowledge_bases(
+        endpoint=master.endpoint, project=master.default_project, api_key=api_key
+    )
+    return [
+        Option(value=kb["name"], label=kb.get("description") or kb["name"])
+        for kb in kbs
+        if kb.get("name")
+    ]

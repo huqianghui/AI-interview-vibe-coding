@@ -13,20 +13,29 @@ Key contract facts (learned the hard way in the reference):
 - The Voice Live metadata SHAPE is owned by the pure, CI-tested ``voice_live_metadata`` builder —
   this module only transports it. That split is why the demo-critical snake_case invariant is
   verified without a live Azure call (see docs/SPIKE-F1-foundry-iq.md Trigger C).
+- Create can hit transient connection drops; those are retried with exponential backoff
+  (:func:`_is_transient_error`, ported from the reference's create loop) before recovery/raise.
 
 The SDK is synchronous; every call is wrapped in ``asyncio.to_thread`` so it never blocks the
 event loop.
+
+Reverse-sync (pull Portal edits back via ``agents.get`` metadata) and metadata-only updates are
+deferred to the editor UI phase (#29), where they have a consumer — porting them now would be
+coverage-omitted code nothing calls.
 """
 
 import asyncio
 import time
 from typing import Any
 
+from app.services.agents.foundry_client import (
+    FoundryClientError,
+    build_project_client,
+    project_endpoint,
+)
 from app.services.agents.knowledge_tool import build_agent_tools
 from app.services.agents.voice_live_metadata import build_voice_live_metadata
 
-# Entra scope used to probe for a usable DefaultAzureCredential before falling back to API key.
-_FOUNDRY_SCOPE = "https://ai.azure.com/.default"
 # Fallback only — the registry always passes settings.foundry_agent_model (which itself resolves
 # DB > .env > code default). Kept as a neutral literal for the bare-constructor case.
 _MODEL_ENV_DEFAULT = "gpt-4o"
@@ -36,21 +45,26 @@ class AgentSyncError(RuntimeError):
     """Raised when a persona cannot be synced to a Foundry prompt agent."""
 
 
-class _ApiKeyTokenCredential:
-    """Minimal TokenCredential stub so AIProjectClient accepts API-key auth.
+# Create can hit transient connection drops against the Foundry endpoint; retry those a few times
+# with exponential backoff before giving up (ported from the reference's create_agent retry loop).
+_MAX_CREATE_ATTEMPTS = 3
+_TRANSIENT_MARKERS = (
+    "RemoteDisconnected",
+    "Connection aborted",
+    "ConnectionError",
+    "ConnectionResetError",
+)
 
-    The SDK constructor requires a ``get_token`` method; real request auth is handled by the
-    AzureKeyCredentialPolicy header, so this only needs to return a well-formed AccessToken.
+
+def _is_transient_error(exc: BaseException) -> bool:
+    """True when an SDK error looks like a transient connection drop worth retrying.
+
+    Pure + unit-testable: classifies by the exception's string form (the SDK raises various
+    connection error types), matching the reference's transient-marker set. A 500/auth error is
+    NOT transient — those flow to the pre-created-agent recovery path instead.
     """
-
-    def __init__(self, api_key: str) -> None:
-        self._api_key = api_key
-
-    def get_token(self, *scopes: str, **kwargs: Any) -> Any:
-        from azure.core.credentials import AccessToken
-
-        # Far-future expiry; the token itself is never sent (header policy carries the key).
-        return AccessToken(self._api_key, int(time.time()) + 3600)
+    text = str(exc)
+    return any(marker in text for marker in _TRANSIENT_MARKERS)
 
 
 class AzureAgentSyncAdapter:
@@ -73,7 +87,7 @@ class AzureAgentSyncAdapter:
         # (…/api/projects/{project}), not the bare Foundry account endpoint — the bare form 404s on
         # every agents call (caught live 2026-08-09). Build it from endpoint + project when a
         # project is given and the endpoint isn't already project-scoped.
-        self._endpoint = self._project_endpoint(endpoint, project)
+        self._endpoint = project_endpoint(endpoint, project)
         self._model = model
         self._api_key = api_key
         # SOP knowledge-base binding via MCP (P15). Empty search config → no knowledge tool. The
@@ -99,38 +113,48 @@ class AzureAgentSyncAdapter:
             connection_id=self._mcp_connection_id or None,
         )
 
-        client = self._project_client()
-        try:
-            result = await self._create_version(client, agent_name, instructions, metadata, tools)
-        except Exception as exc:  # noqa: BLE001 — normalize any SDK error into a recovery attempt
-            result = await self._recover_or_raise(
-                client, agent_name, instructions, metadata, tools, exc
-            )
-
+        # _project_client does a synchronous Entra probe (blocking network/az-CLI call), so build it
+        # off the event loop like the SDK calls it wraps.
+        client = await asyncio.to_thread(self._project_client)
+        result = await self._create_with_retry(client, agent_name, instructions, metadata, tools)
         return {
             "agent_id": str(result.get("id") or agent_name),
             "agent_version": str(result.get("version") or ""),
         }
 
+    async def _create_with_retry(  # pragma: no cover — needs a live Foundry endpoint
+        self,
+        client: Any,
+        agent_name: str,
+        instructions: str,
+        metadata: dict[str, str],
+        tools: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Create the agent version, retrying transient connection drops with 2s/4s backoff.
+
+        A transient error (:func:`_is_transient_error`) is retried up to ``_MAX_CREATE_ATTEMPTS``;
+        a non-transient failure (500/auth/etc.) goes straight to the pre-created-agent recovery
+        path — API-key auth can update a Portal-created agent but cannot create a new one.
+        """
+        for attempt in range(1, _MAX_CREATE_ATTEMPTS + 1):
+            try:
+                return await self._create_version(client, agent_name, instructions, metadata, tools)
+            except Exception as exc:  # noqa: BLE001 — classify, then retry or recover
+                if _is_transient_error(exc) and attempt < _MAX_CREATE_ATTEMPTS:
+                    await asyncio.sleep(2**attempt)  # 2s, 4s
+                    continue
+                return await self._recover_or_raise(
+                    client, agent_name, instructions, metadata, tools, exc
+                )
+        # Unreachable: the loop either returns or the final attempt hits the else branch above.
+        raise AgentSyncError(f"Could not create agent {agent_name!r} after retries")
+
     async def delete_persona_agent(self, persona: Any) -> None:
         """Best-effort delete of the persona's Foundry agent (used when a persona is removed)."""
-        client = self._project_client()
+        client = await asyncio.to_thread(self._project_client)
         await asyncio.to_thread(client.agents.delete, agent_name=self._agent_name(persona))
 
     # -- internals ----------------------------------------------------------
-
-    @staticmethod
-    def _project_endpoint(endpoint: str, project: str) -> str:
-        """Return the project-scoped Foundry endpoint the SDK requires.
-
-        ``https://{acct}.services.ai.azure.com/`` + project → ``…/api/projects/{project}``. Left
-        as-is when already project-scoped or when no project is configured (the caller then owns
-        whether that endpoint works).
-        """
-        base = (endpoint or "").rstrip("/")
-        if not base or not project or "/api/projects/" in base:
-            return base
-        return f"{base}/api/projects/{project}"
 
     def _agent_name(self, persona: Any) -> str:
         return f"interviewer-{persona.id}"
@@ -206,33 +230,12 @@ class AzureAgentSyncAdapter:
         return await self._create_version(client, agent_name, instructions, metadata, tools)
 
     def _project_client(self) -> Any:
-        from azure.ai.projects import AIProjectClient
+        """Build the project-scoped ``AIProjectClient`` (Entra-first, API-key fallback).
 
-        # 1) Prefer Entra ID — required to create new agents.
+        Delegates to the shared :mod:`foundry_client` builder so the credential decision lives in
+        one place; normalizes its error into an :class:`AgentSyncError` for this adapter's callers.
+        """
         try:
-            from azure.identity import DefaultAzureCredential
-
-            credential = DefaultAzureCredential()
-            credential.get_token(_FOUNDRY_SCOPE)  # probe; raises if unusable
-            return AIProjectClient(endpoint=self._endpoint, credential=credential)
-        except Exception:  # noqa: BLE001 — fall through to API key
-            pass
-
-        # 2) Fall back to API key (read/update/delete of existing agents only).
-        if self._api_key:
-            from azure.core.credentials import AzureKeyCredential
-            from azure.core.pipeline.policies import AzureKeyCredentialPolicy
-
-            # AIProjectClient's constructor type-checks for a TokenCredential (needs get_token).
-            # Real auth happens via the AzureKeyCredentialPolicy header; this stub only satisfies
-            # the constructor (ported from the reference's _ApiKeyTokenCredential).
-            return AIProjectClient(
-                endpoint=self._endpoint,
-                credential=_ApiKeyTokenCredential(self._api_key),
-                authentication_policy=AzureKeyCredentialPolicy(
-                    credential=AzureKeyCredential(self._api_key), name="api-key"
-                ),
-            )
-        raise AgentSyncError(
-            "No usable Foundry credential: DefaultAzureCredential failed and no API key set."
-        )
+            return build_project_client(self._endpoint, self._api_key)
+        except FoundryClientError as exc:
+            raise AgentSyncError(str(exc)) from exc

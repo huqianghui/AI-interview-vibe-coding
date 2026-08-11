@@ -3,6 +3,7 @@ import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { InterviewPage } from "./pages/InterviewPage";
 import { AdminPage } from "./pages/AdminPage";
+import { AgentEditorPage } from "./pages/AgentEditorPage";
 import { LanguageSwitcher } from "./components/LanguageSwitcher";
 
 export function App() {
@@ -21,6 +22,8 @@ export function App() {
         <Route path="/" element={<Navigate to="/interview" replace />} />
         <Route path="/interview" element={<InterviewPage />} />
         <Route path="/admin" element={<AdminPage />} />
+        <Route path="/admin/agent" element={<AgentEditorPage />} />
+        <Route path="/admin/agent/:personaId" element={<AgentEditorPage />} />
       </Routes>
     </FluentProvider>
   );

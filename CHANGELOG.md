@@ -33,7 +33,99 @@ that audit found rather than rebuilding it.
   HTTP, voice-fail-then-text); frontend 34 tests; E2E 5 (added a real-browser reload-resume).
 - Live voice round-trip (the digital human speaking the injected question) is a manual Layer-3
   check against Azure Voice Live; the wiring is unit-covered where jsdom allows.
-- Builds on epic #26 Phases 1–3 (PRs #33/#34 still landing); this branch is off main.
+- Builds on epic #26 Phases 1–3 (v0.17–v0.19).
+
+## 0.19.0.0 (2026-08-10)
+
+A Foundry-portal-style Agent editor. Admins get a new `/admin/agent` page that looks and configures
+like the Azure AI Foundry prompt-agent editor: a left persona nav, a center agent-definition column
+(digital-human preview, identity, model, instructions, knowledge status), and a gear-triggered
+Configuration rail (language, speech voice + greeting per language, interim/proactive toggles, an
+avatar picker grid, and advanced audio knobs). Pick an interviewer, edit its instructions and voice,
+choose a digital-human avatar, and save — the backend creates/updates the Foundry agent behind it.
+This is Phase 3 of epic #26; built native Fluent v9 (this repo has no Radix/Tailwind to port).
+
+### Added
+- **`/admin/agent` editor** (`pages/AgentEditorPage.tsx` + `components/agent-editor/*`): login-gated
+  like `/admin`; persona nav (enabled dot, default badge, agent-sync chip, "New persona"); center
+  `AgentDefinitionPanel` (AvatarView preview, identity name/enabled/default, `AgentSyncStatusCard`
+  with retry-sync, model dropdown, voice-mode toggle, instructions, knowledge status); an
+  `OverlayDrawer` `ConfigurationRail` (language → per-locale voice + greeting, interim/proactive,
+  `AvatarGrid`, advanced turn-detection/EOU/noise/echo/temperature/playback).
+- **Persona API client** (`api/personas.ts`): list/get/create/update/set-default/retry-sync over the
+  shared `adminRequest`, with `voice_map`/`greeting_map` JSON-string ⇄ record helpers.
+- **Avatar picker** (`data/avatarCharacters.ts` + `AvatarGrid`): a small roster of Voice Live video
+  avatars (lisa/harry/meg/jeff) writing the persona `character`/`style` fields the backend already
+  maps to the Voice Live avatar config.
+
+### Notes
+- Model dropdown lists the resource's real deployments and the knowledge status shows the real
+  configured Foundry IQ base (both via the existing admin config endpoints, Entra-backed live).
+  Per-persona model + knowledge overrides are intentionally not persisted (no backend field) — model
+  is informational, knowledge is bound from the global config; both link back to `/admin`.
+- Editor preview is static (no live WebRTC in the editor) — orb + selected character/style label +
+  greeting; the live avatar face is the interview page (F9).
+- Frontend 29 → 43 tests; typecheck + lint (`--max-warnings 0`) + build + E2E (4) all green.
+- Builds on Phase 2 (v0.18.0.0); this Phase 3 is additive frontend.
+
+## 0.18.0.0 (2026-08-10)
+
+Phase 2 of the Foundry-agent interviewer refactor (epic #26, issue #28): the Azure-integration
+base. Per-module diff against AI-avatar-vibe-coding, porting **only** what this repo genuinely
+lacked — no re-porting of what already worked, no HCP-training machinery. Landed as six focused
+sub-commits (2.0–2.5). Local dev / CI still run entirely on mock providers — zero Azure to build
+or test; every live path is coverage-omitted and exercised only against real resources.
+
+### Added
+- **Centralized Azure auth** (`app/services/azure_auth.py`, Phase 2.1): single source of truth for
+  the Entra-first / API-key-fallback strategy + per-surface scope constants (Cognitive Services,
+  Foundry, Search, ARM). Both prior duplicated call sites (agent-sync, voice) now delegate.
+- **Foundry IQ connection discovery + RemoteTool creation** (`app/services/agents/foundry_connections.py`
+  + `foundry_client.py`, Phase 2.2) — the genuine gap: the app can now **obtain a usable
+  `project_connection_id`**. Lists AI Search connections + knowledge bases (the `/admin` config KB
+  dropdown now populates from the real resource through this shared path), and finds-or-creates the
+  KB's RemoteTool connection via the ARM control plane (`category=RemoteTool`,
+  `authType=ProjectManagedIdentity` — no stored secret) so the MCPTool authenticates instead of
+  403ing. Shared Entra-first `AIProjectClient` builder extracted so the adapter and the connections
+  service use one seam. Auto-resolving the connection during a persona sync (an ARM write) is
+  deferred to the editor UI phase that triggers that sync; until then the agent uses the configured
+  connection id.
+- **Agent chat via the Responses API** (`app/services/agent_chat_service.py`, Phase 2.3):
+  `chat_with_agent` / `stream_agent_response` drive the hosted Prompt Agent
+  (`responses.create` + `agent_reference`, `previous_response_id` for multi-turn); `agent_name=None`
+  gives the ungrounded plain-model fallback. This is the text/decision channel the interview state
+  machine will use. Without the reference's HCP `personalization_context`.
+- **Transient-retry on agent create** (Phase 2.5): connection drops retry with 2s/4s backoff; a
+  500/auth error goes straight to the pre-created-agent recovery path.
+
+### Changed
+- **Restored + reconnected the DB-backed AI Foundry config layer** (Phase 2.4): instead of
+  re-porting avatar's heavier `config_service`, restored this repo's own right-sized layer (single
+  master `service_configs` row, P1 endpoint-allowlist exfil guard, Fernet at-rest encryption,
+  DB > .env > code-default overlay) that Phase 2.0 had deleted, and reconnected it: admin routes
+  now use the Phase 1 JWT `require_role("admin")` guard; the KB dropdown's Entra fallback delegates
+  to `azure_auth`; the overlay's dead `azure_openai` LLM path (adapter removed in 2.0) was dropped.
+  Endpoints (`/admin/config/ai-foundry` GET/PUT/test + `/model-deployments` + `/knowledge-bases`)
+  satisfy the existing frontend `admin.ts` contract unchanged.
+
+### Removed
+- **Self-made config machinery** (Phase 2.0): the earlier bespoke `admin_config`/`config_service`/
+  `config_overlay`/`azure_llm` iteration was deleted before the port, then the config layer was
+  restored in right-sized form in 2.4. Zero remnants of `voice_live_instance` / `conference` /
+  training-`skill` / `meta-skill` concepts (grep-verified).
+
+### Tests
+- Backend: 327 pass, 88.43% coverage (new: `azure_auth`, `foundry_client`, `foundry_connections`,
+  `agent_chat_service`, `azure_agent_sync` pure-helper suites; restored `config_service` +
+  `admin_config_api` retargeted to the JWT `admin_auth` fixture). Frontend: 29 pass; E2E: 4/4.
+
+### For contributors
+- Pre-landing review (7 specialists) fixes folded in before merge: the synchronous Entra
+  credential probe in `build_project_client` now runs off the event loop (`asyncio.to_thread`) at
+  all five async call sites (it was blocking the FastAPI loop on every discovery/sync request);
+  added the missing pure-helper tests the coverage audit flagged (`_build_openai_request`,
+  `_ApiKeyTokenCredential`, `_get_credential_sync` real body); removed the unused
+  `get_token_credential_sync`.
 
 ## 0.17.0.0 (2026-08-10)
 

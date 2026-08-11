@@ -18,8 +18,8 @@ a fused text/voice interview flow, in phases (branch-per-phase, independently re
 | Phase | Status | Shipped | Notes |
 |---|---|---|---|
 | **Phase 1** User/admin login | ✅ Done | v0.17.0.0 | JWT auth (`require_role`), admin user CRUD, login UI. |
-| **Phase 2** Azure-integration base | ✅ Done | v0.18.0.0 (PR #33) | Centralized `azure_auth`; Foundry IQ connection discovery + RemoteTool creation; agent chat via Responses API; restored DB config; agent-create retry. |
-| **Phase 3** Foundry Agent editor UI | ✅ Done | v0.19.0.0 (PR #34) | `/admin/agent` — Fluent v9 editor: persona nav + agent-definition + config drawer + avatar grid + preview. |
+| **Phase 2** Azure-integration base | ✅ Done | v0.18.0.0 | Centralized `azure_auth`; Foundry IQ connection discovery + RemoteTool creation; agent chat via Responses API; restored DB config; agent-create retry. |
+| **Phase 3** Foundry Agent editor UI | ✅ Done | v0.19.0.0 | `/admin/agent` — Fluent v9 editor: persona nav + agent-definition + config drawer + avatar grid + preview. |
 | **Phase 4** Fuse the interview flow | ✅ Done | v0.20.0.0 | Audit confirmed F6/F7/F9 flow built; added: interview resume after reload (GET endpoint + client persistence), voice speaks the backend-authoritative question (not agent-autonomous), multi-segment voice content-loss fix, empty-bank terminal state, voice-off mid-interview continuation. |
 | **Phase 5** Scoring/report to real Foundry | ⏳ Planned | #31 | Port AI-Coach scoring; wire report to real Foundry output + SOP citations. |
 
