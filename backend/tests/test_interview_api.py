@@ -312,3 +312,85 @@ async def test_voice_session_409_after_completion(client, db_session):
         ).json()
     resp = await client.post(f"/candidate/interview/{interview_id}/voice/session", headers=headers)
     assert resp.status_code == 409
+
+
+# --- resume (F6 edge b) + non-text sources over HTTP -----------------------
+
+
+@pytest.mark.asyncio
+async def test_get_interview_replays_current_question(client):
+    """GET /{id} reads status + current question without mutating (resume on reload)."""
+    headers, interview_id = await _start_interview(client)
+    resp = await client.get(f"/candidate/interview/{interview_id}", headers=headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["interview_session_id"] == interview_id
+    assert body["status"] == "in_progress"
+    assert body["current_question"]["index"] == 0
+    # Idempotent: a second GET returns the same pending question (no advance).
+    again = (await client.get(f"/candidate/interview/{interview_id}", headers=headers)).json()
+    assert again["current_question"]["index"] == 0
+
+
+@pytest.mark.asyncio
+async def test_get_interview_ownership_guarded(client):
+    """Another candidate cannot read someone else's interview (same 404 as not-found)."""
+    _, interview_id = await _start_interview(client)
+    other = await _new_candidate_headers(client)
+    resp = await client.get(f"/candidate/interview/{interview_id}", headers=other)
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_start_twice_resumes_same_interview(client):
+    """A second POST /start for the same candidate resumes, not orphans (edge b)."""
+    headers, first_id = await _start_interview(client)
+    # advance a turn so it's mid-interview
+    await client.post(
+        f"/candidate/interview/{first_id}/answer",
+        headers=headers,
+        json={"text": "an answer of ample length", "source": "text"},
+    )
+    second = (await client.post("/candidate/interview/start", headers=headers)).json()
+    assert second["interview_session_id"] == first_id  # resumed, same session
+
+
+@pytest.mark.asyncio
+async def test_answer_accepts_voice_source_over_http(client):
+    """source=voice round-trips through /answer (Pydantic validation + advance), not just text."""
+    headers, interview_id = await _start_interview(client)
+    resp = await client.post(
+        f"/candidate/interview/{interview_id}/answer",
+        headers=headers,
+        json={"text": "my spoken answer, long enough", "source": "voice"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["current_question"]["index"] == 1
+
+
+@pytest.mark.asyncio
+async def test_answer_rejects_unknown_source_over_http(client):
+    headers, interview_id = await _start_interview(client)
+    resp = await client.post(
+        f"/candidate/interview/{interview_id}/answer",
+        headers=headers,
+        json={"text": "x", "source": "carrier-pigeon"},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_text_answer_works_after_failed_voice_session(client, db_session):
+    """Edge c/d: a failed voice/session (no persona → 503) never blocks the text path."""
+    headers, interview_id = await _start_interview(client)
+    # No persona configured → voice broker is unavailable (503).
+    voice = await client.post(f"/candidate/interview/{interview_id}/voice/session", headers=headers)
+    assert voice.status_code == 503
+    # Text still advances the same interview.
+    answer = await client.post(
+        f"/candidate/interview/{interview_id}/answer",
+        headers=headers,
+        json={"text": "a text answer after voice failed, long enough", "source": "text"},
+    )
+    assert answer.status_code == 200
+    assert answer.json()["current_question"]["index"] == 1

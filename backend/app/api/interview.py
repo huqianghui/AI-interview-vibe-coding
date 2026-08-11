@@ -156,6 +156,23 @@ async def start(
     return _to_interview_out(session, question)
 
 
+@router.get("/{interview_id}", response_model=InterviewOut)
+async def get_interview(
+    interview_id: str,
+    candidate: AnonymousCandidateSession = Depends(get_anonymous_session),
+    db: AsyncSession = Depends(get_db),
+) -> InterviewOut:
+    """Read an interview's status + current question without mutating it (SPEC F6 edge b: resume).
+
+    Ownership-guarded like every candidate route. Lets a reloaded browser replay the pending
+    question (``get_current_question`` returns the pending follow-up when one is owed) instead of
+    starting a brand-new session. ``current_question`` is None once completed/scored.
+    """
+    session = await _owned_interview(db, interview_id, candidate)
+    question = await state_machine.get_current_question(db, session)
+    return _to_interview_out(session, question)
+
+
 @router.post("/{interview_id}/answer", response_model=InterviewOut)
 async def answer(
     interview_id: str,
