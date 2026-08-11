@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.21.0.0 (2026-08-11)
+
+Scoring runs against a real model, and report citations are trustworthy. When an operator points
+the app at their AI Foundry in the admin config, interview scoring + checklist drafting now use a
+real deployment (previously mock-only — Phase 2 had removed the old LLM adapter). And a checklist
+item's SOP citation only shows when it's complete: a half-attributed quote from the drafting model
+is stripped rather than shown. Phase 5 (final) of epic #26 — audited against the merged base and
+scoped to the two real gaps; voice/pronunciation scoring is a separate future issue.
+
+### Added
+- **Real Foundry LLM scoring** (`app/services/agents/adapters/foundry_llm.py`): a `FoundryLLMAdapter`
+  that runs `complete(prompt, json_mode)` against a Foundry deployment via the Responses API (JSON
+  mode = `text.format`), reusing the Phase 2 Entra-first client. Registered as the `azure` LLM
+  provider when a Foundry project endpoint is configured, and flipped on by the config overlay — so
+  saving a config in `/admin` makes a scored report reflect an actual model judgment, no restart.
+
+### Changed
+- **Report SOP citations are gated.** A checklist item's `source_quote`/`source_page` (drafted by
+  the model, previously trusted verbatim) now pass the strict full-field citation gate: a partial
+  pair is cleared so no half-attributed claim reaches the report. The item itself is always kept
+  (never silently drops checklist coverage) — only the attribution is stripped. Applies to freshly
+  drafted checklists, not human-authored admin edits.
+
+### Notes
+- Scoring/drafting still default to the deterministic mock in dev/CI — the real adapter only
+  registers + activates when a Foundry endpoint is configured, so zero-Azure builds are unchanged.
+- The live scoring call is coverage-omitted (needs a real deployment); the request shaping,
+  registration, overlay flip, and citation gate are all unit-tested (backend ~350 tests / ~88%).
+- Deferred to follow-up issues: voice/pronunciation scoring (Azure Speech SDK, a new report
+  dimension) and true citation grounding (cross-checking a drafted quote against the actually
+  retrieved SOP passage). Live scoring against `avarda-demo-prj` is a manual Layer-3 check.
+- **Epic #26 complete** — all five phases (login, Azure base, editor UI, interview flow, scoring)
+  are now on main.
+
 ## 0.20.0.0 (2026-08-11)
 
 The interview flow, fused and hardened. A candidate can answer each question by text OR voice and
