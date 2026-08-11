@@ -25,6 +25,13 @@ that agent's definition — execution stays in the Foundry runtime; this app onl
 - The agent SDK converter (`azure_agent_sync._to_sdk_tool`) dispatches by tool `type` — MCPTool
   (KB + public persona MCP), `CodeInterpreterTool`, `WebSearchTool`. `build_agent_tools` merges the
   SOP KB tool (always first) with the persona's gated tools.
+- **A persona MCP server requires approval by default.** Since the interviewer agent runs a live
+  conversation with an untrusted candidate, an admin-added public MCP defaults to
+  `require_approval="always"` (was implicitly unrestricted) so its tools can't be auto-invoked via
+  prompt injection. The tool gate also validates `server_url` is plain http(s), tolerates non-string
+  fields without crashing, and dedupes repeated tools before they reach Foundry.
+- Interviewer avatars now carry Azure's real style slug. A migration backfills any persona still on
+  the old Lisa `casual` style to `casual-sitting` so it renders the intended pose in Voice Live.
 
 ### Deferred (follow-up issue)
 - Connection-authenticated tools (protected MCP, OpenAPI spec, A2A, Bing grounding, Azure AI Search)

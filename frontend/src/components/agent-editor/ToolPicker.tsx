@@ -1,7 +1,7 @@
 /**
  * "Select a tool" dialog — mirrors the Azure AI Foundry portal's tool picker.
  *
- * Configured / Catalog / Custom tabs, a search box, grid/list view toggle, and a card per tool.
+ * Configured / Catalog / Custom tabs, a search box, and a card per tool.
  * Supported tools (code_interpreter / web_search / public MCP) can be added and really sync to the
  * Foundry agent; the rest carry a "Preview" badge and are not selectable (parity, not fake function).
  * Selecting the MCP card reveals a small server-url form before the tool can be added.

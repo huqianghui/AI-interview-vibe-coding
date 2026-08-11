@@ -34,12 +34,10 @@ export interface ToolCatalogEntry {
   supported: boolean;
   /** True → carries the "Preview" badge (portal parity + our not-yet-wired tools). */
   preview: boolean;
-  /** MCP/OpenAPI/A2A need a small config form before they can be added. */
-  needsConfig?: boolean;
 }
 
-// Tier-A ids this app really syncs (must match backend persona_tools.SUPPORTED_TOOL_TYPES).
-export const SUPPORTED_TOOL_IDS = new Set(["code_interpreter", "web_search", "mcp"]);
+// Tier-A tool ids this app really syncs today mirror backend persona_tools.SUPPORTED_TOOL_TYPES;
+// each catalog entry's `supported` flag below is the single source the UI reads.
 
 /**
  * The full portal card set. `supported` entries sync for real; the rest are parity placeholders
@@ -143,7 +141,6 @@ export const TOOL_CATALOG: readonly ToolCatalogEntry[] = [
     tab: "custom",
     supported: false,
     preview: true,
-    needsConfig: true,
   },
   {
     id: "mcp",
@@ -152,7 +149,6 @@ export const TOOL_CATALOG: readonly ToolCatalogEntry[] = [
     tab: "custom",
     supported: true,
     preview: false,
-    needsConfig: true,
   },
   {
     id: "a2a",
@@ -161,7 +157,6 @@ export const TOOL_CATALOG: readonly ToolCatalogEntry[] = [
     tab: "custom",
     supported: false,
     preview: true,
-    needsConfig: true,
   },
 ];
 

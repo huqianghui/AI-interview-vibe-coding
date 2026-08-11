@@ -1,6 +1,6 @@
 /** ToolPicker: tabs, filter, Preview cards disabled, supported add, MCP config gate. */
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import { ToolPicker } from "./ToolPicker";
@@ -76,7 +76,14 @@ describe("ToolPicker", () => {
     expect(screen.getByTestId("mcp-config-form")).toBeInTheDocument();
     expect(screen.getByTestId("tool-add")).toBeDisabled();
 
-    await user.type(screen.getByTestId("mcp-server-url"), "https://my-mcp/mcp");
+    // Set the value atomically via fireEvent.change rather than char-by-char user.type —
+    // under parallel test workers, simulated keystrokes intermittently drop a trailing char.
+    fireEvent.change(screen.getByTestId("mcp-server-url"), {
+      target: { value: "https://my-mcp/mcp" },
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("mcp-server-url")).toHaveValue("https://my-mcp/mcp"),
+    );
     await user.click(screen.getByTestId("tool-add"));
     expect(onAdd).toHaveBeenCalledWith(
       expect.objectContaining({ type: "mcp", server_url: "https://my-mcp/mcp" }),

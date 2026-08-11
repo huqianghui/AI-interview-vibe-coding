@@ -16,8 +16,6 @@ import {
 import { AddRegular } from "@fluentui/react-icons";
 import type { PersonaOut } from "../../api/personas";
 
-const NEW = "__new__";
-
 const useStyles = makeStyles({
   root: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalM, minWidth: 0 },
   dropdown: { minWidth: "220px" },
@@ -90,5 +88,3 @@ export function PersonaSwitcher({
     </div>
   );
 }
-
-export { NEW as PERSONA_NEW_SENTINEL };

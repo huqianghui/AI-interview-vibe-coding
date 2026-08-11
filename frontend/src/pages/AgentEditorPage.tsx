@@ -1,10 +1,11 @@
 /**
  * Agent editor page (SPEC F5, Phase 3) — Foundry-portal-style interviewer-persona editor.
  *
- * Login-gated like AdminPage (shared admin JWT in sessionStorage). Left nav lists personas; the
- * center panel edits the selected one's definition; a gear-triggered drawer holds the configuration
- * rail. Save creates/updates the persona (backend auto-syncs its Foundry agent); a `formInitialized`
- * ref keeps a background list refresh from clobbering in-progress edits.
+ * Login-gated like AdminPage (shared admin JWT in sessionStorage). A top-bar persona switcher
+ * selects the persona; the left panel edits its definition; a gear-triggered drawer holds the
+ * configuration rail; the center is a Playground preview. Save creates/updates the persona (backend
+ * auto-syncs its Foundry agent); a `formInitialized` ref keeps a background list refresh from
+ * clobbering in-progress edits.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Body1, Button, Input, Title2 } from "@fluentui/react-components";
