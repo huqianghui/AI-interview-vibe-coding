@@ -5,10 +5,23 @@ validation state. The spec of record is [`../SPEC.md`](../SPEC.md); the planning
 [`planning/`](planning/); per-release detail is in [`../CHANGELOG.md`](../CHANGELOG.md). To actually
 **verify** the requirements and run the system, see [`VERIFICATION.md`](VERIFICATION.md).
 
-Status as of **v0.15.0.0**. Backend: 241 tests, ~90% coverage. Frontend: 22 unit/component tests +
-4 Playwright E2E tests (real Chromium). Every merge passed CI (ruff check + ruff format + pytest;
+Status as of **v0.20.0.0**. Backend: ~290 tests, ~87% coverage. Frontend: 34 unit/component tests +
+5 Playwright E2E tests (real Chromium). Every merge passed CI (ruff check + ruff format + pytest;
 tsc + vitest + eslint + Playwright E2E). Local dev / CI run entirely on mock providers — zero Azure
 needed to build or test.
+
+## Foundry-agent interviewer refactor (epic #26)
+
+Rebuilding the interviewer as a real Azure AI Foundry prompt agent + a portal-faithful editor +
+a fused text/voice interview flow, in phases (branch-per-phase, independently revertable).
+
+| Phase | Status | Shipped | Notes |
+|---|---|---|---|
+| **Phase 1** User/admin login | ✅ Done | v0.17.0.0 | JWT auth (`require_role`), admin user CRUD, login UI. |
+| **Phase 2** Azure-integration base | ✅ Done | v0.18.0.0 (PR #33) | Centralized `azure_auth`; Foundry IQ connection discovery + RemoteTool creation; agent chat via Responses API; restored DB config; agent-create retry. |
+| **Phase 3** Foundry Agent editor UI | ✅ Done | v0.19.0.0 (PR #34) | `/admin/agent` — Fluent v9 editor: persona nav + agent-definition + config drawer + avatar grid + preview. |
+| **Phase 4** Fuse the interview flow | ✅ Done | v0.20.0.0 | Audit confirmed F6/F7/F9 flow built; added: interview resume after reload (GET endpoint + client persistence), voice speaks the backend-authoritative question (not agent-autonomous), multi-segment voice content-loss fix, empty-bank terminal state, voice-off mid-interview continuation. |
+| **Phase 5** Scoring/report to real Foundry | ⏳ Planned | #31 | Port AI-Coach scoring; wire report to real Foundry output + SOP citations. |
 
 ## Core features (F1–F9)
 
