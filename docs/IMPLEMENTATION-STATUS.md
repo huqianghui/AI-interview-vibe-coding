@@ -37,6 +37,19 @@ in phases (branch-per-phase, each independently revertable).
 | **F8** Interview report | ✅ Done | v0.10.0.0 | Executive view (grade gauge + narrative + SOP-source-beside-answer) + progressive per-item detail. |
 | **F9** Frontend interview page | ✅ Done | v0.5.0.0 | Avatar/orb, question progress, dual text+voice channel, mic recovery, WebRTC voice broker. |
 
+## Foundry-agent interviewer refactor (epic #26)
+
+Porting AI-avatar-vibe-coding's Foundry-agent + avatar base and fusing the interview flow on top.
+Delivered in phases; each ports **only** what this repo genuinely lacked (per-module diff).
+
+| Phase | Status | Shipped | Notes |
+|---|---|---|---|
+| **Phase 1** User/admin login | ✅ Done | v0.17.0.0 | User model + JWT auth (`require_role`), admin user CRUD, login UI. Candidate anonymous path untouched. |
+| **Phase 2** Azure-integration base | ✅ Done | v0.18.0.0 | Centralized `azure_auth`; Foundry IQ connection discovery + RemoteTool creation (the `connection_id` gap); agent chat via Responses API; restored + reconnected DB config layer; agent-create transient retry. |
+| **Phase 3** Editor UI (Fluent v9, Foundry-portal-like) | ⏳ Next | #29 | Left nav + agent-definition center + Configuration rail + digital-human preview. Reverse-sync/metadata-only update land here (they get a consumer). |
+| **Phase 4** Interview flow fusion | ⏳ Planned | #30 | Read question → show/speak → text/voice answer → state-machine decides follow-up vs next → end. |
+| **Phase 5** Scoring integration | ⏳ Planned | #31 | Wire the existing scoring/report layers onto the fused flow. |
+
 ## Post-demo scope (still in SPEC)
 
 | Feature | Status | Shipped | Notes |

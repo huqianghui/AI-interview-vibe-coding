@@ -10,14 +10,15 @@ from app.config import get_settings
 from app.services import config_service
 from app.services.config_overlay import apply_master_config_to_settings
 
-ADMIN_TOKEN = "test-admin-token"
-AUTH = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
+# Populated with a real admin JWT by the autouse fixture below (Phase 1 require_role("admin") auth).
+AUTH: dict[str, str] = {}
 
 
 @pytest.fixture(autouse=True)
-def _admin_token(monkeypatch):
-    monkeypatch.setattr(get_settings(), "admin_api_token", ADMIN_TOKEN)
-    yield
+def _admin_token(admin_auth):
+    """Populate AUTH with a real admin JWT header (see conftest.admin_auth)."""
+    AUTH.clear()
+    AUTH.update(admin_auth)
 
 
 @pytest.fixture
@@ -121,8 +122,6 @@ async def test_overlay_makes_db_win_over_default(db_session, _restore_settings):
     settings = get_settings()
     # Precondition: no azure agent-sync adapter registered on a mock-only boot.
     registry._AGENT_SYNC_ADAPTERS.pop("azure", None)
-
-    registry._LLM_ADAPTERS.pop("azure_openai", None)
     registry._RETRIEVAL_ADAPTERS.pop("azure", None)
 
     await config_service.upsert_master_config(
@@ -143,10 +142,6 @@ async def test_overlay_makes_db_win_over_default(db_session, _restore_settings):
     assert settings.voice_live_default_model == "gpt-5.4"
     assert settings.foundry_project_endpoint == "https://demo.services.ai.azure.com"
     assert settings.default_agent_sync_provider == "azure"
-    # LLM path flipped + azure_openai fields overlaid → azure_openai adapter registered.
-    assert settings.default_llm_provider == "azure_openai"
-    assert settings.azure_openai_deployment == "gpt-5.4"
-    assert "azure_openai" in registry._LLM_ADAPTERS
     # Retrieval path flipped + kb/ks mapped to search settings → azure retrieval adapter registered.
     assert settings.default_retrieval_provider == "azure"
     assert settings.azure_search_index == "sop-kb"
@@ -156,7 +151,6 @@ async def test_overlay_makes_db_win_over_default(db_session, _restore_settings):
 
     # Cleanup adapters we caused to register so other tests see the mock-only baseline.
     registry._AGENT_SYNC_ADAPTERS.pop("azure", None)
-    registry._LLM_ADAPTERS.pop("azure_openai", None)
     registry._RETRIEVAL_ADAPTERS.pop("azure", None)
 
 
@@ -299,18 +293,25 @@ async def test_model_deployments_db_fallback_on_error(client, _restore_settings,
 
 async def test_knowledge_bases_list(client, _restore_settings, monkeypatch):
     await _seed(client)
-    _FakeAsyncClient._responses = [
-        _FakeResp(200, {"value": [{"name": "sop-kb", "description": "SOP KB"}]})
-    ]
-    monkeypatch.setattr("app.api.admin_config.httpx.AsyncClient", _FakeAsyncClient)
+
+    # The endpoint delegates to foundry_connections.list_knowledge_bases (Phase 2.2); mock that
+    # shared discovery function rather than the raw httpx call it makes internally.
+    async def _fake_kbs(**_kwargs):
+        return [{"name": "sop-kb", "description": "SOP KB"}]
+
+    monkeypatch.setattr("app.api.admin_config.foundry_connections.list_knowledge_bases", _fake_kbs)
     body = (await client.get("/admin/config/ai-foundry/knowledge-bases", headers=AUTH)).json()
     assert body == [{"value": "sop-kb", "label": "SOP KB"}]
 
 
 async def test_knowledge_bases_empty_on_error(client, _restore_settings, monkeypatch):
     await _seed(client)
-    _FakeAsyncClient._responses = [_FakeResp(500, {})]
-    monkeypatch.setattr("app.api.admin_config.httpx.AsyncClient", _FakeAsyncClient)
+
+    # Discovery is best-effort: foundry_connections.list_knowledge_bases returns [] on any failure.
+    async def _empty_kbs(**_kwargs):
+        return []
+
+    monkeypatch.setattr("app.api.admin_config.foundry_connections.list_knowledge_bases", _empty_kbs)
     body = (await client.get("/admin/config/ai-foundry/knowledge-bases", headers=AUTH)).json()
     assert body == []
 
