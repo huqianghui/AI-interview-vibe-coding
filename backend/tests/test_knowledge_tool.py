@@ -59,17 +59,18 @@ def test_build_agent_tools_list_and_empty():
 
 
 def test_project_endpoint_scoping():
-    from app.services.agents.adapters.azure_agent_sync import AzureAgentSyncAdapter as A
+    # The endpoint-scoping helper now lives in the shared foundry_client (Phase 2.2).
+    from app.services.agents.foundry_client import project_endpoint
 
     # Bare Foundry endpoint + project → project-scoped form the SDK requires.
     assert (
-        A._project_endpoint("https://acct.services.ai.azure.com/", "proj")
+        project_endpoint("https://acct.services.ai.azure.com/", "proj")
         == "https://acct.services.ai.azure.com/api/projects/proj"
     )
     # Already project-scoped → unchanged.
     already = "https://acct.services.ai.azure.com/api/projects/proj"
-    assert A._project_endpoint(already, "proj") == already
+    assert project_endpoint(already, "proj") == already
     # No project → left as-is (caller owns whether it works).
-    assert A._project_endpoint("https://acct.services.ai.azure.com/", "") == (
+    assert project_endpoint("https://acct.services.ai.azure.com/", "") == (
         "https://acct.services.ai.azure.com"
     )

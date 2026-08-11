@@ -56,12 +56,6 @@ async def apply_master_config_to_settings(db: AsyncSession) -> bool:
         master.model_or_deployment or settings.voice_live_default_model
     )
 
-    # LLM scoring / checklist-draft path (AzureLLMAdapter registers under "azure_openai" when
-    # endpoint + deployment are set). Foundry and Azure OpenAI share the resource endpoint.
-    settings.azure_openai_endpoint = master.endpoint
-    settings.azure_openai_api_key = api_key
-    settings.azure_openai_deployment = master.model_or_deployment
-
     # SOP retrieval path (Foundry IQ). kb -> the URL path segment; ks -> the retrieve-body name.
     # Registry guards on endpoint/index/knowledge_source, so only overlay when kb+ks are set.
     if master.knowledge_base and master.knowledge_source:
@@ -70,11 +64,11 @@ async def apply_master_config_to_settings(db: AsyncSession) -> bool:
         settings.azure_search_index = master.knowledge_base
         settings.azure_search_knowledge_source = master.knowledge_source
 
-    # Flip the providers this row configures to their real adapters.
+    # Flip the providers this row configures to their real adapters. (The self-made azure_openai
+    # LLM adapter was removed in Phase 2.0 — scoring stays on its own provider; agent chat/sync run
+    # through the Foundry agent, not a separate LLM adapter.)
     settings.default_voice_provider = "azure"
     settings.default_agent_sync_provider = "azure"
-    if master.model_or_deployment:
-        settings.default_llm_provider = "azure_openai"
     if master.knowledge_base and master.knowledge_source:
         settings.default_retrieval_provider = "azure"
 

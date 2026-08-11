@@ -31,6 +31,51 @@ os.environ.update(
     }
 )
 
+# Azure SDK stub shim (SPEC P2): CI installs only ``.[dev]`` (no ``azure`` extra), so the real
+# ``azure.identity`` / ``azure.core`` / ``openai`` modules are absent there. The azure_auth /
+# foundry_client unit tests ``patch("azure.identity.aio.DefaultAzureCredential", ...)`` and the
+# code-under-test lazily ``from azure.core.credentials import AccessToken`` — both need those
+# module *paths* to be importable for the patch target / import to resolve. When the real SDK is
+# present (a dev box set up for live-Azure testing) we use it; when it's absent we register light
+# stub modules so the same tests run identically in CI. Runs before any ``app`` import below.
+import sys  # noqa: E402
+from unittest.mock import MagicMock  # noqa: E402
+
+
+def _ensure_stub_module(name: str) -> None:
+    """Put a MagicMock in ``sys.modules`` for ``name`` (+ parents) if the real one can't import.
+
+    A MagicMock auto-creates any attribute on access, so both ``from azure.core.credentials import
+    AccessToken`` and ``patch("azure.identity.aio.DefaultAzureCredential", ...)`` resolve against it
+    (patch does getattr+setattr on the module object). When the real SDK is installed the import
+    succeeds and we leave it alone.
+    """
+    try:
+        __import__(name)
+        return  # real module present — use it
+    except Exception:  # noqa: BLE001 — any import failure → supply a stub
+        pass
+    parts = name.split(".")
+    for i in range(1, len(parts) + 1):
+        sub = ".".join(parts[:i])
+        if sub not in sys.modules:
+            stub = MagicMock(name=sub)
+            stub.__spec__ = MagicMock()  # importlib treats it as a real, already-imported module
+            sys.modules[sub] = stub
+            if i > 1:
+                setattr(sys.modules[".".join(parts[: i - 1])], parts[i - 1], stub)
+
+
+for _azure_mod in (
+    "azure.identity",
+    "azure.identity.aio",
+    "openai",
+):
+    _ensure_stub_module(_azure_mod)
+# NOTE: azure.core.credentials is deliberately NOT stubbed — the only tests touching it
+# (test_foundry_client) assert the REAL AccessToken's value/expiry, so they importorskip when the
+# SDK is absent. Stubbing it would defeat that skip and yield MagicMock assertion failures.
+
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402

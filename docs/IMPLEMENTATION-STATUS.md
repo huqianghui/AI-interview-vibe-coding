@@ -5,7 +5,7 @@ validation state. The spec of record is [`../SPEC.md`](../SPEC.md); the planning
 [`planning/`](planning/); per-release detail is in [`../CHANGELOG.md`](../CHANGELOG.md). To actually
 **verify** the requirements and run the system, see [`VERIFICATION.md`](VERIFICATION.md).
 
-Status as of **v0.15.0.0**. Backend: 241 tests, ~90% coverage. Frontend: 22 unit/component tests +
+Status as of **v0.18.0.0**. Backend: 320 tests, ~87% coverage. Frontend: 29 unit/component tests +
 4 Playwright E2E tests (real Chromium). Every merge passed CI (ruff check + ruff format + pytest;
 tsc + vitest + eslint + Playwright E2E). Local dev / CI run entirely on mock providers — zero Azure
 needed to build or test.
@@ -23,6 +23,19 @@ needed to build or test.
 | **F7** Session memory surfacing | ✅ Done | v0.11.0.0 | Follow-up visibly cites the candidate's prior answer; Foundry-agent knowledge binding. |
 | **F8** Interview report | ✅ Done | v0.10.0.0 | Executive view (grade gauge + narrative + SOP-source-beside-answer) + progressive per-item detail. |
 | **F9** Frontend interview page | ✅ Done | v0.5.0.0 | Avatar/orb, question progress, dual text+voice channel, mic recovery, WebRTC voice broker. |
+
+## Foundry-agent interviewer refactor (epic #26)
+
+Porting AI-avatar-vibe-coding's Foundry-agent + avatar base and fusing the interview flow on top.
+Delivered in phases; each ports **only** what this repo genuinely lacked (per-module diff).
+
+| Phase | Status | Shipped | Notes |
+|---|---|---|---|
+| **Phase 1** User/admin login | ✅ Done | v0.17.0.0 | User model + JWT auth (`require_role`), admin user CRUD, login UI. Candidate anonymous path untouched. |
+| **Phase 2** Azure-integration base | ✅ Done | v0.18.0.0 | Centralized `azure_auth`; Foundry IQ connection discovery + RemoteTool creation (the `connection_id` gap); agent chat via Responses API; restored + reconnected DB config layer; agent-create transient retry. |
+| **Phase 3** Editor UI (Fluent v9, Foundry-portal-like) | ⏳ Next | #29 | Left nav + agent-definition center + Configuration rail + digital-human preview. Reverse-sync/metadata-only update land here (they get a consumer). |
+| **Phase 4** Interview flow fusion | ⏳ Planned | #30 | Read question → show/speak → text/voice answer → state-machine decides follow-up vs next → end. |
+| **Phase 5** Scoring integration | ⏳ Planned | #31 | Wire the existing scoring/report layers onto the fused flow. |
 
 ## Post-demo scope (still in SPEC)
 
