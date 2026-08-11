@@ -68,7 +68,8 @@ export function InterviewPage() {
   // Final voice-transcript segment ids already POSTed, so a turn with multiple final segments
   // (candidate paused mid-answer) submits ALL of them once — not just the latest (content-loss fix).
   const submittedSegmentIds = useRef<Set<string>>(new Set());
-  // The question text last spoken aloud in voice mode, so we don't re-speak on every re-render.
+  // The prompt text last spoken aloud in voice mode, so we don't re-speak it on every re-render
+  // (keyed on the text so a follow-up on the same question_id is still spoken).
   const spokenQuestionId = useRef<string | null>(null);
 
   const onTranscript = useCallback((seg: TranscriptSegment) => {
@@ -201,22 +202,22 @@ export function InterviewPage() {
   }, []);
 
   // Voice mode: speak the backend-authoritative question text (Phase 4 voice→turn sub-design).
-  // When a new question is current and voice is connected, have Voice Live read q.prompt verbatim
-  // rather than let the agent autonomously generate — the backend keeps the question pointer.
-  const currentQuestionId = interview?.current_question?.question_id ?? null;
+  // When a new prompt is current and voice is connected, have Voice Live read it verbatim rather
+  // than let the agent autonomously generate — the backend keeps the question pointer. Keyed on the
+  // prompt TEXT, not question_id, so a follow-up (same question_id, new prompt) is spoken too.
   const currentPrompt = interview?.current_question?.prompt ?? "";
   useEffect(() => {
     if (
       channel === "voice" &&
       voice.connectionState === "connected" &&
-      currentQuestionId &&
-      spokenQuestionId.current !== currentQuestionId
+      currentPrompt &&
+      spokenQuestionId.current !== currentPrompt
     ) {
       if (voice.speakQuestion(currentPrompt)) {
-        spokenQuestionId.current = currentQuestionId;
+        spokenQuestionId.current = currentPrompt;
       }
     }
-  }, [channel, voice, currentQuestionId, currentPrompt]);
+  }, [channel, voice, currentPrompt]);
 
   const q = interview?.current_question ?? null;
   const scoringNarr = t("transition.scoring", {
