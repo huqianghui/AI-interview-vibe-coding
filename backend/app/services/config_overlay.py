@@ -64,11 +64,12 @@ async def apply_master_config_to_settings(db: AsyncSession) -> bool:
         settings.azure_search_index = master.knowledge_base
         settings.azure_search_knowledge_source = master.knowledge_source
 
-    # Flip the providers this row configures to their real adapters. (The self-made azure_openai
-    # LLM adapter was removed in Phase 2.0 — scoring stays on its own provider; agent chat/sync run
-    # through the Foundry agent, not a separate LLM adapter.)
+    # Flip the providers this row configures to their real adapters. The LLM provider drives scoring
+    # + checklist drafting; Phase 5 backs it with the real Foundry Responses-API adapter (registered
+    # as "azure" when the project endpoint is set), so a saved config scores against a real model.
     settings.default_voice_provider = "azure"
     settings.default_agent_sync_provider = "azure"
+    settings.default_llm_provider = "azure"
     if master.knowledge_base and master.knowledge_source:
         settings.default_retrieval_provider = "azure"
 
