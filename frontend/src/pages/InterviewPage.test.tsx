@@ -13,7 +13,13 @@ import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import "../i18n";
 import i18n from "../i18n";
 import { InterviewPage } from "./InterviewPage";
+import { collectVoiceAnswer } from "./interviewVoiceAnswer";
 import * as client from "../api/client";
+import type { TranscriptSegment } from "../types/voice";
+
+function seg(id: string, content: string, role: "user" | "assistant", isFinal: boolean): TranscriptSegment {
+  return { id, content, role, isFinal, timestamp: 0 };
+}
 
 function renderPage() {
   return render(
@@ -24,6 +30,34 @@ function renderPage() {
 }
 
 afterEach(() => vi.restoreAllMocks());
+
+describe("collectVoiceAnswer", () => {
+  it("joins ALL fresh final user segments in order (multi-segment content-loss fix)", () => {
+    const segments = [
+      seg("u1", "First part.", "user", true),
+      seg("a1", "interviewer says", "assistant", true),
+      seg("u2", "Second part.", "user", true),
+      seg("u3", "still typing", "user", false), // non-final excluded
+    ];
+    const { text, ids } = collectVoiceAnswer(segments, new Set());
+    expect(text).toBe("First part. Second part.");
+    expect(ids).toEqual(["u1", "u2"]);
+  });
+
+  it("excludes already-submitted segments (per-turn boundary)", () => {
+    const segments = [
+      seg("u1", "Prior turn.", "user", true),
+      seg("u2", "This turn.", "user", true),
+    ];
+    const { text, ids } = collectVoiceAnswer(segments, new Set(["u1"]));
+    expect(text).toBe("This turn.");
+    expect(ids).toEqual(["u2"]);
+  });
+
+  it("returns empty when there are no fresh final user segments", () => {
+    expect(collectVoiceAnswer([], new Set())).toEqual({ text: "", ids: [] });
+  });
+});
 
 describe("InterviewPage", () => {
   it("renders the start button initially", () => {
@@ -70,6 +104,36 @@ describe("InterviewPage", () => {
     // Report-ready reveal.
     await waitFor(() => expect(screen.getByText(/100%/)).toBeInTheDocument());
     expect(screen.getByText(/met/)).toBeInTheDocument();
+  });
+
+  it("resumes an in-progress interview on mount (edge b)", async () => {
+    await i18n.changeLanguage("en-US");
+    vi.spyOn(client, "resumeInterview").mockResolvedValue({
+      interview_session_id: "iv-resumed",
+      status: "in_progress",
+      current_question: { question_id: "q2", prompt: "Resumed question?", index: 1, total: 3 },
+    });
+    const startSpy = vi.spyOn(client, "startInterview");
+
+    renderPage();
+    // Lands straight in the interviewing phase on the pending question — no Start click.
+    await waitFor(() => expect(screen.getByText("Resumed question?")).toBeInTheDocument());
+    expect(startSpy).not.toHaveBeenCalled(); // resumed, not a fresh start
+  });
+
+  it("shows a defined end state when the interview has no question (edge a)", async () => {
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "in_progress",
+      current_question: null, // no question to present
+    });
+
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    // A defined "no questions" card, not a blank page.
+    await waitFor(() => expect(screen.getByText(/no questions available/i)).toBeInTheDocument());
   });
 
   it("falls back to text when voice brokering is rejected (P5/P6b)", async () => {

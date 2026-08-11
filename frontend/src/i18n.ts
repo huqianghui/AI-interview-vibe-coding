@@ -28,6 +28,10 @@ export const resources = {
         body: "You'll answer {{total}} questions. Take your time — you can speak or type, and you decide when each answer is finished.",
         begin: "I'm ready",
       },
+      noQuestions: {
+        title: "No questions available",
+        body: "This interview has no questions configured yet. Please check back once a question bank is set up.",
+      },
       voice: {
         idle: "Ready",
         listening: "Listening…",
@@ -90,6 +94,10 @@ export const resources = {
         title: "开始之前",
         body: "你将回答 {{total}} 道题。不用着急 —— 可以语音或打字作答，每题何时答完由你决定。",
         begin: "我准备好了",
+      },
+      noQuestions: {
+        title: "暂无可用题目",
+        body: "本次面试尚未配置题目。请在题库配置完成后再来。",
       },
       voice: {
         idle: "就绪",
