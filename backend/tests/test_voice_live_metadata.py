@@ -119,7 +119,11 @@ def test_voice_rate_is_stringified_and_temperature_passthrough():
 
 def test_avatar_falls_back_when_blank():
     session = build_session(FakePersona(character="", style=""))
-    assert session["avatar"] == {"character": "lisa", "style": "casual", "customized": False}
+    assert session["avatar"] == {
+        "character": "lisa",
+        "style": "casual-sitting",
+        "customized": False,
+    }
 
 
 # --- chunking + full metadata ----------------------------------------------

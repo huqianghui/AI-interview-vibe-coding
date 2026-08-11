@@ -1,13 +1,13 @@
 /**
- * Center agent-definition panel (Phase 3) — the portal's middle column.
+ * Left agent-definition column — the Foundry portal's left panel.
  *
- * Digital-human preview (reusing AvatarView) + identity + agent-sync status + model (informational)
- * + voice-mode toggle + instructions + knowledge status. Presentational: the page owns form state
- * and passes the editable slice + change callbacks.
+ * Divider-separated sections (Identity / Model / Voice mode / Agent sync / Instructions /
+ * Knowledge), not stacked Cards, matching the portal's collapsible-section look. Presentational: the
+ * page owns form state and passes the editable slice + change callbacks. The digital-human preview is
+ * NOT here — it lives in the center Playground column (AvatarPreview).
  */
 import {
-  Card,
-  CardHeader,
+  Divider,
   Field,
   Input,
   Switch,
@@ -18,7 +18,6 @@ import {
   makeStyles,
   tokens,
 } from "@fluentui/react-components";
-import { AvatarView } from "../AvatarView";
 import { AgentSyncStatusCard } from "./AgentSyncStatusCard";
 import { ModelSelect } from "./ModelSelect";
 import { KnowledgeStatus } from "./KnowledgeStatus";
@@ -26,10 +25,15 @@ import type { AgentSyncStatus } from "../../api/personas";
 import type { PersonaFormState } from "../../pages/agentEditorForm";
 
 const useStyles = makeStyles({
-  root: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalL, maxWidth: "720px" },
-  previewCard: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalS },
-  previewBox: { height: "220px", position: "relative" },
+  root: { display: "flex", flexDirection: "column" },
+  section: {
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalS,
+    padding: `${tokens.spacingVerticalL} ${tokens.spacingHorizontalL}`,
+  },
   row: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalL, flexWrap: "wrap" },
+  hint: { color: tokens.colorNeutralForeground3 },
 });
 
 export interface AgentDefinitionPanelProps {
@@ -44,8 +48,6 @@ export interface AgentDefinitionPanelProps {
   isNew: boolean;
   onRetrySync?: () => void;
   retrying?: boolean;
-  /** Greeting for the active locale, shown under the preview. */
-  activeGreeting: string;
 }
 
 export function AgentDefinitionPanel({
@@ -59,28 +61,15 @@ export function AgentDefinitionPanel({
   isNew,
   onRetrySync,
   retrying,
-  activeGreeting,
 }: AgentDefinitionPanelProps) {
   const styles = useStyles();
   const voiceModeOn = Boolean(form.character);
 
   return (
-    <div className={styles.root}>
-      {/* Digital-human preview (static: no live WebRTC session in the editor). */}
-      <Card className={styles.previewCard} data-testid="digital-human-preview">
-        <CardHeader header={<Title3>Preview</Title3>} />
-        <div className={styles.previewBox}>
-          <AvatarView audioState="idle" isAvatarConnected={false} />
-        </div>
-        <Text size={200}>
-          {voiceModeOn ? `Avatar: ${form.character} / ${form.style}` : "Voice-only (no avatar)"}
-        </Text>
-        {activeGreeting && <Text size={200} italic>“{activeGreeting}”</Text>}
-      </Card>
-
+    <div className={styles.root} data-testid="agent-definition-sections">
       {/* Identity */}
-      <Card>
-        <CardHeader header={<Title3>Identity</Title3>} />
+      <div className={styles.section}>
+        <Title3>Identity</Title3>
         <Field label="Name" required>
           <Input
             value={form.name}
@@ -88,7 +77,7 @@ export function AgentDefinitionPanel({
             data-testid="persona-name"
           />
         </Field>
-        <div className={styles.row} style={{ marginTop: tokens.spacingVerticalM }}>
+        <div className={styles.row}>
           <Switch
             label="Enabled"
             checked={form.enabled}
@@ -108,50 +97,73 @@ export function AgentDefinitionPanel({
             />
           </Tooltip>
         </div>
-      </Card>
+      </div>
 
-      {/* Agent-sync status */}
-      <AgentSyncStatusCard
-        status={syncStatus}
-        agentId={agentId}
-        agentVersion={agentVersion}
-        syncError={syncError}
-        onRetry={onRetrySync}
-        retrying={retrying}
-        isNew={isNew}
-      />
+      <Divider />
 
-      {/* Model (informational) */}
-      <Card>
-        <CardHeader header={<Title3>Model</Title3>} />
-        <ModelSelect />
-      </Card>
-
-      {/* Voice mode + instructions */}
-      <Card>
-        <CardHeader header={<Title3>Agent definition</Title3>} />
+      {/* Voice mode */}
+      <div className={styles.section}>
+        <Title3>Voice mode</Title3>
         <Switch
           label="Voice mode (digital-human avatar)"
           checked={voiceModeOn}
           onChange={(_, d) => onToggleVoiceMode(d.checked)}
           data-testid="voice-mode"
         />
-        <Field label="Instructions" style={{ marginTop: tokens.spacingVerticalM }}>
+        <Text size={200} className={styles.hint}>
+          {voiceModeOn
+            ? "The interviewer speaks with a digital-human avatar (pick the character under Configure)."
+            : "Voice-only presence (no avatar face)."}
+        </Text>
+      </div>
+
+      <Divider />
+
+      {/* Model (informational) */}
+      <div className={styles.section}>
+        <Title3>Model</Title3>
+        <ModelSelect />
+      </div>
+
+      <Divider />
+
+      {/* Agent sync */}
+      <div className={styles.section}>
+        <Title3>AI Foundry agent</Title3>
+        <AgentSyncStatusCard
+          status={syncStatus}
+          agentId={agentId}
+          agentVersion={agentVersion}
+          syncError={syncError}
+          onRetry={onRetrySync}
+          retrying={retrying}
+          isNew={isNew}
+        />
+      </div>
+
+      <Divider />
+
+      {/* Instructions */}
+      <div className={styles.section}>
+        <Title3>Instructions</Title3>
+        <Field>
           <Textarea
             value={form.prompt_fragment}
             resize="vertical"
-            rows={6}
+            rows={8}
             onChange={(_, d) => onChange({ prompt_fragment: d.value })}
             data-testid="persona-instructions"
           />
         </Field>
-      </Card>
+      </div>
+
+      <Divider />
 
       {/* Knowledge (read-only status) */}
-      <Card>
-        <CardHeader header={<Title3>Knowledge & tools</Title3>} />
+      <div className={styles.section}>
+        <Title3>Knowledge &amp; tools</Title3>
         <KnowledgeStatus />
-      </Card>
+      </div>
     </div>
   );
 }

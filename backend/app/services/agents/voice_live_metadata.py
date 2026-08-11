@@ -38,7 +38,8 @@ INTERIM_LATENCY_THRESHOLD_MS = 500
 
 # Persona avatar/voice fallbacks (only used when the persona leaves a field blank).
 DEFAULT_AVATAR_CHARACTER = "lisa"
-DEFAULT_AVATAR_STYLE = "casual"
+# Azure Voice Live expects the real style slug; the persona's style is passed through verbatim.
+DEFAULT_AVATAR_STYLE = "casual-sitting"
 DEFAULT_VOICE_BY_LOCALE = {"zh-CN": "zh-CN-XiaoxiaoNeural", "en-US": "en-US-AvaNeural"}
 FALLBACK_LOCALE = "zh-CN"
 

@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.22.0.0 (2026-08-11)
+
+The `/admin/agent` editor now matches the Azure AI Foundry portal Playground: real digital-human
+faces (not letter placeholders), the portal's three-region layout, and the full Azure avatar roster.
+Picking an interviewer now looks and works like it does in Foundry.
+
+### Added
+- **Real-face avatar roster** (`frontend/src/data/avatarCharacters.ts`): the full Azure Voice Live
+  catalog — 6 video avatars (Lisa/Harry/Meg/Jeff/Lori/Max, multiple styles each) + 27 photo avatars
+  — with official Microsoft Learn CDN preview photos (every thumbnail URL verified against the CDN).
+- **`AvatarPreview`**: a static real-face preview for the editor's center Playground column (the
+  digital human "stands" in the middle like the portal), with an initial-swatch fallback and a
+  voice-only orb when no avatar is set. The live-interview `/interview` WebRTC path is untouched.
+- Component tests for `AvatarGrid` (real thumbnails, onError→initial fallback, all/photo/video
+  filter, style dropdown) and `AvatarPreview`.
+
+### Changed
+- **`AvatarGrid` now shows real faces**, not colored letter blocks: CDN thumbnails with an
+  onError→initial fallback (offline/test-safe), an all/photo/video filter, one tile per style for
+  video avatars, and a style dropdown for the selected character.
+- **Editor layout matches the Foundry portal**: persona selection moved into a top-bar switcher
+  dropdown; the left column became divider-separated agent-definition sections (Identity / Voice
+  mode / Model / Agent / Instructions / Knowledge); the center is a large Playground preview.
+- **Avatar style slugs are Azure's real names** (e.g. `casual-sitting`, not `casual`). Since the
+  backend passes `persona.style` through to Voice Live verbatim, this also corrects the value sent to
+  Azure. `DEFAULT_AVATAR_STYLE` is now `casual-sitting` (`voice_live_metadata.py`).
+
+### Removed
+- `PersonaNav` (left-side persona list) — superseded by the top-bar `PersonaSwitcher`.
+
 ## 0.21.0.0 (2026-08-11)
 
 Scoring runs against a real model, and report citations are trustworthy. When an operator points
