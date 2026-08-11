@@ -10,8 +10,8 @@ this project's single SOP knowledge base.
 Two capabilities:
 
 1. **Discovery (read):** list the project's AI Search connections and the Foundry IQ knowledge
-   bases behind them. **Wired:** the admin config KB dropdown (``admin_config.list_knowledge_bases``)
-   calls :func:`list_knowledge_bases` to populate from the real resource.
+   bases behind them. **Wired:** the admin config KB dropdown calls :func:`list_knowledge_bases`
+   (via ``admin_config``) to populate from the real resource.
 2. **RemoteTool find-or-create (write):** resolve the KB's MCPTool auth. MCPTool auth requires a
    **RemoteTool** project connection, NOT a CognitiveSearch/ApiKey connection (which 403s). The
    Portal does not always pre-create that RemoteTool connection for a KB, so we find an existing
