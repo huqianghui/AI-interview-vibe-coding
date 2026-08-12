@@ -109,13 +109,18 @@ def build_signaling_url(
     appends the brokered bearer as an ``Authorization=Bearer%20<token>`` query parameter.
     """
     if agent_name:
+        # HYPHENATED keys are required: `agent-name` / `agent-project-name` / `agent-version`.
+        # Live-verified 2026-08-12 — the underscore forms (`agent_id`/`agent_project_name`) reach
+        # the agent but fail "agent_initialization_failed" on a normal browser (BUNDLE) offer; the
+        # hyphenated forms complete the full session.created → session.updated → sdp.created
+        # handshake with a standard offer. (Matches the AI-Coach project's working contract.)
         params = {
             "api-version": api_version,
-            "agent_id": agent_name,
-            "agent_project_name": project_name or "",
+            "agent-name": agent_name,
+            "agent-project-name": project_name or "",
         }
         if agent_version:
-            params["agent_version"] = agent_version
+            params["agent-version"] = agent_version
         query = urlencode(params)
     else:
         query = urlencode({"api-version": api_version, "model": model or ""})
@@ -169,11 +174,22 @@ async def create_voice_session(
     resolved_locale, _ = resolve_voice(persona.voice_map, effective_locale)
     session_config = build_session(persona, locale=resolved_locale)
 
+    # `proactive_engagement` and `interim_response` are agent-level behaviors carried in the agent's
+    # voice-live metadata, NOT runtime `session.update` fields — the realtime session rejects them
+    # ("'session.proactive_engagement' unexpected"), live-verified 2026-08-12. Drop them from the
+    # runtime config the browser sends; the agent already has them from sync-time metadata.
+    session_config.pop("proactive_engagement", None)
+    session_config.pop("interim_response", None)
+
     # Request the avatar video modality when the persona has a character configured, so Voice Live
     # sends a digital-human video track (the frontend negotiates a recvonly video transceiver).
     avatar_enabled = bool((persona.character or "").strip())
     if avatar_enabled:
         session_config["modalities"] = ["text", "audio", "avatar"]
+        # With an avatar configured, the voice is fixed at the avatar/agent level — a runtime
+        # `session.update` carrying `voice` is rejected ("Cannot update voice when avatar is
+        # configured"), live-verified 2026-08-12. The voice is already set via agent metadata.
+        session_config.pop("voice", None)
 
     # Agent mode authorizes against the AI Agent service (needs an ai.azure.com/Foundry-scoped
     # token); model mode accepts the cognitiveservices scope. Live-verified 2026-08-12: a

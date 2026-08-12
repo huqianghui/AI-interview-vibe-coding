@@ -44,14 +44,24 @@ Live contract for a Foundry agent.
   key); the verbose runtime knobs still apply at `session.update` time. Live-verified: after this
   fix a real browser offer clears agent-init (previously `agent_initialization_failed`).
 
-### Known remaining gate (SDP negotiation)
-- After the metadata fix, a real Chromium offer clears agent-init and reaches Azure's media
-  allocation, which then reports a contradictory pair depending on the offer: with the browser's
-  standard `a=group:BUNDLE` line, agent-init fails; without it, allocation fails "Required BUNDLE
-  group attribute is missing". Isolated live to the `a=group:BUNDLE` line specifically. Reconciling
-  the two stages needs Microsoft's known-good agent-mode WebRTC offer shape (their published sample
-  is model-mode). Everything else — signaling contract, token scope, RBAC, agent metadata — is
-  verified correct against real Azure; the interviewer agent now initializes for voice.
+- **Signaling query keys must be hyphenated** — `agent-name` / `agent-project-name` /
+  `agent-version` (NOT `agent_id` / `agent_project_name`). This was the true blocker behind the
+  whole "agent_initialization_failed" / BUNDLE saga: with the underscore keys a normal browser offer
+  fails agent init; with the hyphenated keys the standard offer (BUNDLE, datachannel, full codecs)
+  completes the full `session.created → session.updated → rtc.call.sdp.created` handshake. Matched
+  against the working AI-Coach project's contract and live-verified end to end.
+- **Runtime `session.update` trimmed for agent+avatar** — the broker drops `voice`,
+  `proactive_engagement`, and `interim_response` from the runtime session config: with an avatar
+  configured Azure rejects a runtime voice change ("Cannot update voice when avatar is configured")
+  and the realtime session rejects `proactive_engagement`/`interim_response` (those live in the
+  agent's metadata, set at sync time).
+- **`speakQuestion` no longer overrides `instructions`** in `response.create` (agent mode rejects
+  it); it injects the backend-authoritative question as an assistant item and fires a bare
+  `response.create`.
+
+**Result (live-verified against real Azure):** clicking 语音作答 now connects the interviewer's
+Foundry agent over WebRTC, streams the digital-human avatar video, and the agent speaks
+(`response.audio_transcript.delta` events flow). No "Voice unavailable" fallback.
 
 ## 0.23.0.0 (2026-08-11)
 

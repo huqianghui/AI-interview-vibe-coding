@@ -100,13 +100,16 @@ that an automatable check can pass while the live service rejects." Validated li
   compact single-key config (voice/turn_detection/avatar/proactive_engagement); verbose knobs apply
   at runtime via `session.update`. Live-verified: a real browser offer now clears agent-init.
 
-### Blocked on SDP negotiation — agent voice not yet fully live
-
-- Past agent-init, Azure's media allocation and agent-init give contradictory demands on the offer's
-  `a=group:BUNDLE` line (allocation requires it; agent-init rejects the browser's standard BUNDLE
-  offer). Reconciling needs Microsoft's known-good AGENT-mode WebRTC offer shape (their sample is
-  model-mode). App side — signaling contract, token scope, RBAC, agent metadata — verified correct
-  against real Azure; the interviewer agent initializes for voice.
+- ✅ **Agent voice fully working end-to-end** (v0.23.1.0, live-verified against real Azure): the
+  final fix was the signaling query-key casing — Azure agent mode needs **hyphenated**
+  `agent-name` / `agent-project-name` / `agent-version` (not the underscore forms). With those, a
+  standard Chromium offer (BUNDLE + datachannel + full codecs) completes
+  `session.created → session.updated → rtc.call.sdp.created`. Clicking 语音作答 connects the Foundry
+  agent, streams the Lisa digital-human avatar, and the agent speaks. Also required: drop
+  voice/proactive/interim from the runtime `session.update` when an avatar is configured, and stop
+  overriding `instructions` in `response.create`. Confirmed via Playwright fake-mic against the real
+  `avarda-demo-prj` project (`sdpCreated=true`, `avatarConnected=true`, audio-transcript deltas
+  streaming). Contract cross-checked with the sibling AI-Coach project's proven implementation.
 
 ### Deploy configuration (v0.15.0.0)
 

@@ -182,41 +182,16 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
       // Step 3: RTCPeerConnection (no ICE servers — Azure handles TURN).
       const pc = new RTCPeerConnection();
       pcRef.current = pc;
-      const audioTransceiver = pc.addTransceiver(micStream.getAudioTracks()[0], {
-        direction: "sendrecv",
-        streams: [micStream],
-      });
+      micStream.getTracks().forEach((track) => pc.addTrack(track, micStream));
 
-      // Limit the offered audio codecs. Azure Voice Live's agent-mode init rejects an offer whose
-      // audio m-line advertises the full Chromium codec set (8 rtpmaps) with
-      // "agent_initialization_failed" — live-verified 2026-08-12 by SDP bisection: dropping ANY one
-      // codec (→7) makes agent-init succeed. We pin a minimal, safe set (Opus + PCMU/PCMA), which
-      // is well under the limit and is what a voice agent actually needs.
-      try {
-        const caps = RTCRtpSender.getCapabilities?.("audio");
-        if (caps && audioTransceiver.setCodecPreferences) {
-          // Opus only. Live SDP bisection showed Azure agent-init also rejects offers carrying
-          // `red` or `telephone-event`; a lean Opus-only offer is what the agent negotiates cleanly.
-          const keep = caps.codecs.filter((c) => /opus/i.test(c.mimeType));
-          if (keep.length) audioTransceiver.setCodecPreferences(keep);
-        }
-      } catch {
-        // setCodecPreferences unsupported → fall through; the offer may still work on some stacks.
-      }
+      // Step 3b: negotiate a recvonly video transceiver so a digital-human avatar video track from
+      // Voice Live (when the session requests the avatar modality) isn't silently dropped.
+      pc.addTransceiver("video", { direction: "recvonly" });
 
-      // NOTE: no recvonly video transceiver on this initial offer — Azure agent-init also rejects a
-      // video m-line. The digital-human avatar video is delivered over a SEPARATE
-      // `session.avatar.connect` SDP exchange (per the Voice Live WebRTC docs), not this control PC.
-
-      // Step 4: data channel. Azure agent-mode init rejects an SDP offer that carries an
-      // `application`/datachannel m-line (live-verified: audio-only offers pass, audio+datachannel
-      // fails "agent_initialization_failed"). So the offerer must NOT create the datachannel here;
-      // instead we accept the datachannel Azure opens on its side via `ondatachannel`, keeping the
-      // initial offer audio-only. Transcript/VAD events still arrive on that (server-opened) channel.
-      pc.ondatachannel = (event) => {
-        dataChannelRef.current = event.channel;
-        event.channel.onmessage = handleDataChannelMessage;
-      };
+      // Step 4: data channel BEFORE createOffer (carries transcripts / VAD / response lifecycle).
+      const dc = pc.createDataChannel("voice-live-events");
+      dataChannelRef.current = dc;
+      dc.onmessage = handleDataChannelMessage;
 
       // Step 5: remote audio + avatar-video playback.
       pc.ontrack = (event) => {
@@ -416,19 +391,17 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
   const speakQuestion = useCallback((text: string): boolean => {
     const ws = signalingWsRef.current;
     if (!text || ws?.readyState !== WebSocket.OPEN) return false;
+    // Inject the backend-authoritative question as an assistant turn so Voice Live speaks THAT text
+    // (not an agent-generated one). Agent mode rejects overriding `instructions` in response.create
+    // ("Overriding instructions in response.create is not supported", live-verified 2026-08-12), so
+    // we place the verbatim text as the assistant item and fire a bare response.create.
     ws.send(
       JSON.stringify({
         type: "conversation.item.create",
         item: { type: "message", role: "assistant", content: [{ type: "text", text }] },
       }),
     );
-    // Read the injected text verbatim — not an agent-generated turn.
-    ws.send(
-      JSON.stringify({
-        type: "response.create",
-        response: { instructions: `Read this question aloud verbatim, then stop:\n${text}` },
-      }),
-    );
+    ws.send(JSON.stringify({ type: "response.create" }));
     return true;
   }, []);
 
