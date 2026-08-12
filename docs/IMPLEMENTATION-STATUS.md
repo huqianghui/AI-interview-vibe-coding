@@ -81,19 +81,21 @@ that an automatable check can pass while the live service rejects." Validated li
 - ✅ **Real retrieval turn**: a question through the KB-bound agent returned a grounded answer
   citing SOP content (`【n:n†source】`), with output items `mcp_list_tools → mcp_call → message`.
 - ✅ Voice Live credential chain (Entra bearer) to the signaling WebSocket handshake.
-- ✅ **Agent-mode Voice Live session init** (v0.23.1.0, 2026-08-12): live-verified that the brokered
-  signaling URL (`/voice-live/realtime/calls`, api-version `2026-01-01-preview`, `agent_id` +
-  `agent_project_name`) makes Azure initialize the real `avarda-demo-agent` — the WS reaches the SDP
-  negotiation stage (only a hand-written fake SDP fails; a real browser offer completes). This fixed
-  the "Voice unavailable" fallback: the prior contract (`/voice-live/realtime`, `2026-07-15`,
-  `agent_name`/`project_name`) was rejected by Azure ("Missing required agent project name", then
-  "Classic foundry agent is not supported in API version 2026-04-10 and above").
+- ✅ **Voice Live agent-mode signaling contract** (v0.23.1.0, 2026-08-12): brokered URL uses the
+  live-verified form (`/voice-live/realtime/calls`, api-version `2026-01-01-preview`, `agent_id` +
+  `agent_project_name`, `ai.azure.com`-scoped token, bare agent id). Verified with a real browser
+  (Playwright fake-mic) that this clears the prior rejections ("Missing required agent project name",
+  "Classic foundry agent is not supported", "Unauthorized to AI Agent service") and reaches Azure's
+  agent-initialization step with an authenticated request + real SDP.
 
-### Still pending live validation (needs a browser/mic, not code)
+### Blocked on Azure-side config (not code) — agent voice not yet fully live
 
-- Full **voice WebRTC audio round-trip** with a real human (mic in, avatar audio/video out). The
-  signaling + agent-init are verified against real Azure; the remaining unverified leg is a live
-  RTCPeerConnection from a real browser with a microphone through to spoken audio + avatar video.
+- Azure returns `agent_initialization_failed` ("check connection string and the identity
+  permissions") at the final agent-init step. This reproduces even for a Foundry-portal agent whose
+  voice mode works in the portal, so it's an identity/RBAC or project-connection gap — the signed-in
+  identity likely needs the **Foundry User / Cognitive Services User** role on the project (the
+  portal supplies this itself). The app-code path is correct up to this boundary; resolving it is an
+  Azure IAM change, then the full mic-in → avatar audio/video-out round-trip can be re-verified.
 
 ### Deploy configuration (v0.15.0.0)
 

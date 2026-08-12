@@ -7,9 +7,9 @@ never transits the backend (P4 boundary — no candidate media on our servers).
 This module owns two things, split so the risky part is CI-testable without Azure:
 
 1. :func:`build_signaling_url` — a **pure** function that assembles the ``wss://…`` signaling URL
-   for agent-mode or model-mode. Agent mode pins ``agent_name``/``agent_version``/``project_name``
-   (the persona's synced Foundry agent); model mode falls back to a bare ``model`` query. No
-   network, fully tested.
+   for agent-mode or model-mode against the ``/voice-live/realtime/calls`` endpoint. Agent mode
+   emits Azure's ``agent_id`` + ``agent_project_name`` (+ ``agent_version``) query keys; model mode
+   falls back to a bare ``model`` query. No network, fully tested.
 
 2. :func:`create_voice_session` — the broker entry point. Resolves the active interviewer persona,
    enforces the **P5 gate** (a persona whose ``agent_sync_status != "synced"`` is rejected, never
@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.services import persona_service
 from app.services.agents.voice_live_metadata import build_session, resolve_voice
+from app.services.azure_auth import COGNITIVE_SERVICES_SCOPE, FOUNDRY_SCOPE
 from app.services.voice_providers import VoiceCredential, get_voice_provider
 from app.utils.azure_endpoints import endpoint_host, to_cognitive_services_endpoint
 
@@ -174,19 +175,28 @@ async def create_voice_session(
     if avatar_enabled:
         session_config["modalities"] = ["text", "audio", "avatar"]
 
+    # Agent mode authorizes against the AI Agent service (needs an ai.azure.com/Foundry-scoped
+    # token); model mode accepts the cognitiveservices scope. Live-verified 2026-08-12: a
+    # cognitiveservices token on an agent session is rejected "Unauthorized to AI Agent service".
+    is_agent = bool((persona.agent_id or "").strip())
+    token_scope = FOUNDRY_SCOPE if is_agent else COGNITIVE_SERVICES_SCOPE
+    # The SDK returns the created agent id as "name:version"; Voice Live's `agent_id` query wants
+    # the bare name (version rides in the separate `agent_version` param). Strip any ":ver" suffix.
+    agent_name = (persona.agent_id or "").split(":", 1)[0] if is_agent else None
+
     credential: VoiceCredential = await voice_provider.issue_credential(
         endpoint=to_cognitive_services_endpoint(settings.azure_foundry_endpoint),
         api_key=settings.azure_foundry_api_key,
+        scope=token_scope,
     )
 
     host = endpoint_host(to_cognitive_services_endpoint(settings.azure_foundry_endpoint)) or (
         credential.host or ""
     )
-    is_agent = bool((persona.agent_id or "").strip())
     signaling_url = build_signaling_url(
         host=host or credential.host or "voice-live.local",
         api_version=settings.voice_live_api_version,
-        agent_name=persona.agent_id if is_agent else None,
+        agent_name=agent_name,
         agent_version=persona.agent_version,
         project_name=settings.azure_foundry_default_project,
         model=settings.voice_live_default_model,

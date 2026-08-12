@@ -37,7 +37,9 @@ class VoiceCredential:
 class VoiceProvider(Protocol):
     name: str
 
-    async def issue_credential(self, *, endpoint: str, api_key: str) -> VoiceCredential: ...
+    async def issue_credential(
+        self, *, endpoint: str, api_key: str, scope: str | None = None
+    ) -> VoiceCredential: ...
 
 
 class MockVoiceProvider:
@@ -45,7 +47,9 @@ class MockVoiceProvider:
 
     name = "mock"
 
-    async def issue_credential(self, *, endpoint: str, api_key: str) -> VoiceCredential:
+    async def issue_credential(
+        self, *, endpoint: str, api_key: str, scope: str | None = None
+    ) -> VoiceCredential:
         # A recognisable, obviously-fake token so a mock credential can never be mistaken for a
         # real bearer in logs or a demo. The host echoes the (possibly empty) configured endpoint.
         # `api_key` is unused by design here — the mock never authenticates — but the parameter
@@ -79,12 +83,12 @@ class AzureVoiceProvider:
 
     # Azure-only paths below need a live endpoint, so they are coverage-omitted (pragma).
     async def issue_credential(  # pragma: no cover
-        self, *, endpoint: str, api_key: str
+        self, *, endpoint: str, api_key: str, scope: str | None = None
     ) -> VoiceCredential:
         if not endpoint:
             raise ValueError("Azure voice provider requires an endpoint")
 
-        aad = await self._try_entra_token()
+        aad = await self._try_entra_token(scope or COGNITIVE_SERVICES_SCOPE)
         if aad is not None:
             return VoiceCredential(auth_token=aad, auth_type="bearer", host=endpoint_host(endpoint))
 
@@ -99,8 +103,15 @@ class AzureVoiceProvider:
             "Run 'az login' (or grant the identity Cognitive Services User), or enable key auth."
         )
 
-    async def _try_entra_token(self) -> str | None:  # pragma: no cover
-        """Get a Cognitive Services AAD bearer, or None if Entra auth is unavailable.
+    async def _try_entra_token(
+        self, scope: str = COGNITIVE_SERVICES_SCOPE
+    ) -> str | None:  # pragma: no cover
+        """Get an AAD bearer for ``scope``, or None if Entra auth is unavailable.
+
+        Agent-mode Voice Live authorizes against the **AI Agent service**, which requires an
+        ``ai.azure.com`` (Foundry)-scoped token — a ``cognitiveservices.azure.com`` token reaches
+        the endpoint but is rejected "Unauthorized" once the agent session initializes (verified
+        live 2026-08-12). Model mode accepts the cognitiveservices scope. Broker picks the scope.
 
         Delegates to the shared cached async credential (azure_auth) so the reconnect burst reuses
         one instance and azure-identity's token cache serves repeat calls without re-probing the
@@ -110,7 +121,7 @@ class AzureVoiceProvider:
         if credential is None:
             return None
         try:
-            token = await credential.get_token(COGNITIVE_SERVICES_SCOPE)
+            token = await credential.get_token(scope)
             return token.token
         except Exception:
             return None

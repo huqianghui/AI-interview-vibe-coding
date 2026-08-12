@@ -8,15 +8,31 @@ session — the digital human never appeared. The signaling handshake was using 
 Live contract for a Foundry agent.
 
 ### Fixed
-- **Voice Live agent-mode signaling.** The broker now builds the WebRTC signaling URL against the
-  correct Azure contract (live-verified against a real Foundry project): the `/voice-live/realtime/calls`
-  endpoint, api-version `2026-01-01-preview`, and the `agent_id` + `agent_project_name` query keys.
-  The previous form (`/voice-live/realtime`, `2026-07-15`, `agent_name`/`project_name`) was rejected
-  by Azure — first as "Missing required agent project name", then as "Classic foundry agent is not
-  supported in API version 2026-04-10 and above". With the fix, Azure initializes the agent and the
-  browser's WebRTC negotiation proceeds, so the interviewer's voice + digital-human avatar connect.
-- The voice hook now also handles the `rtc.call.error` control message from the `/calls` endpoint, so
-  a call-level rejection surfaces immediately instead of waiting out the 30-second connect timeout.
+- **Voice Live agent-mode signaling contract.** The broker now builds the WebRTC signaling URL
+  against the correct Azure contract (live-verified with a real browser via Playwright fake-mic
+  against a real Foundry project): the `/voice-live/realtime/calls` endpoint, api-version
+  `2026-01-01-preview`, and the `agent_id` + `agent_project_name` query keys. The previous form
+  (`/voice-live/realtime`, `2026-07-15`, `agent_name`/`project_name`) was rejected by Azure as
+  "Missing required agent project name" then "Classic foundry agent is not supported in API version
+  2026-04-10 and above".
+- **Agent-mode token scope.** Agent sessions authorize against the AI Agent service, which needs an
+  `ai.azure.com` (Foundry)-scoped bearer; the broker previously always minted a
+  `cognitiveservices.azure.com` token, which Azure rejected "Unauthorized to AI Agent service".
+  `voice_providers.issue_credential` now takes a `scope`, and the broker passes the Foundry scope in
+  agent mode (model mode keeps cognitiveservices).
+- **agent_id version suffix.** The SDK returns a created agent id as `name:version`; the signaling
+  `agent_id` query must be the bare name (version rides in `agent_version`). The broker now strips
+  any `:version` suffix.
+- The voice hook now handles the `rtc.call.error` control message from the `/calls` endpoint, so a
+  call-level rejection surfaces immediately instead of waiting out the 30-second connect timeout.
+
+### Known remaining gate (Azure-side, not code)
+- With all of the above, the browser's real WebRTC SDP now reaches Azure's agent-init step, which
+  then returns `agent_initialization_failed` ("check connection string and the identity
+  permissions"). This reproduces even for a portal agent whose voice mode works in the Foundry
+  portal, so it is an identity/RBAC or project-connection gap (the signed-in identity likely needs
+  the **Foundry User / Cognitive Services User** role on the project), not an app-code issue. The
+  backend now produces a correct, authenticated agent request up to that boundary.
 
 ## 0.23.0.0 (2026-08-11)
 
