@@ -1,19 +1,22 @@
 /**
  * Agent editor page (SPEC F5, Phase 3) — Foundry-portal-style interviewer-persona editor.
  *
- * Login-gated like AdminPage (shared admin JWT in sessionStorage). Left nav lists personas; the
- * center panel edits the selected one's definition; a gear-triggered drawer holds the configuration
- * rail. Save creates/updates the persona (backend auto-syncs its Foundry agent); a `formInitialized`
- * ref keeps a background list refresh from clobbering in-progress edits.
+ * Login-gated like AdminPage (shared admin JWT in sessionStorage). A top-bar persona switcher
+ * selects the persona; the left panel edits its definition; a gear-triggered drawer holds the
+ * configuration rail; the center is a Playground preview. Save creates/updates the persona (backend
+ * auto-syncs its Foundry agent); a `formInitialized` ref keeps a background list refresh from
+ * clobbering in-progress edits.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Body1, Button, Input, Title2, Spinner } from "@fluentui/react-components";
+import { Body1, Button, Input, Title2 } from "@fluentui/react-components";
 import * as auth from "../api/auth";
 import * as personas from "../api/personas";
 import { AgentEditorLayout } from "../components/agent-editor/AgentEditorLayout";
-import { PersonaNav } from "../components/agent-editor/PersonaNav";
+import { PersonaSwitcher } from "../components/agent-editor/PersonaSwitcher";
 import { AgentDefinitionPanel } from "../components/agent-editor/AgentDefinitionPanel";
+import { AvatarPreview } from "../components/agent-editor/AvatarPreview";
 import { ConfigurationRail } from "../components/agent-editor/ConfigurationRail";
+import { DEFAULT_AVATAR_CHARACTER, DEFAULT_AVATAR_STYLE } from "../data/avatarCharacters";
 import {
   EDITOR_LOCALES,
   emptyPersonaForm,
@@ -94,7 +97,11 @@ export function AgentEditorPage() {
 
   // Voice mode: on → ensure a character/style; off → clear both (voice-only orb).
   const toggleVoiceMode = (on: boolean) =>
-    patchForm(on ? { character: "lisa", style: "casual" } : { character: "", style: "" });
+    patchForm(
+      on
+        ? { character: DEFAULT_AVATAR_CHARACTER, style: DEFAULT_AVATAR_STYLE }
+        : { character: "", style: "" },
+    );
 
   const save = () =>
     guard(async () => {
@@ -166,13 +173,22 @@ export function AgentEditorPage() {
   }
 
   const nothingSelected = selectedId === null;
-  const title = isNew ? "New persona" : current?.name || "Agent editor";
+
+  const personaSwitcher = (
+    <PersonaSwitcher
+      personas={list}
+      selectedId={selectedId}
+      isNew={isNew}
+      onSelect={selectPersona}
+      onNew={startNew}
+    />
+  );
 
   return (
     <AgentEditorLayout
-      title={title}
       configOpen={configOpen}
       onConfigOpenChange={setConfigOpen}
+      personaSwitcher={personaSwitcher}
       toolbarActions={
         !nothingSelected && (
           <>
@@ -186,18 +202,10 @@ export function AgentEditorPage() {
           </>
         )
       }
-      leftNav={
-        <PersonaNav
-          personas={list}
-          selectedId={selectedId}
-          onSelect={selectPersona}
-          onNew={startNew}
-        />
-      }
-      center={
+      leftPanel={
         nothingSelected ? (
           <Body1 data-testid="editor-empty" style={{ padding: 24 }}>
-            Select a persona on the left, or create a new one.
+            Select a persona above, or create a new one.
           </Body1>
         ) : (
           <AgentDefinitionPanel
@@ -211,13 +219,23 @@ export function AgentEditorPage() {
             isNew={isNew}
             onRetrySync={retrySync}
             retrying={retrying}
-            activeGreeting={form.greetingMap[activeLocale] ?? ""}
+            tools={form.tools}
+            onToolsChange={(tools) => patchForm({ tools })}
           />
+        )
+      }
+      centerPreview={
+        nothingSelected ? (
+          <Body1 data-testid="preview-empty" style={{ margin: "auto", color: "#888" }}>
+            Select a persona to preview the interviewer.
+          </Body1>
+        ) : (
+          <AvatarPreview character={form.character} style={form.style} />
         )
       }
       configRail={
         nothingSelected ? (
-          <Spinner size="tiny" label="Select a persona" />
+          <Body1>Select a persona first.</Body1>
         ) : (
           <ConfigurationRail
             form={form}

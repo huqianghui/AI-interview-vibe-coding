@@ -50,6 +50,8 @@ a fused text/voice interview flow, in phases (branch-per-phase, independently re
 |---|---|---|
 | Voice-only presence (audio orb + persona voice) | ✅ Done | v0.5.0.0 |
 | **Avatar video track** (digital-human face) | ✅ Done | v0.13.0.0 — broker requests the `avatar` modality; the voice hook negotiates a recvonly video transceiver and `AvatarView` shows the video, falling back to the orb. |
+| **Foundry-portal avatar editor** (real-face roster + layout parity) | ✅ Done | v0.22.0.0 — `/admin/agent` matches the AI Foundry portal Playground: full Azure roster (6 video + 27 photo) with real MS-Learn-CDN face thumbnails, top-bar persona switcher + left definition sections + center `AvatarPreview`, style slugs use Azure real names (`casual-sitting`), passed through to Voice Live. |
+| **Foundry-portal agent Tools** (per-persona, real sync) | ✅ Done | v0.23.0.0 — Tools section + "Select a tool" dialog (Configured/Catalog/Custom) matching the portal. `code_interpreter` / `web_search` / public `mcp` really sync into the persona's Foundry agent (`tools_config` → gated → SDK tools); the rest are Preview cards. Connection-auth tools (OpenAPI/A2A/protected MCP/Bing/Search) + MS-hosted connectors deferred. |
 
 ## End-to-end tests (v0.14.0.0)
 
@@ -79,11 +81,35 @@ that an automatable check can pass while the live service rejects." Validated li
 - ✅ **Real retrieval turn**: a question through the KB-bound agent returned a grounded answer
   citing SOP content (`【n:n†source】`), with output items `mcp_list_tools → mcp_call → message`.
 - ✅ Voice Live credential chain (Entra bearer) to the signaling WebSocket handshake.
+- ✅ **Voice Live agent-mode signaling contract** (v0.23.1.0, 2026-08-12): brokered URL uses the
+  live-verified form (`/voice-live/realtime/calls`, api-version `2026-01-01-preview`, `agent_id` +
+  `agent_project_name`, `ai.azure.com`-scoped token, bare agent id). Verified with a real browser
+  (Playwright fake-mic) that this clears the prior rejections ("Missing required agent project name",
+  "Classic foundry agent is not supported", "Unauthorized to AI Agent service") and reaches Azure's
+  agent-initialization step with an authenticated request + real SDP.
 
-### Still pending live validation (needs a browser/mic or deploy config, not code)
+- ✅ **RBAC + audio-only offer shape** (v0.23.1.0): after granting the identity **Foundry User** on
+  the project, agent-init succeeds for a synthetic audio-only SDP (verified live — advances to the
+  media-allocation stage). Also verified that agent-init rejects any offer carrying a video or
+  datachannel m-line, so the hook now sends an audio-only offer (no video transceiver; accepts
+  Azure's `ondatachannel`) with the session config inline in `rtc.call.sdp.create`.
 
-- Full **voice WebRTC audio round-trip** in a real browser (mic in, avatar audio/video out). Code +
-  credentials are in place; verified through the signaling handshake, not a live human conversation.
+- ✅ **Agent voice-mode metadata** (v0.23.1.0): fixed the config-chunking bug — the agent's
+  `microsoft.voice-live.configuration` was split across two metadata keys (config >512 chars) and
+  Voice Live can't reassemble a split value, failing agent-init. The agent metadata now carries a
+  compact single-key config (voice/turn_detection/avatar/proactive_engagement); verbose knobs apply
+  at runtime via `session.update`. Live-verified: a real browser offer now clears agent-init.
+
+- ✅ **Agent voice fully working end-to-end** (v0.23.1.0, live-verified against real Azure): the
+  final fix was the signaling query-key casing — Azure agent mode needs **hyphenated**
+  `agent-name` / `agent-project-name` / `agent-version` (not the underscore forms). With those, a
+  standard Chromium offer (BUNDLE + datachannel + full codecs) completes
+  `session.created → session.updated → rtc.call.sdp.created`. Clicking 语音作答 connects the Foundry
+  agent, streams the Lisa digital-human avatar, and the agent speaks. Also required: drop
+  voice/proactive/interim from the runtime `session.update` when an avatar is configured, and stop
+  overriding `instructions` in `response.create`. Confirmed via Playwright fake-mic against the real
+  `avarda-demo-prj` project (`sdpCreated=true`, `avatarConnected=true`, audio-transcript deltas
+  streaming). Contract cross-checked with the sibling AI-Coach project's proven implementation.
 
 ### Deploy configuration (v0.15.0.0)
 

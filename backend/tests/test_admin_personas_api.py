@@ -33,6 +33,24 @@ async def test_create_persona_triggers_mock_sync(client):
     assert body["agent_version"] == "1"
 
 
+async def test_tools_config_round_trips(client):
+    cfg = '[{"type":"code_interpreter"},{"type":"mcp","server_url":"https://x/mcp"}]'
+    created = (
+        await client.post("/admin/personas", headers=AUTH, json={"name": "T", "tools_config": cfg})
+    ).json()
+    assert created["tools_config"] == cfg
+    # Default when omitted is an empty JSON array.
+    plain = (await client.post("/admin/personas", headers=AUTH, json={"name": "U"})).json()
+    assert plain["tools_config"] == "[]"
+    # Update persists a new tools_config.
+    updated = await client.put(
+        f"/admin/personas/{plain['id']}",
+        headers=AUTH,
+        json={"tools_config": '[{"type":"web_search"}]'},
+    )
+    assert updated.json()["tools_config"] == '[{"type":"web_search"}]'
+
+
 async def test_list_and_get(client):
     created = (await client.post("/admin/personas", headers=AUTH, json={"name": "P"})).json()
     listing = (await client.get("/admin/personas", headers=AUTH)).json()

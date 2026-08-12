@@ -36,6 +36,7 @@ const PERSONA: personas.PersonaOut = {
   greeting_map: '{"zh-CN":"你好"}',
   enabled: true,
   is_default: true,
+  tools_config: "[]",
   turn_detection: "azure_semantic_vad",
   eou_detection: true,
   noise_suppression: true,
@@ -80,6 +81,12 @@ async function signIn(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByTestId("agent-login"));
 }
 
+/** Persona selection is a top-bar dropdown: open it, then click the persona's option. */
+async function pickPersona(user: ReturnType<typeof userEvent.setup>, id: string) {
+  await user.click(await screen.findByTestId("persona-select"));
+  await user.click(await screen.findByTestId(`persona-item-${id}`));
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   sessionStorage.clear();
@@ -96,8 +103,11 @@ describe("AgentEditorPage", () => {
     expect(screen.getByTestId("agent-username-input")).toBeInTheDocument();
     await signIn(user);
 
-    await waitFor(() => expect(screen.getByText("Demo Interviewer")).toBeInTheDocument());
+    // The persona list loaded into the top-bar switcher; its name shows once the dropdown opens.
+    await waitFor(() => expect(screen.getByTestId("persona-select")).toBeInTheDocument());
     expect(listSpy).toHaveBeenCalled();
+    await user.click(screen.getByTestId("persona-select"));
+    await waitFor(() => expect(screen.getByText("Demo Interviewer")).toBeInTheDocument());
     expect(screen.getByTestId("editor-empty")).toBeInTheDocument(); // nothing selected yet
   });
 
@@ -124,7 +134,7 @@ describe("AgentEditorPage", () => {
 
     renderPage();
     await signIn(user);
-    await user.click(await screen.findByTestId("persona-item-p1"));
+    await pickPersona(user, "p1");
 
     // Center definition panel populated from the persona.
     await waitFor(() =>
@@ -155,7 +165,7 @@ describe("AgentEditorPage", () => {
 
     renderPage();
     await signIn(user);
-    await user.click(await screen.findByTestId("persona-item-p1"));
+    await pickPersona(user, "p1");
     await waitFor(() => expect(screen.getByTestId("persona-name")).toHaveValue("Demo Interviewer"));
 
     const name = screen.getByTestId("persona-name");
@@ -181,17 +191,41 @@ describe("AgentEditorPage", () => {
 
     renderPage();
     await signIn(user);
-    await user.click(await screen.findByTestId("persona-item-p1"));
+    await pickPersona(user, "p1");
     await waitFor(() => expect(screen.getByTestId("persona-name")).toHaveValue("Demo Interviewer"));
 
     await user.click(screen.getByTestId("open-config-drawer"));
-    await user.click(await screen.findByTestId("avatar-option-harry"));
+    // Harry is a video avatar → one tile per style; the first tile is his default style.
+    await user.click((await screen.findAllByTestId("avatar-option-harry"))[0]);
     await user.click(screen.getByTestId("persona-save"));
 
     await waitFor(() => expect(update).toHaveBeenCalled());
     const payload = update.mock.calls[0][1];
     expect(payload.character).toBe("harry");
-    expect(payload.style).toBe("casual"); // harry's first style
+    expect(payload.style).toBe("business"); // harry's first tile / default style
+  });
+
+  it("adding a tool via the Add menu saves it into tools_config", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    mockDiscovery();
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([PERSONA]);
+    vi.spyOn(personas, "getPersona").mockResolvedValue(PERSONA);
+    const update = vi.spyOn(personas, "updatePersona").mockResolvedValue(PERSONA);
+
+    renderPage();
+    await signIn(user);
+    await pickPersona(user, "p1");
+    await waitFor(() => expect(screen.getByTestId("persona-name")).toHaveValue("Demo Interviewer"));
+
+    // Add ▾ → Code interpreter (a supported, connection-free tool).
+    await user.click(screen.getByTestId("tools-add-menu"));
+    await user.click(await screen.findByTestId("tools-add-code-interpreter"));
+    await user.click(screen.getByTestId("persona-save"));
+
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    const payload = update.mock.calls[0][1];
+    expect(JSON.parse(payload.tools_config!)).toEqual([{ type: "code_interpreter" }]);
   });
 
   it("retry-sync calls retrySyncPersona", async () => {
@@ -205,7 +239,7 @@ describe("AgentEditorPage", () => {
 
     renderPage();
     await signIn(user);
-    await user.click(await screen.findByTestId("persona-item-p1"));
+    await pickPersona(user, "p1");
     await waitFor(() => expect(screen.getByTestId("agent-sync-error")).toHaveTextContent("boom"));
 
     await user.click(screen.getByTestId("agent-retry-sync"));

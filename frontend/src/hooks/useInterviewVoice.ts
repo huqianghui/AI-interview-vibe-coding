@@ -188,7 +188,7 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
       // Voice Live (when the session requests the avatar modality) isn't silently dropped.
       pc.addTransceiver("video", { direction: "recvonly" });
 
-      // Step 4: data channel BEFORE createOffer.
+      // Step 4: data channel BEFORE createOffer (carries transcripts / VAD / response lifecycle).
       const dc = pc.createDataChannel("voice-live-events");
       dataChannelRef.current = dc;
       dc.onmessage = handleDataChannelMessage;
@@ -267,7 +267,16 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
         let resolved = false;
 
         ws.onopen = () => {
-          ws.send(JSON.stringify({ type: "rtc.call.sdp.create", sdp_offer: pc.localDescription?.sdp }));
+          // The /voice-live/realtime/calls endpoint needs the session config INLINE in the
+          // sdp.create for an agent call — without it Azure fails agent initialization. (A later
+          // session.update alone is not enough; agent-init happens during the SDP exchange.)
+          ws.send(
+            JSON.stringify({
+              type: "rtc.call.sdp.create",
+              sdp_offer: pc.localDescription?.sdp,
+              session: session.session_config,
+            }),
+          );
         };
 
         ws.onmessage = (event: MessageEvent) => {
@@ -297,7 +306,10 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
                   reject(error);
                 }
               });
-          } else if (msg.type === "error") {
+          } else if (msg.type === "error" || msg.type === "rtc.call.error") {
+            // The /voice-live/realtime/calls endpoint surfaces call-level failures as
+            // `rtc.call.error` (e.g. a rejected agent/SDP); plain `error` is the session-level form.
+            // Handle both so a rejection fails fast instead of hitting the 30s timeout.
             if (!resolved) {
               resolved = true;
               const error = new Error(
@@ -379,19 +391,17 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
   const speakQuestion = useCallback((text: string): boolean => {
     const ws = signalingWsRef.current;
     if (!text || ws?.readyState !== WebSocket.OPEN) return false;
+    // Inject the backend-authoritative question as an assistant turn so Voice Live speaks THAT text
+    // (not an agent-generated one). Agent mode rejects overriding `instructions` in response.create
+    // ("Overriding instructions in response.create is not supported", live-verified 2026-08-12), so
+    // we place the verbatim text as the assistant item and fire a bare response.create.
     ws.send(
       JSON.stringify({
         type: "conversation.item.create",
         item: { type: "message", role: "assistant", content: [{ type: "text", text }] },
       }),
     );
-    // Read the injected text verbatim — not an agent-generated turn.
-    ws.send(
-      JSON.stringify({
-        type: "response.create",
-        response: { instructions: `Read this question aloud verbatim, then stop:\n${text}` },
-      }),
-    );
+    ws.send(JSON.stringify({ type: "response.create" }));
     return true;
   }, []);
 

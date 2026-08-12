@@ -55,6 +55,22 @@ def test_build_agent_tools_list_and_empty():
     assert build_agent_tools(search_endpoint="", index_name="") == []
 
 
+def test_build_agent_tools_merges_persona_tools_after_kb():
+    persona_tools = [{"type": "code_interpreter"}, {"type": "web_search"}]
+    tools = build_agent_tools(
+        search_endpoint="https://s", index_name="kb", persona_tools=persona_tools
+    )
+    # KB MCP tool is always first; persona tools follow, in order.
+    assert [t["type"] for t in tools] == ["mcp", "code_interpreter", "web_search"]
+
+
+def test_persona_tools_sync_even_without_kb():
+    tools = build_agent_tools(
+        search_endpoint="", index_name="", persona_tools=[{"type": "code_interpreter"}]
+    )
+    assert tools == [{"type": "code_interpreter"}]
+
+
 # --- agent project-endpoint scoping (live-caught 404 fix) ------------------
 
 

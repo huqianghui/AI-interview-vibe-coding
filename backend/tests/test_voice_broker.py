@@ -39,29 +39,37 @@ def test_endpoint_host_strips_scheme_and_path():
 
 
 def test_build_signaling_url_agent_mode_pins_agent_and_project():
+    # Live-verified contract: /voice-live/realtime/calls + HYPHENATED agent-name/agent-project-name/
+    # agent-version keys (underscore forms fail agent-init on a normal browser offer).
     url = voice_broker.build_signaling_url(
         host="h.cognitiveservices.azure.com",
-        api_version="2025-05-01-preview",
+        api_version="2026-01-01-preview",
         agent_name="agent-1",
         agent_version="3",
         project_name="proj",
     )
-    assert url.startswith("wss://h.cognitiveservices.azure.com/voice-live/realtime?")
-    assert "agent_name=agent-1" in url
-    assert "agent_version=3" in url
-    assert "project_name=proj" in url
+    assert url.startswith("wss://h.cognitiveservices.azure.com/voice-live/realtime/calls?")
+    assert "agent-name=agent-1" in url
+    assert "agent-project-name=proj" in url
+    assert "agent-version=3" in url
+    # The underscore forms (which Azure rejects for agent init) must NOT be emitted.
+    assert "agent_id=" not in url
+    assert "agent_project_name=" not in url
     assert "model=" not in url
 
 
 def test_build_signaling_url_model_mode_falls_back_to_model():
     url = voice_broker.build_signaling_url(host="h", api_version="v", model="gpt-4o")
+    assert url.startswith("wss://h/voice-live/realtime/calls?")
     assert "model=gpt-4o" in url
-    assert "agent_name" not in url
+    assert "agent-name" not in url
 
 
-def test_build_signaling_url_agent_version_defaults_to_1():
+def test_build_signaling_url_omits_agent_version_when_absent():
+    # agent-version is passed through only when present (no hardcoded "1" default).
     url = voice_broker.build_signaling_url(host="h", api_version="v", agent_name="a")
-    assert "agent_version=1" in url
+    assert "agent-name=a" in url
+    assert "agent-version" not in url
 
 
 @pytest.mark.asyncio
@@ -113,17 +121,23 @@ async def test_create_voice_session_succeeds_for_synced_persona(db_session):
     vs = await voice_broker.create_voice_session(db_session, locale="zh-CN")
 
     assert vs.mode == "agent"  # a synced persona with an agent_id → agent mode
-    assert "agent_name=agent-42" in vs.signaling_url
+    assert "agent-name=agent-42" in vs.signaling_url
+    assert "/voice-live/realtime/calls?" in vs.signaling_url
     assert vs.auth_type == "bearer"
     assert vs.persona_id == persona.id
     assert vs.character == "lisa"
     assert vs.greeting == "你好，我们开始面试。"
     # session_config is the snake_case Voice Live shape — never candidate-facing rubric data.
-    assert "voice" in vs.session_config
     assert "turn_detection" in vs.session_config
     # Persona has a character → avatar video modality requested (digital-human face).
     assert vs.avatar_enabled is True
     assert vs.session_config["modalities"] == ["text", "audio", "avatar"]
+    # With an avatar, runtime session.update must NOT carry voice/proactive/interim — Azure rejects
+    # them ("Cannot update voice when avatar is configured" / "'session.proactive_engagement'
+    # unexpected"); those are set via agent metadata instead.
+    assert "voice" not in vs.session_config
+    assert "proactive_engagement" not in vs.session_config
+    assert "interim_response" not in vs.session_config
 
 
 @pytest.mark.asyncio

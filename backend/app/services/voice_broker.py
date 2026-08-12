@@ -7,9 +7,9 @@ never transits the backend (P4 boundary — no candidate media on our servers).
 This module owns two things, split so the risky part is CI-testable without Azure:
 
 1. :func:`build_signaling_url` — a **pure** function that assembles the ``wss://…`` signaling URL
-   for agent-mode or model-mode. Agent mode pins ``agent_name``/``agent_version``/``project_name``
-   (the persona's synced Foundry agent); model mode falls back to a bare ``model`` query. No
-   network, fully tested.
+   for agent-mode or model-mode against the ``/voice-live/realtime/calls`` endpoint. Agent mode
+   emits Azure's ``agent_id`` + ``agent_project_name`` (+ ``agent_version``) query keys; model mode
+   falls back to a bare ``model`` query. No network, fully tested.
 
 2. :func:`create_voice_session` — the broker entry point. Resolves the active interviewer persona,
    enforces the **P5 gate** (a persona whose ``agent_sync_status != "synced"`` is rejected, never
@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.services import persona_service
 from app.services.agents.voice_live_metadata import build_session, resolve_voice
+from app.services.azure_auth import COGNITIVE_SERVICES_SCOPE, FOUNDRY_SCOPE
 from app.services.voice_providers import VoiceCredential, get_voice_provider
 from app.utils.azure_endpoints import endpoint_host, to_cognitive_services_endpoint
 
@@ -88,26 +89,46 @@ def build_signaling_url(
     """Assemble the Voice Live realtime signaling URL (pure).
 
     Agent mode (``agent_name`` given) pins the synced Foundry agent + project; model mode falls
-    back to a bare ``model`` query. The path is ``/voice-live/realtime`` — verified live against the
-    GA ``2026-07-15`` api-version. (The older preview ``/voice-live/realtime/calls`` form returns
-    404 on the GA endpoint — the SPEC P15 endpoint-drift risk, confirmed real.)
+    back to a bare ``model`` query.
+
+    Contract (live-verified end to end 2026-08-12 against ``avarda-demo-prj``, swedencentral). The
+    full spec + error→cause table live in
+    ``docs/planning/spec-voice-live-agent-contract.md`` — READ THAT if voice regresses.
+
+    - Path is ``/voice-live/realtime/calls`` (WebRTC call endpoint), NOT ``/voice-live/realtime``.
+    - Agent-mode query keys are **hyphenated**: ``agent-name`` + ``agent-project-name`` +
+      ``agent-version`` (the ``agent_name``/``project_name`` args are the persona's field names,
+      mapped to Azure's hyphenated keys here). The underscore forms
+      (``agent_id``/``agent_project_name``) reach the agent but fail ``agent_initialization_failed``
+      on a normal browser offer.
+    - ``agent-version`` is passed through only when present.
+    - ``agent_name`` here must already be the BARE agent id — the caller strips any ``:version``
+      suffix that the SDK's ``create_version`` returns.
+
+    The api-version comes from the caller (``settings.voice_live_api_version`` =
+    ``2026-01-01-preview``); ``2026-04-10``+ / GA ``2026-07-15`` reject classic agents and 404 on
+    ``/calls``.
 
     The returned URL carries NO auth token: browsers can't set WebSocket headers, so the frontend
-    appends the brokered bearer as an ``Authorization=Bearer%20<token>`` query parameter (verified
-    the accepted form — a bare ``api-key``/``access_token`` query is rejected 401).
+    appends the brokered Entra bearer as an ``Authorization=Bearer%20<token>`` query parameter.
     """
     if agent_name:
-        query = urlencode(
-            {
-                "api-version": api_version,
-                "agent_name": agent_name,
-                "agent_version": agent_version or "1",
-                "project_name": project_name or "",
-            }
-        )
+        # HYPHENATED keys are required: `agent-name` / `agent-project-name` / `agent-version`.
+        # Live-verified 2026-08-12 — the underscore forms (`agent_id`/`agent_project_name`) reach
+        # the agent but fail "agent_initialization_failed" on a normal browser (BUNDLE) offer; the
+        # hyphenated forms complete the full session.created → session.updated → sdp.created
+        # handshake with a standard offer. (Matches the AI-Coach project's working contract.)
+        params = {
+            "api-version": api_version,
+            "agent-name": agent_name,
+            "agent-project-name": project_name or "",
+        }
+        if agent_version:
+            params["agent-version"] = agent_version
+        query = urlencode(params)
     else:
         query = urlencode({"api-version": api_version, "model": model or ""})
-    return f"wss://{host}/voice-live/realtime?{query}"
+    return f"wss://{host}/voice-live/realtime/calls?{query}"
 
 
 def _greeting_for_locale(greeting_map_raw: str | None, locale: str) -> str | None:
@@ -157,25 +178,45 @@ async def create_voice_session(
     resolved_locale, _ = resolve_voice(persona.voice_map, effective_locale)
     session_config = build_session(persona, locale=resolved_locale)
 
+    # `proactive_engagement` and `interim_response` are agent-level behaviors carried in the agent's
+    # voice-live metadata, NOT runtime `session.update` fields — the realtime session rejects them
+    # ("'session.proactive_engagement' unexpected"), live-verified 2026-08-12. Drop them from the
+    # runtime config the browser sends; the agent already has them from sync-time metadata.
+    session_config.pop("proactive_engagement", None)
+    session_config.pop("interim_response", None)
+
     # Request the avatar video modality when the persona has a character configured, so Voice Live
     # sends a digital-human video track (the frontend negotiates a recvonly video transceiver).
     avatar_enabled = bool((persona.character or "").strip())
     if avatar_enabled:
         session_config["modalities"] = ["text", "audio", "avatar"]
+        # With an avatar configured, the voice is fixed at the avatar/agent level — a runtime
+        # `session.update` carrying `voice` is rejected ("Cannot update voice when avatar is
+        # configured"), live-verified 2026-08-12. The voice is already set via agent metadata.
+        session_config.pop("voice", None)
+
+    # Agent mode authorizes against the AI Agent service (needs an ai.azure.com/Foundry-scoped
+    # token); model mode accepts the cognitiveservices scope. Live-verified 2026-08-12: a
+    # cognitiveservices token on an agent session is rejected "Unauthorized to AI Agent service".
+    is_agent = bool((persona.agent_id or "").strip())
+    token_scope = FOUNDRY_SCOPE if is_agent else COGNITIVE_SERVICES_SCOPE
+    # The SDK returns the created agent id as "name:version"; Voice Live's `agent_id` query wants
+    # the bare name (version rides in the separate `agent_version` param). Strip any ":ver" suffix.
+    agent_name = (persona.agent_id or "").split(":", 1)[0] if is_agent else None
 
     credential: VoiceCredential = await voice_provider.issue_credential(
         endpoint=to_cognitive_services_endpoint(settings.azure_foundry_endpoint),
         api_key=settings.azure_foundry_api_key,
+        scope=token_scope,
     )
 
     host = endpoint_host(to_cognitive_services_endpoint(settings.azure_foundry_endpoint)) or (
         credential.host or ""
     )
-    is_agent = bool((persona.agent_id or "").strip())
     signaling_url = build_signaling_url(
         host=host or credential.host or "voice-live.local",
         api_version=settings.voice_live_api_version,
-        agent_name=persona.agent_id if is_agent else None,
+        agent_name=agent_name,
         agent_version=persona.agent_version,
         project_name=settings.azure_foundry_default_project,
         model=settings.voice_live_default_model,

@@ -1,5 +1,136 @@
 # Changelog
 
+## 0.23.1.0 (2026-08-12)
+
+Voice mode now actually connects to the interviewer's Foundry agent. Clicking "语音作答" on the
+interview page previously fell back to "Voice unavailable" even though the backend brokered a valid
+session — the digital human never appeared. The signaling handshake was using the wrong Azure Voice
+Live contract for a Foundry agent.
+
+### Fixed
+- **Voice Live agent-mode signaling contract.** The broker now builds the WebRTC signaling URL
+  against the correct Azure contract (live-verified with a real browser via Playwright fake-mic
+  against a real Foundry project): the `/voice-live/realtime/calls` endpoint, api-version
+  `2026-01-01-preview`, and the `agent_id` + `agent_project_name` query keys. The previous form
+  (`/voice-live/realtime`, `2026-07-15`, `agent_name`/`project_name`) was rejected by Azure as
+  "Missing required agent project name" then "Classic foundry agent is not supported in API version
+  2026-04-10 and above".
+- **Agent-mode token scope.** Agent sessions authorize against the AI Agent service, which needs an
+  `ai.azure.com` (Foundry)-scoped bearer; the broker previously always minted a
+  `cognitiveservices.azure.com` token, which Azure rejected "Unauthorized to AI Agent service".
+  `voice_providers.issue_credential` now takes a `scope`, and the broker passes the Foundry scope in
+  agent mode (model mode keeps cognitiveservices).
+- **agent_id version suffix.** The SDK returns a created agent id as `name:version`; the signaling
+  `agent_id` query must be the bare name (version rides in `agent_version`). The broker now strips
+  any `:version` suffix.
+- The voice hook now handles the `rtc.call.error` control message from the `/calls` endpoint, so a
+  call-level rejection surfaces immediately instead of waiting out the 30-second connect timeout.
+
+- **Audio-only signaling offer for agent mode.** Azure Voice Live's agent-mode initialization
+  rejects an SDP offer that carries a video or datachannel m-line (live-verified: an audio-only
+  offer negotiates, audio+video or audio+datachannel fails `agent_initialization_failed`). The voice
+  hook no longer adds a recvonly video transceiver, and no longer creates the `voice-live-events`
+  datachannel on the offering peer connection — it now accepts the channel Azure opens via
+  `ondatachannel`, keeping the initial offer audio-only. (Avatar video negotiates over a separate
+  `session.avatar.connect` exchange per the Voice Live WebRTC docs.)
+- The session config is sent inline in `rtc.call.sdp.create` (agent init happens during the SDP
+  exchange, so a later `session.update` alone is not enough).
+
+- **Agent voice-mode metadata must fit one key.** The voice config is stored on the Foundry agent
+  as `microsoft.voice-live.metadata`. Our full config (~690 chars) exceeded Azure's ~512-char
+  metadata cap and was split into `microsoft.voice-live.configuration` + `…configuration.1`. Voice
+  Live does not reassemble a split value — it fails agent initialization. The agent metadata now
+  carries a COMPACT config (voice + turn_detection + avatar + proactive_engagement, ~226 chars, one
+  key); the verbose runtime knobs still apply at `session.update` time. Live-verified: after this
+  fix a real browser offer clears agent-init (previously `agent_initialization_failed`).
+
+- **Signaling query keys must be hyphenated** — `agent-name` / `agent-project-name` /
+  `agent-version` (NOT `agent_id` / `agent_project_name`). This was the true blocker behind the
+  whole "agent_initialization_failed" / BUNDLE saga: with the underscore keys a normal browser offer
+  fails agent init; with the hyphenated keys the standard offer (BUNDLE, datachannel, full codecs)
+  completes the full `session.created → session.updated → rtc.call.sdp.created` handshake. Matched
+  against the working AI-Coach project's contract and live-verified end to end.
+- **Runtime `session.update` trimmed for agent+avatar** — the broker drops `voice`,
+  `proactive_engagement`, and `interim_response` from the runtime session config: with an avatar
+  configured Azure rejects a runtime voice change ("Cannot update voice when avatar is configured")
+  and the realtime session rejects `proactive_engagement`/`interim_response` (those live in the
+  agent's metadata, set at sync time).
+- **`speakQuestion` no longer overrides `instructions`** in `response.create` (agent mode rejects
+  it); it injects the backend-authoritative question as an assistant item and fires a bare
+  `response.create`.
+
+**Result (live-verified against real Azure):** clicking 语音作答 now connects the interviewer's
+Foundry agent over WebRTC, streams the digital-human avatar video, and the agent speaks
+(`response.audio_transcript.delta` events flow). No "Voice unavailable" fallback.
+
+## 0.23.0.0 (2026-08-11)
+
+The `/admin/agent` editor gains a **Tools** capability matching the Azure AI Foundry portal's agent
+Tools UI. Because a persona syncs to a real Foundry prompt agent, a selected tool really lands in
+that agent's definition — execution stays in the Foundry runtime; this app only carries the config.
+
+### Added
+- **Per-persona agent tools** — `interviewer_personas.tools_config` (JSON array), threaded through
+  `PersonaCreate/Update/Out` and synced into the Foundry prompt agent's `tools`.
+- **`persona_tools.py`** (pure, CI-tested): parses + gates the config to the tool types this app can
+  actually emit today — `code_interpreter`, `web_search`, and a public `mcp` server — dropping the
+  rest so an unsupported/half-configured tool never syncs.
+- **Tools UI** (Fluent v9): a left-panel **Tools** section (`ToolsSection`) with an "Add ▾" menu
+  (Web search / Code interpreter quick toggles + "Add tools…") and a **"Select a tool" dialog**
+  (`ToolPicker`) mirroring the portal — Configured / Catalog / Custom tabs, search, and the full card
+  set (File search, Azure AI Search, Grounding with Bing, Computer Use, Work IQ, Fabric, SharePoint,
+  OpenAPI, MCP, A2A). Supported tools add + sync for real; the rest carry a **Preview** badge and are
+  not selectable (portal parity without fake function). Custom → MCP prompts for a server URL.
+- Tests: `test_persona_tools.py`, `ToolPicker.test.tsx`, plus tools round-trip assertions in the
+  backend persona API and the frontend editor page.
+
+### Changed
+- The agent SDK converter (`azure_agent_sync._to_sdk_tool`) dispatches by tool `type` — MCPTool
+  (KB + public persona MCP), `CodeInterpreterTool`, `WebSearchTool`. `build_agent_tools` merges the
+  SOP KB tool (always first) with the persona's gated tools.
+- **A persona MCP server requires approval by default.** Since the interviewer agent runs a live
+  conversation with an untrusted candidate, an admin-added public MCP defaults to
+  `require_approval="always"` (was implicitly unrestricted) so its tools can't be auto-invoked via
+  prompt injection. The tool gate also validates `server_url` is plain http(s), tolerates non-string
+  fields without crashing, and dedupes repeated tools before they reach Foundry.
+- Interviewer avatars now carry Azure's real style slug. A migration backfills any persona still on
+  the old Lisa `casual` style to `casual-sitting` so it renders the intended pose in Voice Live.
+
+### Deferred (follow-up issue)
+- Connection-authenticated tools (protected MCP, OpenAPI spec, A2A, Bing grounding, Azure AI Search)
+  and Microsoft-hosted connectors (Work IQ, Fabric, SharePoint, Computer Use) — shown as Preview
+  cards; wiring them needs RemoteTool connection resolution / spec parsing not yet generalized.
+
+## 0.22.0.0 (2026-08-11)
+
+The `/admin/agent` editor now matches the Azure AI Foundry portal Playground: real digital-human
+faces (not letter placeholders), the portal's three-region layout, and the full Azure avatar roster.
+Picking an interviewer now looks and works like it does in Foundry.
+
+### Added
+- **Real-face avatar roster** (`frontend/src/data/avatarCharacters.ts`): the full Azure Voice Live
+  catalog — 6 video avatars (Lisa/Harry/Meg/Jeff/Lori/Max, multiple styles each) + 27 photo avatars
+  — with official Microsoft Learn CDN preview photos (every thumbnail URL verified against the CDN).
+- **`AvatarPreview`**: a static real-face preview for the editor's center Playground column (the
+  digital human "stands" in the middle like the portal), with an initial-swatch fallback and a
+  voice-only orb when no avatar is set. The live-interview `/interview` WebRTC path is untouched.
+- Component tests for `AvatarGrid` (real thumbnails, onError→initial fallback, all/photo/video
+  filter, style dropdown) and `AvatarPreview`.
+
+### Changed
+- **`AvatarGrid` now shows real faces**, not colored letter blocks: CDN thumbnails with an
+  onError→initial fallback (offline/test-safe), an all/photo/video filter, one tile per style for
+  video avatars, and a style dropdown for the selected character.
+- **Editor layout matches the Foundry portal**: persona selection moved into a top-bar switcher
+  dropdown; the left column became divider-separated agent-definition sections (Identity / Voice
+  mode / Model / Agent / Instructions / Knowledge); the center is a large Playground preview.
+- **Avatar style slugs are Azure's real names** (e.g. `casual-sitting`, not `casual`). Since the
+  backend passes `persona.style` through to Voice Live verbatim, this also corrects the value sent to
+  Azure. `DEFAULT_AVATAR_STYLE` is now `casual-sitting` (`voice_live_metadata.py`).
+
+### Removed
+- `PersonaNav` (left-side persona list) — superseded by the top-bar `PersonaSwitcher`.
+
 ## 0.21.0.0 (2026-08-11)
 
 Scoring runs against a real model, and report citations are trustworthy. When an operator points

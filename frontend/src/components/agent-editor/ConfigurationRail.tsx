@@ -12,10 +12,12 @@ import {
   AccordionHeader,
   AccordionItem,
   AccordionPanel,
+  Divider,
   Dropdown,
   Field,
   Input,
   Option,
+  Subtitle2,
   Switch,
   Textarea,
   makeStyles,
@@ -80,6 +82,9 @@ export function ConfigurationRail({
         </Dropdown>
       </Field>
 
+      <Divider />
+      <Subtitle2>Speech output</Subtitle2>
+
       {/* Speech voice (per active locale) */}
       <Field label={`Speech voice (${activeLocale})`}>
         <Dropdown
@@ -127,6 +132,9 @@ export function ConfigurationRail({
           data-testid="config-proactive"
         />
       </div>
+
+      <Divider />
+      <Subtitle2>Avatar</Subtitle2>
 
       {/* Avatar grid */}
       <Field label="Avatar">

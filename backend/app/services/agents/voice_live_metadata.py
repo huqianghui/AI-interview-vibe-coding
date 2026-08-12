@@ -38,7 +38,8 @@ INTERIM_LATENCY_THRESHOLD_MS = 500
 
 # Persona avatar/voice fallbacks (only used when the persona leaves a field blank).
 DEFAULT_AVATAR_CHARACTER = "lisa"
-DEFAULT_AVATAR_STYLE = "casual"
+# Azure Voice Live expects the real style slug; the persona's style is passed through verbatim.
+DEFAULT_AVATAR_STYLE = "casual-sitting"
 DEFAULT_VOICE_BY_LOCALE = {"zh-CN": "zh-CN-XiaoxiaoNeural", "en-US": "en-US-AvaNeural"}
 FALLBACK_LOCALE = "zh-CN"
 
@@ -130,6 +131,39 @@ def build_session(persona: Any, *, locale: str | None = None) -> dict[str, Any]:
     return session
 
 
+def build_agent_metadata_session(persona: Any, *, locale: str | None = None) -> dict[str, Any]:
+    """A COMPACT ``session`` for the agent's ``microsoft.voice-live.configuration`` metadata.
+
+    Distinct from :func:`build_session` (the full runtime config sent over the WS at
+    ``session.update`` time). Azure caps a metadata value at ~512 chars; the full config (~690
+    chars) would be split across ``…configuration``/``…configuration.1``, and Voice Live does NOT
+    reassemble the split — it fails agent initialization ("agent_initialization_failed"), verified
+    live 2026-08-12 against a real Foundry project (a compact single-key config initializes fine;
+    the working portal agent Dr-Zhang-Wei likewise carries a single unsplit key).
+
+    So the metadata only needs the fields that ENABLE voice mode on the agent: voice,
+    turn_detection, avatar, proactive_engagement. The verbose runtime knobs (transcription model,
+    EOU sub-object, noise/echo suppression, interim-response triggers) apply at runtime via
+    ``session.update``
+    from :func:`build_session`, and are omitted here to keep the config in one metadata value.
+    """
+    _, voice_name = resolve_voice(persona.voice_map, locale)
+    session: dict[str, Any] = {
+        "voice": {
+            "name": voice_name,
+            "type": "azure-standard",
+            "temperature": persona.voice_temperature,
+        },
+        "turn_detection": {"type": persona.turn_detection},
+        "avatar": {
+            "character": persona.character or DEFAULT_AVATAR_CHARACTER,
+            "style": persona.style or DEFAULT_AVATAR_STYLE,
+        },
+        "proactive_engagement": bool(persona.proactive_engagement),
+    }
+    return session
+
+
 def chunk_metadata_value(
     key: str, value: str, *, max_len: int = METADATA_CHUNK_SIZE
 ) -> dict[str, str]:
@@ -151,7 +185,9 @@ def build_voice_live_metadata(
     ``modified_at`` is injectable for deterministic tests; when omitted it is left out entirely
     (the sync adapter stamps it at call time).
     """
-    session = build_session(persona, locale=locale)
+    # Use the COMPACT session for agent metadata (Voice Live does not reassemble a split
+    # `…configuration`/`…configuration.1` value — it fails agent init). Keep it in a single key.
+    session = build_agent_metadata_session(persona, locale=locale)
     config_json = json.dumps({"session": session}, separators=(",", ":"), ensure_ascii=False)
 
     metadata: dict[str, str] = {VOICE_LIVE_ENABLED_KEY: "true"}
