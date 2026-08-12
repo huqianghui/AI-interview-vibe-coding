@@ -36,14 +36,22 @@ Live contract for a Foundry agent.
 - The session config is sent inline in `rtc.call.sdp.create` (agent init happens during the SDP
   exchange, so a later `session.update` alone is not enough).
 
-### Known remaining gate (needs Azure-side visibility)
-- After RBAC (Foundry User) is granted, agent-init succeeds for a synthetic audio-only SDP (verified
-  live — it advances to the media-allocation stage). A real Chromium WebRTC offer with the same
-  audio-only m-lines, token, and session config still returns `agent_initialization_failed`. The
-  difference is isolated to the real browser SDP's content vs a minimal stub; pinning the exact
-  attribute Azure objects to requires Azure-side logs or Microsoft's known-good agent-mode WebRTC
-  sample. The full signaling contract, token scope, RBAC, and offer shape are otherwise verified
-  correct against real Azure.
+- **Agent voice-mode metadata must fit one key.** The voice config is stored on the Foundry agent
+  as `microsoft.voice-live.metadata`. Our full config (~690 chars) exceeded Azure's ~512-char
+  metadata cap and was split into `microsoft.voice-live.configuration` + `…configuration.1`. Voice
+  Live does not reassemble a split value — it fails agent initialization. The agent metadata now
+  carries a COMPACT config (voice + turn_detection + avatar + proactive_engagement, ~226 chars, one
+  key); the verbose runtime knobs still apply at `session.update` time. Live-verified: after this
+  fix a real browser offer clears agent-init (previously `agent_initialization_failed`).
+
+### Known remaining gate (SDP negotiation)
+- After the metadata fix, a real Chromium offer clears agent-init and reaches Azure's media
+  allocation, which then reports a contradictory pair depending on the offer: with the browser's
+  standard `a=group:BUNDLE` line, agent-init fails; without it, allocation fails "Required BUNDLE
+  group attribute is missing". Isolated live to the `a=group:BUNDLE` line specifically. Reconciling
+  the two stages needs Microsoft's known-good agent-mode WebRTC offer shape (their published sample
+  is model-mode). Everything else — signaling contract, token scope, RBAC, agent metadata — is
+  verified correct against real Azure; the interviewer agent now initializes for voice.
 
 ## 0.23.0.0 (2026-08-11)
 

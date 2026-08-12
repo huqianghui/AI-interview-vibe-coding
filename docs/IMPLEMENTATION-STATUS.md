@@ -94,13 +94,19 @@ that an automatable check can pass while the live service rejects." Validated li
   datachannel m-line, so the hook now sends an audio-only offer (no video transceiver; accepts
   Azure's `ondatachannel`) with the session config inline in `rtc.call.sdp.create`.
 
-### Blocked on Azure-side visibility — agent voice not yet fully live
+- ✅ **Agent voice-mode metadata** (v0.23.1.0): fixed the config-chunking bug — the agent's
+  `microsoft.voice-live.configuration` was split across two metadata keys (config >512 chars) and
+  Voice Live can't reassemble a split value, failing agent-init. The agent metadata now carries a
+  compact single-key config (voice/turn_detection/avatar/proactive_engagement); verbose knobs apply
+  at runtime via `session.update`. Live-verified: a real browser offer now clears agent-init.
 
-- A real Chromium WebRTC offer (same audio-only m-lines / token / session config that a stub SDP
-  passes with) still returns `agent_initialization_failed`. Isolated to the real browser SDP's
-  content; pinning the exact attribute Azure objects to needs Azure-side logs or Microsoft's
-  known-good agent-mode WebRTC sample. Everything on the app side (signaling contract, token scope,
-  RBAC, offer shape) is verified correct against real Azure up to this boundary.
+### Blocked on SDP negotiation — agent voice not yet fully live
+
+- Past agent-init, Azure's media allocation and agent-init give contradictory demands on the offer's
+  `a=group:BUNDLE` line (allocation requires it; agent-init rejects the browser's standard BUNDLE
+  offer). Reconciling needs Microsoft's known-good AGENT-mode WebRTC offer shape (their sample is
+  model-mode). App side — signaling contract, token scope, RBAC, agent metadata — verified correct
+  against real Azure; the interviewer agent initializes for voice.
 
 ### Deploy configuration (v0.15.0.0)
 

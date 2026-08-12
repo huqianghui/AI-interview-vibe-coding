@@ -154,6 +154,20 @@ def test_modified_at_omitted_when_not_given():
     assert "modified_at" not in md
 
 
+def test_agent_metadata_config_is_single_key_and_compact():
+    # Regression: Voice Live rejects a SPLIT `…configuration`/`…configuration.1` metadata value
+    # ("agent_initialization_failed"). A normal persona's agent metadata must stay in ONE key.
+    md = build_voice_live_metadata(FakePersona(), locale="zh-CN")
+    config_keys = [k for k in md if k.startswith(VOICE_LIVE_CONFIG_KEY)]
+    assert config_keys == [VOICE_LIVE_CONFIG_KEY]  # exactly one, no ".1" chunk
+    assert len(md[VOICE_LIVE_CONFIG_KEY]) <= 512
+    # Carries the fields that ENABLE voice mode; omits the verbose runtime-only knobs.
+    session = decode_voice_live_metadata(md)
+    assert {"voice", "turn_detection", "avatar", "proactive_engagement"} <= session.keys()
+    assert "input_audio_transcription" not in session
+    assert "interim_response" not in session
+
+
 def test_metadata_roundtrips_through_decode_even_when_chunked():
     # Force chunking with a huge (valid JSON) voice name so config JSON exceeds 512 chars.
     persona = FakePersona(voice_map=json.dumps({"zh-CN": "v" * 900}))

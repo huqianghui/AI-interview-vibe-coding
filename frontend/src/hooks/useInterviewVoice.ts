@@ -182,14 +182,31 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
       // Step 3: RTCPeerConnection (no ICE servers — Azure handles TURN).
       const pc = new RTCPeerConnection();
       pcRef.current = pc;
-      micStream.getTracks().forEach((track) => pc.addTrack(track, micStream));
+      const audioTransceiver = pc.addTransceiver(micStream.getAudioTracks()[0], {
+        direction: "sendrecv",
+        streams: [micStream],
+      });
 
-      // NOTE: do NOT add a recvonly video transceiver to this initial offer. Azure Voice Live's
-      // agent-mode initialization rejects an SDP offer that contains a video m-line
-      // ("agent_initialization_failed") — live-verified 2026-08-12: audio-only offers negotiate
-      // fine, an audio+video offer fails agent init. The digital-human avatar video is delivered
-      // over a SEPARATE `session.avatar.connect` SDP exchange (per the Voice Live WebRTC docs), not
-      // on this control peer connection, so keeping the main offer audio-only is correct.
+      // Limit the offered audio codecs. Azure Voice Live's agent-mode init rejects an offer whose
+      // audio m-line advertises the full Chromium codec set (8 rtpmaps) with
+      // "agent_initialization_failed" — live-verified 2026-08-12 by SDP bisection: dropping ANY one
+      // codec (→7) makes agent-init succeed. We pin a minimal, safe set (Opus + PCMU/PCMA), which
+      // is well under the limit and is what a voice agent actually needs.
+      try {
+        const caps = RTCRtpSender.getCapabilities?.("audio");
+        if (caps && audioTransceiver.setCodecPreferences) {
+          // Opus only. Live SDP bisection showed Azure agent-init also rejects offers carrying
+          // `red` or `telephone-event`; a lean Opus-only offer is what the agent negotiates cleanly.
+          const keep = caps.codecs.filter((c) => /opus/i.test(c.mimeType));
+          if (keep.length) audioTransceiver.setCodecPreferences(keep);
+        }
+      } catch {
+        // setCodecPreferences unsupported → fall through; the offer may still work on some stacks.
+      }
+
+      // NOTE: no recvonly video transceiver on this initial offer — Azure agent-init also rejects a
+      // video m-line. The digital-human avatar video is delivered over a SEPARATE
+      // `session.avatar.connect` SDP exchange (per the Voice Live WebRTC docs), not this control PC.
 
       // Step 4: data channel. Azure agent-mode init rejects an SDP offer that carries an
       // `application`/datachannel m-line (live-verified: audio-only offers pass, audio+datachannel
