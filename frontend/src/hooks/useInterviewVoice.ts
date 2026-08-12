@@ -197,19 +197,34 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
       pc.ontrack = (event) => {
         if (event.track.kind === "video") {
           const videoEl = optionsRef.current.videoRef?.current;
-          // Flip isAvatarConnected (which hides the fallback orb) ONLY after the video actually
-          // starts playing. If play() is rejected (autoplay policy) or there's no element, leave it
-          // false so the orb stays visible instead of a blank box. The video is muted (avatar audio
-          // is on the separate <audio> element below), so a muted autoplay is allowed from ontrack.
+          // Flip isAvatarConnected (which hides the fallback orb) ONLY when the video is actually
+          // playing AND producing real frames. If play() is rejected (autoplay policy), there's no
+          // element, or the track connects but delivers 0×0 frames (no avatar video), leave it false
+          // so the orb stays visible instead of a blank box. The video is muted (avatar audio is on
+          // the separate <audio> element below), so a muted autoplay is allowed from ontrack.
           if (!videoEl) return;
           videoEl.muted = true;
           videoEl.srcObject = event.streams[0] ?? null;
+          // Real frames present → show the avatar; 0×0 → keep the orb (a track with no picture).
+          const reflectDimensions = () => {
+            const hasFrames = videoEl.videoWidth > 0 && videoEl.videoHeight > 0;
+            // eslint-disable-next-line no-console
+            console.debug(
+              `[voice] avatar video ${hasFrames ? "has frames" : "0x0 (no frames yet)"}: ` +
+                `${videoEl.videoWidth}x${videoEl.videoHeight}`,
+            );
+            setIsAvatarConnected(hasFrames);
+          };
+          // Dimensions can arrive after play() resolves; track both events (and clear on track end).
+          videoEl.onloadedmetadata = reflectDimensions;
+          videoEl.onresize = reflectDimensions;
+          event.track.onended = () => setIsAvatarConnected(false);
           videoEl
             .play()
             .then(() => {
               // eslint-disable-next-line no-console
               console.debug("[voice] avatar video track attached and playing");
-              setIsAvatarConnected(true);
+              reflectDimensions();
             })
             .catch((err: unknown) => {
               // eslint-disable-next-line no-console
