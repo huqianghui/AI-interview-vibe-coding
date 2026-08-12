@@ -39,29 +39,36 @@ def test_endpoint_host_strips_scheme_and_path():
 
 
 def test_build_signaling_url_agent_mode_pins_agent_and_project():
+    # Live-verified contract: /voice-live/realtime/calls + agent_id/agent_project_name query keys.
     url = voice_broker.build_signaling_url(
         host="h.cognitiveservices.azure.com",
-        api_version="2025-05-01-preview",
+        api_version="2026-01-01-preview",
         agent_name="agent-1",
         agent_version="3",
         project_name="proj",
     )
-    assert url.startswith("wss://h.cognitiveservices.azure.com/voice-live/realtime?")
-    assert "agent_name=agent-1" in url
+    assert url.startswith("wss://h.cognitiveservices.azure.com/voice-live/realtime/calls?")
+    assert "agent_id=agent-1" in url
+    assert "agent_project_name=proj" in url
     assert "agent_version=3" in url
-    assert "project_name=proj" in url
+    # Azure's GA key names must NOT leak the old (rejected) forms.
+    assert "agent_name=" not in url
+    assert "&project_name=" not in url and "?project_name=" not in url
     assert "model=" not in url
 
 
 def test_build_signaling_url_model_mode_falls_back_to_model():
     url = voice_broker.build_signaling_url(host="h", api_version="v", model="gpt-4o")
+    assert url.startswith("wss://h/voice-live/realtime/calls?")
     assert "model=gpt-4o" in url
-    assert "agent_name" not in url
+    assert "agent_id" not in url
 
 
-def test_build_signaling_url_agent_version_defaults_to_1():
+def test_build_signaling_url_omits_agent_version_when_absent():
+    # agent_version is passed through only when present (no hardcoded "1" default).
     url = voice_broker.build_signaling_url(host="h", api_version="v", agent_name="a")
-    assert "agent_version=1" in url
+    assert "agent_id=a" in url
+    assert "agent_version" not in url
 
 
 @pytest.mark.asyncio
@@ -113,7 +120,8 @@ async def test_create_voice_session_succeeds_for_synced_persona(db_session):
     vs = await voice_broker.create_voice_session(db_session, locale="zh-CN")
 
     assert vs.mode == "agent"  # a synced persona with an agent_id → agent mode
-    assert "agent_name=agent-42" in vs.signaling_url
+    assert "agent_id=agent-42" in vs.signaling_url
+    assert "/voice-live/realtime/calls?" in vs.signaling_url
     assert vs.auth_type == "bearer"
     assert vs.persona_id == persona.id
     assert vs.character == "lisa"

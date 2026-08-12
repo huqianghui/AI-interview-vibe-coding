@@ -81,11 +81,19 @@ that an automatable check can pass while the live service rejects." Validated li
 - ✅ **Real retrieval turn**: a question through the KB-bound agent returned a grounded answer
   citing SOP content (`【n:n†source】`), with output items `mcp_list_tools → mcp_call → message`.
 - ✅ Voice Live credential chain (Entra bearer) to the signaling WebSocket handshake.
+- ✅ **Agent-mode Voice Live session init** (v0.23.1.0, 2026-08-12): live-verified that the brokered
+  signaling URL (`/voice-live/realtime/calls`, api-version `2026-01-01-preview`, `agent_id` +
+  `agent_project_name`) makes Azure initialize the real `avarda-demo-agent` — the WS reaches the SDP
+  negotiation stage (only a hand-written fake SDP fails; a real browser offer completes). This fixed
+  the "Voice unavailable" fallback: the prior contract (`/voice-live/realtime`, `2026-07-15`,
+  `agent_name`/`project_name`) was rejected by Azure ("Missing required agent project name", then
+  "Classic foundry agent is not supported in API version 2026-04-10 and above").
 
-### Still pending live validation (needs a browser/mic or deploy config, not code)
+### Still pending live validation (needs a browser/mic, not code)
 
-- Full **voice WebRTC audio round-trip** in a real browser (mic in, avatar audio/video out). Code +
-  credentials are in place; verified through the signaling handshake, not a live human conversation.
+- Full **voice WebRTC audio round-trip** with a real human (mic in, avatar audio/video out). The
+  signaling + agent-init are verified against real Azure; the remaining unverified leg is a live
+  RTCPeerConnection from a real browser with a microphone through to spoken audio + avatar video.
 
 ### Deploy configuration (v0.15.0.0)
 

@@ -89,9 +89,11 @@ class Settings(BaseSettings):
     # Model Voice Live runs the session on. Same deployment constraint + precedence as
     # foundry_agent_model. Neutral code default; real value from DB master config or .env.
     voice_live_default_model: str = "gpt-4o"
-    # Voice Live / Foundry Agents GA api-version. Matches the reference project's proven value
-    # (GA 2026-07-13, azure-ai-voicelive SDK 1.3.0) — do NOT regress to an older preview literal.
-    voice_live_api_version: str = "2026-07-15"
+    # Voice Live realtime api-version. Classic Foundry agents (what agent-sync currently creates)
+    # require 2026-01-01-preview or 2025-10-01 — api-version 2026-04-10 and above reject them with
+    # "Classic foundry agent is not supported" (live-verified 2026-08-11, swedencentral). The GA
+    # 2026-07-15 value only works for model mode / migrated new-type agents.
+    voice_live_api_version: str = "2026-01-01-preview"
 
 
 @lru_cache

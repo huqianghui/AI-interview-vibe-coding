@@ -88,26 +88,37 @@ def build_signaling_url(
     """Assemble the Voice Live realtime signaling URL (pure).
 
     Agent mode (``agent_name`` given) pins the synced Foundry agent + project; model mode falls
-    back to a bare ``model`` query. The path is ``/voice-live/realtime`` — verified live against the
-    GA ``2026-07-15`` api-version. (The older preview ``/voice-live/realtime/calls`` form returns
-    404 on the GA endpoint — the SPEC P15 endpoint-drift risk, confirmed real.)
+    back to a bare ``model`` query.
+
+    Contract (live-verified 2026-08-11 against ``avarda-demo-prj``, swedencentral — see the earlier
+    ``/voice-live/realtime`` + ``agent_name``/``project_name`` form which Azure rejected with
+    "Missing required agent project name", and classic agents with "Classic foundry agent is not
+    supported in API version 2026-04-10 and above"):
+
+    - Path is ``/voice-live/realtime/calls`` (the WebRTC call endpoint). The frontend opens this WS
+      and sends ``rtc.call.sdp.create`` with the browser SDP offer.
+    - Agent-mode query keys are ``agent_id`` + ``agent_project_name`` (NOT ``agent_name`` /
+      ``project_name`` — those are the persona's field names, mapped to Azure's keys here).
+    - ``agent_version`` is passed through when present.
+
+    The api-version is supplied by the caller (``settings.voice_live_api_version``); classic Foundry
+    agents require ``2026-01-01-preview`` (or ``2025-10-01``), since ``2026-04-10``+ reject them.
 
     The returned URL carries NO auth token: browsers can't set WebSocket headers, so the frontend
-    appends the brokered bearer as an ``Authorization=Bearer%20<token>`` query parameter (verified
-    the accepted form — a bare ``api-key``/``access_token`` query is rejected 401).
+    appends the brokered bearer as an ``Authorization=Bearer%20<token>`` query parameter.
     """
     if agent_name:
-        query = urlencode(
-            {
-                "api-version": api_version,
-                "agent_name": agent_name,
-                "agent_version": agent_version or "1",
-                "project_name": project_name or "",
-            }
-        )
+        params = {
+            "api-version": api_version,
+            "agent_id": agent_name,
+            "agent_project_name": project_name or "",
+        }
+        if agent_version:
+            params["agent_version"] = agent_version
+        query = urlencode(params)
     else:
         query = urlencode({"api-version": api_version, "model": model or ""})
-    return f"wss://{host}/voice-live/realtime?{query}"
+    return f"wss://{host}/voice-live/realtime/calls?{query}"
 
 
 def _greeting_for_locale(greeting_map_raw: str | None, locale: str) -> str | None:

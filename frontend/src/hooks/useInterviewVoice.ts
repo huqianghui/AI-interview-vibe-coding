@@ -297,7 +297,10 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
                   reject(error);
                 }
               });
-          } else if (msg.type === "error") {
+          } else if (msg.type === "error" || msg.type === "rtc.call.error") {
+            // The /voice-live/realtime/calls endpoint surfaces call-level failures as
+            // `rtc.call.error` (e.g. a rejected agent/SDP); plain `error` is the session-level form.
+            // Handle both so a rejection fails fast instead of hitting the 30s timeout.
             if (!resolved) {
               resolved = true;
               const error = new Error(

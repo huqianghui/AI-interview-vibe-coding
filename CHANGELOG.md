@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.23.1.0 (2026-08-12)
+
+Voice mode now actually connects to the interviewer's Foundry agent. Clicking "语音作答" on the
+interview page previously fell back to "Voice unavailable" even though the backend brokered a valid
+session — the digital human never appeared. The signaling handshake was using the wrong Azure Voice
+Live contract for a Foundry agent.
+
+### Fixed
+- **Voice Live agent-mode signaling.** The broker now builds the WebRTC signaling URL against the
+  correct Azure contract (live-verified against a real Foundry project): the `/voice-live/realtime/calls`
+  endpoint, api-version `2026-01-01-preview`, and the `agent_id` + `agent_project_name` query keys.
+  The previous form (`/voice-live/realtime`, `2026-07-15`, `agent_name`/`project_name`) was rejected
+  by Azure — first as "Missing required agent project name", then as "Classic foundry agent is not
+  supported in API version 2026-04-10 and above". With the fix, Azure initializes the agent and the
+  browser's WebRTC negotiation proceeds, so the interviewer's voice + digital-human avatar connect.
+- The voice hook now also handles the `rtc.call.error` control message from the `/calls` endpoint, so
+  a call-level rejection surfaces immediately instead of waiting out the 30-second connect timeout.
+
 ## 0.23.0.0 (2026-08-11)
 
 The `/admin/agent` editor gains a **Tools** capability matching the Azure AI Foundry portal's agent
