@@ -91,22 +91,26 @@ def build_signaling_url(
     Agent mode (``agent_name`` given) pins the synced Foundry agent + project; model mode falls
     back to a bare ``model`` query.
 
-    Contract (live-verified 2026-08-11 against ``avarda-demo-prj``, swedencentral — see the earlier
-    ``/voice-live/realtime`` + ``agent_name``/``project_name`` form which Azure rejected with
-    "Missing required agent project name", and classic agents with "Classic foundry agent is not
-    supported in API version 2026-04-10 and above"):
+    Contract (live-verified end to end 2026-08-12 against ``avarda-demo-prj``, swedencentral). The
+    full spec + error→cause table live in
+    ``docs/planning/spec-voice-live-agent-contract.md`` — READ THAT if voice regresses.
 
-    - Path is ``/voice-live/realtime/calls`` (the WebRTC call endpoint). The frontend opens this WS
-      and sends ``rtc.call.sdp.create`` with the browser SDP offer.
-    - Agent-mode query keys are ``agent_id`` + ``agent_project_name`` (NOT ``agent_name`` /
-      ``project_name`` — those are the persona's field names, mapped to Azure's keys here).
-    - ``agent_version`` is passed through when present.
+    - Path is ``/voice-live/realtime/calls`` (WebRTC call endpoint), NOT ``/voice-live/realtime``.
+    - Agent-mode query keys are **hyphenated**: ``agent-name`` + ``agent-project-name`` +
+      ``agent-version`` (the ``agent_name``/``project_name`` args are the persona's field names,
+      mapped to Azure's hyphenated keys here). The underscore forms
+      (``agent_id``/``agent_project_name``) reach the agent but fail ``agent_initialization_failed``
+      on a normal browser offer.
+    - ``agent-version`` is passed through only when present.
+    - ``agent_name`` here must already be the BARE agent id — the caller strips any ``:version``
+      suffix that the SDK's ``create_version`` returns.
 
-    The api-version is supplied by the caller (``settings.voice_live_api_version``); classic Foundry
-    agents require ``2026-01-01-preview`` (or ``2025-10-01``), since ``2026-04-10``+ reject them.
+    The api-version comes from the caller (``settings.voice_live_api_version`` =
+    ``2026-01-01-preview``); ``2026-04-10``+ / GA ``2026-07-15`` reject classic agents and 404 on
+    ``/calls``.
 
     The returned URL carries NO auth token: browsers can't set WebSocket headers, so the frontend
-    appends the brokered bearer as an ``Authorization=Bearer%20<token>`` query parameter.
+    appends the brokered Entra bearer as an ``Authorization=Bearer%20<token>`` query parameter.
     """
     if agent_name:
         # HYPHENATED keys are required: `agent-name` / `agent-project-name` / `agent-version`.

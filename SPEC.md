@@ -230,6 +230,13 @@ Foundry agent built-in session memory + an explicit demo moment.
   progress (n/N) visible; (3) citations render in a separate sources panel, never inline in the
   transcript; (4) mic-denied shows retry / use-text-instead; (5) reconnect recovers a dropped
   connection within 3 attempts.
+- **Voice Live agent-mode contract (live-verified):** the exact Azure signaling/auth/agent-metadata
+  requirements that make the interviewer's Foundry prompt agent connect over WebRTC (Lisa appears +
+  speaks) are documented in
+  [`docs/planning/spec-voice-live-agent-contract.md`](docs/planning/spec-voice-live-agent-contract.md).
+  Non-obvious essentials: hyphenated `agent-name`/`agent-project-name` query keys, `/voice-live/realtime/calls`
+  endpoint at api-version `2026-01-01-preview`, Entra `ai.azure.com`-scoped bearer, single-key
+  (≤512-char) agent voice metadata, Foundry User RBAC. **Read that spec first if voice regresses.**
 
 ---
 
