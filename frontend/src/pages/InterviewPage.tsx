@@ -53,9 +53,18 @@ type Channel = "text" | "voice";
 const useStyles = makeStyles({
   // Centered container for the non-live phases (idle / orientation / scoring / report).
   page: { maxWidth: "760px", margin: "0 auto", padding: "24px" },
-  header: { marginBottom: tokens.spacingVerticalL },
+  header: {
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalXS,
+    marginBottom: tokens.spacingVerticalL,
+  },
   // Full-width two-column stage for the live Q&A.
-  stageWrap: { padding: `0 ${tokens.spacingHorizontalXXL}`, boxSizing: "border-box", width: "100%" },
+  stageWrap: {
+    padding: `${tokens.spacingVerticalL} ${tokens.spacingHorizontalXXL}`,
+    boxSizing: "border-box",
+    width: "100%",
+  },
   grid: {
     display: "grid",
     gridTemplateColumns: "minmax(0, 3fr) minmax(360px, 2fr)",
