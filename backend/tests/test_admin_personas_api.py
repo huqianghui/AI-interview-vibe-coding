@@ -101,3 +101,83 @@ async def test_retry_sync_on_existing(client):
 async def test_create_rejects_blank_name(client):
     resp = await client.post("/admin/personas", headers=AUTH, json={"name": ""})
     assert resp.status_code == 422
+
+
+# --- per-persona knowledge (Foundry IQ) ------------------------------------
+
+
+async def test_knowledge_routes_require_a_token(client):
+    assert (await client.get("/admin/personas/knowledge/connections")).status_code == 401
+    p = (await client.post("/admin/personas", headers=AUTH, json={"name": "K"})).json()
+    assert (await client.get(f"/admin/personas/{p['id']}/knowledge")).status_code == 401
+
+
+async def test_knowledge_add_list_remove_round_trip(client):
+    p = (await client.post("/admin/personas", headers=AUTH, json={"name": "K"})).json()
+    # No KB attached initially.
+    assert (await client.get(f"/admin/personas/{p['id']}/knowledge", headers=AUTH)).json() == []
+
+    # Attach one → returned list has it, with a defaulted server_label.
+    add = await client.post(
+        f"/admin/personas/{p['id']}/knowledge",
+        headers=AUTH,
+        json={
+            "connection_name": "search-conn",
+            "connection_target": "https://s.search.windows.net",
+            "index_name": "sop-kb",
+        },
+    )
+    assert add.status_code == 201
+    configs = add.json()
+    assert len(configs) == 1
+    assert configs[0]["index_name"] == "sop-kb"
+    assert configs[0]["server_label"] == "knowledge-base-sop-kb"
+    assert configs[0]["persona_id"] == p["id"]
+
+    # List reflects it.
+    listing = (await client.get(f"/admin/personas/{p['id']}/knowledge", headers=AUTH)).json()
+    assert [c["index_name"] for c in listing] == ["sop-kb"]
+
+    # Remove → persona payload returned (re-synced), and the KB is gone.
+    removed = await client.delete(f"/admin/personas/knowledge/{configs[0]['id']}", headers=AUTH)
+    assert removed.status_code == 200
+    assert removed.json()["agent_sync_status"] == "synced"
+    assert (await client.get(f"/admin/personas/{p['id']}/knowledge", headers=AUTH)).json() == []
+
+
+async def test_knowledge_add_triggers_resync(client):
+    p = (await client.post("/admin/personas", headers=AUTH, json={"name": "K"})).json()
+    add = await client.post(
+        f"/admin/personas/{p['id']}/knowledge",
+        headers=AUTH,
+        json={"connection_name": "c", "connection_target": "https://s", "index_name": "kb"},
+    )
+    assert add.status_code == 201
+    # The persona was re-synced by the mock adapter (agent-sync bookkeeping updated).
+    persona = (await client.get(f"/admin/personas/{p['id']}", headers=AUTH)).json()
+    assert persona["agent_sync_status"] == "synced"
+
+
+async def test_knowledge_add_to_missing_persona_is_404(client):
+    resp = await client.post(
+        "/admin/personas/nope/knowledge",
+        headers=AUTH,
+        json={"connection_name": "c", "connection_target": "https://s", "index_name": "kb"},
+    )
+    assert resp.status_code == 404
+
+
+async def test_knowledge_remove_missing_config_is_404(client):
+    assert (await client.delete("/admin/personas/knowledge/nope", headers=AUTH)).status_code == 404
+
+
+async def test_knowledge_list_missing_persona_is_404(client):
+    assert (await client.get("/admin/personas/nope/knowledge", headers=AUTH)).status_code == 404
+
+
+async def test_knowledge_discovery_empty_when_unconfigured(client):
+    # No AI Foundry master config in the test DB → discovery degrades to [] (never 500).
+    assert (await client.get("/admin/personas/knowledge/connections", headers=AUTH)).json() == []
+    assert (
+        await client.get("/admin/personas/knowledge/knowledge-bases", headers=AUTH)
+    ).json() == []

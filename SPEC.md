@@ -161,10 +161,19 @@ Foundry prompt agent + inline voice mode config. No VoiceLiveInstance.
   noise_reduction / echo_cancellation / avatar / proactive_engagement / interim_response), chunked
   at 512 chars. Credential fallback: DefaultAzureCredential first (required for create), API key
   for read/update/delete.
+- **Per-persona knowledge (v0.24.0.0):** each persona binds its OWN Foundry IQ knowledge bases —
+  there is no global KB for agent grounding. Model `persona_knowledge_config` (persona_id FK
+  cascade, connection_name, connection_target, index_name, server_label, is_enabled), edited in the
+  `/admin/agent` Knowledge section via a connect dialog (Azure AI Search connection → knowledge base,
+  live dropdowns). On sync, each attached KB is resolved to an authenticated RemoteTool connection
+  (find-or-create via ARM) and bound as one MCPTool; a KB that can't authenticate fails the sync
+  rather than silently dropping. See [`docs/planning/spec-per-persona-knowledge.md`](docs/planning/spec-per-persona-knowledge.md).
+  The F1 SOP *text-retrieval* used for scoring is separate and still reads the global Admin config.
 - **AC:** (1) create an interviewer persona → Foundry agent synced, agent_id + version stored;
   (2) voice config metadata written in snake_case (portal shows Voice mode ON); (3) exactly one
   enabled default persona enforced at DB level; (4) sync failure sets status=failed + error, doesn't
-  crash.
+  crash; (5) attaching a KB to a persona adds an MCPTool to THAT agent on re-sync; a persona with no
+  KB syncs ungrounded.
 
 ### F6 — Turn-by-turn interview state machine
 

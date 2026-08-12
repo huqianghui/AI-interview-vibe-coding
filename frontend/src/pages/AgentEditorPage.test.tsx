@@ -7,6 +7,7 @@ import { AgentEditorPage } from "./AgentEditorPage";
 import * as personas from "../api/personas";
 import * as admin from "../api/admin";
 import * as auth from "../api/auth";
+import * as personaKnowledge from "../api/personaKnowledge";
 
 function renderPage() {
   return render(
@@ -75,6 +76,13 @@ function mockDiscovery() {
   });
 }
 
+/** Stub the per-persona knowledge endpoints the Knowledge section loads on select. */
+function mockKnowledge(configs: personaKnowledge.PersonaKnowledgeConfig[] = []) {
+  vi.spyOn(personaKnowledge, "listPersonaKnowledge").mockResolvedValue(configs);
+  vi.spyOn(personaKnowledge, "listKbConnections").mockResolvedValue([]);
+  vi.spyOn(personaKnowledge, "listKnowledgeBases").mockResolvedValue([]);
+}
+
 async function signIn(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByTestId("agent-username-input"), "admin");
   await user.type(screen.getByTestId("agent-password-input"), "pw");
@@ -97,6 +105,7 @@ describe("AgentEditorPage", () => {
     const user = userEvent.setup();
     mockAdminLogin();
     mockDiscovery();
+    mockKnowledge();
     const listSpy = vi.spyOn(personas, "listPersonas").mockResolvedValue([PERSONA]);
 
     renderPage();
@@ -129,6 +138,7 @@ describe("AgentEditorPage", () => {
     const user = userEvent.setup();
     mockAdminLogin();
     mockDiscovery();
+    mockKnowledge();
     vi.spyOn(personas, "listPersonas").mockResolvedValue([PERSONA]);
     vi.spyOn(personas, "getPersona").mockResolvedValue(PERSONA);
 
@@ -143,8 +153,9 @@ describe("AgentEditorPage", () => {
     expect(screen.getByTestId("persona-instructions")).toHaveValue("You are an interviewer.");
     // Model dropdown populated from discovery.
     await waitFor(() => expect(screen.getByTestId("model-dropdown")).toBeInTheDocument());
-    // KB status shows the configured base.
-    await waitFor(() => expect(screen.getByTestId("knowledge-kb")).toHaveTextContent("sop-kb"));
+    // Per-persona Knowledge section renders; this persona has no attached KB yet.
+    await waitFor(() => expect(screen.getByTestId("knowledge-section")).toBeInTheDocument());
+    expect(screen.getByTestId("knowledge-none")).toBeInTheDocument();
     // Agent sync status.
     expect(screen.getByTestId("agent-sync-badge")).toHaveTextContent(/synced/i);
 
@@ -159,6 +170,7 @@ describe("AgentEditorPage", () => {
     const user = userEvent.setup();
     mockAdminLogin();
     mockDiscovery();
+    mockKnowledge();
     vi.spyOn(personas, "listPersonas").mockResolvedValue([PERSONA]);
     vi.spyOn(personas, "getPersona").mockResolvedValue(PERSONA);
     const update = vi.spyOn(personas, "updatePersona").mockResolvedValue(PERSONA);
@@ -185,6 +197,7 @@ describe("AgentEditorPage", () => {
     const user = userEvent.setup();
     mockAdminLogin();
     mockDiscovery();
+    mockKnowledge();
     vi.spyOn(personas, "listPersonas").mockResolvedValue([PERSONA]);
     vi.spyOn(personas, "getPersona").mockResolvedValue(PERSONA);
     const update = vi.spyOn(personas, "updatePersona").mockResolvedValue(PERSONA);
@@ -209,6 +222,7 @@ describe("AgentEditorPage", () => {
     const user = userEvent.setup();
     mockAdminLogin();
     mockDiscovery();
+    mockKnowledge();
     vi.spyOn(personas, "listPersonas").mockResolvedValue([PERSONA]);
     vi.spyOn(personas, "getPersona").mockResolvedValue(PERSONA);
     const update = vi.spyOn(personas, "updatePersona").mockResolvedValue(PERSONA);
@@ -232,6 +246,7 @@ describe("AgentEditorPage", () => {
     const user = userEvent.setup();
     mockAdminLogin();
     mockDiscovery();
+    mockKnowledge();
     const failed = { ...PERSONA, agent_sync_status: "failed" as const, agent_sync_error: "boom" };
     vi.spyOn(personas, "listPersonas").mockResolvedValue([failed]);
     vi.spyOn(personas, "getPersona").mockResolvedValue(failed);
@@ -250,6 +265,7 @@ describe("AgentEditorPage", () => {
     const user = userEvent.setup();
     mockAdminLogin();
     mockDiscovery();
+    mockKnowledge();
     vi.spyOn(personas, "listPersonas").mockResolvedValue([]);
     const create = vi.spyOn(personas, "createPersona").mockResolvedValue(PERSONA);
 
@@ -263,5 +279,38 @@ describe("AgentEditorPage", () => {
 
     await waitFor(() => expect(create).toHaveBeenCalled());
     expect(create.mock.calls[0][0].name).toBe("Fresh");
+  });
+
+  it("shows a persona's attached knowledge bases and removes one", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    mockDiscovery();
+    mockKnowledge([
+      {
+        id: "k1",
+        persona_id: "p1",
+        connection_name: "search-conn",
+        connection_target: "https://s.search.windows.net",
+        index_name: "sop-kb",
+        server_label: "knowledge-base-sop-kb",
+        is_enabled: true,
+      },
+    ]);
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([PERSONA]);
+    vi.spyOn(personas, "getPersona").mockResolvedValue(PERSONA);
+    const remove = vi.spyOn(personaKnowledge, "removePersonaKnowledge").mockResolvedValue(undefined);
+
+    renderPage();
+    await signIn(user);
+    await pickPersona(user, "p1");
+    await waitFor(() => expect(screen.getByTestId("persona-name")).toHaveValue("Demo Interviewer"));
+
+    // The attached KB shows in the Knowledge section.
+    await waitFor(() => expect(screen.getByTestId("knowledge-item-k1")).toBeInTheDocument());
+    expect(screen.getByTestId("knowledge-item-k1")).toHaveTextContent("sop-kb");
+
+    // Removing it calls the API with the config id.
+    await user.click(screen.getByTestId("knowledge-remove-k1"));
+    await waitFor(() => expect(remove).toHaveBeenCalledWith("k1"));
   });
 });

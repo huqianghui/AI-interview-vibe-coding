@@ -41,6 +41,12 @@ living specification is [`../../SPEC.md`](../../SPEC.md) at the repo root — st
   scope, agent metadata single-key rule, runtime `session.update` trimming, plus an error→cause table
   and a copy-paste regression checklist. Shipped v0.23.1.0. **Read this first if voice regresses.**
 
+- [`spec-per-persona-knowledge.md`](spec-per-persona-knowledge.md) — per-persona Foundry IQ knowledge:
+  configure each interviewer persona's own knowledge bases in the `/admin/agent` Knowledge section
+  (connection → KB connect dialog), bound to that persona's Foundry agent as authenticated MCPTools
+  on sync. Retires the single global KB → agent binding (F1 SOP scoring retrieval unchanged). Ported
+  in shape from AI-Coach's per-HCP KB feature. Shipped v0.24.0.0.
+
 ## What was intentionally NOT promoted
 
 The gstack project dir also holds machine-local, per-developer working state that does **not**

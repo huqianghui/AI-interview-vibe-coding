@@ -57,11 +57,10 @@ def _register_azure_agent_sync() -> None:
         model=settings.foundry_agent_model,
         api_key=settings.foundry_api_key,
         project=settings.azure_foundry_default_project,
-        # Bind the SOP knowledge base as an MCPTool so the agent's answers/follow-ups stay
-        # SOP-grounded (P15). Reuses the F1 Search config; empty values → no tool (ungrounded).
-        search_endpoint=settings.azure_search_endpoint,
-        search_index=settings.azure_search_index,
-        mcp_connection_id=settings.foundry_kb_mcp_connection,
+        # Knowledge grounding is now per-persona: each persona's attached KBs are resolved to
+        # authenticated MCPTools at sync time (the admin_personas router passes knowledge_configs
+        # into sync_persona). The global KB binding was retired. The F1 SOP *scoring* retrieval
+        # path (_register_azure_retrieval) still uses azure_search_* independently.
     )
 
 

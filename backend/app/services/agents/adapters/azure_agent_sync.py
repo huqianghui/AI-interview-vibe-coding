@@ -28,12 +28,13 @@ import asyncio
 import time
 from typing import Any
 
+from app.services.agents import foundry_connections
 from app.services.agents.foundry_client import (
     FoundryClientError,
     build_project_client,
     project_endpoint,
 )
-from app.services.agents.knowledge_tool import build_agent_tools
+from app.services.agents.knowledge_tool import build_agent_tools, build_knowledge_mcp_tool
 from app.services.agents.persona_tools import build_persona_tools
 from app.services.agents.voice_live_metadata import build_voice_live_metadata
 
@@ -80,9 +81,6 @@ class AzureAgentSyncAdapter:
         model: str = _MODEL_ENV_DEFAULT,
         api_key: str = "",
         project: str = "",
-        search_endpoint: str = "",
-        search_index: str = "",
-        mcp_connection_id: str = "",
     ) -> None:
         # The SDK's AIProjectClient needs the PROJECT-scoped endpoint
         # (…/api/projects/{project}), not the bare Foundry account endpoint — the bare form 404s on
@@ -91,27 +89,33 @@ class AzureAgentSyncAdapter:
         self._endpoint = project_endpoint(endpoint, project)
         self._model = model
         self._api_key = api_key
-        # SOP knowledge-base binding via MCP (P15). Empty search config → no knowledge tool. The
-        # MCP RemoteTool connection id authenticates the KB's MCP endpoint (ApiKey conn → 403).
-        self._search_endpoint = search_endpoint
-        self._search_index = search_index
-        self._mcp_connection_id = mcp_connection_id
+        # Raw endpoint + project are kept for per-persona KB RemoteTool resolution (the SDK's
+        # connections list/create needs the project-scoped client, built from these).
+        self._raw_endpoint = endpoint
+        self._project = project
 
     # -- public API ---------------------------------------------------------
 
-    async def sync_persona(self, persona: Any, *, locale: str | None = None) -> dict[str, str]:
+    async def sync_persona(
+        self,
+        persona: Any,
+        *,
+        locale: str | None = None,
+        knowledge_configs: list[dict] | None = None,
+    ) -> dict[str, str]:
         """Create or update the persona's agent; return ``{agent_id, agent_version}``.
 
         ``persona.name`` is the stable agent name (Foundry versions are ``name:version``); the
         instructions come from ``persona.prompt_fragment``; the voice config rides in metadata.
+        ``knowledge_configs`` are THIS persona's attached knowledge bases (each becomes an
+        authenticated KB MCPTool) — the global KB binding was retired in favour of per-persona KBs.
         """
         agent_name = self._agent_name(persona)
         instructions = persona.prompt_fragment or f"You are {persona.name}, an interviewer."
         metadata = build_voice_live_metadata(persona, locale=locale, modified_at=int(time.time()))
+        knowledge_tools = await self._resolve_kb_tools(knowledge_configs or [])
         tools = build_agent_tools(
-            search_endpoint=self._search_endpoint,
-            index_name=self._search_index,
-            connection_id=self._mcp_connection_id or None,
+            knowledge_tools=knowledge_tools,
             persona_tools=build_persona_tools(getattr(persona, "tools_config", None)),
         )
 
@@ -123,6 +127,45 @@ class AzureAgentSyncAdapter:
             "agent_id": str(result.get("id") or agent_name),
             "agent_version": str(result.get("version") or ""),
         }
+
+    async def _resolve_kb_tools(  # pragma: no cover — needs a live Foundry/Search resource
+        self, knowledge_configs: list[dict]
+    ) -> list[dict[str, Any]]:
+        """Build one authenticated KB MCPTool per enabled config.
+
+        For each enabled config, resolve (find-or-create) the RemoteTool project connection that
+        authenticates the KB's MCP endpoint (a CognitiveSearch/ApiKey connection returns 403), then
+        build the MCPTool dict. **Invariant (from the reference):** the built-tool count must equal
+        the enabled-config count — a KB that can't bind to an authenticated connection must FAIL
+        the sync, never silently drop, so a "synced" agent is never falsely reported as grounded.
+        """
+        enabled = [c for c in knowledge_configs if c.get("is_enabled", True)]
+        tools: list[dict[str, Any]] = []
+        for cfg in enabled:
+            search_target = cfg.get("connection_target", "")
+            index_name = cfg.get("index_name", "")
+            connection_id = await foundry_connections.resolve_remote_tool_connection(
+                endpoint=self._raw_endpoint,
+                project=self._project,
+                api_key=self._api_key,
+                search_target=search_target,
+                index_name=index_name,
+            )
+            tool = build_knowledge_mcp_tool(
+                search_endpoint=search_target,
+                index_name=index_name,
+                connection_id=connection_id,
+                server_label=cfg.get("server_label") or None,
+            )
+            if tool is not None:
+                tools.append(tool)
+        if len(tools) != len(enabled):
+            raise AgentSyncError(
+                f"Failed to build authenticated MCP tools for all knowledge bases "
+                f"({len(tools)}/{len(enabled)}). A KB endpoint/name may be missing or its "
+                "RemoteTool connection could not be resolved."
+            )
+        return tools
 
     async def _create_with_retry(  # pragma: no cover — needs a live Foundry endpoint
         self,

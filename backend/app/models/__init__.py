@@ -9,6 +9,7 @@ from app.models.anonymous_session import AnonymousCandidateSession
 from app.models.checklist import Checklist, ChecklistItem
 from app.models.interview import InterviewSession, InterviewTurn
 from app.models.persona import InterviewerPersona
+from app.models.persona_knowledge import PersonaKnowledgeConfig
 from app.models.question import Question, QuestionBank
 from app.models.service_config import ServiceConfig
 from app.models.sop import SopChunk, SopDocument
@@ -22,6 +23,7 @@ __all__ = [
     "InterviewSession",
     "InterviewTurn",
     "InterviewerPersona",
+    "PersonaKnowledgeConfig",
     "Question",
     "QuestionBank",
     "ServiceConfig",

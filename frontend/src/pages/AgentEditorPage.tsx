@@ -221,6 +221,7 @@ export function AgentEditorPage() {
             retrying={retrying}
             tools={form.tools}
             onToolsChange={(tools) => patchForm({ tools })}
+            personaId={isNew ? null : current?.id ?? null}
           />
         )
       }

@@ -60,20 +60,16 @@ def build_knowledge_mcp_tool(
 
 def build_agent_tools(
     *,
-    search_endpoint: str,
-    index_name: str,
-    connection_id: str | None = None,
+    knowledge_tools: list[dict[str, Any]] | None = None,
     persona_tools: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """The agent's ``tools`` list — the SOP KB MCPTool (when configured) + any per-persona tools.
+    """The agent's ``tools`` list — per-persona KB MCPTools first, then any per-persona tools.
 
-    The KB tool is always first and independent of persona config (grounding is not opt-out). The
-    KB is empty when unconfigured, so the agent still syncs (ungrounded) rather than failing.
-    ``persona_tools`` must already be gated to supported types (see ``build_persona_tools``).
+    ``knowledge_tools`` is the list of already-built KB MCPTool dicts for THIS persona's attached
+    knowledge bases (see ``build_knowledge_mcp_tool`` + the azure adapter's RemoteTool resolution);
+    empty means the persona has no KB and syncs ungrounded. ``persona_tools`` must already be gated
+    to supported types (see ``build_persona_tools``). Pure concat — no Azure here.
     """
-    tool = build_knowledge_mcp_tool(
-        search_endpoint=search_endpoint, index_name=index_name, connection_id=connection_id
-    )
-    tools = [tool] if tool else []
+    tools = list(knowledge_tools or [])
     tools.extend(persona_tools or [])
     return tools

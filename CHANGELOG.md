@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.24.0.0 (2026-08-12)
+
+Knowledge grounding is now configured **per interviewer persona**, directly in the `/admin/agent`
+editor — matching the Azure AI Foundry portal's per-agent Knowledge experience. An admin picks an
+Azure AI Search connection and one or more Foundry IQ knowledge bases for a persona; each is bound
+to that persona's Foundry prompt agent as an authenticated MCPTool on sync. The old single global
+knowledge base (set under Admin → AI Foundry and bound to every agent) is retired for agent
+grounding; the separate SOP text-retrieval used for answer scoring is unchanged.
+
+### Added
+- **Per-persona knowledge bases.** New `persona_knowledge_configs` table + `PersonaKnowledgeConfig`
+  model (one row per attached KB, cascade-deleted with the persona) and a DB-only
+  `persona_knowledge_service` (list / add / remove / `configs_as_dicts`).
+- **Editor Knowledge section (now editable).** The read-only status strip is replaced by a
+  per-persona list with a **Connect knowledge base** dialog: two cascading dropdowns (Azure AI
+  Search connection → Foundry IQ knowledge base) populated live from the resource. Add/remove
+  re-syncs the persona's agent immediately.
+- **Admin endpoints.** `GET /admin/personas/knowledge/connections`,
+  `GET /admin/personas/knowledge/knowledge-bases`, `GET/POST /admin/personas/{id}/knowledge`,
+  `DELETE /admin/personas/knowledge/{config_id}` (all admin-only; discovery is fail-soft → `[]`).
+
+### Changed
+- **Agent sync binds per-persona KBs.** `AzureAgentSyncAdapter.sync_persona` now resolves each of a
+  persona's attached KBs to an authenticated RemoteTool connection (find-or-create via ARM, reusing
+  the existing `foundry_connections` helpers) and builds one MCPTool per KB. A KB that cannot
+  authenticate fails the sync (recorded as `agent_sync_status=failed`) rather than silently
+  dropping — a "synced" agent is never falsely reported as grounded. `build_agent_tools` now takes
+  `knowledge_tools` + `persona_tools`.
+- Retired the global KB → agent binding in the adapter registry (the F1 SOP scoring retrieval path
+  is untouched and still reads the Admin AI Foundry config).
+
 ## 0.23.1.0 (2026-08-12)
 
 Voice mode now actually connects to the interviewer's Foundry agent. Clicking "语音作答" on the

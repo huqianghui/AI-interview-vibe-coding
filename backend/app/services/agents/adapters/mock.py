@@ -92,7 +92,13 @@ class MockAgentSyncAdapter:
 
     name = "mock"
 
-    async def sync_persona(self, persona: object, *, locale: str | None = None) -> dict[str, str]:
+    async def sync_persona(
+        self,
+        persona: object,
+        *,
+        locale: str | None = None,
+        knowledge_configs: list[dict] | None = None,
+    ) -> dict[str, str]:
         pid = getattr(persona, "id", "mock")
         return {"agent_id": f"mock-agent-{pid}", "agent_version": "1"}
 
