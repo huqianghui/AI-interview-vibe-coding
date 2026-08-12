@@ -197,11 +197,25 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
       pc.ontrack = (event) => {
         if (event.track.kind === "video") {
           const videoEl = optionsRef.current.videoRef?.current;
-          if (videoEl) {
-            videoEl.srcObject = event.streams[0] ?? null;
-            videoEl.play().catch(() => undefined);
-          }
-          setIsAvatarConnected(true);
+          // Flip isAvatarConnected (which hides the fallback orb) ONLY after the video actually
+          // starts playing. If play() is rejected (autoplay policy) or there's no element, leave it
+          // false so the orb stays visible instead of a blank box. The video is muted (avatar audio
+          // is on the separate <audio> element below), so a muted autoplay is allowed from ontrack.
+          if (!videoEl) return;
+          videoEl.muted = true;
+          videoEl.srcObject = event.streams[0] ?? null;
+          videoEl
+            .play()
+            .then(() => {
+              // eslint-disable-next-line no-console
+              console.debug("[voice] avatar video track attached and playing");
+              setIsAvatarConnected(true);
+            })
+            .catch((err: unknown) => {
+              // eslint-disable-next-line no-console
+              console.debug("[voice] avatar video play() rejected; keeping orb", err);
+              setIsAvatarConnected(false);
+            });
           return;
         }
         if (event.track.kind !== "audio") return;

@@ -97,6 +97,9 @@ describe("InterviewPage", () => {
 
     // Progress stepper + text channel are present.
     expect(screen.getByTestId("question-progress")).toBeInTheDocument();
+    // Two-column stage layout: the stage (avatar) and the control column both render.
+    expect(screen.getByTestId("interview-stage")).toBeInTheDocument();
+    expect(screen.getByTestId("interview-controls")).toBeInTheDocument();
 
     await user.type(screen.getByRole("textbox"), "a sufficiently long answer");
     await user.click(screen.getByRole("button", { name: /submit answer/i }));
