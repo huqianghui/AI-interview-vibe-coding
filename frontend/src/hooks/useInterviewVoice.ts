@@ -184,14 +184,22 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
       pcRef.current = pc;
       micStream.getTracks().forEach((track) => pc.addTrack(track, micStream));
 
-      // Step 3b: negotiate a recvonly video transceiver so a digital-human avatar video track from
-      // Voice Live (when the session requests the avatar modality) isn't silently dropped.
-      pc.addTransceiver("video", { direction: "recvonly" });
+      // NOTE: do NOT add a recvonly video transceiver to this initial offer. Azure Voice Live's
+      // agent-mode initialization rejects an SDP offer that contains a video m-line
+      // ("agent_initialization_failed") — live-verified 2026-08-12: audio-only offers negotiate
+      // fine, an audio+video offer fails agent init. The digital-human avatar video is delivered
+      // over a SEPARATE `session.avatar.connect` SDP exchange (per the Voice Live WebRTC docs), not
+      // on this control peer connection, so keeping the main offer audio-only is correct.
 
-      // Step 4: data channel BEFORE createOffer.
-      const dc = pc.createDataChannel("voice-live-events");
-      dataChannelRef.current = dc;
-      dc.onmessage = handleDataChannelMessage;
+      // Step 4: data channel. Azure agent-mode init rejects an SDP offer that carries an
+      // `application`/datachannel m-line (live-verified: audio-only offers pass, audio+datachannel
+      // fails "agent_initialization_failed"). So the offerer must NOT create the datachannel here;
+      // instead we accept the datachannel Azure opens on its side via `ondatachannel`, keeping the
+      // initial offer audio-only. Transcript/VAD events still arrive on that (server-opened) channel.
+      pc.ondatachannel = (event) => {
+        dataChannelRef.current = event.channel;
+        event.channel.onmessage = handleDataChannelMessage;
+      };
 
       // Step 5: remote audio + avatar-video playback.
       pc.ontrack = (event) => {
@@ -267,7 +275,16 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
         let resolved = false;
 
         ws.onopen = () => {
-          ws.send(JSON.stringify({ type: "rtc.call.sdp.create", sdp_offer: pc.localDescription?.sdp }));
+          // The /voice-live/realtime/calls endpoint needs the session config INLINE in the
+          // sdp.create for an agent call — without it Azure fails agent initialization. (A later
+          // session.update alone is not enough; agent-init happens during the SDP exchange.)
+          ws.send(
+            JSON.stringify({
+              type: "rtc.call.sdp.create",
+              sdp_offer: pc.localDescription?.sdp,
+              session: session.session_config,
+            }),
+          );
         };
 
         ws.onmessage = (event: MessageEvent) => {

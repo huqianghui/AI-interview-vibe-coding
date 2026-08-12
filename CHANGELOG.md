@@ -26,13 +26,24 @@ Live contract for a Foundry agent.
 - The voice hook now handles the `rtc.call.error` control message from the `/calls` endpoint, so a
   call-level rejection surfaces immediately instead of waiting out the 30-second connect timeout.
 
-### Known remaining gate (Azure-side, not code)
-- With all of the above, the browser's real WebRTC SDP now reaches Azure's agent-init step, which
-  then returns `agent_initialization_failed` ("check connection string and the identity
-  permissions"). This reproduces even for a portal agent whose voice mode works in the Foundry
-  portal, so it is an identity/RBAC or project-connection gap (the signed-in identity likely needs
-  the **Foundry User / Cognitive Services User** role on the project), not an app-code issue. The
-  backend now produces a correct, authenticated agent request up to that boundary.
+- **Audio-only signaling offer for agent mode.** Azure Voice Live's agent-mode initialization
+  rejects an SDP offer that carries a video or datachannel m-line (live-verified: an audio-only
+  offer negotiates, audio+video or audio+datachannel fails `agent_initialization_failed`). The voice
+  hook no longer adds a recvonly video transceiver, and no longer creates the `voice-live-events`
+  datachannel on the offering peer connection — it now accepts the channel Azure opens via
+  `ondatachannel`, keeping the initial offer audio-only. (Avatar video negotiates over a separate
+  `session.avatar.connect` exchange per the Voice Live WebRTC docs.)
+- The session config is sent inline in `rtc.call.sdp.create` (agent init happens during the SDP
+  exchange, so a later `session.update` alone is not enough).
+
+### Known remaining gate (needs Azure-side visibility)
+- After RBAC (Foundry User) is granted, agent-init succeeds for a synthetic audio-only SDP (verified
+  live — it advances to the media-allocation stage). A real Chromium WebRTC offer with the same
+  audio-only m-lines, token, and session config still returns `agent_initialization_failed`. The
+  difference is isolated to the real browser SDP's content vs a minimal stub; pinning the exact
+  attribute Azure objects to requires Azure-side logs or Microsoft's known-good agent-mode WebRTC
+  sample. The full signaling contract, token scope, RBAC, and offer shape are otherwise verified
+  correct against real Azure.
 
 ## 0.23.0.0 (2026-08-11)
 

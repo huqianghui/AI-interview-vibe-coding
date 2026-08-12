@@ -88,14 +88,19 @@ that an automatable check can pass while the live service rejects." Validated li
   "Classic foundry agent is not supported", "Unauthorized to AI Agent service") and reaches Azure's
   agent-initialization step with an authenticated request + real SDP.
 
-### Blocked on Azure-side config (not code) — agent voice not yet fully live
+- ✅ **RBAC + audio-only offer shape** (v0.23.1.0): after granting the identity **Foundry User** on
+  the project, agent-init succeeds for a synthetic audio-only SDP (verified live — advances to the
+  media-allocation stage). Also verified that agent-init rejects any offer carrying a video or
+  datachannel m-line, so the hook now sends an audio-only offer (no video transceiver; accepts
+  Azure's `ondatachannel`) with the session config inline in `rtc.call.sdp.create`.
 
-- Azure returns `agent_initialization_failed` ("check connection string and the identity
-  permissions") at the final agent-init step. This reproduces even for a Foundry-portal agent whose
-  voice mode works in the portal, so it's an identity/RBAC or project-connection gap — the signed-in
-  identity likely needs the **Foundry User / Cognitive Services User** role on the project (the
-  portal supplies this itself). The app-code path is correct up to this boundary; resolving it is an
-  Azure IAM change, then the full mic-in → avatar audio/video-out round-trip can be re-verified.
+### Blocked on Azure-side visibility — agent voice not yet fully live
+
+- A real Chromium WebRTC offer (same audio-only m-lines / token / session config that a stub SDP
+  passes with) still returns `agent_initialization_failed`. Isolated to the real browser SDP's
+  content; pinning the exact attribute Azure objects to needs Azure-side logs or Microsoft's
+  known-good agent-mode WebRTC sample. Everything on the app side (signaling contract, token scope,
+  RBAC, offer shape) is verified correct against real Azure up to this boundary.
 
 ### Deploy configuration (v0.15.0.0)
 
