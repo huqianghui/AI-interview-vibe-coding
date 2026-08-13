@@ -81,6 +81,35 @@ async def get_decrypted_key(db: AsyncSession) -> str:
     return decrypt_value(master.api_key_encrypted)
 
 
+async def resolve_foundry_connection(db: AsyncSession) -> tuple[str, str, str, str]:
+    """Resolve ``(endpoint, project, api_key, model)`` for Foundry discovery calls.
+
+    The admin-saved ``service_configs`` master row is the source of truth WHEN PRESENT. But a fresh
+    deploy (or dev machine) often has real Foundry creds only in ``.env`` and no saved row yet — in
+    that case the discovery endpoints (model-deployment list, KB connection/knowledge-base list)
+    must still work. So: prefer the DB master row; fall back field-by-field to ``get_settings()``
+    (the ``.env`` values) when the row is absent or a field is blank. Returns empty strings only
+    when neither source has a value (callers then degrade to an empty list, never error).
+    """
+    # Imported here (not at module top) to avoid a settings import cycle at load time.
+    from app.config import get_settings
+
+    settings = get_settings()
+    master = await get_master_config(db)
+
+    endpoint = (
+        (master.endpoint if master else "")
+        or settings.azure_foundry_endpoint
+        or (settings.foundry_project_endpoint)
+    )
+    project = (master.default_project if master else "") or settings.azure_foundry_default_project
+    api_key = (
+        (await get_decrypted_key(db)) or settings.azure_foundry_api_key or settings.foundry_api_key
+    )
+    model = (master.model_or_deployment if master else "") or settings.foundry_agent_model
+    return endpoint, project, api_key, model
+
+
 async def upsert_master_config(
     db: AsyncSession,
     *,

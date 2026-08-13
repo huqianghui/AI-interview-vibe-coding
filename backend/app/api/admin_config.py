@@ -154,15 +154,16 @@ async def list_model_deployments(db: AsyncSession = Depends(get_db)) -> list[Opt
     Tries the AI Foundry project-scoped deployments API, then the legacy Azure OpenAI deployments
     API, then falls back to the saved model. Fail-soft: any error → saved model or []; never 500.
     """
-    master = await config_service.get_master_config(db)
-    api_key = await config_service.get_decrypted_key(db)
-    if master and master.endpoint and api_key:
-        base = master.endpoint.rstrip("/")
+    # Resolve from the saved master row, falling back to .env when no row exists yet (a fresh
+    # deploy has creds only in .env). Without this fallback the dropdown is empty on day one.
+    endpoint, project, api_key, model = await config_service.resolve_foundry_connection(db)
+    if endpoint and api_key:
+        base = endpoint.rstrip("/")
         headers = {"api-key": api_key}
         async with httpx.AsyncClient(timeout=10.0) as client:
-            if master.default_project:
+            if project:
                 try:
-                    url = f"{base}/api/projects/{master.default_project}/deployments?api-version=v1"
+                    url = f"{base}/api/projects/{project}/deployments?api-version=v1"
                     r = await client.get(url, headers=headers)
                     if r.status_code == 200:
                         body = r.json()
@@ -187,8 +188,9 @@ async def list_model_deployments(db: AsyncSession = Depends(get_db)) -> list[Opt
                     ]
             except (httpx.HTTPError, KeyError, ValueError) as exc:
                 logger.warning("Azure OpenAI deployments API failed: %s", exc)
-    if master and master.model_or_deployment:
-        return [Option(value=master.model_or_deployment, label=master.model_or_deployment)]
+    # Last resort: the configured model name (from DB or .env) as a single option.
+    if model:
+        return [Option(value=model, label=model)]
     return []
 
 
@@ -200,12 +202,11 @@ async def list_knowledge_bases(db: AsyncSession = Depends(get_db)) -> list[Optio
     discovery path (resolve the AI Search connection via the project client, then call the Search
     data-plane API with Entra-first / api-key-fallback auth). Fail-soft: any error → []; never 500.
     """
-    master = await config_service.get_master_config(db)
-    if not (master and master.endpoint):
+    endpoint, project, api_key, _model = await config_service.resolve_foundry_connection(db)
+    if not endpoint:
         return []
-    api_key = await config_service.get_decrypted_key(db)
     kbs = await foundry_connections.list_knowledge_bases(
-        endpoint=master.endpoint, project=master.default_project, api_key=api_key
+        endpoint=endpoint, project=project, api_key=api_key
     )
     return [
         Option(value=kb["name"], label=kb.get("description") or kb["name"])

@@ -159,8 +159,7 @@ describe("AgentEditorPage", () => {
     // Agent sync status.
     expect(screen.getByTestId("agent-sync-badge")).toHaveTextContent(/synced/i);
 
-    // Open the configuration drawer → rail regions present.
-    await user.click(screen.getByTestId("open-config-drawer"));
+    // The configuration rail is a permanent 3rd column (no Configure gate) — regions present.
     await waitFor(() => expect(screen.getByTestId("configuration-rail-body")).toBeInTheDocument());
     expect(screen.getByTestId("config-language")).toBeInTheDocument();
     expect(screen.getByTestId("avatar-grid")).toBeInTheDocument();
@@ -207,7 +206,7 @@ describe("AgentEditorPage", () => {
     await pickPersona(user, "p1");
     await waitFor(() => expect(screen.getByTestId("persona-name")).toHaveValue("Demo Interviewer"));
 
-    await user.click(screen.getByTestId("open-config-drawer"));
+    // Avatar grid lives in the always-visible config rail (no drawer to open).
     // Harry is a video avatar → one tile per style; the first tile is his default style.
     await user.click((await screen.findAllByTestId("avatar-option-harry"))[0]);
     await user.click(screen.getByTestId("persona-save"));

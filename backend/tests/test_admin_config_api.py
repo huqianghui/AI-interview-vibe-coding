@@ -321,6 +321,39 @@ async def test_knowledge_bases_empty_on_error(client, _restore_settings, monkeyp
     assert body == []
 
 
+async def test_model_deployments_env_fallback_without_db_row(
+    client, _restore_settings, monkeypatch
+):
+    # No service_configs row saved (fresh deploy). Discovery must fall back to .env settings and
+    # still return the configured model, rather than an empty dropdown.
+    s = get_settings()
+    s.azure_foundry_endpoint = "https://envdemo.services.ai.azure.com"
+    s.azure_foundry_api_key = "env-key"
+    s.azure_foundry_default_project = "env-prj"
+    s.foundry_agent_model = "gpt-5.4-env"
+    # Both live probes fail → falls through to the configured model name from .env.
+    _FakeAsyncClient._responses = [_FakeResp(500, {}), _FakeResp(500, {})]
+    monkeypatch.setattr("app.api.admin_config.httpx.AsyncClient", _FakeAsyncClient)
+    body = (await client.get("/admin/config/ai-foundry/model-deployments", headers=AUTH)).json()
+    assert body == [{"value": "gpt-5.4-env", "label": "gpt-5.4-env"}]
+
+
+async def test_knowledge_bases_env_fallback_without_db_row(client, _restore_settings, monkeypatch):
+    # No DB row; .env has the Foundry endpoint → KB discovery still runs (delegates to the mocked
+    # foundry_connections list) instead of short-circuiting to [].
+    s = get_settings()
+    s.azure_foundry_endpoint = "https://envdemo.services.ai.azure.com"
+    s.azure_foundry_api_key = "env-key"
+    s.azure_foundry_default_project = "env-prj"
+
+    async def _fake_kbs(**_kwargs):
+        return [{"name": "env-kb", "description": "Env KB"}]
+
+    monkeypatch.setattr("app.api.admin_config.foundry_connections.list_knowledge_bases", _fake_kbs)
+    body = (await client.get("/admin/config/ai-foundry/knowledge-bases", headers=AUTH)).json()
+    assert body == [{"value": "env-kb", "label": "Env KB"}]
+
+
 async def test_dropdowns_require_admin(client):
     assert (await client.get("/admin/config/ai-foundry/model-deployments")).status_code == 401
     assert (await client.get("/admin/config/ai-foundry/knowledge-bases")).status_code == 401

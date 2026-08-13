@@ -157,17 +157,17 @@ async def _sync(db: AsyncSession, persona: InterviewerPersona) -> None:
 
 
 async def _foundry_conn(db: AsyncSession) -> tuple[str, str, str]:
-    """Resolve (endpoint, project, api_key) from the saved master AI Foundry config.
+    """Resolve (endpoint, project, api_key) for the KB discovery endpoints.
 
-    Shared by the KB discovery endpoints — mirrors ``admin_config``'s discovery auth (the operator's
-    saved connection, key decrypted server-side). Returns empty strings when unconfigured so callers
-    degrade to an empty list rather than erroring.
+    Uses ``config_service.resolve_foundry_connection`` so a fresh deploy with creds only in ``.env``
+    (no saved ``service_configs`` row yet) still populates the connection/knowledge-base dropdowns —
+    the DB master row wins when present, ``.env`` is the fallback. Returns empty strings only when
+    neither source has an endpoint, so callers degrade to an empty list rather than erroring.
     """
-    master = await config_service.get_master_config(db)
-    if not (master and master.endpoint):
+    endpoint, project, key, _model = await config_service.resolve_foundry_connection(db)
+    if not endpoint:
         return "", "", ""
-    key = await config_service.get_decrypted_key(db)
-    return master.endpoint, master.default_project, key
+    return endpoint, project, key
 
 
 @router.get("", response_model=list[PersonaOut])

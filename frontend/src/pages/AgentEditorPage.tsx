@@ -39,7 +39,6 @@ export function AgentEditorPage() {
   const [current, setCurrent] = useState<personas.PersonaOut | null>(null);
   const [form, setForm] = useState<PersonaFormState>(emptyPersonaForm());
   const [activeLocale, setActiveLocale] = useState<EditorLocale>(EDITOR_LOCALES[0]);
-  const [configOpen, setConfigOpen] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const formInitialized = useRef(false);
@@ -186,8 +185,6 @@ export function AgentEditorPage() {
 
   return (
     <AgentEditorLayout
-      configOpen={configOpen}
-      onConfigOpenChange={setConfigOpen}
       personaSwitcher={personaSwitcher}
       toolbarActions={
         !nothingSelected && (
