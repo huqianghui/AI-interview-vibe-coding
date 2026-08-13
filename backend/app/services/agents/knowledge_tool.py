@@ -1,12 +1,14 @@
-"""Foundry-agent knowledge-source MCP tool (SPEC F1/P15) — pure shape, CI-tested.
+"""Foundry-agent knowledge-source MCP tool (SPEC F1/F5/P15) — pure shape, CI-tested.
 
-Binding the SOP knowledge base to the interviewer's Foundry prompt agent is what lets the agent's
-answers and follow-ups stay SOP-grounded. AI Foundry connects a Knowledge Base to an agent via the
-**MCP protocol** (the Portal's "Knowledge" section, Preview), NOT an ``AzureAISearchTool`` — the KB
-exposes a ``/knowledgebases/{index}/mcp`` endpoint and the agent carries an **MCPTool** pointing at
-it. This module owns the shape (verified against the reference project's live-tested contract, per
-SPEC P16); the live SDK ``MCPTool`` construction + the RemoteTool connection it authenticates
-through live in the coverage-omitted azure adapter.
+Binding a knowledge base to the interviewer's Foundry prompt agent is what lets the agent's answers
+and follow-ups stay grounded. Knowledge is **per-persona** (SPEC F5): each persona attaches its own
+knowledge bases and ``build_agent_tools`` takes the list of already-built KB MCPTool dicts for that
+persona. AI Foundry connects a Knowledge Base to an agent via the **MCP protocol** (the Portal's
+"Knowledge" section, Preview), NOT an ``AzureAISearchTool`` — the KB exposes a
+``/knowledgebases/{index}/mcp`` endpoint and the agent carries an **MCPTool** pointing at it. This
+module owns the shape (verified against the reference project's live-tested contract, per SPEC P16);
+the live SDK ``MCPTool`` construction + the RemoteTool connection it authenticates through live in
+the coverage-omitted azure adapter.
 
 Contract facts the reference learned the hard way (and P15/P16 warn drift silently unbinds the KB):
 - The tool is an **MCPTool**: ``server_label`` + ``server_url`` (the MCP endpoint) +

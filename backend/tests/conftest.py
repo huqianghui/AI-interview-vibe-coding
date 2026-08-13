@@ -79,6 +79,7 @@ for _azure_mod in (
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
+from sqlalchemy import event  # noqa: E402
 from sqlalchemy.ext.asyncio import (  # noqa: E402
     AsyncSession,
     async_sessionmaker,
@@ -93,6 +94,15 @@ from app.main import app  # noqa: E402
 @pytest_asyncio.fixture
 async def db_session():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+
+    # Mirror app.db: SQLite needs PRAGMA foreign_keys=ON per-connection for ON DELETE CASCADE to
+    # fire. Without this the cascade tests would pass vacuously (FKs unenforced in the test DB).
+    @event.listens_for(engine.sync_engine, "connect")
+    def _fk_on(dbapi_connection, _record):  # noqa: ANN001
+        cur = dbapi_connection.cursor()
+        cur.execute("PRAGMA foreign_keys=ON")
+        cur.close()
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

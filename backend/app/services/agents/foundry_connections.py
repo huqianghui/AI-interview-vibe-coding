@@ -16,11 +16,11 @@ Two capabilities:
    **RemoteTool** project connection, NOT a CognitiveSearch/ApiKey connection (which 403s). The
    Portal does not always pre-create that RemoteTool connection for a KB, so we find an existing
    one (by metadata or normalized MCP target) and, failing that, create one via the ARM control
-   plane (the data-plane connections API has no create — PUT/POST return 405). **Deferred to
-   Phase 3 (#29):** wiring :func:`resolve_remote_tool_connection` into ``azure_agent_sync`` so a
-   persona sync auto-resolves/creates the connection id — that path performs an ARM *write* per
-   sync, so it lands with the editor UI that actually triggers a persona sync, not before. Until
-   then the adapter takes the connection id from the ``foundry_kb_mcp_connection`` setting.
+   plane (the data-plane connections API has no create — PUT/POST return 405). **Wired:**
+   ``azure_agent_sync._resolve_kb_tools`` calls :func:`resolve_remote_tool_connection` once per
+   per-persona knowledge base at sync time (an ARM *write* on first use), so each attached KB binds
+   to an authenticated connection. The former global ``foundry_kb_mcp_connection`` setting is
+   retired — knowledge is per-persona now (see ``models.persona_knowledge``).
 
 Auth: discovery uses the project client (Entra-first via :mod:`foundry_client`); Search
 data-plane and ARM calls use Entra bearers from :mod:`azure_auth` (never a stored secret). All

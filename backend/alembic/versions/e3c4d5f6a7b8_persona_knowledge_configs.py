@@ -27,8 +27,8 @@ def upgrade() -> None:
         sa.Column("index_name", sa.String(length=255), nullable=False),
         sa.Column("server_label", sa.String(length=255), nullable=False, server_default=""),
         sa.Column("is_enabled", sa.Boolean(), nullable=False, server_default=sa.true()),
-        sa.Column("created_at", sa.DateTime(), server_default=sa.func.now(), nullable=True),
-        sa.Column("updated_at", sa.DateTime(), server_default=sa.func.now(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.ForeignKeyConstraint(
             ["persona_id"], ["interviewer_personas.id"], ondelete="CASCADE"
         ),

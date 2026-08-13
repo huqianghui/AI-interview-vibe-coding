@@ -151,11 +151,19 @@ class AzureAgentSyncAdapter:
                 search_target=search_target,
                 index_name=index_name,
             )
-            tool = build_knowledge_mcp_tool(
-                search_endpoint=search_target,
-                index_name=index_name,
-                connection_id=connection_id,
-                server_label=cfg.get("server_label") or None,
+            # A KB MCPTool without a RemoteTool connection id authenticates as a CognitiveSearch/
+            # ApiKey call and 403s at runtime — that is NOT a grounded agent. Require a resolved
+            # connection id; a missing one drops the tool so the count-invariant below fails the
+            # sync (rather than shipping an unauthenticated tool that looks "synced").
+            tool = (
+                build_knowledge_mcp_tool(
+                    search_endpoint=search_target,
+                    index_name=index_name,
+                    connection_id=connection_id,
+                    server_label=cfg.get("server_label") or None,
+                )
+                if connection_id
+                else None
             )
             if tool is not None:
                 tools.append(tool)
@@ -163,7 +171,8 @@ class AzureAgentSyncAdapter:
             raise AgentSyncError(
                 f"Failed to build authenticated MCP tools for all knowledge bases "
                 f"({len(tools)}/{len(enabled)}). A KB endpoint/name may be missing or its "
-                "RemoteTool connection could not be resolved."
+                "RemoteTool connection could not be resolved (a KB without an authenticated "
+                "RemoteTool connection would 403 at runtime, so the sync fails instead)."
             )
         return tools
 

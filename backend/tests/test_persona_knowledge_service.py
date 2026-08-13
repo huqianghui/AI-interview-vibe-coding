@@ -81,6 +81,22 @@ async def test_configs_as_dicts_shape(db_session):
     ]
 
 
+async def test_deleting_persona_cascades_knowledge_configs(db_session):
+    # ON DELETE CASCADE (requires PRAGMA foreign_keys=ON on SQLite — set in app.db + conftest) must
+    # remove a persona's KB configs when the persona is deleted, not orphan them.
+    p = await _persona(db_session)
+    await kb.add_config(
+        db_session, p.id, connection_name="c", connection_target="t", index_name="x"
+    )
+    assert len(await kb.list_configs(db_session, p.id)) == 1
+
+    persona = await svc.get_persona(db_session, p.id)
+    await db_session.delete(persona)
+    await db_session.commit()
+
+    assert await kb.list_configs(db_session, p.id) == []
+
+
 async def test_configs_isolated_per_persona(db_session):
     p1 = await _persona(db_session, name="one")
     p2 = await _persona(db_session, name="two")

@@ -2,6 +2,8 @@
 
 import pytest
 
+from app.services import config_service
+
 AUTH: dict = {}
 
 
@@ -181,3 +183,41 @@ async def test_knowledge_discovery_empty_when_unconfigured(client):
     assert (
         await client.get("/admin/personas/knowledge/knowledge-bases", headers=AUTH)
     ).json() == []
+
+
+async def test_knowledge_discovery_delegates_when_configured(client, db_session, monkeypatch):
+    # With a master AI Foundry config saved, both discovery routes call through to
+    # foundry_connections and map its rows into the response shapes (name/target/is_default,
+    # value/label) — the "configured" half of _foundry_conn's fail-soft branch.
+    await config_service.upsert_master_config(
+        db_session,
+        endpoint="https://demo.services.ai.azure.com",
+        api_key="k",
+        default_project="demo-prj",
+        model_or_deployment="gpt-4o-mini",
+        updated_by="admin",
+    )
+
+    async def _fake_conns(**_kwargs):
+        return [
+            {"name": "search-conn", "target": "https://s.search.windows.net", "is_default": True},
+            {"name": "", "target": "https://ignored"},  # no name → filtered out
+        ]
+
+    async def _fake_kbs(**_kwargs):
+        return [{"name": "sop-kb", "description": "SOP KB"}, {"name": ""}]  # no name → filtered
+
+    monkeypatch.setattr(
+        "app.api.admin_personas.foundry_connections.list_search_connections", _fake_conns
+    )
+    monkeypatch.setattr(
+        "app.api.admin_personas.foundry_connections.list_knowledge_bases", _fake_kbs
+    )
+
+    conns = (await client.get("/admin/personas/knowledge/connections", headers=AUTH)).json()
+    assert conns == [
+        {"name": "search-conn", "target": "https://s.search.windows.net", "is_default": True}
+    ]
+
+    kbs = (await client.get("/admin/personas/knowledge/knowledge-bases", headers=AUTH)).json()
+    assert kbs == [{"value": "sop-kb", "label": "SOP KB"}]
