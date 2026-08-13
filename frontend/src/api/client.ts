@@ -102,7 +102,11 @@ function setToken(token: string): void {
   if (typeof localStorage !== "undefined") localStorage.setItem(TOKEN_KEY, token);
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+function clearToken(): void {
+  if (typeof localStorage !== "undefined") localStorage.removeItem(TOKEN_KEY);
+}
+
+async function request<T>(path: string, init: RequestInit = {}, _retried = false): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
   const token = getToken();
@@ -110,6 +114,20 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   const resp = await fetch(`${BASE}${path}`, { ...init, headers });
   if (!resp.ok) {
+    // Self-heal a stale/invalid anon token: a cached token that no longer decodes (backend secret
+    // rotated, or its session row is gone) 401s forever otherwise. Drop it, mint a fresh session,
+    // and retry the call ONCE. Guard against loops (only retry when we actually had a token, and
+    // never on the session-mint endpoint itself).
+    if (
+      resp.status === 401 &&
+      !_retried &&
+      token &&
+      !path.includes("/public/candidate/session")
+    ) {
+      clearToken();
+      await ensureSession();
+      return request<T>(path, init, true);
+    }
     const detail = await resp.text().catch(() => "");
     throw new Error(`${resp.status} ${resp.statusText}: ${detail}`);
   }
