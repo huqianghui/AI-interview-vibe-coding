@@ -67,7 +67,9 @@ export type AnswerSource = "text" | "voice" | "verbal_cue";
 
 /** WebRTC connection info brokered by the backend (SPEC F9). Mirrors `VoiceSessionOut`. */
 export interface VoiceSession {
-  interview_session_id: string;
+  // Present for a candidate interview session; absent for the admin editor Playground (which
+  // brokers a persona-scoped session with no interview). The voice hook doesn't read it.
+  interview_session_id?: string;
   signaling_url: string;
   auth_token: string;
   auth_type: string;

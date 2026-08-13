@@ -30,6 +30,7 @@ from urllib.parse import urlencode
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.models.persona import InterviewerPersona
 from app.services import persona_service
 from app.services.agents.voice_live_metadata import build_session, resolve_voice
 from app.services.azure_auth import COGNITIVE_SERVICES_SCOPE, FOUNDRY_SCOPE
@@ -149,19 +150,25 @@ def _greeting_for_locale(greeting_map_raw: str | None, locale: str) -> str | Non
 
 
 async def create_voice_session(
-    db: AsyncSession, *, locale: str | None = None, provider: str | None = None
+    db: AsyncSession,
+    *,
+    locale: str | None = None,
+    provider: str | None = None,
+    persona: InterviewerPersona | None = None,
 ) -> VoiceSession:
-    """Broker a WebRTC voice session for the active interviewer persona.
+    """Broker a WebRTC voice session for an interviewer persona.
 
-    Steps: resolve the enabled default persona → **P5 gate** (must be ``synced``) → build the
-    snake_case Voice Live ``session`` config from the persona → get a browser-safe credential from
-    the provider adapter → assemble the signaling URL. Raises :class:`VoiceUnavailable` when Voice
-    Live is off/unconfigured and :class:`VoiceAgentNotSynced` when the P5 gate fails.
+    Steps: resolve the persona (the explicit ``persona`` for the admin Playground, else the enabled
+    default for a candidate interview) → **P5 gate** (must be ``synced``) → build the snake_case
+    Voice Live ``session`` config from the persona → get a browser-safe credential from the provider
+    adapter → assemble the signaling URL. Raises :class:`VoiceUnavailable` when Voice Live is
+    off/unconfigured and :class:`VoiceAgentNotSynced` when the P5 gate fails.
     """
     settings = get_settings()
     effective_locale = locale or DEFAULT_LOCALE
 
-    persona = await persona_service.get_default_persona(db)
+    if persona is None:
+        persona = await persona_service.get_default_persona(db)
     if persona is None:
         raise VoiceUnavailable("No enabled interviewer persona is configured")
 

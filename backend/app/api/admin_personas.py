@@ -126,6 +126,33 @@ class Option(BaseModel):
     label: str
 
 
+class TestChatIn(BaseModel):
+    message: str = Field(min_length=1, max_length=4000)
+    previous_response_id: str | None = None
+
+
+class TestChatOut(BaseModel):
+    response_text: str
+    response_id: str | None = None
+
+
+class PlaygroundVoiceSessionOut(BaseModel):
+    """WebRTC connection info for the editor Playground's voice/avatar test (mirrors the interview
+    ``VoiceSessionOut`` minus the interview id — the Playground tests a persona directly)."""
+
+    signaling_url: str
+    auth_token: str
+    auth_type: str
+    mode: str
+    model: str
+    session_config: dict
+    persona_id: str
+    character: str
+    style: str
+    greeting: str | None = None
+    avatar_enabled: bool = False
+
+
 class KbConnectionOut(BaseModel):
     """An Azure AI Search connection for the connect dialog. ``target`` (the Search endpoint URL)
     is carried so the client can persist it as ``connection_target`` without a second lookup."""
@@ -328,3 +355,66 @@ async def retry_sync(persona_id: str, db: AsyncSession = Depends(get_db)) -> Per
         ) from exc
     await _sync(db, persona)
     return PersonaOut.of(persona)
+
+
+# --- editor Playground (inline test) ---------------------------------------
+
+
+@router.post("/{persona_id}/test-chat", response_model=TestChatOut)
+async def test_chat(
+    persona_id: str, body: TestChatIn, db: AsyncSession = Depends(get_db)
+) -> TestChatOut:
+    """Send one message to the persona's hosted Foundry agent and return its reply (text test).
+
+    Requires the persona to have a synced agent (agent_id/version); returns 409 otherwise so the
+    editor can tell the admin to sync first. Threads multi-turn via ``previous_response_id``.
+    """
+    from app.services import agent_chat_service
+
+    try:
+        persona = await svc.get_persona(db, persona_id)
+    except svc.PersonaNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Persona not found"
+        ) from exc
+    if not (persona.agent_id and persona.agent_version):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Persona has no synced agent yet — save/sync it first.",
+        )
+    # agent_id is stored as "name:version"; the chat service wants the bare name.
+    agent_name = persona.agent_id.split(":", 1)[0]
+    try:
+        result = await agent_chat_service.chat_with_agent(
+            agent_name, persona.agent_version, body.message, body.previous_response_id
+        )
+    except agent_chat_service.AgentChatError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    return TestChatOut(response_text=result["response_text"], response_id=result.get("response_id"))
+
+
+@router.post("/{persona_id}/voice/session", response_model=PlaygroundVoiceSessionOut)
+async def playground_voice_session(
+    persona_id: str, db: AsyncSession = Depends(get_db)
+) -> PlaygroundVoiceSessionOut:
+    """Broker a Voice Live session for THIS persona so the editor Playground can test voice+avatar
+    without a candidate interview. Same broker + P5 sync gate as the interview path."""
+    from dataclasses import asdict
+
+    from app.services import voice_broker
+
+    try:
+        persona = await svc.get_persona(db, persona_id)
+    except svc.PersonaNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Persona not found"
+        ) from exc
+    try:
+        vs = await voice_broker.create_voice_session(db, persona=persona)
+    except voice_broker.VoiceAgentNotSynced as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except voice_broker.VoiceUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
+    return PlaygroundVoiceSessionOut(**asdict(vs))

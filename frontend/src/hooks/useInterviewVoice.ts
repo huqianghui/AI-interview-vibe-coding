@@ -37,6 +37,10 @@ export interface UseInterviewVoiceOptions {
   /** Attached via `ontrack` when Voice Live sends a digital-human avatar video track. When set,
    * the hook negotiates a recvonly video transceiver so the avatar face isn't silently dropped. */
   videoRef?: RefObject<HTMLVideoElement | null>;
+  /** Override how a VoiceSession is brokered. Defaults to the interview endpoint
+   * (`fetchVoiceSession(interviewId, locale)`); the admin editor Playground passes a persona-scoped
+   * fetcher so it can test voice+avatar without a candidate interview. */
+  sessionFetcher?: (locale: string) => Promise<VoiceSession>;
 }
 
 const MAX_RECONNECT = 3;
@@ -156,7 +160,10 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
       // Step 1: broker session (may throw VoiceSessionError 409/503 — propagate for text fallback).
       let session: VoiceSession;
       try {
-        session = await fetchVoiceSession(interviewId, effectiveLocale);
+        const fetcher = optionsRef.current.sessionFetcher;
+        session = fetcher
+          ? await fetcher(effectiveLocale)
+          : await fetchVoiceSession(interviewId, effectiveLocale);
       } catch (err) {
         setConn("error");
         const error = err instanceof Error ? err : new Error("Failed to broker voice session");

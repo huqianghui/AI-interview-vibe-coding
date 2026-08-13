@@ -7,6 +7,7 @@
  * Reuses `admin.ts`'s `adminRequest` so these authenticate like every other admin surface.
  */
 import { adminRequest } from "./admin";
+import type { VoiceSession } from "./client";
 
 /** A dropdown option from the knowledge-bases discovery endpoint ({value,label}, backend Option). */
 export interface KbOption {
@@ -64,3 +65,22 @@ export const addPersonaKnowledge = (personaId: string, body: PersonaKnowledgeCre
 /** Detach a KB by config id; the owning persona re-syncs server-side. */
 export const removePersonaKnowledge = (configId: string) =>
   adminRequest<unknown>(`/admin/personas/knowledge/${configId}`, { method: "DELETE" });
+
+// ── Editor Playground (inline test) ────────────────────────────────────────
+
+export interface TestChatReply {
+  response_text: string;
+  response_id: string | null;
+}
+
+/** Send one message to the persona's hosted Foundry agent (text test). Throws AdminApiError on
+ * 409 (no synced agent) or 502 (agent call failed) so the Playground can show the reason. */
+export const testChat = (personaId: string, message: string, previousResponseId?: string) =>
+  adminRequest<TestChatReply>(`/admin/personas/${personaId}/test-chat`, {
+    method: "POST",
+    body: JSON.stringify({ message, previous_response_id: previousResponseId ?? null }),
+  });
+
+/** Broker a persona-scoped Voice Live session for the Playground voice+avatar test. */
+export const brokerPlaygroundVoice = (personaId: string) =>
+  adminRequest<VoiceSession>(`/admin/personas/${personaId}/voice/session`, { method: "POST" });

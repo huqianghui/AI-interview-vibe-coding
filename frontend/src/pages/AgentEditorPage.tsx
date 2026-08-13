@@ -14,7 +14,7 @@ import * as personas from "../api/personas";
 import { AgentEditorLayout } from "../components/agent-editor/AgentEditorLayout";
 import { PersonaSwitcher } from "../components/agent-editor/PersonaSwitcher";
 import { AgentDefinitionPanel } from "../components/agent-editor/AgentDefinitionPanel";
-import { AvatarPreview } from "../components/agent-editor/AvatarPreview";
+import { PlaygroundPanel } from "../components/agent-editor/PlaygroundPanel";
 import { ConfigurationRail } from "../components/agent-editor/ConfigurationRail";
 import { DEFAULT_AVATAR_CHARACTER, DEFAULT_AVATAR_STYLE } from "../data/avatarCharacters";
 import {
@@ -228,7 +228,12 @@ export function AgentEditorPage() {
             Select a persona to preview the interviewer.
           </Body1>
         ) : (
-          <AvatarPreview character={form.character} style={form.style} />
+          <PlaygroundPanel
+            personaId={isNew ? null : current?.id ?? null}
+            character={form.character}
+            style={form.style}
+            locale={activeLocale}
+          />
         )
       }
       configRail={
