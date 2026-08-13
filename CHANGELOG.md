@@ -9,6 +9,11 @@ to that persona's Foundry prompt agent as an authenticated MCPTool on sync. The 
 knowledge base (set under Admin → AI Foundry and bound to every agent) is retired for agent
 grounding; the separate SOP text-retrieval used for answer scoring is unchanged.
 
+Two candidate-facing improvements ship alongside it: the digital-human avatar now actually appears
+during a voice interview, and the interview page is redesigned into a full-screen two-column stage
+(the interviewer's face/orb on the left, question and answer controls on the right) instead of a
+cramped centered column.
+
 ### Added
 - **Per-persona knowledge bases.** New `persona_knowledge_configs` table + `PersonaKnowledgeConfig`
   model (one row per attached KB, cascade-deleted with the persona) and a DB-only
@@ -30,6 +35,20 @@ grounding; the separate SOP text-retrieval used for answer scoring is unchanged.
   `knowledge_tools` + `persona_tools`.
 - Retired the global KB → agent binding in the adapter registry (the F1 SOP scoring retrieval path
   is untouched and still reads the Admin AI Foundry config).
+- **Interview page redesigned.** The live Q&A is now a full-width two-column stage: the digital
+  human (or the voice orb) on a dark stage at left, and the question, a colored status pill
+  (listening / speaking / muted), the text/voice answer controls, and the transcript at right. It
+  stacks to one column on narrow screens. The other phases (start, orientation, scoring, report)
+  keep a centered layout.
+
+### Fixed
+- **Digital human now appears in voice mode.** The avatar video never rendered — the browser
+  blocked it from playing because the element wasn't muted, leaving a blank stage. The avatar video
+  now plays (its audio was always on a separate channel), and the interviewer's face only replaces
+  the fallback orb once real video frames arrive, so a stalled or empty stream shows the orb instead
+  of a blank box.
+- **Deleting a persona now removes its attached knowledge bases** instead of orphaning them (foreign
+  keys are enforced on SQLite).
 
 ## 0.23.1.0 (2026-08-12)
 
