@@ -43,15 +43,17 @@ describe("PlaygroundPanel", () => {
     fireEvent.change(screen.getByTestId("playground-input"), { target: { value: "test" } });
     fireEvent.click(screen.getByTestId("playground-send"));
     await waitFor(() =>
-      expect(screen.getByTestId("playground-chat-error")).toHaveTextContent(/no synced agent/),
+      expect(screen.getByTestId("playground-error")).toHaveTextContent(/no synced agent/),
     );
   });
 
-  it("switches to the voice tab and shows a Start button", async () => {
+  it("has a single composer with both text send and a voice toggle (unified, no tabs)", () => {
     renderPanel("p1");
-    fireEvent.click(screen.getByTestId("playground-tab-voice"));
-    await waitFor(() =>
-      expect(screen.getByTestId("playground-voice-start")).toBeInTheDocument(),
-    );
+    // One conversation surface — text input, Send, and a Voice toggle all in one composer.
+    expect(screen.getByTestId("playground-input")).toBeInTheDocument();
+    expect(screen.getByTestId("playground-send")).toBeInTheDocument();
+    expect(screen.getByTestId("playground-voice-toggle")).toBeInTheDocument();
+    // No separate Text/Voice tabs.
+    expect(screen.queryByTestId("playground-tab-voice")).not.toBeInTheDocument();
   });
 });
