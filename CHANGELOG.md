@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.25.0.0 (2026-08-13)
+
+The `/admin/agent` editor is now a working Foundry-portal-style workspace: you can pick the agent's
+model, attach knowledge bases, and **test the agent right in the editor** — by text and by voice —
+without leaving the page. Config is laid out in three always-visible columns instead of hidden
+behind a "Configure" button, and the digital human is shown large and centered.
+
+### Added
+- **Inline Playground (test the agent in the editor).** The center column is now a live "Try it"
+  panel with two tabs: **Text** (chat with the persona's hosted Foundry agent, multi-turn) and
+  **Voice + digital human** (Start brokers a real Voice Live session for that persona and connects
+  audio + transcript). Backed by new admin endpoints `POST /admin/personas/{id}/test-chat` and
+  `POST /admin/personas/{id}/voice/session`.
+- **Three-column editor layout.** Left = agent definition, center = Playground, right =
+  configuration (language / voice / avatar / advanced) — all visible at once; the Configure drawer
+  is gone. Collapses to one column on narrow screens.
+
+### Changed
+- **Model + Foundry-IQ dropdowns now populate on a fresh deploy.** Discovery previously required an
+  admin to first save the AI Foundry connection into the database; it now falls back to the `.env`
+  Foundry credentials when no saved row exists, so the model list and the knowledge-base
+  connection/KB pickers work out of the box.
+- **Digital human enlarged.** The interviewer preview fills the center column (proportional to the
+  viewport) instead of a small fixed box.
+
+### Fixed
+- **Interview no longer dead-ends on a stale session.** A cached anonymous token that no longer
+  validates (server restarted) used to fail every attempt with "Invalid anonymous token"; the app
+  now transparently re-establishes a fresh session and retries.
+
+### Known limitation
+- **Digital-human VIDEO still shows the animated orb, not a live face, during a voice session.**
+  Live testing proved this is an Azure transport limit, not a UI bug: the current direct-to-Azure
+  voice transport streams the agent's audio + transcript but returns no avatar video pipeline
+  (`session.updated` reports `avatar: null`, no ICE servers), so no video frames ever arrive and the
+  orb is shown. Rendering the real avatar face requires migrating voice to a backend-proxied Voice
+  Live connection (a separate, larger change). Audio, transcript, and the static real-face preview
+  are unaffected. See `docs/planning/spec-voice-live-agent-contract.md` §11.
+
 ## 0.24.0.0 (2026-08-12)
 
 Knowledge grounding is now configured **per interviewer persona**, directly in the `/admin/agent`

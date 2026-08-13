@@ -289,3 +289,39 @@ constraints match ours exactly.
 - ❌ Don't use API-key or STS auth for agent mode. Entra `ai.azure.com` bearer only.
 - ❌ Don't bump `voice_live_api_version` to `2026-07-15`/GA without re-verifying — it 404s on `/calls`
   and rejects classic agents.
+
+---
+
+## 11. Avatar VIDEO does not render on this transport (live-verified 2026-08-13)
+
+**Finding:** the `/voice-live/realtime/calls` (direct browser→Azure) transport streams the agent's
+**audio + transcript** perfectly, but the **digital-human video never renders** — the WebRTC video
+track opens and then delivers **zero frames** (`videoWidth=0/videoHeight=0/readyState=0` forever).
+
+**Root cause (proven, not guessed):** `e2e/avatar-diagnostic.spec.ts` captures the `session.updated`
+payload from real Azure. Even with `modalities: ["text","audio","avatar"]` and
+`avatar:{character,style,video:{codec:"h264"}}` sent in `session.update`, Azure returns
+**`avatar: null`** in `session.updated`. It accepts the modality but hands back **no avatar config,
+no `avatar.ice_servers`**, and never starts the avatar media pipeline. Without `ice_servers` the
+`session.avatar.connect` SDP handshake (the documented way to bring up avatar video) is impossible —
+there is nothing to connect to.
+
+**Why:** the working avatar pipeline (per the `AI-avatar-vibe-coding` reference, docs 06/09) runs on
+a **backend-WS-proxy transport** — the backend holds the Voice Live SDK connection, and *that*
+connection is where Azure delivers `avatar.ice_servers` + processes `session.avatar.connect`. The
+direct `/calls` endpoint used here for agent-mode audio simply does not carry avatar video.
+
+**Current state:** the frontend keeps a recvonly video transceiver + a frame-gated `ontrack` (so a
+real track would render if it ever arrived) and `avatar.video:{codec:"h264"}` in the session config
+(harmless, correct-if-supported). Until the transport is migrated, the **fallback orb (AudioOrb) is
+the correct, permanent visible state** — NOT a bug. The static real-face preview still shows in the
+editor.
+
+**The real fix (separate, larger follow-up):** migrate avatar sessions to a backend Voice Live WS
+proxy that surfaces `avatar.ice_servers` to the browser and relays the `session.avatar.connect` /
+`session.avatar.connecting` SDP exchange. Verify success with `e2e/avatar-diagnostic` — non-zero
+`videoWidth/videoHeight` is the pass signal.
+
+- ❌ Don't add `session.avatar.connect` handshake code to the `/calls` path — Azure returns no
+  `ice_servers` there, so it can't complete; it's dead code that implies avatar video works when it
+  doesn't.

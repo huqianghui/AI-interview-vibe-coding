@@ -186,13 +186,20 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
         throw error;
       }
 
-      // Step 3: RTCPeerConnection (no ICE servers — Azure handles TURN).
+      // Step 3: RTCPeerConnection. No ICE servers passed: on the /voice-live/realtime/calls
+      // (direct browser→Azure) transport, `session.updated` returns `avatar: null` — Azure accepts
+      // the avatar modality but does NOT hand back `avatar.ice_servers` or start the avatar video
+      // pipeline (live-verified via e2e/avatar-diagnostic: track opens, 0 frames). Real avatar video
+      // needs the backend-WS-proxy transport where Azure delivers ice_servers + the
+      // session.avatar.connect handshake. Until that transport migration, the fallback orb (see
+      // AvatarView) is the correct, permanent visible state on this path.
       const pc = new RTCPeerConnection();
       pcRef.current = pc;
       micStream.getTracks().forEach((track) => pc.addTrack(track, micStream));
 
-      // Step 3b: negotiate a recvonly video transceiver so a digital-human avatar video track from
-      // Voice Live (when the session requests the avatar modality) isn't silently dropped.
+      // Negotiate a recvonly video transceiver anyway: it's harmless, keeps the ontrack path ready,
+      // and means if/when the avatar transport is migrated the video track will render without a
+      // frontend change (the frame-gate in ontrack shows the orb until real frames arrive).
       pc.addTransceiver("video", { direction: "recvonly" });
 
       // Step 4: data channel BEFORE createOffer (carries transcripts / VAD / response lifecycle).

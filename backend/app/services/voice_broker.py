@@ -201,6 +201,12 @@ async def create_voice_session(
         # `session.update` carrying `voice` is rejected ("Cannot update voice when avatar is
         # configured"), live-verified 2026-08-12. The voice is already set via agent metadata.
         session_config.pop("voice", None)
+        # The avatar block MUST declare a video codec, else Azure reports back `video: null` and
+        # never starts the digital-human video pipeline (the track opens but delivers 0 frames —
+        # confirmed via the avatar-diagnostic harness + the AI-avatar reference's debug logs).
+        avatar_cfg = session_config.get("avatar")
+        if isinstance(avatar_cfg, dict):
+            avatar_cfg.setdefault("video", {"codec": "h264"})
 
     # Agent mode authorizes against the AI Agent service (needs an ai.azure.com/Foundry-scoped
     # token); model mode accepts the cognitiveservices scope. Live-verified 2026-08-12: a

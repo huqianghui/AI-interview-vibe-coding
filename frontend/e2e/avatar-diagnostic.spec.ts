@@ -27,6 +27,7 @@ test.describe("Avatar diagnostic (real Azure)", () => {
     page.on("pageerror", (err) => consoleLines.push(`[pageerror] ${err.message}`));
 
     const wsFrames: string[] = [];
+    const sessionPayloads: Record<string, unknown> = {};
     const sdpFlags = { answered: false, callError: null as string | null };
     page.on("websocket", (ws) => {
       if (!/voice-live\/realtime/.test(ws.url())) return;
@@ -34,12 +35,21 @@ test.describe("Avatar diagnostic (real Azure)", () => {
         const data = typeof f.payload === "string" ? f.payload : "";
         if (!data) return;
         try {
-          const msg = JSON.parse(data) as { type?: string; error?: { message?: string } };
+          const msg = JSON.parse(data) as {
+            type?: string;
+            error?: { message?: string };
+            session?: unknown;
+          };
           if (msg.type) {
             wsFrames.push(msg.type);
             if (msg.type === "rtc.call.sdp.created") sdpFlags.answered = true;
             if (msg.type === "rtc.call.error" || msg.type === "error")
               sdpFlags.callError = msg.error?.message ?? msg.type;
+            // Capture session.* payloads so we can SEE whether Azure returns avatar.ice_servers
+            // (decides whether the session.avatar.connect handshake is available on /calls).
+            if (msg.type.startsWith("session.") || msg.type.includes("avatar")) {
+              sessionPayloads[msg.type] = msg.session ?? msg;
+            }
           }
         } catch {
           /* non-JSON */
@@ -104,6 +114,8 @@ test.describe("Avatar diagnostic (real Azure)", () => {
     console.log("\n========== AVATAR DIAGNOSTIC ==========");
     console.log("SDP answered:", sdpFlags.answered, "| call error:", sdpFlags.callError);
     console.log("WS frame types:", JSON.stringify([...new Set(wsFrames)]));
+    console.log("session.* payloads (look for avatar.ice_servers + avatar.video):");
+    console.log(JSON.stringify(sessionPayloads, null, 2).slice(0, 4000));
     console.log("RTCPeerConnection tracks:", JSON.stringify(videoState.trackLog, null, 2));
     console.log("Video element:", JSON.stringify(videoState, null, 2));
     console.log("[voice] console lines:");
