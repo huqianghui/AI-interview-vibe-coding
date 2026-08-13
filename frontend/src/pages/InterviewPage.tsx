@@ -34,7 +34,6 @@ import {
   resumeInterview,
   startInterview,
   submitAnswer,
-  VoiceSessionError,
   type Interview,
   type Report,
 } from "../api/client";
@@ -237,8 +236,9 @@ export function InterviewPage() {
       if (err instanceof MicAccessError) {
         setMicRetried((prev) => prev || micDialogOpen);
         setMicDialogOpen(true);
-      } else if (err instanceof VoiceSessionError) {
-        // P5/P6b: agent not synced (409) or voice off (503) — stay on text, tell the candidate.
+      } else {
+        // P5/P6b: any non-mic failure (agent not synced, voice off, WS proxy unreachable — the
+        // WS transport rejects with a plain Error, not only VoiceSessionError) → stay on text.
         setVoiceUnavailable(true);
         setChannel("text");
       }

@@ -139,7 +139,7 @@ describe("InterviewPage", () => {
     await waitFor(() => expect(screen.getByText(/no questions available/i)).toBeInTheDocument());
   });
 
-  it("falls back to text when voice brokering is rejected (P5/P6b)", async () => {
+  it("falls back to text when the voice connection fails (P5/P6b)", async () => {
     await i18n.changeLanguage("en-US");
     const user = userEvent.setup();
     vi.spyOn(client, "startInterview").mockResolvedValue({
@@ -147,22 +147,43 @@ describe("InterviewPage", () => {
       status: "in_progress",
       current_question: { question_id: "q1", prompt: "Question one?", index: 0, total: 2 },
     });
-    // Agent not synced → 409.
-    vi.spyOn(client, "fetchVoiceSession").mockRejectedValue(
-      new client.VoiceSessionError("409 Conflict", 409),
-    );
+    // Voice now connects over a backend WebSocket proxy (not a REST broker). Simulate the WS
+    // failing to connect (e.g. agent not synced / backend down) by stubbing global WebSocket with
+    // one that fires onerror right after construction → the hook surfaces onError → text fallback.
+    const realWS = global.WebSocket;
+    class FailingWS {
+      onerror: ((e: unknown) => void) | null = null;
+      onopen: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+      onmessage: (() => void) | null = null;
+      readyState = 0;
+      constructor() {
+        setTimeout(() => this.onerror?.(new Event("error")), 0);
+      }
+      send() {}
+      close() {}
+    }
+    // @ts-expect-error test stub
+    global.WebSocket = FailingWS;
+    // getUserMedia must succeed so the failure is the WS, not the mic.
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [], getAudioTracks: () => [] }) },
+    });
 
-    renderPage();
-    await user.click(screen.getByRole("button", { name: /start interview/i }));
-    await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
-    await screen.findByText("Question one?");
+    try {
+      renderPage();
+      await user.click(screen.getByRole("button", { name: /start interview/i }));
+      await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+      await screen.findByText("Question one?");
 
-    await user.click(screen.getByRole("button", { name: /answer by voice/i }));
+      await user.click(screen.getByRole("button", { name: /answer by voice/i }));
 
-    // Voice-unavailable notice shows and the page is back on the text channel.
-    await waitFor(() =>
-      expect(screen.getByText(/voice unavailable/i)).toBeInTheDocument(),
-    );
-    expect(screen.getByRole("textbox")).toBeInTheDocument();
+      // Voice-unavailable notice shows and the page is back on the text channel.
+      await waitFor(() => expect(screen.getByText(/voice unavailable/i)).toBeInTheDocument());
+      expect(screen.getByRole("textbox")).toBeInTheDocument();
+    } finally {
+      global.WebSocket = realWS;
+    }
   });
 });

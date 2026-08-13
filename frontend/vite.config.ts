@@ -14,6 +14,9 @@ export default defineConfig({
         target: apiTarget,
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ""),
+        // Voice Live's avatar-video path (SPEC F9) opens a WebSocket at /api/voice-live/ws — vite's
+        // proxy doesn't forward the Upgrade handshake for that without this flag.
+        ws: true,
       },
     },
   },

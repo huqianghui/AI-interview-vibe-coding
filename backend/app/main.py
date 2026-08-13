@@ -16,6 +16,7 @@ from app.api import (
     candidate_session,
     health,
     interview,
+    voice_live_ws,
 )
 from app.config import get_settings
 
@@ -67,3 +68,4 @@ app.include_router(admin_questions.router)
 app.include_router(auth.router)
 app.include_router(admin_users.router)
 app.include_router(admin_config.router)
+app.include_router(voice_live_ws.router)

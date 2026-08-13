@@ -24,7 +24,8 @@ import { Mic24Regular, MicOff24Regular } from "@fluentui/react-icons";
 import { AvatarView } from "../AvatarView";
 import { AvatarPreview } from "./AvatarPreview";
 import { useInterviewVoice, MicAccessError } from "../../hooks/useInterviewVoice";
-import { brokerPlaygroundVoice, testChat } from "../../api/personaKnowledge";
+import { testChat } from "../../api/personaKnowledge";
+import { getAdminToken } from "../../api/admin";
 import type { TranscriptSegment } from "../../types/voice";
 
 const useStyles = makeStyles({
@@ -113,7 +114,10 @@ export function PlaygroundPanel({ personaId, character, style, locale }: Playgro
     locale,
     videoRef: avatarVideoRef,
     onTranscript,
-    sessionFetcher: () => brokerPlaygroundVoice(personaId ?? ""),
+    // Editor Playground: pin THIS persona's Voice Live session over the backend WS proxy, authed
+    // with the admin token (the candidate anon token is only for /interview).
+    tokenProvider: getAdminToken,
+    personaId: personaId ?? undefined,
     onError: (err) => {
       if (err instanceof MicAccessError) setError("需要麦克风权限 / Microphone access needed.");
       else setError(err.message);
