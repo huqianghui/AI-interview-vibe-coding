@@ -117,6 +117,9 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
   const lastLocaleRef = useRef<string | undefined>(undefined);
   const transcriptIdCounter = useRef(0);
   const avatarEnabledRef = useRef(false);
+  // Guards the one-shot avatar handshake (Azure sends two session.updated frames; only the second
+  // carries ice_servers — fire the handshake once, on whichever frame has them).
+  const avatarStartedRef = useRef(false);
   // Mirrors isMuted for handleMessage's mic-frame callback, which is created once per
   // `session.updated` and must read the LATEST mute state without resubscribing.
   const isMutedRef = useRef(false);
@@ -145,6 +148,7 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
     }
     avatarStream.disconnect();
     audio.cleanupMic();
+    avatarStartedRef.current = false;
   }, [audio, avatarStream]);
 
   /** WS message handler — Azure Voice Live realtime events, relayed near-verbatim by the backend
@@ -179,12 +183,19 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
           setAudioState("idle");
           onConnected();
 
-          if (avatarEnabledRef.current) {
+          // Azure sends TWO session.updated frames: the first has `avatar: null`, the SECOND
+          // carries the avatar block with ice_servers. Trigger the handshake on the ACTUAL presence
+          // of ice_servers in THIS frame (not a separate avatar_enabled flag, which races the two
+          // frames), and only once (avatarStarted guard).
+          if (avatarConf && iceServers.length > 0 && !avatarStartedRef.current) {
+            avatarStartedRef.current = true;
+            console.debug("[voice] session.updated has avatar ice_servers → starting handshake");
             void avatarStream
               .connect(iceServers, (clientSdp) => {
                 send({ type: "session.avatar.connect", client_sdp: clientSdp });
               })
               .catch((err: unknown) => {
+                avatarStartedRef.current = false;
                 // Non-fatal: avatar video failed to negotiate, keep the voice-only session alive
                 // (AvatarView's fallback orb covers this — see useAvatarStream's frame gate).
                 console.debug("[voice] avatar handshake failed; continuing voice-only", err);

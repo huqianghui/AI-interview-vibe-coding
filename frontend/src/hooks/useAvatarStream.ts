@@ -39,6 +39,7 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
    */
   const connect = useCallback(
     async (iceServers: RTCIceServer[], sendSdpOffer: (clientSdp: string) => Promise<void> | void) => {
+      console.debug("[avatar-stream] connect() entry, iceServers=", iceServers.length, iceServers);
       if (videoRef.current) videoRef.current.srcObject = null;
 
       const pc = new RTCPeerConnection({
@@ -46,6 +47,7 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
         bundlePolicy: "max-bundle",
       });
       pcRef.current = pc;
+      console.debug("[avatar-stream] RTCPeerConnection created");
 
       pc.onconnectionstatechange = () => {
         console.debug("[avatar-stream] connectionState:", pc.connectionState);
@@ -116,6 +118,7 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
+      console.debug("[avatar-stream] setLocalDescription done; gathering ICE for offer");
 
       const serverSdpPromise = new Promise<string>((resolve, reject) => {
         sdpResolverRef.current = resolve;
@@ -126,6 +129,7 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
       });
 
       const encodedOffer = await offerReadyPromise;
+      console.debug("[avatar-stream] offer ready, sending session.avatar.connect");
       await sendSdpOffer(encodedOffer);
 
       const serverSdp = await serverSdpPromise;

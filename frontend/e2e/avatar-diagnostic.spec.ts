@@ -22,15 +22,27 @@ test.describe("Avatar diagnostic (real Azure)", () => {
     page.on("console", (msg) => {
       const text = `[${msg.type()}] ${msg.text()}`;
       consoleLines.push(text);
-      if (msg.text().includes("[voice]")) voiceLines.push(msg.text());
+      if (msg.text().includes("[voice]") || msg.text().includes("[avatar-stream]"))
+        voiceLines.push(msg.text());
     });
     page.on("pageerror", (err) => consoleLines.push(`[pageerror] ${err.message}`));
 
     const wsFrames: string[] = [];
     const sessionPayloads: Record<string, unknown> = {};
     const sdpFlags = { answered: false, callError: null as string | null };
+    const wsSent: string[] = [];
     page.on("websocket", (ws) => {
-      if (!/voice-live\/realtime/.test(ws.url())) return;
+      // Match BOTH transports: old direct /calls and the new backend proxy /voice-live/ws.
+      if (!/voice-live/.test(ws.url())) return;
+      ws.on("framesent", (f) => {
+        const d = typeof f.payload === "string" ? f.payload : "";
+        try {
+          const m = JSON.parse(d) as { type?: string };
+          if (m.type) wsSent.push(m.type);
+        } catch {
+          /* binary audio frame */
+        }
+      });
       ws.on("framereceived", (f) => {
         const data = typeof f.payload === "string" ? f.payload : "";
         if (!data) return;
@@ -42,11 +54,13 @@ test.describe("Avatar diagnostic (real Azure)", () => {
           };
           if (msg.type) {
             wsFrames.push(msg.type);
-            if (msg.type === "rtc.call.sdp.created") sdpFlags.answered = true;
+            // WS-proxy avatar handshake success signal: server sends session.avatar.connecting
+            // (carries server_sdp). Old /calls signal was rtc.call.sdp.created.
+            if (msg.type === "rtc.call.sdp.created" || msg.type === "session.avatar.connecting")
+              sdpFlags.answered = true;
             if (msg.type === "rtc.call.error" || msg.type === "error")
               sdpFlags.callError = msg.error?.message ?? msg.type;
-            // Capture session.* payloads so we can SEE whether Azure returns avatar.ice_servers
-            // (decides whether the session.avatar.connect handshake is available on /calls).
+            // Capture session.* payloads so we can SEE whether Azure returns avatar.ice_servers.
             if (msg.type.startsWith("session.") || msg.type.includes("avatar")) {
               sessionPayloads[msg.type] = msg.session ?? msg;
             }
@@ -81,12 +95,12 @@ test.describe("Avatar diagnostic (real Azure)", () => {
     await expect(page.getByRole("textbox")).toBeVisible();
     await page.getByRole("button", { name: /语音作答|answer by voice/i }).click();
 
-    // Wait up to 45s for either an SDP answer or a call error.
-    await expect
-      .poll(() => (sdpFlags.answered ? "answered" : sdpFlags.callError ? "error" : "pending"), {
-        timeout: 45_000,
-      })
-      .not.toBe("pending");
+    // Capture-only: wait up to 45s for a handshake signal, but DON'T fail if it never comes —
+    // we want the diagnostic dump (frames seen, video state) regardless so we can see WHY.
+    const deadline = Date.now() + 45_000;
+    while (Date.now() < deadline && !sdpFlags.answered && !sdpFlags.callError) {
+      await page.waitForTimeout(1000);
+    }
 
     // Give the avatar video track time to arrive + produce frames.
     await page.waitForTimeout(12_000);
@@ -113,7 +127,8 @@ test.describe("Avatar diagnostic (real Azure)", () => {
     // Emit everything to the test output.
     console.log("\n========== AVATAR DIAGNOSTIC ==========");
     console.log("SDP answered:", sdpFlags.answered, "| call error:", sdpFlags.callError);
-    console.log("WS frame types:", JSON.stringify([...new Set(wsFrames)]));
+    console.log("WS frames RECEIVED:", JSON.stringify([...new Set(wsFrames)]));
+    console.log("WS frames SENT (client→server):", JSON.stringify([...new Set(wsSent)]));
     console.log("session.* payloads (look for avatar.ice_servers + avatar.video):");
     console.log(JSON.stringify(sessionPayloads, null, 2).slice(0, 4000));
     console.log("RTCPeerConnection tracks:", JSON.stringify(videoState.trackLog, null, 2));

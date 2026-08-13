@@ -140,6 +140,10 @@ async def run_proxy(
     Sends ``{"type": "proxy.connected", ...}`` once Azure has acknowledged the initial
     ``session.update``, then runs two race-cancelled relay loops until either side closes.
     """
+    import ssl
+
+    import certifi
+
     from azure.ai.voicelive.aio import ConnectionClosed, connect
 
     credential, _is_entra = await _resolve_voice_live_credential(api_key)
@@ -147,10 +151,17 @@ async def run_proxy(
     is_agent = bool((persona.agent_id or "").strip())
     agent_name = (persona.agent_id or "").split(":", 1)[0] if is_agent else None
 
+    # aiohttp (the voicelive SDK's WS transport) uses the OS trust store, which on macOS/some Linux
+    # can't verify Azure's cert chain → "CERTIFICATE_VERIFY_FAILED, unable to get local issuer
+    # certificate". Point it at certifi's CA bundle via the SDK's vendor_options escape hatch (maps
+    # straight to aiohttp ws_connect's ssl= kwarg). Live-verified: default ctx fails, certifi ctx 200s.
+    ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+
     connect_kwargs: dict[str, Any] = {
         "endpoint": endpoint,
         "credential": credential,
         "api_version": api_version,
+        "connection_options": {"vendor_options": {"ssl": ssl_ctx}},
     }
     if is_agent:
         connect_kwargs["agent_name"] = agent_name
