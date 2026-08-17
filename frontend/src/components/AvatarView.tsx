@@ -27,7 +27,11 @@ const useStyles = makeStyles({
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    minHeight: "220px",
+    // Fill the (flex-grown) stage so the avatar video is as large as the space allows, rather than a
+    // fixed small box. Falls back to a sensible min so a voice-only orb still has presence.
+    width: "100%",
+    height: "100%",
+    minHeight: "360px",
   },
   video: {
     position: "absolute",

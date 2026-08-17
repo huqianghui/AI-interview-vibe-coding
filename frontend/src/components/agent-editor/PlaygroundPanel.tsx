@@ -30,11 +30,35 @@ import type { TranscriptSegment } from "../../types/voice";
 
 const useStyles = makeStyles({
   root: { display: "flex", flexDirection: "column", height: "100%", gap: tokens.spacingVerticalM },
-  // Avatar/orb sits above the conversation only while a voice session is live.
-  stageRow: { display: "flex", justifyContent: "center", flexShrink: 0 },
-  stageBox: { width: "100%", maxWidth: "520px", minHeight: "320px" },
-  log: {
+  // Digital-human stage — the dominant element. It GROWS to fill the column (flex:1) so the avatar
+  // is as large as the space allows (Foundry-portal parity), rather than a fixed small box. The
+  // <video> stays MOUNTED (via `hiddenStage`) even when hidden so the avatar's `ontrack` always has
+  // a ref to attach to — hiding it via display:none would race the async handshake and drop frames.
+  stageRow: {
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "stretch",
     flex: 1,
+    minHeight: "360px",
+    overflow: "hidden",
+  },
+  hiddenStage: { display: "none" },
+  // Wrapper around the live AvatarView — fills the stage so the video is as large as possible.
+  liveStage: { display: "flex", flex: 1, minHeight: 0, width: "100%" },
+  stageBox: {
+    width: "100%",
+    maxWidth: "900px",
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
+    flex: 1,
+    minHeight: 0,
+  },
+  // The conversation log is secondary while voice is live — it takes a bounded slice, not the whole
+  // column, so the avatar stays dominant. Scrolls internally.
+  log: {
+    flexShrink: 0,
+    maxHeight: "240px",
     overflowY: "auto",
     display: "flex",
     flexDirection: "column",
@@ -176,10 +200,15 @@ export function PlaygroundPanel({ personaId, character, style, locale }: Playgro
 
   return (
     <div className={styles.root} data-testid="playground-panel">
-      {/* Digital human / orb — only while a voice session is live. */}
-      {voiceOn && (
-        <div className={styles.stageRow}>
-          <div className={styles.stageBox}>
+      {/* Digital human stage — ALWAYS visible (Foundry/AI-Coach parity): show the static avatar
+          portrait when voice is off, and the live AvatarView (real video / orb) once voice starts.
+          The AvatarView (and its <video>) stays MOUNTED via display:none even when the static
+          preview is shown, so the async avatar handshake's `ontrack` always has a video element to
+          attach to (mounting it on voiceOn would race the handshake and drop the video track). */}
+      <div className={styles.stageRow}>
+        <div className={styles.stageBox}>
+          {!voiceOn && <AvatarPreview character={character} style={style} />}
+          <div className={voiceOn ? styles.liveStage : styles.hiddenStage}>
             <AvatarView
               ref={avatarVideoRef}
               audioState={voice.audioState}
@@ -187,13 +216,10 @@ export function PlaygroundPanel({ personaId, character, style, locale }: Playgro
             />
           </div>
         </div>
-      )}
+      </div>
 
       {/* One shared conversation stream (typed + spoken). */}
       <div className={styles.log} ref={logRef} data-testid="playground-log" aria-live="polite">
-        {turns.length === 0 && (
-          <Caption1>Type a message, or start voice — the agent's replies show here as text.</Caption1>
-        )}
         {turns.map((t) => (
           <div
             key={t.id}

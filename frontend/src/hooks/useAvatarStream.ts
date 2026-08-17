@@ -17,7 +17,7 @@
  * used by the direct-WebRTC `useInterviewVoice` so `AvatarView`'s fallback orb never shows a blank
  * connected-but-frameless box.
  */
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 
 /** All candidates gathered within this window before falling back to sending whatever we have. */
@@ -30,6 +30,12 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
   const [isConnected, setIsConnected] = useState(false);
   const sdpResolverRef = useRef<((sdp: string) => void) | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
+  // The avatar's video MediaStream, stashed so it can be (re)attached to the <video> element even if
+  // `ontrack` fires while the element is momentarily unmounted (e.g. the editor Playground mounts the
+  // <video> only while a voice session is live, racing the async handshake). Without this, a track
+  // that arrives before the element exists is silently lost and the face never renders — the exact
+  // failure AI-Coach avoids by always mounting its <video>. We instead re-attach defensively.
+  const pendingStreamRef = useRef<MediaStream | null>(null);
 
   /**
    * Start the avatar WebRTC handshake.
@@ -37,9 +43,66 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
    * @param sendSdpOffer Sends the base64-encoded SDP offer as `session.avatar.connect` over the
    *   Voice Live WS (caller's responsibility — this hook has no WS reference).
    */
+  /** Attach a video MediaStream to the <video> element + flip `isConnected` once it paints real
+   * frames. Safe to call repeatedly; a no-op if the element isn't mounted yet (the stream stays in
+   * `pendingStreamRef` and the ref-watching effect below re-attaches it once it mounts). */
+  const attachStream = useCallback(
+    (stream: MediaStream) => {
+      pendingStreamRef.current = stream;
+      const videoEl = videoRef.current;
+      if (!videoEl) {
+        console.info("[avatar-stream] video track arrived before <video> mounted; will re-attach");
+        return;
+      }
+      videoEl.srcObject = stream;
+      // Flip isConnected (which hides AvatarView's fallback orb) ONCE the video is actually producing
+      // real frames — a track that connects but never paints (0x0) must leave the orb visible. The
+      // FIRST decoded frame can lag `loadedmetadata`/`play()` by a beat, so a single check at those
+      // moments can read 0x0 and wrongly stick on the orb (the "已连接 but still a ball" symptom).
+      // Watch every event that signals a painted frame AND poll briefly, flipping true on the first
+      // non-zero reading and then stopping — so the face appears the instant frames arrive.
+      let settled = false;
+      let pollId: ReturnType<typeof setInterval> | null = null;
+      const stopPolling = () => {
+        if (pollId) {
+          clearInterval(pollId);
+          pollId = null;
+        }
+      };
+      const reflectDimensions = () => {
+        const hasFrames = videoEl.videoWidth > 0 && videoEl.videoHeight > 0;
+        if (hasFrames && !settled) {
+          settled = true;
+          stopPolling();
+          console.info(`[avatar-stream] video HAS frames: ${videoEl.videoWidth}x${videoEl.videoHeight}`);
+          setIsConnected(true);
+        }
+      };
+      videoEl.onloadedmetadata = reflectDimensions;
+      videoEl.onloadeddata = reflectDimensions;
+      videoEl.onresize = reflectDimensions;
+      videoEl.onplaying = reflectDimensions;
+      videoEl.ontimeupdate = reflectDimensions;
+      // Poll as a backstop for browsers/streams that don't fire a dimension event on the first frame.
+      pollId = setInterval(reflectDimensions, 250);
+      setTimeout(stopPolling, 15_000);
+      videoEl
+        .play()
+        .then(reflectDimensions)
+        .catch((err: unknown) => {
+          console.info("[avatar-stream] video play() rejected; retrying muted", err);
+          // Autoplay can reject; the element is already muted, but re-assert and retry once.
+          videoEl.muted = true;
+          void videoEl.play().then(reflectDimensions).catch(() => undefined);
+        });
+    },
+    [videoRef],
+  );
+
   const connect = useCallback(
     async (iceServers: RTCIceServer[], sendSdpOffer: (clientSdp: string) => Promise<void> | void) => {
-      console.debug("[avatar-stream] connect() entry, iceServers=", iceServers.length, iceServers);
+      console.info("[avatar-stream] connect() entry, iceServers=", iceServers.length);
+      pendingStreamRef.current = null;
       if (videoRef.current) videoRef.current.srcObject = null;
 
       const pc = new RTCPeerConnection({
@@ -47,41 +110,21 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
         bundlePolicy: "max-bundle",
       });
       pcRef.current = pc;
-      console.debug("[avatar-stream] RTCPeerConnection created");
+      console.info("[avatar-stream] RTCPeerConnection created");
 
       pc.onconnectionstatechange = () => {
-        console.debug("[avatar-stream] connectionState:", pc.connectionState);
+        console.info("[avatar-stream] connectionState:", pc.connectionState);
       };
       pc.oniceconnectionstatechange = () => {
-        console.debug("[avatar-stream] iceConnectionState:", pc.iceConnectionState);
+        console.info("[avatar-stream] iceConnectionState:", pc.iceConnectionState);
       };
 
       pc.ontrack = (event) => {
+        console.info("[avatar-stream] ontrack kind=", event.track.kind, "streams=", event.streams.length);
         if (event.track.kind === "video") {
-          const videoEl = videoRef.current;
-          if (!videoEl) return;
-          videoEl.srcObject = event.streams[0] ?? null;
-          // Flip isConnected (which hides AvatarView's fallback orb) ONLY once the video is
-          // actually producing real frames — a track that connects but never paints (0x0) must
-          // leave the orb visible, matching the existing frame-gate pattern in useInterviewVoice.
-          const reflectDimensions = () => {
-            const hasFrames = videoEl.videoWidth > 0 && videoEl.videoHeight > 0;
-            console.debug(
-              `[avatar-stream] video ${hasFrames ? "has frames" : "0x0 (no frames yet)"}: ` +
-                `${videoEl.videoWidth}x${videoEl.videoHeight}`,
-            );
-            setIsConnected(hasFrames);
-          };
-          videoEl.onloadedmetadata = reflectDimensions;
-          videoEl.onresize = reflectDimensions;
+          const stream = event.streams[0] ?? new MediaStream([event.track]);
           event.track.onended = () => setIsConnected(false);
-          videoEl
-            .play()
-            .then(reflectDimensions)
-            .catch((err: unknown) => {
-              console.debug("[avatar-stream] video play() rejected; keeping orb", err);
-              setIsConnected(false);
-            });
+          attachStream(stream);
           return;
         }
         if (event.track.kind !== "audio") return;
@@ -97,6 +140,7 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
       // Two recvonly transceivers, registered BEFORE createOffer — the avatar only streams TO us.
       pc.addTransceiver("video", { direction: "recvonly" });
       pc.addTransceiver("audio", { direction: "recvonly" });
+      console.info("[avatar-stream] transceivers added; calling createOffer()");
 
       // ICE-complete gate: resolve on whichever fires first — the null-candidate signal, the
       // gathering-state transition, or an 8s safety timeout (some networks never signal complete).
@@ -117,8 +161,9 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
       });
 
       const offer = await pc.createOffer();
+      console.info("[avatar-stream] createOffer resolved; calling setLocalDescription()");
       await pc.setLocalDescription(offer);
-      console.debug("[avatar-stream] setLocalDescription done; gathering ICE for offer");
+      console.info("[avatar-stream] setLocalDescription done; gathering ICE for offer");
 
       const serverSdpPromise = new Promise<string>((resolve, reject) => {
         sdpResolverRef.current = resolve;
@@ -129,16 +174,26 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
       });
 
       const encodedOffer = await offerReadyPromise;
-      console.debug("[avatar-stream] offer ready, sending session.avatar.connect");
+      console.info("[avatar-stream] offer ready, sending session.avatar.connect");
       await sendSdpOffer(encodedOffer);
 
       const serverSdp = await serverSdpPromise;
       sdpResolverRef.current = null;
       await pc.setRemoteDescription({ type: "answer", sdp: serverSdp });
-      console.debug("[avatar-stream] setRemoteDescription success; awaiting first video frame");
+      console.info("[avatar-stream] setRemoteDescription success; awaiting first video frame");
     },
-    [videoRef],
+    [videoRef, attachStream],
   );
+
+  // Re-attach the avatar stream if the <video> element mounts AFTER `ontrack` already fired. The
+  // editor Playground mounts <video> only while voice is live, which can race the async handshake;
+  // this effect closes that gap so a track is never permanently lost to a transiently-null ref.
+  useEffect(() => {
+    if (pendingStreamRef.current && videoRef.current && !videoRef.current.srcObject) {
+      console.info("[avatar-stream] <video> now mounted; re-attaching pending stream");
+      attachStream(pendingStreamRef.current);
+    }
+  });
 
   /** Handle a `session.avatar.connecting` event's `server_sdp` (base64 JSON `{type,sdp}`, with a
    * raw-string fallback if decoding fails). */
@@ -155,6 +210,7 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
 
   const disconnect = useCallback(() => {
     sdpResolverRef.current = null;
+    pendingStreamRef.current = null;
     if (pcRef.current) {
       pcRef.current.close();
       pcRef.current = null;

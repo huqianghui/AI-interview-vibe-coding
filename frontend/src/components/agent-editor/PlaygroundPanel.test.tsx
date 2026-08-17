@@ -56,4 +56,13 @@ describe("PlaygroundPanel", () => {
     // No separate Text/Voice tabs.
     expect(screen.queryByTestId("playground-tab-voice")).not.toBeInTheDocument();
   });
+
+  it("keeps the avatar <video> mounted even before voice starts (so ontrack never drops frames)", () => {
+    // Regression: the avatar handshake's `ontrack` fires from an async WebRTC negotiation. If the
+    // <video> were mounted only once voice is live, the track could arrive before the element exists
+    // and be silently dropped — the exact bug that left the digital human永远只显示 orb. The element
+    // must be in the DOM from first render (hidden until connected), matching AI-Coach's always-mount.
+    renderPanel("p1");
+    expect(screen.getByTestId("avatar-video")).toBeInTheDocument();
+  });
 });

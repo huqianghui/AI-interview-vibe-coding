@@ -172,6 +172,12 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
       switch (msg.type as string | undefined) {
         case "proxy.connected":
           avatarEnabledRef.current = Boolean(msg.avatar_enabled);
+          console.info(
+            "[voice] proxy.connected — mode:",
+            msg.mode,
+            "avatar_enabled:",
+            msg.avatar_enabled,
+          );
           break;
 
         case "session.updated": {
@@ -187,9 +193,15 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
           // carries the avatar block with ice_servers. Trigger the handshake on the ACTUAL presence
           // of ice_servers in THIS frame (not a separate avatar_enabled flag, which races the two
           // frames), and only once (avatarStarted guard).
+          console.info(
+            "[voice] session.updated received; avatar block present:",
+            !!avatarConf,
+            "ice_servers:",
+            iceServers.length,
+          );
           if (avatarConf && iceServers.length > 0 && !avatarStartedRef.current) {
             avatarStartedRef.current = true;
-            console.debug("[voice] session.updated has avatar ice_servers → starting handshake");
+            console.info("[voice] session.updated has avatar ice_servers → starting handshake");
             void avatarStream
               .connect(iceServers, (clientSdp) => {
                 send({ type: "session.avatar.connect", client_sdp: clientSdp });
@@ -198,7 +210,7 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
                 avatarStartedRef.current = false;
                 // Non-fatal: avatar video failed to negotiate, keep the voice-only session alive
                 // (AvatarView's fallback orb covers this — see useAvatarStream's frame gate).
-                console.debug("[voice] avatar handshake failed; continuing voice-only", err);
+                console.warn("[voice] avatar handshake failed; continuing voice-only", err);
               });
           }
 
@@ -303,6 +315,12 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
       // Step 3: open the Voice Live WS proxy and wait for `session.updated` (connected) or an
       // error/timeout.
       const wsUrl = buildWsUrl(token, optionsRef.current.personaId, effectiveLocale);
+      console.info(
+        "[voice] opening WS proxy; persona:",
+        optionsRef.current.personaId ?? "(default)",
+        "locale:",
+        effectiveLocale,
+      );
 
       await new Promise<void>((resolve, reject) => {
         const ws = new WebSocket(wsUrl);
@@ -418,14 +436,23 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
     [send],
   );
 
+  // Teardown must run ONLY on unmount. `cleanup`'s identity changes every render (it closes over
+  // `audio`/`avatarStream`, both fresh objects each render), so depending on `[cleanup]` here made
+  // this effect re-run on EVERY render — and each re-run fired the previous render's teardown,
+  // calling `avatarStream.disconnect()` → `pc.close()` and `ws.close()` mid-handshake. That closed
+  // the PeerConnection while `createOffer()` was pending (which then never resolves) and closed the
+  // WS before any mic/offer frame could be sent — the digital human never rendered. Hold the latest
+  // cleanup in a ref and invoke it from an unmount-only effect so a re-render can never tear down a
+  // live session.
+  const cleanupRef = useRef(cleanup);
+  cleanupRef.current = cleanup;
   useEffect(() => {
     return () => {
       intentionalCloseRef.current = true;
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-      cleanup();
+      cleanupRef.current();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- cleanup uses latest refs internally.
-  }, [cleanup]);
+  }, []);
 
   useEffect(() => {
     if (interviewId) console.debug("[voice] useInterviewVoice bound to interview", interviewId);

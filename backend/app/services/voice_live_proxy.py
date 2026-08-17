@@ -73,7 +73,16 @@ def build_avatar_session(persona: InterviewerPersona, *, locale: str | None) -> 
     session_kwargs: dict[str, Any] = {
         "modalities": modalities,
         "voice": AzureStandardVoice(name=voice_name, type="azure-standard"),
-        "turn_detection": AzureSemanticVad(type="azure_semantic_vad"),
+        # Server VAD drives a fully hands-free turn (AI Foundry portal parity): Azure detects when
+        # the user stops speaking and AUTO-generates the agent's reply (create_response=True), and
+        # the user can barge in to cut the agent off mid-answer (interrupt_response=True). Set both
+        # EXPLICITLY rather than relying on Azure's defaults so behavior can't silently regress —
+        # this is why the interviewer wasn't replying without a manual trigger.
+        "turn_detection": AzureSemanticVad(
+            type="azure_semantic_vad",
+            create_response=True,
+            interrupt_response=True,
+        ),
         "input_audio_transcription": AudioInputTranscriptionOptions(
             model="azure-speech", language=resolved_locale
         ),
@@ -143,7 +152,6 @@ async def run_proxy(
     import ssl
 
     import certifi
-
     from azure.ai.voicelive.aio import ConnectionClosed, connect
 
     credential, _is_entra = await _resolve_voice_live_credential(api_key)
@@ -154,7 +162,7 @@ async def run_proxy(
     # aiohttp (the voicelive SDK's WS transport) uses the OS trust store, which on macOS/some Linux
     # can't verify Azure's cert chain → "CERTIFICATE_VERIFY_FAILED, unable to get local issuer
     # certificate". Point it at certifi's CA bundle via the SDK's vendor_options escape hatch (maps
-    # straight to aiohttp ws_connect's ssl= kwarg). Live-verified: default ctx fails, certifi ctx 200s.
+    # straight to aiohttp ws_connect's ssl= kwarg). Live-verified: default fails, certifi works.
     ssl_ctx = ssl.create_default_context(cafile=certifi.where())
 
     connect_kwargs: dict[str, Any] = {

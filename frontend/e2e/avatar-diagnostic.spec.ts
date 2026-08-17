@@ -71,20 +71,52 @@ test.describe("Avatar diagnostic (real Azure)", () => {
       });
     });
 
-    // Instrument RTCPeerConnection.ontrack to see what tracks Azure actually sends.
+    // Instrument RTCPeerConnection to see whether the NATIVE createOffer/setLocalDescription resolve
+    // (bisecting the "hangs at createOffer()" symptom) + what tracks arrive.
     await page.addInitScript(() => {
-      const w = window as unknown as { __trackLog: string[] };
+      const w = window as unknown as { __trackLog: string[]; __pc: string[] };
       w.__trackLog = [];
+      w.__pc = [];
       const OrigPC = window.RTCPeerConnection;
       window.RTCPeerConnection = class extends OrigPC {
         constructor(...args: unknown[]) {
           // @ts-expect-error passthrough
           super(...args);
+          w.__pc.push(
+            `ctor iceServers=${JSON.stringify((args[0] as RTCConfiguration)?.iceServers ?? null)}`,
+          );
+          this.addEventListener("icegatheringstatechange", () =>
+            w.__pc.push(`iceGatheringState=${this.iceGatheringState}`),
+          );
           this.addEventListener("track", (e: RTCTrackEvent) => {
             w.__trackLog.push(
               `track kind=${e.track.kind} id=${e.track.id} streams=${e.streams.length}`,
             );
           });
+        }
+        async createOffer(...a: unknown[]) {
+          w.__pc.push("native createOffer() called");
+          try {
+            // @ts-expect-error passthrough
+            const o = await super.createOffer(...a);
+            w.__pc.push("native createOffer() RESOLVED");
+            return o;
+          } catch (e) {
+            w.__pc.push(`native createOffer() REJECTED: ${String(e)}`);
+            throw e;
+          }
+        }
+        async setLocalDescription(...a: unknown[]) {
+          w.__pc.push("native setLocalDescription() called");
+          try {
+            // @ts-expect-error passthrough
+            const r = await super.setLocalDescription(...a);
+            w.__pc.push("native setLocalDescription() RESOLVED");
+            return r;
+          } catch (e) {
+            w.__pc.push(`native setLocalDescription() REJECTED: ${String(e)}`);
+            throw e;
+          }
         }
       } as unknown as typeof RTCPeerConnection;
     });
@@ -130,7 +162,9 @@ test.describe("Avatar diagnostic (real Azure)", () => {
     console.log("WS frames RECEIVED:", JSON.stringify([...new Set(wsFrames)]));
     console.log("WS frames SENT (client→server):", JSON.stringify([...new Set(wsSent)]));
     console.log("session.* payloads (look for avatar.ice_servers + avatar.video):");
-    console.log(JSON.stringify(sessionPayloads, null, 2).slice(0, 4000));
+    console.log(JSON.stringify(sessionPayloads, null, 2).slice(0, 6000));
+    const pcLog = await page.evaluate(() => (window as unknown as { __pc: string[] }).__pc);
+    console.log("RTCPeerConnection native progression:", JSON.stringify(pcLog, null, 2));
     console.log("RTCPeerConnection tracks:", JSON.stringify(videoState.trackLog, null, 2));
     console.log("Video element:", JSON.stringify(videoState, null, 2));
     console.log("[voice] console lines:");
