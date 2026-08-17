@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.26.0.0 (2026-08-17)
+
+The digital human now shows a **live face**, not just the orb. This release migrates the editor's
+voice session onto a backend-proxied Voice Live connection, which is what makes real avatar video
+possible — closing the headline *Known limitation* of 0.25.0.0. It also keeps each persona's model
+and Foundry-agent version in sync with the Azure AI Foundry Portal, makes voice turns fully
+hands-free, and cuts the time-to-connect.
+
+### Added
+- **Avatar video (live digital-human face).** The editor Playground's voice session now streams the
+  real avatar face, not the animated orb. Voice runs over a new backend **Voice Live WebSocket
+  proxy** (`/voice-live` WS + `voice_live_proxy.py`): the backend holds the `azure-ai-voicelive` SDK
+  connection and relays both directions, so Azure delivers the avatar's ICE servers + SDP handshake
+  on the same connection that configured the session. A separate recvonly `RTCPeerConnection`
+  negotiates the video, and the view only swaps the static portrait for live video once real frames
+  actually paint (frame-gate) — no orb flash. This is the transport migration flagged as a
+  follow-up in 0.25.0.0.
+- **Per-persona model + Foundry-agent version reconciliation.** Each persona now stores its own
+  `model` (new column) instead of a single global value. Opening a persona in the editor reconciles
+  against the live Foundry agent (`POST /admin/personas/{id}/reconcile`): if the Portal bumped the
+  agent's version/model, Foundry is authoritative and the app pulls the new version + model back
+  into the persona (and, for the default persona, into the runtime config). Editing the model in the
+  editor pushes it to Foundry on save (bidirectional).
+- **Unified Playground conversation.** Text and voice are no longer separate tabs — one message
+  stream carries both typed turns and live voice transcripts (user speech + agent replies), with a
+  single composer holding text send + a voice toggle.
+
+### Changed
+- **Hands-free voice turns (Foundry-portal parity).** Server VAD is now configured explicitly
+  (`create_response=True`, `interrupt_response=True`) so Azure auto-generates the agent's reply when
+  you stop speaking and lets you barge in mid-answer — the interviewer no longer needs a manual
+  trigger to respond.
+- **Agent model dropdown lists all chat deployments.** Deployment discovery is Entra-first and
+  filtered to chat-capable models, so the `/admin/agent` model picker shows the full roster on a
+  key-disabled Foundry resource instead of a single entry.
+- **Faster voice connect.** The Entra credential is pre-warmed in the background at startup, the
+  certifi SSL context is built once and reused, and microphone acquisition runs in parallel with the
+  connection setup — shaving the one-time cost off the first connect.
+
+### Fixed
+- **Avatar portrait no longer flashes to the orb during connect.** The static real-face portrait
+  stays visible as an overlay through the entire connect (WS → session update → avatar ICE/SDP →
+  first frame) and cross-fades straight into the live face.
+- **Avatar WS-proxy SSL trust.** The proxy points aiohttp at the certifi CA bundle, fixing
+  `CERTIFICATE_VERIFY_FAILED` when verifying Azure's cert chain on macOS/some Linux.
+
 ## 0.25.0.0 (2026-08-13)
 
 The `/admin/agent` editor is now a working Foundry-portal-style workspace: you can pick the agent's

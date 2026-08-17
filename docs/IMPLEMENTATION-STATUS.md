@@ -5,8 +5,8 @@ validation state. The spec of record is [`../SPEC.md`](../SPEC.md); the planning
 [`planning/`](planning/); per-release detail is in [`../CHANGELOG.md`](../CHANGELOG.md). To actually
 **verify** the requirements and run the system, see [`VERIFICATION.md`](VERIFICATION.md).
 
-Status as of **v0.21.0.0**. Backend: ~350 tests, ~88% coverage. Frontend: 48 unit/component tests +
-5 Playwright E2E tests (real Chromium). Every merge passed CI (ruff check + ruff format + pytest;
+Status as of **v0.26.0.0**. Backend: 408 tests, 86% coverage. Frontend: 91 unit/component tests +
+Playwright E2E (real Chromium). Every merge passed CI (ruff check + ruff format + pytest;
 tsc + vitest + eslint + Playwright E2E). Local dev / CI run entirely on mock providers — zero Azure
 needed to build or test.
 
@@ -31,7 +31,7 @@ a fused text/voice interview flow, in phases (branch-per-phase, independently re
 | **F2** Question bank | ✅ Done | v0.7.0.0 | DB-backed banks + questions, one-enabled-default, 10-question seed on boot, candidate read API (no rubric leak, P3). |
 | **F3** Checklist (rubric) | ✅ Done | v0.8.0.0 | AI-drafted required/recommended/forbidden items with SOP source quotes; weights normalized to 100. |
 | **F4** Scoring engine | ✅ Done | v0.9.0.0 | 4-state per-item judgment + anti-hallucination rails (empty→not_met, forbidden→violated, invented dropped, missing→retry); weighted score + grade; cross-language. |
-| **F5** Interviewer digital human | ✅ Done | v0.4.0.0 | Persona model + admin API + Voice Live metadata builder. Agent sync **live-validated**. Per-persona Foundry IQ knowledge (v0.24.0.0, [`planning/spec-per-persona-knowledge.md`](planning/spec-per-persona-knowledge.md)). Editor Playground — inline text + voice agent test, 3-column layout, `.env` discovery fallback for model/KB dropdowns (v0.25.0.0). **Avatar VIDEO limit (live-verified):** the direct `/calls` voice transport returns `avatar: null` (no ICE servers) so the digital-human face never streams — the orb is the correct fallback; real avatar video needs a backend-WS-proxy transport migration (follow-up). See [`planning/spec-voice-live-agent-contract.md`](planning/spec-voice-live-agent-contract.md) §11. |
+| **F5** Interviewer digital human | ✅ Done | v0.4.0.0 | Persona model + admin API + Voice Live metadata builder. Agent sync **live-validated**. Per-persona Foundry IQ knowledge (v0.24.0.0, [`planning/spec-per-persona-knowledge.md`](planning/spec-per-persona-knowledge.md)). Editor Playground — inline text + voice agent test, 3-column layout, `.env` discovery fallback for model/KB dropdowns (v0.25.0.0). Unified text+voice Playground conversation + **per-persona model/version reconciliation** with the Foundry Portal (v0.26.0.0). **Avatar VIDEO now streams (v0.26.0.0):** the earlier `/calls` transport limit (`avatar: null`, no ICE) was resolved by migrating voice to a backend **Voice Live WS proxy** (`voice_live_proxy.py`) that holds the SDK connection so Azure delivers the avatar ICE/SDP on the same connection; a recvonly `RTCPeerConnection` renders the live face (frame-gated, no orb flash). See [`planning/spec-voice-live-agent-contract.md`](planning/spec-voice-live-agent-contract.md) §11. |
 | **F6** Turn-by-turn state machine | ✅ Done | v0.4.1.0 | Channel-agnostic `answer_finalized`; follow-up hook; answer grouping; verbal cue. |
 | **F7** Session memory surfacing | ✅ Done | v0.11.0.0 | Follow-up visibly cites the candidate's prior answer; Foundry-agent knowledge binding. |
 | **F8** Interview report | ✅ Done | v0.10.0.0 | Executive view (grade gauge + narrative + SOP-source-beside-answer) + progressive per-item detail. |
