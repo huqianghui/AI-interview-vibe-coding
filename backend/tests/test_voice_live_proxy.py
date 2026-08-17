@@ -14,7 +14,12 @@ from dataclasses import dataclass
 
 import pytest
 
-from app.services.voice_live_proxy import build_avatar_session
+# build_avatar_session shapes real azure-ai-voicelive SDK models, so these run only where the
+# `azure` extra is installed (local Azure-equipped venv). CI installs `.[dev]` only — zero-Azure by
+# design — so skip cleanly there rather than error, mirroring test_foundry_client's importorskip.
+pytest.importorskip("azure.ai.voicelive.models")
+
+from app.services.voice_live_proxy import build_avatar_session  # noqa: E402
 
 
 @dataclass
