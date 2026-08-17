@@ -65,4 +65,14 @@ describe("PlaygroundPanel", () => {
     renderPanel("p1");
     expect(screen.getByTestId("avatar-video")).toBeInTheDocument();
   });
+
+  it("shows the static portrait while the avatar is not yet painting frames", () => {
+    // Issue 1: before real avatar frames arrive (`isAvatarConnected` false — which spans the whole
+    // connect: idle → connecting → negotiating), the static portrait must stay visible as an overlay
+    // so the digital human never "disappears" into the orb. It's unmounted only once the live video
+    // paints frames.
+    renderPanel("p1");
+    expect(screen.getByTestId("playground-portrait-overlay")).toBeInTheDocument();
+    expect(screen.getByTestId("avatar-preview")).toBeInTheDocument();
+  });
 });

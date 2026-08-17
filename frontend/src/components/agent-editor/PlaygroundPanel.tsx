@@ -46,6 +46,7 @@ const useStyles = makeStyles({
   // Wrapper around the live AvatarView — fills the stage so the video is as large as possible.
   liveStage: { display: "flex", flex: 1, minHeight: 0, width: "100%" },
   stageBox: {
+    position: "relative", // anchors the absolute portrait overlay below
     width: "100%",
     maxWidth: "900px",
     display: "flex",
@@ -53,6 +54,20 @@ const useStyles = makeStyles({
     justifyContent: "center",
     flex: 1,
     minHeight: 0,
+  },
+  // The static portrait sits as an ABSOLUTE overlay above the stage so it stays visible through the
+  // entire connect (WS → session.updated → avatar ICE/SDP → first frame), instead of unmounting the
+  // instant voice starts. The live <video> (z-index 10 in AvatarView) fades in ABOVE it the moment
+  // real frames paint; then this overlay is unmounted (isAvatarConnected). This kills the
+  // "portrait vanishes → orb for several seconds → face" flash (the AvatarView orb is underneath).
+  portraitOverlay: {
+    position: "absolute",
+    inset: 0,
+    zIndex: 5,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    pointerEvents: "none",
   },
   // The conversation log is secondary while voice is live — it takes a bounded slice, not the whole
   // column, so the avatar stays dominant. Scrolls internally.
@@ -200,14 +215,16 @@ export function PlaygroundPanel({ personaId, character, style, locale }: Playgro
 
   return (
     <div className={styles.root} data-testid="playground-panel">
-      {/* Digital human stage — ALWAYS visible (Foundry/AI-Coach parity): show the static avatar
-          portrait when voice is off, and the live AvatarView (real video / orb) once voice starts.
-          The AvatarView (and its <video>) stays MOUNTED via display:none even when the static
-          preview is shown, so the async avatar handshake's `ontrack` always has a video element to
-          attach to (mounting it on voiceOn would race the handshake and drop the video track). */}
+      {/* Digital human stage — the static portrait is ALWAYS visible until the LIVE avatar video is
+          actually painting frames (`isAvatarConnected`), NOT merely until `voiceOn` flips. It rides
+          as an absolute overlay above the stage so it stays put through the entire connect
+          (WS → session.updated → avatar ICE/SDP → first frame) and cross-fades straight into the
+          live face — no "portrait vanishes → orb for several seconds → face" flash. The AvatarView
+          (and its <video>) stays MOUNTED via display:none while voice is off so the async avatar
+          handshake's `ontrack` always has a video element to attach to (mounting it on voiceOn would
+          race the handshake and drop the video track). */}
       <div className={styles.stageRow}>
         <div className={styles.stageBox}>
-          {!voiceOn && <AvatarPreview character={character} style={style} />}
           <div className={voiceOn ? styles.liveStage : styles.hiddenStage}>
             <AvatarView
               ref={avatarVideoRef}
@@ -215,6 +232,11 @@ export function PlaygroundPanel({ personaId, character, style, locale }: Playgro
               isAvatarConnected={voice.isAvatarConnected}
             />
           </div>
+          {!voice.isAvatarConnected && (
+            <div className={styles.portraitOverlay} data-testid="playground-portrait-overlay">
+              <AvatarPreview character={character} style={style} />
+            </div>
+          )}
         </div>
       </div>
 
