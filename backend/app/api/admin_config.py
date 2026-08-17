@@ -147,47 +147,81 @@ async def test_ai_foundry_config(db: AsyncSession = Depends(get_db)) -> Connecti
         return ConnectionTestResult(success=False, message=f"Connection failed: {exc}")
 
 
+def _chat_deployment_options(items: list[dict]) -> list[Option]:
+    """Map Foundry project-API deployment items to dropdown options, Portal-style.
+
+    The Portal's agent model dropdown lists only chat-capable deployments — not embeddings, image,
+    or realtime deployments (``capabilities.chat_completion != "true"``). Mirror that filter so the
+    admin dropdown matches the Portal; if the capability field is absent on every item (older API
+    shape), fall back to listing everything rather than an empty dropdown.
+    """
+    named = [d for d in items if d.get("name")]
+    chat = [d for d in named if str(d.get("capabilities", {}).get("chat_completion")) == "true"]
+    return [
+        Option(value=d["name"], label=f"{d['name']} ({d.get('modelName', '')})")
+        for d in (chat or named)
+    ]
+
+
 @router.get("/ai-foundry/model-deployments", response_model=list[Option])
 async def list_model_deployments(db: AsyncSession = Depends(get_db)) -> list[Option]:
     """List the resource's real model deployments for the config-page dropdown.
 
-    Tries the AI Foundry project-scoped deployments API, then the legacy Azure OpenAI deployments
+    Tries the AI Foundry project-scoped deployments API (Entra bearer first — key auth is disabled
+    on this resource class and 403s; api-key as fallback), then the legacy Azure OpenAI deployments
     API, then falls back to the saved model. Fail-soft: any error → saved model or []; never 500.
     """
+    # Imported lazily like the other azure_auth users to keep module import light for tests.
+    from app.services.azure_auth import FOUNDRY_SCOPE, get_bearer_token
+
     # Resolve from the saved master row, falling back to .env when no row exists yet (a fresh
     # deploy has creds only in .env). Without this fallback the dropdown is empty on day one.
     endpoint, project, api_key, model = await config_service.resolve_foundry_connection(db)
-    if endpoint and api_key:
+    if endpoint:
         base = endpoint.rstrip("/")
-        headers = {"api-key": api_key}
+        # Entra-first: same pattern as KB discovery — key-disabled Foundry resources reject
+        # api-key with 403 AuthenticationTypeDisabled, so try the bearer before the key.
+        bearer = await get_bearer_token(FOUNDRY_SCOPE)
+        header_attempts = [
+            h
+            for h in (
+                {"Authorization": f"Bearer {bearer}"} if bearer else None,
+                {"api-key": api_key} if api_key else None,
+            )
+            if h
+        ]
         async with httpx.AsyncClient(timeout=10.0) as client:
             if project:
+                for headers in header_attempts:
+                    try:
+                        url = f"{base}/api/projects/{project}/deployments?api-version=v1"
+                        r = await client.get(url, headers=headers)
+                        if r.status_code == 200:
+                            body = r.json()
+                            items = body.get("data", body.get("value", []))
+                            out = _chat_deployment_options(items)
+                            if out:
+                                return out
+                        else:
+                            logger.warning(
+                                "Foundry deployments API returned %d (%s auth)",
+                                r.status_code,
+                                "bearer" if "Authorization" in headers else "api-key",
+                            )
+                    except (httpx.HTTPError, KeyError, ValueError) as exc:
+                        logger.warning("Foundry deployments API failed: %s", exc)
+            for headers in header_attempts:
                 try:
-                    url = f"{base}/api/projects/{project}/deployments?api-version=v1"
+                    url = f"{base}/openai/deployments?api-version=2024-10-21"
                     r = await client.get(url, headers=headers)
                     if r.status_code == 200:
-                        body = r.json()
-                        items = body.get("data", body.get("value", []))
-                        out = [
-                            Option(value=d["name"], label=f"{d['name']} ({d.get('modelName', '')})")
-                            for d in items
-                            if d.get("name")
+                        return [
+                            Option(value=d["id"], label=f"{d['id']} ({d.get('model', '')})")
+                            for d in r.json().get("data", [])
+                            if d.get("id")
                         ]
-                        if out:
-                            return out
                 except (httpx.HTTPError, KeyError, ValueError) as exc:
-                    logger.warning("Foundry deployments API failed: %s", exc)
-            try:
-                url = f"{base}/openai/deployments?api-version=2024-10-21"
-                r = await client.get(url, headers=headers)
-                if r.status_code == 200:
-                    return [
-                        Option(value=d["id"], label=f"{d['id']} ({d.get('model', '')})")
-                        for d in r.json().get("data", [])
-                        if d.get("id")
-                    ]
-            except (httpx.HTTPError, KeyError, ValueError) as exc:
-                logger.warning("Azure OpenAI deployments API failed: %s", exc)
+                    logger.warning("Azure OpenAI deployments API failed: %s", exc)
     # Last resort: the configured model name (from DB or .env) as a single option.
     if model:
         return [Option(value=model, label=model)]
