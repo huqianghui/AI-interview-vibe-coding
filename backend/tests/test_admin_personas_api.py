@@ -105,6 +105,45 @@ async def test_create_rejects_blank_name(client):
     assert resp.status_code == 422
 
 
+# --- reconcile (pull Portal edits back) ------------------------------------
+
+
+async def test_reconcile_requires_admin(client):
+    assert (await client.post("/admin/personas/x/reconcile")).status_code == 401
+
+
+async def test_reconcile_missing_is_404(client):
+    assert (await client.post("/admin/personas/nope/reconcile", headers=AUTH)).status_code == 404
+
+
+async def test_reconcile_is_fail_soft_on_mock_adapter(client):
+    # The mock adapter's fetch_remote_state returns None (no live Foundry agent), so reconcile is a
+    # no-op that still returns the persona 200 — a plain editor open must never 500.
+    p = (await client.post("/admin/personas", headers=AUTH, json={"name": "R"})).json()
+    resp = await client.post(f"/admin/personas/{p['id']}/reconcile", headers=AUTH)
+    assert resp.status_code == 200
+    assert resp.json()["id"] == p["id"]
+
+
+async def test_reconcile_pulls_version_and_model(client, monkeypatch):
+    # A persona synced by the mock adapter (agent_id/version set). Stub the adapter's reverse-read
+    # to report a Portal-bumped version + model; reconcile writes them onto the persona.
+    p = (await client.post("/admin/personas", headers=AUTH, json={"name": "Drift"})).json()
+    assert p["agent_version"] == "1"
+
+    async def _remote(self, persona):
+        return {"agent_version": "7", "model": "gpt-5"}
+
+    from app.services.agents.adapters.mock import MockAgentSyncAdapter
+
+    monkeypatch.setattr(MockAgentSyncAdapter, "fetch_remote_state", _remote)
+    resp = await client.post(f"/admin/personas/{p['id']}/reconcile", headers=AUTH)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["agent_version"] == "7"
+    assert body["model"] == "gpt-5"
+
+
 # --- per-persona knowledge (Foundry IQ) ------------------------------------
 
 

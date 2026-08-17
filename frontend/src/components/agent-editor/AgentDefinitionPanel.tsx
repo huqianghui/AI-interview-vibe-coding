@@ -128,10 +128,10 @@ export function AgentDefinitionPanel({
 
       <Divider />
 
-      {/* Model (informational) */}
+      {/* Model (per-persona) */}
       <div className={styles.section}>
         <Title3>Model</Title3>
-        <ModelSelect />
+        <ModelSelect value={form.model} onChange={(model) => onChange({ model })} />
       </div>
 
       <Divider />

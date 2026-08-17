@@ -50,6 +50,8 @@ class PersonaCreate(VoiceKnobs):
     enabled: bool = True
     is_default: bool = False
     tools_config: str = "[]"
+    # Per-persona model deployment ("" → fall back to the global foundry_agent_model).
+    model: str = ""
 
 
 class PersonaUpdate(BaseModel):
@@ -70,6 +72,7 @@ class PersonaUpdate(BaseModel):
     proactive_engagement: bool | None = None
     voice_temperature: float | None = None
     playback_speed: float | None = None
+    model: str | None = None
 
 
 class PersonaOut(BaseModel):
@@ -91,6 +94,7 @@ class PersonaOut(BaseModel):
     proactive_engagement: bool
     voice_temperature: float
     playback_speed: float
+    model: str | None
     agent_id: str | None
     agent_version: str | None
     agent_sync_status: str
@@ -315,6 +319,23 @@ async def get_one(persona_id: str, db: AsyncSession = Depends(get_db)) -> Person
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Persona not found"
         ) from exc
+
+
+@router.post("/{persona_id}/reconcile", response_model=PersonaOut)
+async def reconcile(persona_id: str, db: AsyncSession = Depends(get_db)) -> PersonaOut:
+    """Pull the live Foundry agent's version + model into the persona when it has drifted.
+
+    Called by the editor on open (auto-reconcile). Fail-soft: an unavailable agent or a read error
+    leaves the persona untouched (``reconcile_persona`` never raises), so the page still loads.
+    """
+    try:
+        persona = await svc.get_persona(db, persona_id)
+    except svc.PersonaNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Persona not found"
+        ) from exc
+    await svc.reconcile_persona(db, persona)
+    return PersonaOut.of(persona)
 
 
 @router.put("/{persona_id}", response_model=PersonaOut)

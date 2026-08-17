@@ -19,9 +19,9 @@ Key contract facts (learned the hard way in the reference):
 The SDK is synchronous; every call is wrapped in ``asyncio.to_thread`` so it never blocks the
 event loop.
 
-Reverse-sync (pull Portal edits back via ``agents.get`` metadata) and metadata-only updates are
-deferred to the editor UI phase (#29), where they have a consumer — porting them now would be
-coverage-omitted code nothing calls.
+Reverse-read: :meth:`fetch_remote_state` pulls the live agent's latest version + model back so the
+editor can reconcile Portal edits (a Portal edit bumps the version but doesn't sync to our DB). It's
+read-only — it never creates a version. Full metadata reverse-sync stays deferred (#29).
 """
 
 import asyncio
@@ -122,11 +122,35 @@ class AzureAgentSyncAdapter:
         # _project_client does a synchronous Entra probe (blocking network/az-CLI call), so build it
         # off the event loop like the SDK calls it wraps.
         client = await asyncio.to_thread(self._project_client)
-        result = await self._create_with_retry(client, agent_name, instructions, metadata, tools)
+        # Per-persona model wins over the global adapter default so a model set in the editor is
+        # pushed to Foundry; empty/None falls back to self._model (settings.foundry_agent_model).
+        model = getattr(persona, "model", None) or self._model
+        result = await self._create_with_retry(
+            client, agent_name, instructions, metadata, tools, model
+        )
         return {
             "agent_id": str(result.get("id") or agent_name),
             "agent_version": str(result.get("version") or ""),
         }
+
+    async def fetch_remote_state(self, persona: Any) -> dict[str, str] | None:
+        """Read the live Foundry agent's latest version + model (pull direction).
+
+        Returns ``{"agent_version": <str>, "model": <str>}`` for the agent backing ``persona``, or
+        ``None`` when the agent doesn't exist or the read fails — reconciliation is best-effort and
+        must never 500. Walks ``AgentDetails.versions.latest.version`` then
+        ``get_version(...).definition.model`` (the ``PromptAgentDefinition.model`` this app writes).
+        """
+        try:
+            client = await asyncio.to_thread(self._project_client)
+            name = self._agent_name(persona)
+            details = await asyncio.to_thread(client.agents.get, agent_name=name)
+            version = str(details.versions.latest.version)
+            vdetails = await asyncio.to_thread(client.agents.get_version, name, version)
+            model = getattr(vdetails.definition, "model", None)
+            return {"agent_version": version, "model": str(model) if model else ""}
+        except Exception:  # noqa: BLE001 — any read failure → no reconcile, not an error
+            return None
 
     async def _resolve_kb_tools(  # pragma: no cover — needs a live Foundry/Search resource
         self, knowledge_configs: list[dict]
@@ -183,6 +207,7 @@ class AzureAgentSyncAdapter:
         instructions: str,
         metadata: dict[str, str],
         tools: list[dict[str, Any]],
+        model: str,
     ) -> dict[str, Any]:
         """Create the agent version, retrying transient connection drops with 2s/4s backoff.
 
@@ -192,13 +217,15 @@ class AzureAgentSyncAdapter:
         """
         for attempt in range(1, _MAX_CREATE_ATTEMPTS + 1):
             try:
-                return await self._create_version(client, agent_name, instructions, metadata, tools)
+                return await self._create_version(
+                    client, agent_name, instructions, metadata, tools, model
+                )
             except Exception as exc:  # noqa: BLE001 — classify, then retry or recover
                 if _is_transient_error(exc) and attempt < _MAX_CREATE_ATTEMPTS:
                     await asyncio.sleep(2**attempt)  # 2s, 4s
                     continue
                 return await self._recover_or_raise(
-                    client, agent_name, instructions, metadata, tools, exc
+                    client, agent_name, instructions, metadata, tools, model, exc
                 )
         # Unreachable: the loop either returns or the final attempt hits the else branch above.
         raise AgentSyncError(f"Could not create agent {agent_name!r} after retries")
@@ -262,12 +289,13 @@ class AzureAgentSyncAdapter:
         instructions: str,
         metadata: dict[str, str],
         tools: list[dict[str, Any]],
+        model: str,
     ) -> dict[str, Any]:
         from azure.ai.projects.models import PromptAgentDefinition
 
         # Attach the SOP knowledge base as an MCPTool when configured so the agent is grounded
         # (P15). The pure builder yields dicts; convert to SDK MCPTool objects here.
-        definition_kwargs: dict[str, Any] = {"model": self._model, "instructions": instructions}
+        definition_kwargs: dict[str, Any] = {"model": model, "instructions": instructions}
         sdk_tools = [self._to_sdk_tool(t) for t in tools]
         if sdk_tools:
             definition_kwargs["tools"] = sdk_tools
@@ -289,6 +317,7 @@ class AzureAgentSyncAdapter:
         instructions: str,
         metadata: dict[str, str],
         tools: list[dict[str, Any]],
+        model: str,
         original: Exception,
     ) -> dict[str, Any]:
         """On a create failure, if the agent already exists, retry as an update; else raise.
@@ -307,7 +336,7 @@ class AzureAgentSyncAdapter:
                 "with API-key auth, pre-create the agent in the Foundry Portal first."
             ) from original
         # Agent exists — a new version (update) is allowed under API-key auth.
-        return await self._create_version(client, agent_name, instructions, metadata, tools)
+        return await self._create_version(client, agent_name, instructions, metadata, tools, model)
 
     def _project_client(self) -> Any:
         """Build the project-scoped ``AIProjectClient`` (Entra-first, API-key fallback).

@@ -46,6 +46,7 @@ const PERSONA: personas.PersonaOut = {
   proactive_engagement: false,
   voice_temperature: 0.8,
   playback_speed: 1.0,
+  model: null,
   agent_id: "interviewer-p1",
   agent_version: "3",
   agent_sync_status: "synced",
@@ -74,6 +75,9 @@ function mockDiscovery() {
     knowledge_source: "sop-ks",
     is_active: true,
   });
+  // Reconcile fires in the background on persona open. Default it to the fail-soft path (unavailable
+  // Foundry) so it leaves the getPersona result in place; tests that exercise a pull override this.
+  vi.spyOn(personas, "reconcilePersona").mockRejectedValue(new Error("offline"));
 }
 
 /** Stub the per-persona knowledge endpoints the Knowledge section loads on select. */
@@ -311,5 +315,33 @@ describe("AgentEditorPage", () => {
     // Removing it calls the API with the config id.
     await user.click(screen.getByTestId("knowledge-remove-k1"));
     await waitFor(() => expect(remove).toHaveBeenCalledWith("k1"));
+  });
+
+  it("reconciles on open and applies a Portal-pulled model + version", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    mockDiscovery();
+    mockKnowledge();
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([PERSONA]);
+    vi.spyOn(personas, "getPersona").mockResolvedValue(PERSONA);
+    // The live Foundry agent drifted: bumped to v9 running a different model. Reconcile pulls it.
+    const pulled = { ...PERSONA, agent_version: "9", model: "gpt-5" };
+    const reconcile = vi
+      .spyOn(personas, "reconcilePersona")
+      .mockResolvedValue(pulled);
+
+    renderPage();
+    await signIn(user);
+    await pickPersona(user, "p1");
+    await waitFor(() => expect(screen.getByTestId("persona-name")).toHaveValue("Demo Interviewer"));
+
+    await waitFor(() => expect(reconcile).toHaveBeenCalledWith("p1"));
+    // The pulled version reaches the sync card…
+    await waitFor(() => expect(screen.getByText(/version:\s*9/)).toBeInTheDocument());
+    // …and the pulled model is now the persona's selection, so a save persists it.
+    const update = vi.spyOn(personas, "updatePersona").mockResolvedValue(pulled);
+    await user.click(screen.getByTestId("persona-save"));
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update.mock.calls[0][1].model).toBe("gpt-5");
   });
 });

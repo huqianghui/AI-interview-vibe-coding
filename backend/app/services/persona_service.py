@@ -165,6 +165,93 @@ async def mark_sync_failed(db: AsyncSession, persona: InterviewerPersona, *, err
     await db.commit()
 
 
+# --- reverse reconcile (pull Portal edits back) ----------------------------
+
+
+async def reconcile_persona(db: AsyncSession, persona: InterviewerPersona) -> InterviewerPersona:
+    """Pull the live Foundry agent's version + model into the persona when it has drifted.
+
+    An operator can edit the agent directly in the Foundry Portal (changing model/instructions),
+    which bumps the agent version but never syncs back to us. On opening the editor we reconcile:
+    read the live agent's latest version + that version's model; if the version differs from what we
+    stored (or we have no model yet — backfill for rows predating the per-persona ``model`` column),
+    Foundry is authoritative → write its version + model onto the persona.
+
+    Fail-soft: a never-synced persona, an unavailable agent, or any read error is a no-op (the
+    persona is returned unchanged). Never raises — a plain page-load must not 500 on Azure trouble.
+
+    When the reconciled persona is the enabled default, its model also drives the global runtime
+    config (``foundry_agent_model`` / Voice Live default): the master ``service_configs`` row is
+    updated and re-overlaid onto the settings singleton — the runtime override, without rewriting
+    the physical ``.env`` file.
+    """
+    # Never synced → no remote agent to reconcile against.
+    if not persona.agent_id or not persona.agent_version:
+        return persona
+
+    # Lazy imports keep this module's import graph light (the adapter pulls azure-only deps) and let
+    # tests monkeypatch the registry / config service.
+    from app.services.agents.registry import get_agent_sync_adapter
+
+    remote = await get_agent_sync_adapter().fetch_remote_state(persona)
+    if not remote:
+        return persona
+
+    remote_version = remote.get("agent_version") or ""
+    remote_model = remote.get("model") or ""
+    # Pull when the version drifted OR we have no per-persona model yet (backfill on first open).
+    version_changed = bool(remote_version) and remote_version != persona.agent_version
+    needs_backfill = bool(remote_model) and not persona.model
+    if not version_changed and not needs_backfill:
+        return persona
+
+    model_changed = bool(remote_model) and remote_model != persona.model
+    if remote_version:
+        persona.agent_version = remote_version
+    if remote_model:
+        persona.model = remote_model
+    persona.agent_sync_status = "synced"
+    persona.agent_sync_error = None
+    await db.commit()
+
+    # The default persona's model is the global runtime model — propagate it (runtime overlay only).
+    if persona.is_default and model_changed and remote_model:
+        await _propagate_default_model(db, remote_model)
+
+    return persona
+
+
+async def _propagate_default_model(db: AsyncSession, model: str) -> None:
+    """Push the default persona's reconciled model into the master config + settings overlay.
+
+    Preserves the saved endpoint/key/project/kb (empty ``api_key`` keeps the stored secret); only
+    the model changes. Fail-soft — a missing master row (creds only in ``.env``) or an overlay error
+    must not break reconciliation, so any error here is swallowed.
+    """
+    from app.services import config_service
+    from app.services.config_overlay import apply_master_config_to_settings
+
+    master = await config_service.get_master_config(db)
+    if master is None or not master.endpoint:
+        # No saved master row yet — the overlay is driven by .env; nothing to update at runtime.
+        return
+    try:
+        await config_service.upsert_master_config(
+            db,
+            endpoint=master.endpoint,
+            api_key="",  # preserve the existing encrypted key
+            default_project=master.default_project,
+            model_or_deployment=model,
+            updated_by="reconcile",
+            knowledge_base=master.knowledge_base,
+            knowledge_source=master.knowledge_source,
+        )
+        await db.commit()
+        await apply_master_config_to_settings(db)
+    except Exception:  # noqa: BLE001 — runtime propagation is best-effort, never fatal
+        await db.rollback()
+
+
 # --- internals -------------------------------------------------------------
 
 

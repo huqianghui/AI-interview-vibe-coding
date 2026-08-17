@@ -42,6 +42,9 @@ export function AgentEditorPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const formInitialized = useRef(false);
+  // Tracks the persona currently open so a slow background reconcile can't apply to a persona the
+  // user has since switched away from.
+  const openPersonaId = useRef<string | null>(null);
 
   const guard = useCallback(async (fn: () => Promise<void>) => {
     setError(null);
@@ -78,14 +81,29 @@ export function AgentEditorPage() {
     guard(async () => {
       setStatus(null);
       setSelectedId(id);
+      openPersonaId.current = id;
       const p = await personas.getPersona(id);
       setCurrent(p);
       setForm(personaToForm(p));
       formInitialized.current = true;
+      // Reconcile against the live Foundry agent in the background: an operator may have edited the
+      // agent in the Portal (bumping its version/model) without syncing back to us. Fail-soft — a
+      // reconcile error leaves the freshly-loaded persona in place. Only apply if the user hasn't
+      // switched personas in the meantime.
+      void personas
+        .reconcilePersona(id)
+        .then((pulled) => {
+          if (openPersonaId.current !== id) return;
+          setCurrent(pulled);
+          setForm(personaToForm(pulled));
+          setList((prev) => prev.map((row) => (row.id === pulled.id ? pulled : row)));
+        })
+        .catch(() => {});
     });
 
   const startNew = () => {
     setStatus(null);
+    openPersonaId.current = null; // cancel any in-flight reconcile from a previously-open persona
     setSelectedId(NEW);
     setCurrent(null);
     setForm(emptyPersonaForm());

@@ -67,6 +67,10 @@ class InterviewerPersona(TimestampMixin, Base):
     # Foundry agent binding + sync bookkeeping --------------------------------
     agent_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     agent_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Per-persona model deployment. Different Foundry agent versions can run different models, so
+    # the model is tracked here (not just the global master config). Nullable: null means "fall
+    # back to the global foundry_agent_model". Populated on sync/reconcile with the version's model.
+    model: Mapped[str | None] = mapped_column(String(100), nullable=True, default=None)
     agent_sync_status: Mapped[str] = mapped_column(String(16), default="none", nullable=False)
     agent_sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
