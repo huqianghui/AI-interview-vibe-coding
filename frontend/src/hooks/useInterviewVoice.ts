@@ -123,6 +123,12 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
   // Mirrors isMuted for handleMessage's mic-frame callback, which is created once per
   // `session.updated` and must read the LATEST mute state without resubscribing.
   const isMutedRef = useRef(false);
+  // Holds the in-flight `initMic()` promise for THIS connect. The mic is initialized CONCURRENTLY
+  // with the WS open (they're independent — mic frames don't start until `session.updated`), so the
+  // few-hundred-ms getUserMedia + worklet load overlaps the multi-second WS/Azure handshake instead
+  // of blocking it serially. The `session.updated` handler awaits this before `startRecording`, and
+  // `connect()` awaits it after the WS is up so a mic denial still rejects as a MicAccessError.
+  const micReadyRef = useRef<Promise<void> | null>(null);
   const optionsRef = useRef(options);
   optionsRef.current = options;
 
@@ -214,10 +220,17 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
               });
           }
 
-          audio.startRecording((base64Audio) => {
-            if (isMutedRef.current) return;
-            send({ type: "input_audio_buffer.append", audio: base64Audio });
-          });
+          // The mic was initialized concurrently with the WS open — make sure it's ready before we
+          // start streaming frames (it almost always resolved during the handshake). If it rejected
+          // (denied/no hardware), skip recording; the connect()-side await surfaces the error.
+          void (micReadyRef.current ?? Promise.resolve())
+            .then(() => {
+              audio.startRecording((base64Audio) => {
+                if (isMutedRef.current) return;
+                send({ type: "input_audio_buffer.append", audio: base64Audio });
+              });
+            })
+            .catch(() => undefined);
           break;
         }
 
@@ -299,18 +312,16 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
         throw error;
       }
 
-      // Step 2: microphone. A failure here is a MicAccessError (distinct from service errors).
-      try {
-        await audio.initMic();
-      } catch (err) {
-        setConn("error");
-        const error = new MicAccessError(
-          err instanceof Error ? err.message : "Microphone access denied",
-          { cause: err },
-        );
-        optionsRef.current.onError?.(error);
-        throw error;
-      }
+      // Step 2: microphone — kicked off CONCURRENTLY with the WS open (Step 3), not awaited here.
+      // getUserMedia + worklet load takes a few hundred ms; the WS/Azure handshake takes seconds and
+      // doesn't need the mic until `session.updated` fires `startRecording`. Running them in parallel
+      // shaves that mic time off the critical path. We stash the promise: the `session.updated`
+      // handler awaits it before recording, and the connect() flow awaits it after the WS is up so a
+      // mic denial still rejects as a MicAccessError. A `.catch` here keeps it from being an
+      // unhandled rejection while it's in flight.
+      const micReady = Promise.resolve(audio.initMic());
+      micReadyRef.current = micReady;
+      micReady.catch(() => undefined);
 
       // Step 3: open the Voice Live WS proxy and wait for `session.updated` (connected) or an
       // error/timeout.
@@ -379,6 +390,22 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
           }
         }, CONNECT_TIMEOUT_MS);
       });
+
+      // The WS is up. Now surface a mic failure (started in Step 2, likely already resolved): a
+      // denial/no-hardware becomes a MicAccessError so the caller can distinguish it from a service
+      // error — same contract as when initMic was awaited serially, just no longer on the WS's path.
+      try {
+        await micReady;
+      } catch (err) {
+        cleanup();
+        setConn("error");
+        const error = new MicAccessError(
+          err instanceof Error ? err.message : "Microphone access denied",
+          { cause: err },
+        );
+        optionsRef.current.onError?.(error);
+        throw error;
+      }
     },
     [audio, avatarStream, cleanup, handleMessage, setConn],
   );

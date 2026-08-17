@@ -36,6 +36,29 @@ logger = logging.getLogger(__name__)
 PROXY_CONNECTED_TYPE = "proxy.connected"
 ERROR_TYPE = "error"
 
+# The certifi-backed SSL context is identical for every connection, so build it once and reuse it
+# across connects instead of paying ssl.create_default_context (reads + parses the CA bundle) on
+# each run_proxy call. Cached lazily so importing this module never requires ssl/certifi.
+_ssl_ctx_cache: Any = None
+
+
+def _certifi_ssl_context() -> Any:  # pragma: no cover — trivial cache around stdlib ssl/certifi
+    """Return a process-wide certifi CA-bundle SSL context (built once, then reused).
+
+    aiohttp (the voicelive SDK's WS transport) uses the OS trust store, which on macOS/some Linux
+    can't verify Azure's cert chain → "CERTIFICATE_VERIFY_FAILED, unable to get local issuer
+    certificate". Pointing it at certifi's CA bundle fixes that (live-verified). The context is
+    immutable for our use, so one instance serves every connection.
+    """
+    global _ssl_ctx_cache
+    if _ssl_ctx_cache is None:
+        import ssl
+
+        import certifi
+
+        _ssl_ctx_cache = ssl.create_default_context(cafile=certifi.where())
+    return _ssl_ctx_cache
+
 
 def build_avatar_session(persona: InterviewerPersona, *, locale: str | None) -> Any:
     """Build the Azure SDK ``RequestSession`` for a persona's avatar/voice Voice Live session.
@@ -149,9 +172,6 @@ async def run_proxy(
     Sends ``{"type": "proxy.connected", ...}`` once Azure has acknowledged the initial
     ``session.update``, then runs two race-cancelled relay loops until either side closes.
     """
-    import ssl
-
-    import certifi
     from azure.ai.voicelive.aio import ConnectionClosed, connect
 
     credential, _is_entra = await _resolve_voice_live_credential(api_key)
@@ -159,11 +179,9 @@ async def run_proxy(
     is_agent = bool((persona.agent_id or "").strip())
     agent_name = (persona.agent_id or "").split(":", 1)[0] if is_agent else None
 
-    # aiohttp (the voicelive SDK's WS transport) uses the OS trust store, which on macOS/some Linux
-    # can't verify Azure's cert chain → "CERTIFICATE_VERIFY_FAILED, unable to get local issuer
-    # certificate". Point it at certifi's CA bundle via the SDK's vendor_options escape hatch (maps
-    # straight to aiohttp ws_connect's ssl= kwarg). Live-verified: default fails, certifi works.
-    ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+    # certifi CA-bundle SSL context (see _certifi_ssl_context) handed to the SDK's vendor_options
+    # escape hatch, which maps straight to aiohttp ws_connect's ssl= kwarg. Built once, reused here.
+    ssl_ctx = _certifi_ssl_context()
 
     connect_kwargs: dict[str, Any] = {
         "endpoint": endpoint,
