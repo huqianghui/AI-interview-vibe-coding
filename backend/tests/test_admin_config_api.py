@@ -275,8 +275,18 @@ async def _seed(client, *, kb="", ks=""):
     )
 
 
+def _mock_bearer(monkeypatch, token):
+    """Stub azure_auth.get_bearer_token (imported lazily by the deployments endpoint)."""
+
+    async def _fake(scope=""):
+        return token
+
+    monkeypatch.setattr("app.services.azure_auth.get_bearer_token", _fake)
+
+
 async def test_model_deployments_from_project_api(client, _restore_settings, monkeypatch):
     await _seed(client)
+    _mock_bearer(monkeypatch, None)  # no Entra → api-key attempt only, as before
     _FakeAsyncClient._responses = [
         _FakeResp(200, {"data": [{"name": "gpt-5.4-mini", "modelName": "gpt-5.4-mini"}]})
     ]
@@ -287,8 +297,51 @@ async def test_model_deployments_from_project_api(client, _restore_settings, mon
     assert body[0]["value"] == "gpt-5.4-mini"
 
 
+async def test_model_deployments_entra_first_on_key_disabled(
+    client, _restore_settings, monkeypatch
+):
+    # Key-disabled Foundry resource: the bearer attempt runs FIRST and succeeds, so the api-key
+    # 403 (AuthenticationTypeDisabled) path is never consulted. Non-chat deployments (embeddings /
+    # realtime / image) are filtered out, matching the Portal's agent model dropdown.
+    await _seed(client)
+    _mock_bearer(monkeypatch, "entra-token")
+    _FakeAsyncClient._responses = [
+        _FakeResp(
+            200,
+            {
+                "data": [
+                    {
+                        "name": "gpt-5.4-mini",
+                        "modelName": "gpt-5.4-mini",
+                        "capabilities": {"chat_completion": "true"},
+                    },
+                    {
+                        "name": "gpt-5",
+                        "modelName": "gpt-5",
+                        "capabilities": {"chat_completion": "true"},
+                    },
+                    {
+                        "name": "text-embedding-3-small",
+                        "modelName": "text-embedding-3-small",
+                        "capabilities": {"embeddings": "true"},
+                    },
+                    {
+                        "name": "gpt-realtime-2.1",
+                        "modelName": "gpt-realtime-2.1",
+                        "capabilities": {"chat_completion": "false"},
+                    },
+                ]
+            },
+        )
+    ]
+    monkeypatch.setattr("app.api.admin_config.httpx.AsyncClient", _FakeAsyncClient)
+    body = (await client.get("/admin/config/ai-foundry/model-deployments", headers=AUTH)).json()
+    assert [o["value"] for o in body] == ["gpt-5.4-mini", "gpt-5"]
+
+
 async def test_model_deployments_db_fallback_on_error(client, _restore_settings, monkeypatch):
     await _seed(client)
+    _mock_bearer(monkeypatch, None)
     # Both the project-scoped and legacy calls fail → fall back to the saved model.
     _FakeAsyncClient._responses = [_FakeResp(500, {}), _FakeResp(500, {})]
     monkeypatch.setattr("app.api.admin_config.httpx.AsyncClient", _FakeAsyncClient)
@@ -319,6 +372,40 @@ async def test_knowledge_bases_empty_on_error(client, _restore_settings, monkeyp
     monkeypatch.setattr("app.api.admin_config.foundry_connections.list_knowledge_bases", _empty_kbs)
     body = (await client.get("/admin/config/ai-foundry/knowledge-bases", headers=AUTH)).json()
     assert body == []
+
+
+async def test_model_deployments_env_fallback_without_db_row(
+    client, _restore_settings, monkeypatch
+):
+    # No service_configs row saved (fresh deploy). Discovery must fall back to .env settings and
+    # still return the configured model, rather than an empty dropdown.
+    s = get_settings()
+    s.azure_foundry_endpoint = "https://envdemo.services.ai.azure.com"
+    s.azure_foundry_api_key = "env-key"
+    s.azure_foundry_default_project = "env-prj"
+    s.foundry_agent_model = "gpt-5.4-env"
+    _mock_bearer(monkeypatch, None)
+    # Both live probes fail → falls through to the configured model name from .env.
+    _FakeAsyncClient._responses = [_FakeResp(500, {}), _FakeResp(500, {})]
+    monkeypatch.setattr("app.api.admin_config.httpx.AsyncClient", _FakeAsyncClient)
+    body = (await client.get("/admin/config/ai-foundry/model-deployments", headers=AUTH)).json()
+    assert body == [{"value": "gpt-5.4-env", "label": "gpt-5.4-env"}]
+
+
+async def test_knowledge_bases_env_fallback_without_db_row(client, _restore_settings, monkeypatch):
+    # No DB row; .env has the Foundry endpoint → KB discovery still runs (delegates to the mocked
+    # foundry_connections list) instead of short-circuiting to [].
+    s = get_settings()
+    s.azure_foundry_endpoint = "https://envdemo.services.ai.azure.com"
+    s.azure_foundry_api_key = "env-key"
+    s.azure_foundry_default_project = "env-prj"
+
+    async def _fake_kbs(**_kwargs):
+        return [{"name": "env-kb", "description": "Env KB"}]
+
+    monkeypatch.setattr("app.api.admin_config.foundry_connections.list_knowledge_bases", _fake_kbs)
+    body = (await client.get("/admin/config/ai-foundry/knowledge-bases", headers=AUTH)).json()
+    assert body == [{"value": "env-kb", "label": "Env KB"}]
 
 
 async def test_dropdowns_require_admin(client):

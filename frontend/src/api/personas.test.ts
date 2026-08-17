@@ -27,6 +27,7 @@ const SAMPLE: personas.PersonaOut = {
   proactive_engagement: false,
   voice_temperature: 0.8,
   playback_speed: 1.0,
+  model: null,
   agent_id: "interviewer-p1",
   agent_version: "3",
   agent_sync_status: "synced",

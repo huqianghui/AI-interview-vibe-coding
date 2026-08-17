@@ -35,6 +35,7 @@ export interface PersonaFormState {
   proactive_engagement: boolean;
   voice_temperature: number;
   playback_speed: number;
+  model: string; // per-persona Foundry model deployment ("" → global default)
   tools: ToolConfig[];
 }
 
@@ -57,6 +58,7 @@ export function emptyPersonaForm(): PersonaFormState {
     proactive_engagement: false,
     voice_temperature: 0.8,
     playback_speed: 1.0,
+    model: "",
     tools: [],
   };
 }
@@ -80,6 +82,7 @@ export function personaToForm(p: PersonaOut): PersonaFormState {
     proactive_engagement: p.proactive_engagement,
     voice_temperature: p.voice_temperature,
     playback_speed: p.playback_speed,
+    model: p.model ?? "",
     tools: parseToolsConfig(p.tools_config),
   };
 }
@@ -103,6 +106,7 @@ export function formToPayload(form: PersonaFormState): PersonaCreate {
     proactive_engagement: form.proactive_engagement,
     voice_temperature: form.voice_temperature,
     playback_speed: form.playback_speed,
+    model: form.model,
     tools_config: stringifyToolsConfig(form.tools),
   };
 }

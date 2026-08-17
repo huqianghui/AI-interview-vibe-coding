@@ -20,7 +20,7 @@ import {
 } from "@fluentui/react-components";
 import { AgentSyncStatusCard } from "./AgentSyncStatusCard";
 import { ModelSelect } from "./ModelSelect";
-import { KnowledgeStatus } from "./KnowledgeStatus";
+import { KnowledgeSection } from "./KnowledgeSection";
 import { ToolsSection } from "./ToolsSection";
 import type { AgentSyncStatus } from "../../api/personas";
 import type { PersonaFormState } from "../../pages/agentEditorForm";
@@ -52,6 +52,8 @@ export interface AgentDefinitionPanelProps {
   retrying?: boolean;
   tools: ToolConfig[];
   onToolsChange: (tools: ToolConfig[]) => void;
+  /** Saved persona id (null for a new, unsaved persona) — drives the per-persona Knowledge section. */
+  personaId: string | null;
 }
 
 export function AgentDefinitionPanel({
@@ -67,6 +69,7 @@ export function AgentDefinitionPanel({
   retrying,
   tools,
   onToolsChange,
+  personaId,
 }: AgentDefinitionPanelProps) {
   const styles = useStyles();
   const voiceModeOn = Boolean(form.character);
@@ -125,10 +128,10 @@ export function AgentDefinitionPanel({
 
       <Divider />
 
-      {/* Model (informational) */}
+      {/* Model (per-persona) */}
       <div className={styles.section}>
         <Title3>Model</Title3>
-        <ModelSelect />
+        <ModelSelect value={form.model} onChange={(model) => onChange({ model })} />
       </div>
 
       <Divider />
@@ -176,10 +179,10 @@ export function AgentDefinitionPanel({
 
       <Divider />
 
-      {/* Knowledge (read-only status) */}
+      {/* Knowledge (per-persona Foundry IQ) */}
       <div className={styles.section}>
         <Title3>Knowledge</Title3>
-        <KnowledgeStatus />
+        <KnowledgeSection personaId={personaId} />
       </div>
     </div>
   );

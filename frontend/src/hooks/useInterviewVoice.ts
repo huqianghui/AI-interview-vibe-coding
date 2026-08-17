@@ -1,20 +1,38 @@
 /**
- * Interview voice hook (SPEC F9) — ported from the reference Avatar layer's
- * `use-anonymous-voice-live.ts`, adapted to the interview backend.
+ * Interview voice hook (SPEC F9 avatar-video path) — backend-WS-proxy transport.
  *
- * The candidate's browser connects DIRECTLY to Azure Voice Live over WebRTC; the backend only
- * brokers the signaling URL + a short-lived bearer (see `fetchVoiceSession`). This hook owns the
- * WebRTC/RTCPeerConnection bootstrap: SDP offer/answer over a signaling WebSocket, a
- * `voice-live-events` data channel for transcripts/VAD, and a **3-attempt reconnect with
- * 1s/2s/4s backoff**. `MicAccessError` is thrown ONLY when `getUserMedia` fails, so the caller can
- * distinguish "grant mic access" from service-side failures (backend 409/503, signaling errors).
+ * REPLACES the direct-to-Azure WebRTC transport this hook used to implement. That transport
+ * couldn't render avatar video: on `/voice-live/realtime/calls` (browser→Azure direct), Azure
+ * accepts the avatar modality but never hands back `avatar.ice_servers` or starts the avatar video
+ * pipeline (live-verified: track opens, 0 frames). Real avatar video needs Azure's avatar SDP
+ * handshake (`session.avatar.connect`/`session.avatar.connecting`) to ride the SAME connection
+ * that sent `session.update` — a short-lived STS credential handed to a fresh browser WebRTC
+ * connection can't reuse that context. So the backend now holds the one Azure Voice Live SDK
+ * connection and relays everything over a single WebSocket at `/api/voice-live/ws`
+ * (`app/api/voice_live_ws.py` + `app/services/voice_live_proxy.py`):
  *
- * Deviation from the reference: session issuance calls the interview endpoint
- * (`fetchVoiceSession(interviewId, locale)`) instead of the anonymous-avatar broker; a
- * `VoiceSessionError` with status 409/503 propagates so the page can fall back to text (P6b).
+ *   - mic PCM goes UP as `input_audio_buffer.append` base64 frames (see `useVoiceAudio`).
+ *   - assistant audio (base64 PCM16 24kHz, `response.audio.delta`) + transcript events come DOWN.
+ *   - avatar VIDEO is a SEPARATE recvonly `RTCPeerConnection` (`useAvatarStream`) whose ICE servers
+ *     arrive in `session.updated` (`session.avatar.ice_servers`) and whose SDP offer/answer is
+ *     relayed over this same WS as `session.avatar.connect` (client) / `session.avatar.connecting`
+ *     (server).
+ *
+ * The backend already auto-configures the Voice Live session server-side (from the resolved
+ * persona + `locale` query param) before relaying anything to the browser — unlike the reference
+ * Avatar layer this was ported from, this hook does NOT send a client-initiated `session.update`
+ * bootstrap on open.
+ *
+ * Auth: browsers can't set WS headers, so the token rides as a `?token=` query param. The
+ * candidate interview path defaults to the anon session token (`api/client.ts`); the admin editor
+ * Playground passes its own `tokenProvider` (`getAdminToken` from `api/admin.ts`) + `personaId` so
+ * the WS pins the persona under test instead of resolving the default enabled one.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchVoiceSession, type VoiceSession } from "../api/client";
+import type { RefObject } from "react";
+import { _internal as clientInternal, type VoiceSession } from "../api/client";
+import { useVoiceAudio } from "./useVoiceAudio";
+import { useAvatarStream } from "./useAvatarStream";
 import type { AudioState, TranscriptSegment, VoiceConnectionState } from "../types/voice";
 
 /** Thrown ONLY when `getUserMedia` fails (mic denied / no hardware) — never for service errors. */
@@ -25,8 +43,6 @@ export class MicAccessError extends Error {
   }
 }
 
-import type { RefObject } from "react";
-
 export interface UseInterviewVoiceOptions {
   locale?: string;
   onTranscript?: (segment: TranscriptSegment) => void;
@@ -34,33 +50,85 @@ export interface UseInterviewVoiceOptions {
   onAudioStateChange?: (state: AudioState) => void;
   onResponseDone?: () => void;
   onError?: (error: Error) => void;
-  /** Attached via `ontrack` when Voice Live sends a digital-human avatar video track. When set,
-   * the hook negotiates a recvonly video transceiver so the avatar face isn't silently dropped. */
+  /** Attached to the avatar's video track via `ontrack` once Voice Live's avatar handshake
+   * completes and real frames arrive (see `useAvatarStream`). */
   videoRef?: RefObject<HTMLVideoElement | null>;
+  /**
+   * Kept for compile-compatibility with the old broker-based `VoiceSession` fetch pattern (the
+   * admin editor Playground still passes one). UNUSED by the WS-proxy transport — there is no
+   * separately-brokered session to fetch anymore, the WS itself IS the session. Retained only so
+   * existing callers keep type-checking until they're migrated to `tokenProvider`/`personaId`.
+   */
+  sessionFetcher?: (locale: string) => Promise<VoiceSession>;
+  /** Returns the bearer token for the `/voice-live/ws?token=` query param. Defaults to the
+   * candidate anon session token (`api/client.ts`). The admin editor Playground should pass
+   * `getAdminToken` (`api/admin.ts`) here instead. */
+  tokenProvider?: () => string | null;
+  /** Pins the WS to a specific persona (editor Playground). Omitted for the candidate interview
+   * path, which lets the backend resolve the default enabled persona. */
+  personaId?: string;
 }
 
 const MAX_RECONNECT = 3;
 const RECONNECT_DELAYS = [1000, 2000, 4000];
 const CONNECT_TIMEOUT_MS = 30_000;
-const ICE_GATHERING_TIMEOUT_MS = 5_000;
+
+/** Wire shape of one entry in `session.updated`'s `session.avatar.ice_servers` (matches the Azure
+ * SDK's `IceServer.as_dict()`: each server carries its OWN username/credential). */
+interface AvatarIceServerWire {
+  urls?: string | string[];
+  username?: string;
+  credential?: string;
+}
+
+function toRtcIceServers(raw: unknown): RTCIceServer[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((entry) => entry as AvatarIceServerWire)
+    .filter((entry) => !!entry.urls)
+    .map((entry) => ({
+      urls: entry.urls as string | string[],
+      username: entry.username,
+      credential: entry.credential,
+    }));
+}
+
+function buildWsUrl(token: string, personaId: string | undefined, locale: string): string {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const params = new URLSearchParams({ token, locale });
+  if (personaId) params.set("persona_id", personaId);
+  return `${protocol}//${window.location.host}/api/voice-live/ws?${params.toString()}`;
+}
 
 export function useInterviewVoice(interviewId: string, options: UseInterviewVoiceOptions = {}) {
   const [connectionState, setConnectionState] = useState<VoiceConnectionState>("disconnected");
   const [audioState, setAudioState] = useState<AudioState>("idle");
   const [isMuted, setIsMuted] = useState(false);
-  // True once a real avatar video track has arrived via ontrack; drives AvatarView video-vs-orb.
-  const [isAvatarConnected, setIsAvatarConnected] = useState(false);
 
-  const pcRef = useRef<RTCPeerConnection | null>(null);
-  const signalingWsRef = useRef<WebSocket | null>(null);
-  const dataChannelRef = useRef<RTCDataChannel | null>(null);
-  const micStreamRef = useRef<MediaStream | null>(null);
-  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const audio = useVoiceAudio();
+  // Stable fallback ref (not re-created per render) for callers that don't pass a videoRef.
+  const fallbackVideoRef = useRef<HTMLVideoElement | null>(null);
+  const avatarStream = useAvatarStream(options.videoRef ?? fallbackVideoRef);
+
+  const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const intentionalCloseRef = useRef(false);
   const lastLocaleRef = useRef<string | undefined>(undefined);
   const transcriptIdCounter = useRef(0);
+  const avatarEnabledRef = useRef(false);
+  // Guards the one-shot avatar handshake (Azure sends two session.updated frames; only the second
+  // carries ice_servers — fire the handshake once, on whichever frame has them).
+  const avatarStartedRef = useRef(false);
+  // Mirrors isMuted for handleMessage's mic-frame callback, which is created once per
+  // `session.updated` and must read the LATEST mute state without resubscribing.
+  const isMutedRef = useRef(false);
+  // Holds the in-flight `initMic()` promise for THIS connect. The mic is initialized CONCURRENTLY
+  // with the WS open (they're independent — mic frames don't start until `session.updated`), so the
+  // few-hundred-ms getUserMedia + worklet load overlaps the multi-second WS/Azure handshake instead
+  // of blocking it serially. The `session.updated` handler awaits this before `startRecording`, and
+  // `connect()` awaits it after the WS is up so a mic denial still rejects as a MicAccessError.
+  const micReadyRef = useRef<Promise<void> | null>(null);
   const optionsRef = useRef(options);
   optionsRef.current = options;
 
@@ -74,261 +142,240 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
     optionsRef.current.onAudioStateChange?.(state);
   }, []);
 
-  const cleanup = useCallback(() => {
-    if (dataChannelRef.current) {
-      dataChannelRef.current.close();
-      dataChannelRef.current = null;
-    }
-    if (pcRef.current) {
-      pcRef.current.close();
-      pcRef.current = null;
-    }
-    if (signalingWsRef.current) {
-      signalingWsRef.current.close();
-      signalingWsRef.current = null;
-    }
-    if (micStreamRef.current) {
-      micStreamRef.current.getTracks().forEach((t) => t.stop());
-      micStreamRef.current = null;
-    }
-    if (remoteAudioRef.current) {
-      remoteAudioRef.current.srcObject = null;
-      remoteAudioRef.current.remove();
-      remoteAudioRef.current = null;
-    }
+  const send = useCallback((data: Record<string, unknown>) => {
+    const ws = wsRef.current;
+    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data));
   }, []);
 
-  /** Data-channel messages: transcripts, VAD, response lifecycle. */
-  const handleDataChannelMessage = useCallback((event: MessageEvent) => {
-    let msg: Record<string, unknown>;
-    try {
-      msg = JSON.parse(event.data as string) as Record<string, unknown>;
-    } catch {
-      return;
+  const cleanup = useCallback(() => {
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
     }
-    const emit = (role: "user" | "assistant", content: string, isFinal: boolean, id: string) =>
-      optionsRef.current.onTranscript?.({ id, role, content, isFinal, timestamp: Date.now() });
+    avatarStream.disconnect();
+    audio.cleanupMic();
+    avatarStartedRef.current = false;
+  }, [audio, avatarStream]);
 
-    switch (msg.type as string | undefined) {
-      case "input_audio_buffer.speech_started":
-        setAudio("listening");
-        break;
-      case "input_audio_buffer.speech_stopped":
-        setAudio("idle");
-        break;
-      case "conversation.item.input_audio_transcription.completed":
-        if (msg.transcript) emit("user", msg.transcript as string, true, `user-${++transcriptIdCounter.current}`);
-        break;
-      case "response.created":
-        setAudio("speaking");
-        break;
-      case "response.audio_transcript.delta":
-        if (msg.delta)
-          emit("assistant", msg.delta as string, false, `assistant-${msg.response_id}-${msg.item_id}`);
-        break;
-      case "response.audio_transcript.done":
-        if (msg.transcript)
-          emit("assistant", msg.transcript as string, true, `assistant-${msg.response_id}-${msg.item_id}`);
-        break;
-      case "response.done":
-        setAudio("idle");
-        optionsRef.current.onResponseDone?.();
-        break;
-      case "error":
-        optionsRef.current.onError?.(
-          new Error(((msg.error as Record<string, unknown>)?.message as string) || "Data channel error"),
-        );
-        break;
-    }
-  }, [setAudio]);
+  /** WS message handler — Azure Voice Live realtime events, relayed near-verbatim by the backend
+   * proxy (plus its own `proxy.connected` bootstrap frame). */
+  const handleMessage = useCallback(
+    (
+      event: MessageEvent,
+      onConnected: () => void,
+      onFatalError: (error: Error) => void,
+    ) => {
+      let msg: Record<string, unknown>;
+      try {
+        msg = JSON.parse(event.data as string) as Record<string, unknown>;
+      } catch {
+        return;
+      }
+
+      const emit = (role: "user" | "assistant", content: string, isFinal: boolean, id: string) =>
+        optionsRef.current.onTranscript?.({ id, role, content, isFinal, timestamp: Date.now() });
+
+      switch (msg.type as string | undefined) {
+        case "proxy.connected":
+          avatarEnabledRef.current = Boolean(msg.avatar_enabled);
+          console.info(
+            "[voice] proxy.connected — mode:",
+            msg.mode,
+            "avatar_enabled:",
+            msg.avatar_enabled,
+          );
+          break;
+
+        case "session.updated": {
+          const session = msg.session as Record<string, unknown> | undefined;
+          const avatarConf = session?.avatar as Record<string, unknown> | undefined;
+          const iceServers = toRtcIceServers(avatarConf?.ice_servers);
+
+          setConn("connected");
+          setAudioState("idle");
+          onConnected();
+
+          // Azure sends TWO session.updated frames: the first has `avatar: null`, the SECOND
+          // carries the avatar block with ice_servers. Trigger the handshake on the ACTUAL presence
+          // of ice_servers in THIS frame (not a separate avatar_enabled flag, which races the two
+          // frames), and only once (avatarStarted guard).
+          console.info(
+            "[voice] session.updated received; avatar block present:",
+            !!avatarConf,
+            "ice_servers:",
+            iceServers.length,
+          );
+          if (avatarConf && iceServers.length > 0 && !avatarStartedRef.current) {
+            avatarStartedRef.current = true;
+            console.info("[voice] session.updated has avatar ice_servers → starting handshake");
+            void avatarStream
+              .connect(iceServers, (clientSdp) => {
+                send({ type: "session.avatar.connect", client_sdp: clientSdp });
+              })
+              .catch((err: unknown) => {
+                avatarStartedRef.current = false;
+                // Non-fatal: avatar video failed to negotiate, keep the voice-only session alive
+                // (AvatarView's fallback orb covers this — see useAvatarStream's frame gate).
+                console.warn("[voice] avatar handshake failed; continuing voice-only", err);
+              });
+          }
+
+          // The mic was initialized concurrently with the WS open — make sure it's ready before we
+          // start streaming frames (it almost always resolved during the handshake). If it rejected
+          // (denied/no hardware), skip recording; the connect()-side await surfaces the error.
+          void (micReadyRef.current ?? Promise.resolve())
+            .then(() => {
+              audio.startRecording((base64Audio) => {
+                if (isMutedRef.current) return;
+                send({ type: "input_audio_buffer.append", audio: base64Audio });
+              });
+            })
+            .catch(() => undefined);
+          break;
+        }
+
+        case "session.avatar.connecting": {
+          const serverSdp = (msg.server_sdp ?? msg.serverSdp) as string | undefined;
+          if (serverSdp) avatarStream.handleServerSdp(serverSdp);
+          break;
+        }
+
+        case "input_audio_buffer.speech_started":
+          setAudio("listening");
+          break;
+        case "input_audio_buffer.speech_stopped":
+          setAudio("idle");
+          break;
+        case "conversation.item.input_audio_transcription.completed":
+          if (msg.transcript)
+            emit("user", msg.transcript as string, true, `user-${++transcriptIdCounter.current}`);
+          break;
+
+        case "response.created":
+          setAudio("speaking");
+          break;
+        case "response.audio.delta":
+          if (msg.delta) audio.playAudio(msg.delta as string);
+          break;
+        case "response.audio_transcript.delta":
+          if (msg.delta)
+            emit("assistant", msg.delta as string, false, `assistant-${msg.response_id}-${msg.item_id}`);
+          break;
+        case "response.audio_transcript.done":
+          if (msg.transcript)
+            emit(
+              "assistant",
+              msg.transcript as string,
+              true,
+              `assistant-${msg.response_id}-${msg.item_id}`,
+            );
+          break;
+        case "response.done":
+          setAudio("idle");
+          optionsRef.current.onResponseDone?.();
+          break;
+
+        case "error": {
+          const errInfo = msg.error as Record<string, unknown> | undefined;
+          const error = new Error((errInfo?.message as string) || "Voice Live error");
+          setConn("error");
+          optionsRef.current.onError?.(error);
+          onFatalError(error);
+          break;
+        }
+      }
+    },
+    [audio, avatarStream, send, setAudio, setConn],
+  );
 
   const connect = useCallback(
     async (locale?: string, isReconnect = false): Promise<void> => {
       const effectiveLocale = locale ?? optionsRef.current.locale ?? "zh-CN";
       lastLocaleRef.current = effectiveLocale;
-      // Only a user-initiated connect resets the attempt counter. The auto-reconnect path
-      // below re-invokes connect() with isReconnect=true so the 3-attempt cap actually
-      // accumulates across cycles — otherwise a down broker becomes an unbounded retry loop.
       if (!isReconnect) reconnectAttemptRef.current = 0;
       intentionalCloseRef.current = false;
       setConn("connecting");
 
-      // Step 1: broker session (may throw VoiceSessionError 409/503 — propagate for text fallback).
-      let session: VoiceSession;
-      try {
-        session = await fetchVoiceSession(interviewId, effectiveLocale);
-      } catch (err) {
+      // Step 0: unlock autoplay for the assistant-audio AudioContext inside this user gesture,
+      // before any async WS event tries to call playAudio() (Chrome autoplay policy).
+      await audio.prepareAudioContext();
+
+      // Step 1: resolve the WS auth token (anon session token by default; admin editor Playground
+      // passes its own tokenProvider). Not a network broker call anymore — the WS itself is the
+      // session.
+      const tokenProvider = optionsRef.current.tokenProvider ?? (() => clientInternal.getToken());
+      const token = tokenProvider();
+      if (!token) {
+        const error = new Error("No voice auth token available");
         setConn("error");
-        const error = err instanceof Error ? err : new Error("Failed to broker voice session");
         optionsRef.current.onError?.(error);
         throw error;
       }
 
-      // Step 2: microphone. A failure here is a MicAccessError (distinct from service errors).
-      let micStream: MediaStream;
-      try {
-        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        micStreamRef.current = micStream;
-      } catch (err) {
-        setConn("error");
-        const error = new MicAccessError(
-          err instanceof Error ? err.message : "Microphone access denied",
-          { cause: err },
-        );
-        optionsRef.current.onError?.(error);
-        throw error;
-      }
+      // Step 2: microphone — kicked off CONCURRENTLY with the WS open (Step 3), not awaited here.
+      // getUserMedia + worklet load takes a few hundred ms; the WS/Azure handshake takes seconds and
+      // doesn't need the mic until `session.updated` fires `startRecording`. Running them in parallel
+      // shaves that mic time off the critical path. We stash the promise: the `session.updated`
+      // handler awaits it before recording, and the connect() flow awaits it after the WS is up so a
+      // mic denial still rejects as a MicAccessError. A `.catch` here keeps it from being an
+      // unhandled rejection while it's in flight.
+      const micReady = Promise.resolve(audio.initMic());
+      micReadyRef.current = micReady;
+      micReady.catch(() => undefined);
 
-      // Step 3: RTCPeerConnection (no ICE servers — Azure handles TURN).
-      const pc = new RTCPeerConnection();
-      pcRef.current = pc;
-      micStream.getTracks().forEach((track) => pc.addTrack(track, micStream));
+      // Step 3: open the Voice Live WS proxy and wait for `session.updated` (connected) or an
+      // error/timeout.
+      const wsUrl = buildWsUrl(token, optionsRef.current.personaId, effectiveLocale);
+      console.info(
+        "[voice] opening WS proxy; persona:",
+        optionsRef.current.personaId ?? "(default)",
+        "locale:",
+        effectiveLocale,
+      );
 
-      // Step 3b: negotiate a recvonly video transceiver so a digital-human avatar video track from
-      // Voice Live (when the session requests the avatar modality) isn't silently dropped.
-      pc.addTransceiver("video", { direction: "recvonly" });
+      await new Promise<void>((resolve, reject) => {
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+        let resolved = false;
 
-      // Step 4: data channel BEFORE createOffer (carries transcripts / VAD / response lifecycle).
-      const dc = pc.createDataChannel("voice-live-events");
-      dataChannelRef.current = dc;
-      dc.onmessage = handleDataChannelMessage;
+        const resolveOnce = () => {
+          if (resolved) return;
+          resolved = true;
+          resolve();
+        };
+        const rejectOnce = (error: Error) => {
+          if (resolved) return;
+          resolved = true;
+          reject(error);
+        };
 
-      // Step 5: remote audio + avatar-video playback.
-      pc.ontrack = (event) => {
-        if (event.track.kind === "video") {
-          const videoEl = optionsRef.current.videoRef?.current;
-          if (videoEl) {
-            videoEl.srcObject = event.streams[0] ?? null;
-            videoEl.play().catch(() => undefined);
+        ws.onmessage = (event) => handleMessage(event, resolveOnce, rejectOnce);
+
+        ws.onerror = () => {
+          rejectOnce(new Error("Voice Live WebSocket connection failed"));
+        };
+
+        ws.onclose = () => {
+          const wasConnected = resolved;
+          wsRef.current = null;
+          if (!wasConnected) {
+            rejectOnce(new Error("Voice Live WebSocket closed before connecting"));
+            return;
           }
-          setIsAvatarConnected(true);
-          return;
-        }
-        if (event.track.kind !== "audio") return;
-        const audio = document.createElement("audio");
-        audio.srcObject = event.streams[0] ?? null;
-        audio.autoplay = true;
-        audio.style.display = "none";
-        document.body.appendChild(audio);
-        audio.play().catch(() => undefined);
-        remoteAudioRef.current = audio;
-      };
-
-      // Reconnect on connection failure: 3 attempts, 1s/2s/4s backoff.
-      pc.onconnectionstatechange = () => {
-        const state = pc.connectionState;
-        if ((state === "disconnected" || state === "failed") && !intentionalCloseRef.current) {
+          if (intentionalCloseRef.current) return;
+          // Reconnect on unexpected close: 3 attempts, 1s/2s/4s backoff.
           if (reconnectAttemptRef.current < MAX_RECONNECT) {
             reconnectAttemptRef.current++;
             const delay = RECONNECT_DELAYS[reconnectAttemptRef.current - 1] ?? 4000;
             setConn("reconnecting");
-            cleanup();
+            avatarStream.disconnect();
+            audio.stopRecording();
             reconnectTimerRef.current = setTimeout(() => {
               void connect(lastLocaleRef.current, true).catch(() => undefined);
             }, delay);
           } else {
             setConn("error");
             optionsRef.current.onError?.(new Error("Voice connection failed after 3 attempts"));
-          }
-        }
-      };
-
-      // Step 6: SDP offer.
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
-      // Step 7: wait for ICE gathering (or 5s timeout).
-      await new Promise<void>((resolve) => {
-        if (pc.iceGatheringState === "complete") return resolve();
-        let resolved = false;
-        const done = () => {
-          if (!resolved) {
-            resolved = true;
-            pc.removeEventListener("icegatheringstatechange", onChange);
-            resolve();
-          }
-        };
-        const onChange = () => {
-          if (pc.iceGatheringState === "complete") done();
-        };
-        pc.addEventListener("icegatheringstatechange", onChange);
-        setTimeout(done, ICE_GATHERING_TIMEOUT_MS);
-      });
-
-      // Step 8: signaling WebSocket. Browsers can't set WS headers, so the bearer rides as a query
-      // parameter. The verified-accepted form is `Authorization=Bearer <token>` (a bare `api-key`
-      // or `access_token` query is rejected 401 on the GA endpoint).
-      const sep = session.signaling_url.includes("?") ? "&" : "?";
-      const signalingUrl = `${session.signaling_url}${sep}Authorization=${encodeURIComponent(`Bearer ${session.auth_token}`)}`;
-
-      await new Promise<void>((resolve, reject) => {
-        const ws = new WebSocket(signalingUrl);
-        signalingWsRef.current = ws;
-        let resolved = false;
-
-        ws.onopen = () => {
-          // The /voice-live/realtime/calls endpoint needs the session config INLINE in the
-          // sdp.create for an agent call — without it Azure fails agent initialization. (A later
-          // session.update alone is not enough; agent-init happens during the SDP exchange.)
-          ws.send(
-            JSON.stringify({
-              type: "rtc.call.sdp.create",
-              sdp_offer: pc.localDescription?.sdp,
-              session: session.session_config,
-            }),
-          );
-        };
-
-        ws.onmessage = (event: MessageEvent) => {
-          let msg: Record<string, unknown>;
-          try {
-            msg = JSON.parse(event.data as string) as Record<string, unknown>;
-          } catch {
-            return;
-          }
-          if (msg.type === "rtc.call.sdp.created" && msg.sdp_answer) {
-            pc.setRemoteDescription({ type: "answer", sdp: msg.sdp_answer as string })
-              .then(() => {
-                ws.send(JSON.stringify({ type: "session.update", session: session.session_config }));
-                setConn("connected");
-                setAudioState("idle");
-                if (!resolved) {
-                  resolved = true;
-                  resolve();
-                }
-              })
-              .catch((err: unknown) => {
-                if (!resolved) {
-                  resolved = true;
-                  const error = err instanceof Error ? err : new Error("Failed to set remote SDP");
-                  setConn("error");
-                  optionsRef.current.onError?.(error);
-                  reject(error);
-                }
-              });
-          } else if (msg.type === "error" || msg.type === "rtc.call.error") {
-            // The /voice-live/realtime/calls endpoint surfaces call-level failures as
-            // `rtc.call.error` (e.g. a rejected agent/SDP); plain `error` is the session-level form.
-            // Handle both so a rejection fails fast instead of hitting the 30s timeout.
-            if (!resolved) {
-              resolved = true;
-              const error = new Error(
-                ((msg.error as Record<string, unknown>)?.message as string) || "Signaling error",
-              );
-              setConn("error");
-              optionsRef.current.onError?.(error);
-              reject(error);
-            }
-          }
-        };
-
-        ws.onerror = () => {
-          if (!resolved) {
-            resolved = true;
-            const error = new Error("Signaling WebSocket connection failed");
-            setConn("error");
-            optionsRef.current.onError?.(error);
-            reject(error);
           }
         };
 
@@ -343,8 +390,24 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
           }
         }, CONNECT_TIMEOUT_MS);
       });
+
+      // The WS is up. Now surface a mic failure (started in Step 2, likely already resolved): a
+      // denial/no-hardware becomes a MicAccessError so the caller can distinguish it from a service
+      // error — same contract as when initMic was awaited serially, just no longer on the WS's path.
+      try {
+        await micReady;
+      } catch (err) {
+        cleanup();
+        setConn("error");
+        const error = new MicAccessError(
+          err instanceof Error ? err.message : "Microphone access denied",
+          { cause: err },
+        );
+        optionsRef.current.onError?.(error);
+        throw error;
+      }
     },
-    [cleanup, handleDataChannelMessage, interviewId, setConn],
+    [audio, avatarStream, cleanup, handleMessage, setConn],
   );
 
   const disconnect = useCallback(async () => {
@@ -354,64 +417,73 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
       reconnectTimerRef.current = null;
     }
     cleanup();
+    audio.stopAudio();
     setConn("disconnected");
     setAudioState("idle");
     setIsMuted(false);
-    setIsAvatarConnected(false);
-  }, [cleanup, setConn]);
+    isMutedRef.current = false;
+  }, [audio, cleanup, setConn]);
 
   const toggleMute = useCallback(() => {
     setIsMuted((prev) => {
       const next = !prev;
-      if (micStreamRef.current) {
-        micStreamRef.current.getTracks().forEach((t) => {
-          t.enabled = !next;
-        });
-      }
+      isMutedRef.current = next;
+      audio.setMicEnabled(!next);
       setAudio(next ? "muted" : "idle");
       return next;
     });
-  }, [setAudio]);
+  }, [audio, setAudio]);
 
   /** Signal end-of-answer to Voice Live (paired with the manual "I'm done" control, P13). */
   const commitAnswer = useCallback(() => {
-    const ws = signalingWsRef.current;
-    if (ws?.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "response.create" }));
-    }
-  }, []);
+    send({ type: "response.create" });
+  }, [send]);
 
   /** Speak the backend-provided question text verbatim (SPEC Phase 4 voice→turn sub-design).
    *
    * The backend keeps the question pointer authoritative, so voice must SPEAK its text, not let
    * the agent generate its own. We inject the question as an assistant conversation item and ask
    * Voice Live to read it exactly, rather than firing a bare `response.create` (which would make
-   * the agent autonomously produce whatever its generic instructions yield). Returns true if the
-   * request was sent (a live socket exists). Live-path behaviour is Layer-3 verified. */
-  const speakQuestion = useCallback((text: string): boolean => {
-    const ws = signalingWsRef.current;
-    if (!text || ws?.readyState !== WebSocket.OPEN) return false;
-    // Inject the backend-authoritative question as an assistant turn so Voice Live speaks THAT text
-    // (not an agent-generated one). Agent mode rejects overriding `instructions` in response.create
-    // ("Overriding instructions in response.create is not supported", live-verified 2026-08-12), so
-    // we place the verbatim text as the assistant item and fire a bare response.create.
-    ws.send(
-      JSON.stringify({
+   * the agent autonomously produce whatever its generic instructions yield). Agent mode rejects
+   * overriding `instructions` in `response.create` ("Overriding instructions in response.create is
+   * not supported", live-verified), so the verbatim text rides as the assistant item and a bare
+   * `response.create` follows — same pattern as the old data-channel transport, now over the WS.
+   */
+  const speakQuestion = useCallback(
+    (text: string): boolean => {
+      const ws = wsRef.current;
+      if (!text || ws?.readyState !== WebSocket.OPEN) return false;
+      send({
         type: "conversation.item.create",
         item: { type: "message", role: "assistant", content: [{ type: "text", text }] },
-      }),
-    );
-    ws.send(JSON.stringify({ type: "response.create" }));
-    return true;
-  }, []);
+      });
+      send({ type: "response.create" });
+      return true;
+    },
+    [send],
+  );
 
+  // Teardown must run ONLY on unmount. `cleanup`'s identity changes every render (it closes over
+  // `audio`/`avatarStream`, both fresh objects each render), so depending on `[cleanup]` here made
+  // this effect re-run on EVERY render — and each re-run fired the previous render's teardown,
+  // calling `avatarStream.disconnect()` → `pc.close()` and `ws.close()` mid-handshake. That closed
+  // the PeerConnection while `createOffer()` was pending (which then never resolves) and closed the
+  // WS before any mic/offer frame could be sent — the digital human never rendered. Hold the latest
+  // cleanup in a ref and invoke it from an unmount-only effect so a re-render can never tear down a
+  // live session.
+  const cleanupRef = useRef(cleanup);
+  cleanupRef.current = cleanup;
   useEffect(() => {
     return () => {
       intentionalCloseRef.current = true;
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-      cleanup();
+      cleanupRef.current();
     };
-  }, [cleanup]);
+  }, []);
+
+  useEffect(() => {
+    if (interviewId) console.debug("[voice] useInterviewVoice bound to interview", interviewId);
+  }, [interviewId]);
 
   return {
     connect,
@@ -422,6 +494,6 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
     isMuted,
     connectionState,
     audioState,
-    isAvatarConnected,
+    isAvatarConnected: avatarStream.isConnected,
   };
 }

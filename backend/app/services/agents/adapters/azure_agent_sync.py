@@ -19,21 +19,22 @@ Key contract facts (learned the hard way in the reference):
 The SDK is synchronous; every call is wrapped in ``asyncio.to_thread`` so it never blocks the
 event loop.
 
-Reverse-sync (pull Portal edits back via ``agents.get`` metadata) and metadata-only updates are
-deferred to the editor UI phase (#29), where they have a consumer — porting them now would be
-coverage-omitted code nothing calls.
+Reverse-read: :meth:`fetch_remote_state` pulls the live agent's latest version + model back so the
+editor can reconcile Portal edits (a Portal edit bumps the version but doesn't sync to our DB). It's
+read-only — it never creates a version. Full metadata reverse-sync stays deferred (#29).
 """
 
 import asyncio
 import time
 from typing import Any
 
+from app.services.agents import foundry_connections
 from app.services.agents.foundry_client import (
     FoundryClientError,
     build_project_client,
     project_endpoint,
 )
-from app.services.agents.knowledge_tool import build_agent_tools
+from app.services.agents.knowledge_tool import build_agent_tools, build_knowledge_mcp_tool
 from app.services.agents.persona_tools import build_persona_tools
 from app.services.agents.voice_live_metadata import build_voice_live_metadata
 
@@ -80,9 +81,6 @@ class AzureAgentSyncAdapter:
         model: str = _MODEL_ENV_DEFAULT,
         api_key: str = "",
         project: str = "",
-        search_endpoint: str = "",
-        search_index: str = "",
-        mcp_connection_id: str = "",
     ) -> None:
         # The SDK's AIProjectClient needs the PROJECT-scoped endpoint
         # (…/api/projects/{project}), not the bare Foundry account endpoint — the bare form 404s on
@@ -91,38 +89,116 @@ class AzureAgentSyncAdapter:
         self._endpoint = project_endpoint(endpoint, project)
         self._model = model
         self._api_key = api_key
-        # SOP knowledge-base binding via MCP (P15). Empty search config → no knowledge tool. The
-        # MCP RemoteTool connection id authenticates the KB's MCP endpoint (ApiKey conn → 403).
-        self._search_endpoint = search_endpoint
-        self._search_index = search_index
-        self._mcp_connection_id = mcp_connection_id
+        # Raw endpoint + project are kept for per-persona KB RemoteTool resolution (the SDK's
+        # connections list/create needs the project-scoped client, built from these).
+        self._raw_endpoint = endpoint
+        self._project = project
 
     # -- public API ---------------------------------------------------------
 
-    async def sync_persona(self, persona: Any, *, locale: str | None = None) -> dict[str, str]:
+    async def sync_persona(
+        self,
+        persona: Any,
+        *,
+        locale: str | None = None,
+        knowledge_configs: list[dict] | None = None,
+    ) -> dict[str, str]:
         """Create or update the persona's agent; return ``{agent_id, agent_version}``.
 
         ``persona.name`` is the stable agent name (Foundry versions are ``name:version``); the
         instructions come from ``persona.prompt_fragment``; the voice config rides in metadata.
+        ``knowledge_configs`` are THIS persona's attached knowledge bases (each becomes an
+        authenticated KB MCPTool) — the global KB binding was retired in favour of per-persona KBs.
         """
         agent_name = self._agent_name(persona)
         instructions = persona.prompt_fragment or f"You are {persona.name}, an interviewer."
         metadata = build_voice_live_metadata(persona, locale=locale, modified_at=int(time.time()))
+        knowledge_tools = await self._resolve_kb_tools(knowledge_configs or [])
         tools = build_agent_tools(
-            search_endpoint=self._search_endpoint,
-            index_name=self._search_index,
-            connection_id=self._mcp_connection_id or None,
+            knowledge_tools=knowledge_tools,
             persona_tools=build_persona_tools(getattr(persona, "tools_config", None)),
         )
 
         # _project_client does a synchronous Entra probe (blocking network/az-CLI call), so build it
         # off the event loop like the SDK calls it wraps.
         client = await asyncio.to_thread(self._project_client)
-        result = await self._create_with_retry(client, agent_name, instructions, metadata, tools)
+        # Per-persona model wins over the global adapter default so a model set in the editor is
+        # pushed to Foundry; empty/None falls back to self._model (settings.foundry_agent_model).
+        model = getattr(persona, "model", None) or self._model
+        result = await self._create_with_retry(
+            client, agent_name, instructions, metadata, tools, model
+        )
         return {
             "agent_id": str(result.get("id") or agent_name),
             "agent_version": str(result.get("version") or ""),
         }
+
+    async def fetch_remote_state(self, persona: Any) -> dict[str, str] | None:
+        """Read the live Foundry agent's latest version + model (pull direction).
+
+        Returns ``{"agent_version": <str>, "model": <str>}`` for the agent backing ``persona``, or
+        ``None`` when the agent doesn't exist or the read fails — reconciliation is best-effort and
+        must never 500. Walks ``AgentDetails.versions.latest.version`` then
+        ``get_version(...).definition.model`` (the ``PromptAgentDefinition.model`` this app writes).
+        """
+        try:
+            client = await asyncio.to_thread(self._project_client)
+            name = self._agent_name(persona)
+            details = await asyncio.to_thread(client.agents.get, agent_name=name)
+            version = str(details.versions.latest.version)
+            vdetails = await asyncio.to_thread(client.agents.get_version, name, version)
+            model = getattr(vdetails.definition, "model", None)
+            return {"agent_version": version, "model": str(model) if model else ""}
+        except Exception:  # noqa: BLE001 — any read failure → no reconcile, not an error
+            return None
+
+    async def _resolve_kb_tools(  # pragma: no cover — needs a live Foundry/Search resource
+        self, knowledge_configs: list[dict]
+    ) -> list[dict[str, Any]]:
+        """Build one authenticated KB MCPTool per enabled config.
+
+        For each enabled config, resolve (find-or-create) the RemoteTool project connection that
+        authenticates the KB's MCP endpoint (a CognitiveSearch/ApiKey connection returns 403), then
+        build the MCPTool dict. **Invariant (from the reference):** the built-tool count must equal
+        the enabled-config count — a KB that can't bind to an authenticated connection must FAIL
+        the sync, never silently drop, so a "synced" agent is never falsely reported as grounded.
+        """
+        enabled = [c for c in knowledge_configs if c.get("is_enabled", True)]
+        tools: list[dict[str, Any]] = []
+        for cfg in enabled:
+            search_target = cfg.get("connection_target", "")
+            index_name = cfg.get("index_name", "")
+            connection_id = await foundry_connections.resolve_remote_tool_connection(
+                endpoint=self._raw_endpoint,
+                project=self._project,
+                api_key=self._api_key,
+                search_target=search_target,
+                index_name=index_name,
+            )
+            # A KB MCPTool without a RemoteTool connection id authenticates as a CognitiveSearch/
+            # ApiKey call and 403s at runtime — that is NOT a grounded agent. Require a resolved
+            # connection id; a missing one drops the tool so the count-invariant below fails the
+            # sync (rather than shipping an unauthenticated tool that looks "synced").
+            tool = (
+                build_knowledge_mcp_tool(
+                    search_endpoint=search_target,
+                    index_name=index_name,
+                    connection_id=connection_id,
+                    server_label=cfg.get("server_label") or None,
+                )
+                if connection_id
+                else None
+            )
+            if tool is not None:
+                tools.append(tool)
+        if len(tools) != len(enabled):
+            raise AgentSyncError(
+                f"Failed to build authenticated MCP tools for all knowledge bases "
+                f"({len(tools)}/{len(enabled)}). A KB endpoint/name may be missing or its "
+                "RemoteTool connection could not be resolved (a KB without an authenticated "
+                "RemoteTool connection would 403 at runtime, so the sync fails instead)."
+            )
+        return tools
 
     async def _create_with_retry(  # pragma: no cover — needs a live Foundry endpoint
         self,
@@ -131,6 +207,7 @@ class AzureAgentSyncAdapter:
         instructions: str,
         metadata: dict[str, str],
         tools: list[dict[str, Any]],
+        model: str,
     ) -> dict[str, Any]:
         """Create the agent version, retrying transient connection drops with 2s/4s backoff.
 
@@ -140,13 +217,15 @@ class AzureAgentSyncAdapter:
         """
         for attempt in range(1, _MAX_CREATE_ATTEMPTS + 1):
             try:
-                return await self._create_version(client, agent_name, instructions, metadata, tools)
+                return await self._create_version(
+                    client, agent_name, instructions, metadata, tools, model
+                )
             except Exception as exc:  # noqa: BLE001 — classify, then retry or recover
                 if _is_transient_error(exc) and attempt < _MAX_CREATE_ATTEMPTS:
                     await asyncio.sleep(2**attempt)  # 2s, 4s
                     continue
                 return await self._recover_or_raise(
-                    client, agent_name, instructions, metadata, tools, exc
+                    client, agent_name, instructions, metadata, tools, model, exc
                 )
         # Unreachable: the loop either returns or the final attempt hits the else branch above.
         raise AgentSyncError(f"Could not create agent {agent_name!r} after retries")
@@ -210,12 +289,13 @@ class AzureAgentSyncAdapter:
         instructions: str,
         metadata: dict[str, str],
         tools: list[dict[str, Any]],
+        model: str,
     ) -> dict[str, Any]:
         from azure.ai.projects.models import PromptAgentDefinition
 
         # Attach the SOP knowledge base as an MCPTool when configured so the agent is grounded
         # (P15). The pure builder yields dicts; convert to SDK MCPTool objects here.
-        definition_kwargs: dict[str, Any] = {"model": self._model, "instructions": instructions}
+        definition_kwargs: dict[str, Any] = {"model": model, "instructions": instructions}
         sdk_tools = [self._to_sdk_tool(t) for t in tools]
         if sdk_tools:
             definition_kwargs["tools"] = sdk_tools
@@ -237,6 +317,7 @@ class AzureAgentSyncAdapter:
         instructions: str,
         metadata: dict[str, str],
         tools: list[dict[str, Any]],
+        model: str,
         original: Exception,
     ) -> dict[str, Any]:
         """On a create failure, if the agent already exists, retry as an update; else raise.
@@ -255,7 +336,7 @@ class AzureAgentSyncAdapter:
                 "with API-key auth, pre-create the agent in the Foundry Portal first."
             ) from original
         # Agent exists — a new version (update) is allowed under API-key auth.
-        return await self._create_version(client, agent_name, instructions, metadata, tools)
+        return await self._create_version(client, agent_name, instructions, metadata, tools, model)
 
     def _project_client(self) -> Any:
         """Build the project-scoped ``AIProjectClient`` (Entra-first, API-key fallback).

@@ -47,7 +47,15 @@ class AgentSyncAdapter(Protocol):
     name: str
 
     async def sync_persona(
-        self, persona: object, *, locale: str | None = None
+        self,
+        persona: object,
+        *,
+        locale: str | None = None,
+        knowledge_configs: list[dict] | None = None,
     ) -> dict[str, str]: ...
 
     async def delete_persona_agent(self, persona: object) -> None: ...
+
+    async def fetch_remote_state(self, persona: object) -> dict[str, str] | None:
+        """Read the live agent's ``{agent_version, model}`` (pull), or ``None`` if unavailable."""
+        ...

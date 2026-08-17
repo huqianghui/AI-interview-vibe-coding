@@ -32,6 +32,7 @@ export interface PersonaOut {
   proactive_engagement: boolean;
   voice_temperature: number;
   playback_speed: number;
+  model: string | null; // per-persona Foundry model deployment ("" / null → global default)
   agent_id: string | null;
   agent_version: string | null;
   agent_sync_status: AgentSyncStatus;
@@ -69,6 +70,14 @@ export const setDefaultPersona = (id: string) =>
 
 export const retrySyncPersona = (id: string) =>
   adminRequest<PersonaOut>(`/admin/personas/${id}/retry-sync`, { method: "POST" });
+
+/**
+ * Pull the live Foundry agent's version + model into the persona when it has drifted (an operator
+ * edited the agent in the Portal). Fired on editor open; fail-soft on the backend (an unavailable
+ * agent leaves the persona untouched and still returns 200).
+ */
+export const reconcilePersona = (id: string) =>
+  adminRequest<PersonaOut>(`/admin/personas/${id}/reconcile`, { method: "POST" });
 
 // ── Local-map helpers (JSON string ⇄ Record) ──────────────────────────────
 

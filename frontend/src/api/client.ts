@@ -67,7 +67,9 @@ export type AnswerSource = "text" | "voice" | "verbal_cue";
 
 /** WebRTC connection info brokered by the backend (SPEC F9). Mirrors `VoiceSessionOut`. */
 export interface VoiceSession {
-  interview_session_id: string;
+  // Present for a candidate interview session; absent for the admin editor Playground (which
+  // brokers a persona-scoped session with no interview). The voice hook doesn't read it.
+  interview_session_id?: string;
   signaling_url: string;
   auth_token: string;
   auth_type: string;
@@ -102,7 +104,11 @@ function setToken(token: string): void {
   if (typeof localStorage !== "undefined") localStorage.setItem(TOKEN_KEY, token);
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+function clearToken(): void {
+  if (typeof localStorage !== "undefined") localStorage.removeItem(TOKEN_KEY);
+}
+
+async function request<T>(path: string, init: RequestInit = {}, _retried = false): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
   const token = getToken();
@@ -110,6 +116,20 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   const resp = await fetch(`${BASE}${path}`, { ...init, headers });
   if (!resp.ok) {
+    // Self-heal a stale/invalid anon token: a cached token that no longer decodes (backend secret
+    // rotated, or its session row is gone) 401s forever otherwise. Drop it, mint a fresh session,
+    // and retry the call ONCE. Guard against loops (only retry when we actually had a token, and
+    // never on the session-mint endpoint itself).
+    if (
+      resp.status === 401 &&
+      !_retried &&
+      token &&
+      !path.includes("/public/candidate/session")
+    ) {
+      clearToken();
+      await ensureSession();
+      return request<T>(path, init, true);
+    }
     const detail = await resp.text().catch(() => "");
     throw new Error(`${resp.status} ${resp.statusText}: ${detail}`);
   }

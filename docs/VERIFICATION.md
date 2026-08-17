@@ -26,11 +26,11 @@ pip install -e ".[dev]"                              # first time only
 ruff check app tests          # lint
 ruff format --check app tests # format gate (run `ruff format` to fix)
 alembic upgrade head          # migrations apply cleanly
-pytest -q                     # 230 tests, ≥85% coverage gate (currently ~91%)
+pytest -q                     # 387 tests, ≥85% coverage gate (currently ~88%)
 ```
 
 Expected: `All checks passed!`, `N files already formatted`, migrations run to head, and
-`230 passed … Required test coverage of 85% reached.`
+`387 passed … Required test coverage of 85% reached.`
 
 ### 1b. Frontend — typecheck, lint, unit tests, build
 
@@ -39,29 +39,31 @@ cd frontend
 npm ci            # first time only
 npm run typecheck # tsc --noEmit
 npm run lint      # eslint, --max-warnings 0
-npm run test      # vitest — 21 unit/component tests
+npm run test      # vitest — 79 unit/component tests
 npm run build     # tsc -b && vite build
 ```
 
-Expected: no type errors, no lint warnings, `21 passed`, a clean production build.
+Expected: no type errors, no lint warnings, `79 passed`, a clean production build.
 
 ### 1c. End-to-end — real browser, mock providers
 
 ```bash
 cd frontend
 npx playwright install chromium   # first time only
-npm run e2e                        # boots backend + frontend, runs 4 specs in Chromium
+npm run e2e                        # boots backend + frontend, runs 6 tests across 3 specs in Chromium
 ```
 
-Expected: `4 passed`. Playwright boots a fresh migrated SQLite DB + the API (mock providers, known
-admin token) on :8100 and the vite dev server on :5273, then drives:
+Expected: `5 passed, 1 skipped`. Playwright boots a fresh migrated SQLite DB + the API (mock
+providers, known admin token) on :8100 and the vite dev server on :5273, then drives:
 
 | Spec | SPEC coverage | What it proves |
 |---|---|---|
-| Candidate text interview | F6/F7/F8/F9 | land → orientation → answer → **F7 follow-up quoting the candidate's own words** → report. |
+| Candidate text interview | F6/F7/F8/F9 | land → orientation → answer → **F7 follow-up quoting the candidate's own words** → report reveal. |
+| Candidate resumes after reload | F6 edge b | an in-progress interview survives a page reload (GET resume endpoint + client persistence). |
 | P3 boundary | P3 | candidate page never leaks `checklist`/`rubric`/`expected_points`/`weight`/`source_quote`. |
 | Admin authors bank + checklist → scored report | F2b/F3b/F3/F4/F8 | admin sign-in → default bank → question → checklist draft (weights = 100) → candidate reaches a **scored** exec report (grade gauge + SOP-source-beside-answer) + per-item detail. |
 | Voice, no mic | F9 AC#4 | voice with no microphone surfaces the permission / unavailable notice — never hangs. |
+| Voice Live agent-mode (real Azure) | F9/F5 | opt-in only: skipped unless `LIVE_VOICE=1` is set, since it drives the real Foundry Voice Live agent over WebRTC. |
 
 **If all of Layer 1 passes, every one of the 9 features + both admin editors is verified against
 its acceptance criteria on mocks.** See the SPEC↔feature map in `IMPLEMENTATION-STATUS.md`.

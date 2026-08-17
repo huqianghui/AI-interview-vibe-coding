@@ -1,0 +1,78 @@
+/** PlaygroundPanel: text chat sends to the agent; not-yet-saved persona shows a hint. */
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { FluentProvider, webLightTheme } from "@fluentui/react-components";
+import "../../i18n";
+import { PlaygroundPanel } from "./PlaygroundPanel";
+import * as pk from "../../api/personaKnowledge";
+
+function renderPanel(personaId: string | null) {
+  render(
+    <FluentProvider theme={webLightTheme}>
+      <PlaygroundPanel personaId={personaId} character="lisa" style="casual-sitting" locale="zh-CN" />
+    </FluentProvider>,
+  );
+}
+
+afterEach(() => vi.restoreAllMocks());
+
+describe("PlaygroundPanel", () => {
+  it("prompts to save when the persona has no id yet", () => {
+    renderPanel(null);
+    expect(screen.getByTestId("playground-needs-save")).toBeInTheDocument();
+  });
+
+  it("sends a text message to the agent and shows the reply", async () => {
+    const spy = vi
+      .spyOn(pk, "testChat")
+      .mockResolvedValue({ response_text: "Hello from the agent", response_id: "resp-1" });
+    renderPanel("p1");
+
+    fireEvent.change(screen.getByTestId("playground-input"), { target: { value: "hi there" } });
+    fireEvent.click(screen.getByTestId("playground-send"));
+
+    await waitFor(() => expect(spy).toHaveBeenCalledWith("p1", "hi there", undefined));
+    await waitFor(() => expect(screen.getByText("Hello from the agent")).toBeInTheDocument());
+    // The user's message is also shown.
+    expect(screen.getByText("hi there")).toBeInTheDocument();
+  });
+
+  it("shows an error when the agent chat fails", async () => {
+    vi.spyOn(pk, "testChat").mockRejectedValue(new Error("409 Conflict: no synced agent"));
+    renderPanel("p1");
+    fireEvent.change(screen.getByTestId("playground-input"), { target: { value: "test" } });
+    fireEvent.click(screen.getByTestId("playground-send"));
+    await waitFor(() =>
+      expect(screen.getByTestId("playground-error")).toHaveTextContent(/no synced agent/),
+    );
+  });
+
+  it("has a single composer with both text send and a voice toggle (unified, no tabs)", () => {
+    renderPanel("p1");
+    // One conversation surface — text input, Send, and a Voice toggle all in one composer.
+    expect(screen.getByTestId("playground-input")).toBeInTheDocument();
+    expect(screen.getByTestId("playground-send")).toBeInTheDocument();
+    expect(screen.getByTestId("playground-voice-toggle")).toBeInTheDocument();
+    // No separate Text/Voice tabs.
+    expect(screen.queryByTestId("playground-tab-voice")).not.toBeInTheDocument();
+  });
+
+  it("keeps the avatar <video> mounted even before voice starts (so ontrack never drops frames)", () => {
+    // Regression: the avatar handshake's `ontrack` fires from an async WebRTC negotiation. If the
+    // <video> were mounted only once voice is live, the track could arrive before the element exists
+    // and be silently dropped — the exact bug that left the digital human永远只显示 orb. The element
+    // must be in the DOM from first render (hidden until connected), matching AI-Coach's always-mount.
+    renderPanel("p1");
+    expect(screen.getByTestId("avatar-video")).toBeInTheDocument();
+  });
+
+  it("shows the static portrait while the avatar is not yet painting frames", () => {
+    // Issue 1: before real avatar frames arrive (`isAvatarConnected` false — which spans the whole
+    // connect: idle → connecting → negotiating), the static portrait must stay visible as an overlay
+    // so the digital human never "disappears" into the orb. It's unmounted only once the live video
+    // paints frames.
+    renderPanel("p1");
+    expect(screen.getByTestId("playground-portrait-overlay")).toBeInTheDocument();
+    expect(screen.getByTestId("avatar-preview")).toBeInTheDocument();
+  });
+});

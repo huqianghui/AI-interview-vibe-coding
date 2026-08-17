@@ -9,6 +9,12 @@
  *
  * The `<video>` visibility is driven by opacity/z-index (not display:none) so the browser's
  * autoplay pipeline stays alive while a track is attaching.
+ *
+ * The `<video>` is **muted** on purpose: Chrome's autoplay policy blocks `play()` on an unmuted
+ * media element outside a user gesture, and the avatar track is attached from the async `ontrack`
+ * handler — an unmuted video silently fails to play and leaves a blank box. Muting the video is
+ * safe because the avatar's AUDIO arrives on a SEPARATE `<audio>` element (see useInterviewVoice
+ * ontrack), not this element.
  */
 import { forwardRef } from "react";
 import { makeStyles, mergeClasses } from "@fluentui/react-components";
@@ -21,7 +27,11 @@ const useStyles = makeStyles({
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    minHeight: "220px",
+    // Fill the (flex-grown) stage so the avatar video is as large as the space allows, rather than a
+    // fixed small box. Falls back to a sensible min so a voice-only orb still has presence.
+    width: "100%",
+    height: "100%",
+    minHeight: "360px",
   },
   video: {
     position: "absolute",
@@ -54,7 +64,7 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
         ref={ref}
         autoPlay
         playsInline
-        muted={false}
+        muted
         className={mergeClasses(styles.video, isAvatarConnected ? styles.shown : styles.hidden)}
         data-testid="avatar-video"
       />

@@ -1,23 +1,16 @@
 /**
  * Agent-editor layout shell — the Azure AI Foundry portal Playground frame.
  *
- * Top bar (persona switcher + Save/Reset actions + Configure gear) over a two-column body: a left
- * "agent definition" column (Model / Voice mode / Instructions / Tools / Knowledge, divider-separated
- * collapsible sections) and a large center Playground preview (the digital human, centered). The
- * right Configuration rail slides in as a Fluent `OverlayDrawer`, opened by the gear. All regions are
- * passed as props so the page owns state and this component owns only the frame.
+ * Top bar (persona switcher + Save/Reset actions) over a THREE-column body, all always visible
+ * (matching the Foundry portal + AI-Coach editor — no "Configure" gate):
+ *   left   = agent definition (Model / Voice mode / Instructions / Tools / Knowledge)
+ *   center = the Playground (digital human + inline test), given the most room
+ *   right  = the configuration rail (language / voice / avatar / advanced knobs)
+ * All regions are passed as props so the page owns state and this component owns only the frame.
+ * Columns collapse to a single stacked column under ~1100px.
  */
 import type { ReactNode } from "react";
-import {
-  Button,
-  OverlayDrawer,
-  DrawerHeader,
-  DrawerHeaderTitle,
-  DrawerBody,
-  makeStyles,
-  tokens,
-} from "@fluentui/react-components";
-import { Dismiss24Regular, Settings24Regular } from "@fluentui/react-icons";
+import { makeStyles, tokens } from "@fluentui/react-components";
 
 const useStyles = makeStyles({
   root: {
@@ -37,14 +30,20 @@ const useStyles = makeStyles({
   },
   topBarLeft: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalM, minWidth: 0 },
   topBarActions: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS },
-  body: { flex: 1, display: "flex", minHeight: 0 },
+  body: {
+    flex: 1,
+    display: "flex",
+    minHeight: 0,
+    "@media (max-width: 1100px)": { flexDirection: "column", overflowY: "auto" },
+  },
   leftPanel: {
-    width: "420px",
-    minWidth: "340px",
-    maxWidth: "46%",
+    width: "380px",
+    minWidth: "320px",
+    maxWidth: "40%",
     borderRight: `1px solid ${tokens.colorNeutralStroke2}`,
     overflowY: "auto",
     backgroundColor: tokens.colorNeutralBackground1,
+    "@media (max-width: 1100px)": { width: "auto", maxWidth: "none", borderRight: "none" },
   },
   center: {
     flex: 1,
@@ -54,6 +53,22 @@ const useStyles = makeStyles({
     overflowY: "auto",
     padding: tokens.spacingHorizontalL,
     backgroundColor: tokens.colorNeutralBackground2,
+    "@media (max-width: 1100px)": { minHeight: "420px" },
+  },
+  configRail: {
+    width: "340px",
+    minWidth: "300px",
+    maxWidth: "38%",
+    borderLeft: `1px solid ${tokens.colorNeutralStroke2}`,
+    overflowY: "auto",
+    padding: tokens.spacingHorizontalL,
+    backgroundColor: tokens.colorNeutralBackground1,
+    "@media (max-width: 1100px)": {
+      width: "auto",
+      maxWidth: "none",
+      borderLeft: "none",
+      borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+    },
   },
 });
 
@@ -62,14 +77,12 @@ export interface AgentEditorLayoutProps {
   personaSwitcher: ReactNode;
   /** Left column: the agent-definition sections. */
   leftPanel: ReactNode;
-  /** Center column: the large Playground preview (digital human). */
+  /** Center column: the large Playground (digital human + inline test). */
   centerPreview: ReactNode;
-  /** Right drawer body: the configuration rail. */
+  /** Right column: the configuration rail (always visible). */
   configRail: ReactNode;
-  /** Top-bar action nodes rendered left of the Configure gear (e.g. status/Save/Reset). */
+  /** Top-bar action nodes (e.g. status/Save/Reset). */
   toolbarActions?: ReactNode;
-  configOpen: boolean;
-  onConfigOpenChange: (open: boolean) => void;
 }
 
 export function AgentEditorLayout({
@@ -78,25 +91,13 @@ export function AgentEditorLayout({
   centerPreview,
   configRail,
   toolbarActions,
-  configOpen,
-  onConfigOpenChange,
 }: AgentEditorLayoutProps) {
   const styles = useStyles();
   return (
     <div className={styles.root} data-testid="agent-editor-layout">
       <div className={styles.topBar}>
         <div className={styles.topBarLeft}>{personaSwitcher}</div>
-        <div className={styles.topBarActions}>
-          {toolbarActions}
-          <Button
-            icon={<Settings24Regular />}
-            appearance="secondary"
-            onClick={() => onConfigOpenChange(true)}
-            data-testid="open-config-drawer"
-          >
-            Configure
-          </Button>
-        </div>
+        <div className={styles.topBarActions}>{toolbarActions}</div>
       </div>
       <div className={styles.body}>
         <aside className={styles.leftPanel} data-testid="agent-definition-panel">
@@ -105,30 +106,10 @@ export function AgentEditorLayout({
         <section className={styles.center} data-testid="agent-playground-preview">
           {centerPreview}
         </section>
+        <aside className={styles.configRail} data-testid="configuration-rail">
+          {configRail}
+        </aside>
       </div>
-      <OverlayDrawer
-        position="end"
-        open={configOpen}
-        onOpenChange={(_, d) => onConfigOpenChange(d.open)}
-        data-testid="configuration-rail"
-      >
-        <DrawerHeader>
-          <DrawerHeaderTitle
-            action={
-              <Button
-                appearance="subtle"
-                aria-label="Close configuration"
-                icon={<Dismiss24Regular />}
-                onClick={() => onConfigOpenChange(false)}
-                data-testid="close-config-drawer"
-              />
-            }
-          >
-            Configuration
-          </DrawerHeaderTitle>
-        </DrawerHeader>
-        <DrawerBody>{configRail}</DrawerBody>
-      </OverlayDrawer>
     </div>
   );
 }

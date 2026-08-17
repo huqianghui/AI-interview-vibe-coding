@@ -1,5 +1,140 @@
 # Changelog
 
+## 0.26.0.0 (2026-08-17)
+
+The digital human now shows a **live face**, not just the orb. This release migrates the editor's
+voice session onto a backend-proxied Voice Live connection, which is what makes real avatar video
+possible — closing the headline *Known limitation* of 0.25.0.0. It also keeps each persona's model
+and Foundry-agent version in sync with the Azure AI Foundry Portal, makes voice turns fully
+hands-free, and cuts the time-to-connect.
+
+### Added
+- **Avatar video (live digital-human face).** The editor Playground's voice session now streams the
+  real avatar face, not the animated orb. Voice runs over a new backend **Voice Live WebSocket
+  proxy** (`/voice-live` WS + `voice_live_proxy.py`): the backend holds the `azure-ai-voicelive` SDK
+  connection and relays both directions, so Azure delivers the avatar's ICE servers + SDP handshake
+  on the same connection that configured the session. A separate recvonly `RTCPeerConnection`
+  negotiates the video, and the view only swaps the static portrait for live video once real frames
+  actually paint (frame-gate) — no orb flash. This is the transport migration flagged as a
+  follow-up in 0.25.0.0.
+- **Per-persona model + Foundry-agent version reconciliation.** Each persona now stores its own
+  `model` (new column) instead of a single global value. Opening a persona in the editor reconciles
+  against the live Foundry agent (`POST /admin/personas/{id}/reconcile`): if the Portal bumped the
+  agent's version/model, Foundry is authoritative and the app pulls the new version + model back
+  into the persona (and, for the default persona, into the runtime config). Editing the model in the
+  editor pushes it to Foundry on save (bidirectional).
+- **Unified Playground conversation.** Text and voice are no longer separate tabs — one message
+  stream carries both typed turns and live voice transcripts (user speech + agent replies), with a
+  single composer holding text send + a voice toggle.
+
+### Changed
+- **Hands-free voice turns (Foundry-portal parity).** Server VAD is now configured explicitly
+  (`create_response=True`, `interrupt_response=True`) so Azure auto-generates the agent's reply when
+  you stop speaking and lets you barge in mid-answer — the interviewer no longer needs a manual
+  trigger to respond.
+- **Agent model dropdown lists all chat deployments.** Deployment discovery is Entra-first and
+  filtered to chat-capable models, so the `/admin/agent` model picker shows the full roster on a
+  key-disabled Foundry resource instead of a single entry.
+- **Faster voice connect.** The Entra credential is pre-warmed in the background at startup, the
+  certifi SSL context is built once and reused, and microphone acquisition runs in parallel with the
+  connection setup — shaving the one-time cost off the first connect.
+
+### Fixed
+- **Avatar portrait no longer flashes to the orb during connect.** The static real-face portrait
+  stays visible as an overlay through the entire connect (WS → session update → avatar ICE/SDP →
+  first frame) and cross-fades straight into the live face.
+- **Avatar WS-proxy SSL trust.** The proxy points aiohttp at the certifi CA bundle, fixing
+  `CERTIFICATE_VERIFY_FAILED` when verifying Azure's cert chain on macOS/some Linux.
+
+## 0.25.0.0 (2026-08-13)
+
+The `/admin/agent` editor is now a working Foundry-portal-style workspace: you can pick the agent's
+model, attach knowledge bases, and **test the agent right in the editor** — by text and by voice —
+without leaving the page. Config is laid out in three always-visible columns instead of hidden
+behind a "Configure" button, and the digital human is shown large and centered.
+
+### Added
+- **Inline Playground (test the agent in the editor).** The center column is now a live "Try it"
+  panel with two tabs: **Text** (chat with the persona's hosted Foundry agent, multi-turn) and
+  **Voice + digital human** (Start brokers a real Voice Live session for that persona and connects
+  audio + transcript). Backed by new admin endpoints `POST /admin/personas/{id}/test-chat` and
+  `POST /admin/personas/{id}/voice/session`.
+- **Three-column editor layout.** Left = agent definition, center = Playground, right =
+  configuration (language / voice / avatar / advanced) — all visible at once; the Configure drawer
+  is gone. Collapses to one column on narrow screens.
+
+### Changed
+- **Model + Foundry-IQ dropdowns now populate on a fresh deploy.** Discovery previously required an
+  admin to first save the AI Foundry connection into the database; it now falls back to the `.env`
+  Foundry credentials when no saved row exists, so the model list and the knowledge-base
+  connection/KB pickers work out of the box.
+- **Digital human enlarged.** The interviewer preview fills the center column (proportional to the
+  viewport) instead of a small fixed box.
+
+### Fixed
+- **Interview no longer dead-ends on a stale session.** A cached anonymous token that no longer
+  validates (server restarted) used to fail every attempt with "Invalid anonymous token"; the app
+  now transparently re-establishes a fresh session and retries.
+
+### Known limitation
+- **Digital-human VIDEO still shows the animated orb, not a live face, during a voice session.**
+  Live testing proved this is an Azure transport limit, not a UI bug: the current direct-to-Azure
+  voice transport streams the agent's audio + transcript but returns no avatar video pipeline
+  (`session.updated` reports `avatar: null`, no ICE servers), so no video frames ever arrive and the
+  orb is shown. Rendering the real avatar face requires migrating voice to a backend-proxied Voice
+  Live connection (a separate, larger change). Audio, transcript, and the static real-face preview
+  are unaffected. See `docs/planning/spec-voice-live-agent-contract.md` §11.
+
+## 0.24.0.0 (2026-08-12)
+
+Knowledge grounding is now configured **per interviewer persona**, directly in the `/admin/agent`
+editor — matching the Azure AI Foundry portal's per-agent Knowledge experience. An admin picks an
+Azure AI Search connection and one or more Foundry IQ knowledge bases for a persona; each is bound
+to that persona's Foundry prompt agent as an authenticated MCPTool on sync. The old single global
+knowledge base (set under Admin → AI Foundry and bound to every agent) is retired for agent
+grounding; the separate SOP text-retrieval used for answer scoring is unchanged.
+
+Two candidate-facing improvements ship alongside it: the digital-human avatar now actually appears
+during a voice interview, and the interview page is redesigned into a full-screen two-column stage
+(the interviewer's face/orb on the left, question and answer controls on the right) instead of a
+cramped centered column.
+
+### Added
+- **Per-persona knowledge bases.** New `persona_knowledge_configs` table + `PersonaKnowledgeConfig`
+  model (one row per attached KB, cascade-deleted with the persona) and a DB-only
+  `persona_knowledge_service` (list / add / remove / `configs_as_dicts`).
+- **Editor Knowledge section (now editable).** The read-only status strip is replaced by a
+  per-persona list with a **Connect knowledge base** dialog: two cascading dropdowns (Azure AI
+  Search connection → Foundry IQ knowledge base) populated live from the resource. Add/remove
+  re-syncs the persona's agent immediately.
+- **Admin endpoints.** `GET /admin/personas/knowledge/connections`,
+  `GET /admin/personas/knowledge/knowledge-bases`, `GET/POST /admin/personas/{id}/knowledge`,
+  `DELETE /admin/personas/knowledge/{config_id}` (all admin-only; discovery is fail-soft → `[]`).
+
+### Changed
+- **Agent sync binds per-persona KBs.** `AzureAgentSyncAdapter.sync_persona` now resolves each of a
+  persona's attached KBs to an authenticated RemoteTool connection (find-or-create via ARM, reusing
+  the existing `foundry_connections` helpers) and builds one MCPTool per KB. A KB that cannot
+  authenticate fails the sync (recorded as `agent_sync_status=failed`) rather than silently
+  dropping — a "synced" agent is never falsely reported as grounded. `build_agent_tools` now takes
+  `knowledge_tools` + `persona_tools`.
+- Retired the global KB → agent binding in the adapter registry (the F1 SOP scoring retrieval path
+  is untouched and still reads the Admin AI Foundry config).
+- **Interview page redesigned.** The live Q&A is now a full-width two-column stage: the digital
+  human (or the voice orb) on a dark stage at left, and the question, a colored status pill
+  (listening / speaking / muted), the text/voice answer controls, and the transcript at right. It
+  stacks to one column on narrow screens. The other phases (start, orientation, scoring, report)
+  keep a centered layout.
+
+### Fixed
+- **Digital human now appears in voice mode.** The avatar video never rendered — the browser
+  blocked it from playing because the element wasn't muted, leaving a blank stage. The avatar video
+  now plays (its audio was always on a separate channel), and the interviewer's face only replaces
+  the fallback orb once real video frames arrive, so a stalled or empty stream shows the orb instead
+  of a blank box.
+- **Deleting a persona now removes its attached knowledge bases** instead of orphaning them (foreign
+  keys are enforced on SQLite).
+
 ## 0.23.1.0 (2026-08-12)
 
 Voice mode now actually connects to the interviewer's Foundry agent. Clicking "语音作答" on the

@@ -25,6 +25,14 @@ describe("AvatarView", () => {
     expect(screen.getByTestId("avatar-view")).toHaveAttribute("data-avatar-connected", "false");
   });
 
+  it("keeps the <video> muted so autoplay from ontrack is allowed (avatar audio is separate)", () => {
+    // Chrome blocks play() on an unmuted media element outside a user gesture; the avatar track is
+    // attached from the async ontrack handler, so an unmuted video silently fails to paint. The
+    // avatar's audio arrives on a separate <audio> element, so muting the video loses nothing.
+    renderView(true);
+    expect(screen.getByTestId<HTMLVideoElement>("avatar-video").muted).toBe(true);
+  });
+
   it("shows the avatar video and hides the orb once connected", () => {
     renderView(true);
     expect(screen.getByTestId("avatar-video")).toBeInTheDocument();

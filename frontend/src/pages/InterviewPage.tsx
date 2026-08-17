@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  Badge,
   Body1,
   Button,
   Card,
@@ -25,19 +26,20 @@ import {
   Text,
   Textarea,
   Title2,
+  makeStyles,
+  tokens,
 } from "@fluentui/react-components";
 import {
   getReport,
   resumeInterview,
   startInterview,
   submitAnswer,
-  VoiceSessionError,
   type Interview,
   type Report,
 } from "../api/client";
 import { MicAccessError, useInterviewVoice } from "../hooks/useInterviewVoice";
 import { collectVoiceAnswer } from "./interviewVoiceAnswer";
-import type { TranscriptSegment } from "../types/voice";
+import type { AudioState, TranscriptSegment } from "../types/voice";
 import { AvatarView } from "../components/AvatarView";
 import { QuestionProgress } from "../components/QuestionProgress";
 import { MicPermissionDialog } from "../components/MicPermissionDialog";
@@ -47,7 +49,77 @@ import { ReportView } from "../components/ReportView";
 type Phase = "idle" | "orientation" | "interviewing" | "scoring" | "scored";
 type Channel = "text" | "voice";
 
+const useStyles = makeStyles({
+  // Centered container for the non-live phases (idle / orientation / scoring / report).
+  page: { maxWidth: "760px", margin: "0 auto", padding: "24px" },
+  header: {
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalXS,
+    marginBottom: tokens.spacingVerticalL,
+  },
+  // Full-width two-column stage for the live Q&A.
+  stageWrap: {
+    padding: `${tokens.spacingVerticalL} ${tokens.spacingHorizontalXXL}`,
+    boxSizing: "border-box",
+    width: "100%",
+  },
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 3fr) minmax(360px, 2fr)",
+    gap: tokens.spacingHorizontalXXL,
+    alignItems: "stretch",
+    maxWidth: "1400px",
+    margin: "0 auto",
+    "@media (max-width: 900px)": { gridTemplateColumns: "1fr" },
+  },
+  // Left: the dark "stage" the digital human / orb sits on.
+  stage: {
+    position: "relative",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: "560px",
+    borderRadius: tokens.borderRadiusXLarge,
+    background: "linear-gradient(160deg, #14162b 0%, #1f2140 60%, #2a1f45 100%)",
+    overflow: "hidden",
+    padding: tokens.spacingVerticalXL,
+    "@media (max-width: 900px)": { minHeight: "360px" },
+  },
+  stageAvatar: { width: "100%", flex: 1, display: "flex", alignItems: "center", justifyContent: "center" },
+  // Status pill overlaid at the bottom of the stage.
+  statusOverlay: {
+    position: "absolute",
+    bottom: tokens.spacingVerticalL,
+    left: "50%",
+    transform: "translateX(-50%)",
+    zIndex: 20,
+  },
+  // Right: the control column.
+  controls: {
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalL,
+    minWidth: 0,
+  },
+  questionCard: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalM },
+  questionText: { fontSize: tokens.fontSizeBase500, lineHeight: tokens.lineHeightBase500 },
+  channelRow: { display: "flex", gap: tokens.spacingHorizontalS },
+  voiceControls: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalS },
+  voiceButtons: { display: "flex", gap: tokens.spacingHorizontalS },
+});
+
+/** Fluent Badge color for each voice audio state (status prominence). */
+const AUDIO_BADGE_COLOR: Record<AudioState, "informative" | "success" | "subtle" | "brand"> = {
+  idle: "brand",
+  listening: "informative",
+  speaking: "success",
+  muted: "subtle",
+};
+
 export function InterviewPage() {
+  const styles = useStyles();
   const { t, i18n } = useTranslation();
   const [phase, setPhase] = useState<Phase>("idle");
   const [interview, setInterview] = useState<Interview | null>(null);
@@ -164,8 +236,9 @@ export function InterviewPage() {
       if (err instanceof MicAccessError) {
         setMicRetried((prev) => prev || micDialogOpen);
         setMicDialogOpen(true);
-      } else if (err instanceof VoiceSessionError) {
-        // P5/P6b: agent not synced (409) or voice off (503) — stay on text, tell the candidate.
+      } else {
+        // P5/P6b: any non-mic failure (agent not synced, voice off, WS proxy unreachable — the
+        // WS transport rejects with a plain Error, not only VoiceSessionError) → stay on text.
         setVoiceUnavailable(true);
         setChannel("text");
       }
@@ -225,168 +298,206 @@ export function InterviewPage() {
     total: q?.total ?? report?.per_question.length ?? 0,
   });
 
-  return (
-    <div style={{ maxWidth: 720, margin: "0 auto", padding: 24 }}>
-      <Title2 as="h1">{t("appTitle")}</Title2>
-      <Body1 style={{ display: "block", marginBottom: 24, opacity: 0.7 }}>{t("tagline")}</Body1>
+  const errorBanner = error && (
+    <Body1 role="alert" style={{ display: "block", marginTop: 16, color: "#b00" }}>
+      {error}
+    </Body1>
+  );
 
-      {phase === "idle" && (
-        <Button appearance="primary" disabled={busy} onClick={onStart}>
-          {busy ? t("starting") : t("start")}
+  const micDialog = (
+    <MicPermissionDialog
+      open={micDialogOpen}
+      onOpenChange={setMicDialogOpen}
+      onRetry={startVoice}
+      onUseTextInstead={() => {
+        setChannel("text");
+        setMicDialogOpen(false);
+      }}
+      stillDenied={micRetried}
+    />
+  );
+
+  // The answer controls (question card, channel switch, text/voice answer) — shared by both layouts.
+  const answerControls = q && (
+    <Card className={styles.questionCard}>
+      <CardHeader
+        header={
+          <Text weight="semibold">
+            {t("questionProgress", { index: q.index + 1, total: q.total })}
+          </Text>
+        }
+      />
+      <Body1 as="p" className={styles.questionText}>
+        {q.prompt}
+      </Body1>
+
+      {/* Channel switch */}
+      <div className={styles.channelRow}>
+        <Button
+          appearance={channel === "text" ? "primary" : "secondary"}
+          onClick={() => setChannel("text")}
+        >
+          {t("voice.useText")}
         </Button>
+        <Button
+          appearance={channel === "voice" ? "primary" : "secondary"}
+          disabled={voiceUnavailable}
+          onClick={startVoice}
+        >
+          {t("voice.useVoice")}
+        </Button>
+      </div>
+
+      {voiceUnavailable && (
+        <Body1 style={{ display: "block", opacity: 0.7 }}>{t("voice.endedFallback")}</Body1>
       )}
 
-      {/* Orientation beat (P13): set expectations before Q1. */}
-      {phase === "orientation" && q && (
-        <Card>
-          <CardHeader header={<Text weight="semibold">{t("orientation.title")}</Text>} />
-          <Body1 style={{ display: "block", marginBottom: 16 }}>
-            {t("orientation.body", { total: q.total })}
-          </Body1>
-          <Button appearance="primary" onClick={() => setPhase("interviewing")}>
-            {t("orientation.begin")}
-          </Button>
-        </Card>
-      )}
-
-      {phase === "interviewing" && q && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-          {/* (1) avatar dominant */}
-          <div style={{ padding: "24px 0" }}>
-            <AvatarView
-              ref={avatarVideoRef}
-              audioState={channel === "voice" ? voice.audioState : "idle"}
-              isAvatarConnected={channel === "voice" && voice.isAvatarConnected}
-            />
+      {channel === "text" && (
+        <>
+          <Textarea
+            value={answer}
+            placeholder={t("answerPlaceholder")}
+            onChange={(_, d) => setAnswer(d.value)}
+            resize="vertical"
+          />
+          <div>
+            <Button appearance="primary" disabled={busy || !answer.trim()} onClick={onSubmitText}>
+              {busy ? t("submitting") : t("submit")}
+            </Button>
           </div>
+        </>
+      )}
 
-          {/* (3) progress */}
-          <QuestionProgress current={q.index} total={q.total} />
-
-          {/* (2) current question pinned */}
-          <Card>
-            <CardHeader
-              header={
-                <Text weight="semibold">
-                  {t("questionProgress", { index: q.index + 1, total: q.total })}
-                </Text>
-              }
-            />
-            <Body1 style={{ display: "block", marginBottom: 12 }}>{q.prompt}</Body1>
-
-            {/* Channel switch */}
-            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-              <Button
-                appearance={channel === "text" ? "primary" : "secondary"}
-                onClick={() => setChannel("text")}
-              >
-                {t("voice.useText")}
-              </Button>
-              <Button
-                appearance={channel === "voice" ? "primary" : "secondary"}
-                disabled={voiceUnavailable}
-                onClick={startVoice}
-              >
-                {t("voice.useVoice")}
-              </Button>
-            </div>
-
-            {voiceUnavailable && (
-              <Body1 style={{ display: "block", marginBottom: 12, opacity: 0.7 }}>
-                {t("voice.endedFallback")}
-              </Body1>
-            )}
-
-            {channel === "text" && (
-              <>
-                <Textarea
-                  value={answer}
-                  placeholder={t("answerPlaceholder")}
-                  onChange={(_, d) => setAnswer(d.value)}
-                  resize="vertical"
-                />
-                <div style={{ marginTop: 12 }}>
-                  <Button
-                    appearance="primary"
-                    disabled={busy || !answer.trim()}
-                    onClick={onSubmitText}
-                  >
-                    {busy ? t("submitting") : t("submit")}
-                  </Button>
-                </div>
-              </>
-            )}
-
-            {channel === "voice" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {voice.connectionState === "connecting" && <Text>{t("voice.connecting")}</Text>}
-                {voice.connectionState === "reconnecting" && (
-                  <Text style={{ opacity: 0.7 }}>{t("voice.reconnecting")}</Text>
-                )}
-                {voice.audioState === "listening" && (
-                  <Text size={200} style={{ opacity: 0.7 }}>
-                    {t("voice.stillListening")}
-                  </Text>
-                )}
-                <div style={{ display: "flex", gap: 8 }}>
-                  <Button onClick={voice.toggleMute}>
-                    {voice.isMuted ? t("voice.unmute") : t("voice.mute")}
-                  </Button>
-                  {/* Manual end-of-answer control (P13) */}
-                  <Button
-                    appearance="primary"
-                    disabled={busy || voice.connectionState !== "connected"}
-                    onClick={onVoiceDone}
-                  >
-                    {t("voice.imDone")}
-                  </Button>
-                </div>
-              </div>
-            )}
-          </Card>
-
-          {/* (4) transcript secondary — (5) sources panel intentionally omitted during live Q&A (P12) */}
-          <Transcript segments={segments} />
+      {channel === "voice" && (
+        <div className={styles.voiceControls}>
+          {voice.connectionState === "connecting" && <Text>{t("voice.connecting")}</Text>}
+          {voice.connectionState === "reconnecting" && (
+            <Text style={{ opacity: 0.7 }}>{t("voice.reconnecting")}</Text>
+          )}
+          {voice.audioState === "listening" && (
+            <Text size={200} style={{ opacity: 0.7 }}>
+              {t("voice.stillListening")}
+            </Text>
+          )}
+          <div className={styles.voiceButtons}>
+            <Button onClick={voice.toggleMute}>
+              {voice.isMuted ? t("voice.unmute") : t("voice.mute")}
+            </Button>
+            {/* Manual end-of-answer control (P13) */}
+            <Button
+              appearance="primary"
+              disabled={busy || voice.connectionState !== "connected"}
+              onClick={onVoiceDone}
+            >
+              {t("voice.imDone")}
+            </Button>
+          </div>
         </div>
       )}
+    </Card>
+  );
 
-      {/* Edge (a): an interview with no question to show (empty bank / defensive backend null).
-          A defined end state, not a blank page — never leave the candidate on a broken screen. */}
-      {(phase === "orientation" || phase === "interviewing") && !q && (
-        <Card>
-          <CardHeader header={<Text weight="semibold">{t("noQuestions.title")}</Text>} />
-          <Body1 style={{ display: "block" }}>{t("noQuestions.body")}</Body1>
-        </Card>
-      )}
-
-      {/* Scoring-in-progress beat (P10) */}
-      {phase === "scoring" && (
-        <Card>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 12 }}>
-            <Spinner size="small" />
-            <Text>{scoringNarr}</Text>
+  // Live Q&A: full-width two-column stage (avatar dominant left, controls right).
+  if (phase === "interviewing" && q) {
+    const voiceActive = channel === "voice";
+    const badgeState: AudioState = voiceActive ? voice.audioState : "idle";
+    return (
+      <>
+        <div className={styles.stageWrap}>
+          <div className={styles.header}>
+            <Title2 as="h1">{t("appTitle")}</Title2>
+            <Body1 style={{ opacity: 0.7 }}>{t("tagline")}</Body1>
           </div>
-        </Card>
-      )}
+          <div className={styles.grid}>
+            {/* Left: the stage — digital human / orb, dominant. */}
+            <div className={styles.stage} data-testid="interview-stage">
+              <div className={styles.stageAvatar}>
+                <AvatarView
+                  ref={avatarVideoRef}
+                  audioState={badgeState}
+                  isAvatarConnected={voiceActive && voice.isAvatarConnected}
+                />
+              </div>
+              {voiceActive && (
+                <div className={styles.statusOverlay}>
+                  <Badge
+                    size="large"
+                    appearance="filled"
+                    color={AUDIO_BADGE_COLOR[badgeState]}
+                    data-testid="voice-status-badge"
+                  >
+                    {t(`voice.${badgeState}`)}
+                  </Badge>
+                </div>
+              )}
+            </div>
 
-      {phase === "scored" && report && <ReportView report={report} />}
+            {/* Right: the control column. */}
+            <div className={styles.controls} data-testid="interview-controls">
+              <QuestionProgress current={q.index} total={q.total} />
+              {answerControls}
+              <Transcript segments={segments} />
+            </div>
+          </div>
+          {errorBanner}
+        </div>
+        {micDialog}
+      </>
+    );
+  }
 
-      {error && (
-        <Body1 role="alert" style={{ display: "block", marginTop: 16, color: "#b00" }}>
-          {error}
-        </Body1>
-      )}
+  // All non-live phases: a centered, readable column.
+  return (
+    <>
+      <div className={styles.page}>
+        <div className={styles.header}>
+          <Title2 as="h1">{t("appTitle")}</Title2>
+          <Body1 style={{ display: "block", opacity: 0.7 }}>{t("tagline")}</Body1>
+        </div>
 
-      <MicPermissionDialog
-        open={micDialogOpen}
-        onOpenChange={setMicDialogOpen}
-        onRetry={startVoice}
-        onUseTextInstead={() => {
-          setChannel("text");
-          setMicDialogOpen(false);
-        }}
-        stillDenied={micRetried}
-      />
-    </div>
+        {phase === "idle" && (
+          <Button appearance="primary" disabled={busy} onClick={onStart}>
+            {busy ? t("starting") : t("start")}
+          </Button>
+        )}
+
+        {/* Orientation beat (P13): set expectations before Q1. */}
+        {phase === "orientation" && q && (
+          <Card>
+            <CardHeader header={<Text weight="semibold">{t("orientation.title")}</Text>} />
+            <Body1 style={{ display: "block", marginBottom: 16 }}>
+              {t("orientation.body", { total: q.total })}
+            </Body1>
+            <Button appearance="primary" onClick={() => setPhase("interviewing")}>
+              {t("orientation.begin")}
+            </Button>
+          </Card>
+        )}
+
+        {/* Edge (a): an interview with no question to show (empty bank / defensive backend null).
+            A defined end state, not a blank page — never leave the candidate on a broken screen. */}
+        {(phase === "orientation" || phase === "interviewing") && !q && (
+          <Card>
+            <CardHeader header={<Text weight="semibold">{t("noQuestions.title")}</Text>} />
+            <Body1 style={{ display: "block" }}>{t("noQuestions.body")}</Body1>
+          </Card>
+        )}
+
+        {/* Scoring-in-progress beat (P10) */}
+        {phase === "scoring" && (
+          <Card>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 12 }}>
+              <Spinner size="small" />
+              <Text>{scoringNarr}</Text>
+            </div>
+          </Card>
+        )}
+
+        {phase === "scored" && report && <ReportView report={report} />}
+
+        {errorBanner}
+      </div>
+      {micDialog}
+    </>
   );
 }

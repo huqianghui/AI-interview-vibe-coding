@@ -1,12 +1,14 @@
-"""Foundry-agent knowledge-source MCP tool (SPEC F1/P15) — pure shape, CI-tested.
+"""Foundry-agent knowledge-source MCP tool (SPEC F1/F5/P15) — pure shape, CI-tested.
 
-Binding the SOP knowledge base to the interviewer's Foundry prompt agent is what lets the agent's
-answers and follow-ups stay SOP-grounded. AI Foundry connects a Knowledge Base to an agent via the
-**MCP protocol** (the Portal's "Knowledge" section, Preview), NOT an ``AzureAISearchTool`` — the KB
-exposes a ``/knowledgebases/{index}/mcp`` endpoint and the agent carries an **MCPTool** pointing at
-it. This module owns the shape (verified against the reference project's live-tested contract, per
-SPEC P16); the live SDK ``MCPTool`` construction + the RemoteTool connection it authenticates
-through live in the coverage-omitted azure adapter.
+Binding a knowledge base to the interviewer's Foundry prompt agent is what lets the agent's answers
+and follow-ups stay grounded. Knowledge is **per-persona** (SPEC F5): each persona attaches its own
+knowledge bases and ``build_agent_tools`` takes the list of already-built KB MCPTool dicts for that
+persona. AI Foundry connects a Knowledge Base to an agent via the **MCP protocol** (the Portal's
+"Knowledge" section, Preview), NOT an ``AzureAISearchTool`` — the KB exposes a
+``/knowledgebases/{index}/mcp`` endpoint and the agent carries an **MCPTool** pointing at it. This
+module owns the shape (verified against the reference project's live-tested contract, per SPEC P16);
+the live SDK ``MCPTool`` construction + the RemoteTool connection it authenticates through live in
+the coverage-omitted azure adapter.
 
 Contract facts the reference learned the hard way (and P15/P16 warn drift silently unbinds the KB):
 - The tool is an **MCPTool**: ``server_label`` + ``server_url`` (the MCP endpoint) +
@@ -60,20 +62,16 @@ def build_knowledge_mcp_tool(
 
 def build_agent_tools(
     *,
-    search_endpoint: str,
-    index_name: str,
-    connection_id: str | None = None,
+    knowledge_tools: list[dict[str, Any]] | None = None,
     persona_tools: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """The agent's ``tools`` list — the SOP KB MCPTool (when configured) + any per-persona tools.
+    """The agent's ``tools`` list — per-persona KB MCPTools first, then any per-persona tools.
 
-    The KB tool is always first and independent of persona config (grounding is not opt-out). The
-    KB is empty when unconfigured, so the agent still syncs (ungrounded) rather than failing.
-    ``persona_tools`` must already be gated to supported types (see ``build_persona_tools``).
+    ``knowledge_tools`` is the list of already-built KB MCPTool dicts for THIS persona's attached
+    knowledge bases (see ``build_knowledge_mcp_tool`` + the azure adapter's RemoteTool resolution);
+    empty means the persona has no KB and syncs ungrounded. ``persona_tools`` must already be gated
+    to supported types (see ``build_persona_tools``). Pure concat — no Azure here.
     """
-    tool = build_knowledge_mcp_tool(
-        search_endpoint=search_endpoint, index_name=index_name, connection_id=connection_id
-    )
-    tools = [tool] if tool else []
+    tools = list(knowledge_tools or [])
     tools.extend(persona_tools or [])
     return tools

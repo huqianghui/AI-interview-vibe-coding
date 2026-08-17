@@ -118,3 +118,118 @@ async def test_sync_failure_records_capped_error(db_session):
     await svc.mark_sync_failed(db_session, p, error="boom " * 300)
     assert p.agent_sync_status == "failed"
     assert len(p.agent_sync_error) == 500
+
+
+# --- reverse reconcile (pull Portal edits back) ----------------------------
+
+
+class _StubAdapter:
+    """Stubs the agent-sync adapter's reverse-read for reconcile tests."""
+
+    def __init__(self, remote):
+        self._remote = remote
+
+    async def fetch_remote_state(self, persona):
+        return self._remote
+
+
+def _stub_adapter(monkeypatch, remote):
+    """Patch registry.get_agent_sync_adapter (imported lazily inside reconcile_persona)."""
+    monkeypatch.setattr(
+        "app.services.agents.registry.get_agent_sync_adapter",
+        lambda name=None: _StubAdapter(remote),
+    )
+
+
+async def test_reconcile_noop_when_never_synced(db_session, monkeypatch):
+    # An unsynced persona (no agent_id/version) has no remote to reconcile against — no adapter hit.
+    called = {"hit": False}
+
+    def _boom(name=None):
+        called["hit"] = True
+        raise AssertionError("adapter must not be consulted for an unsynced persona")
+
+    monkeypatch.setattr("app.services.agents.registry.get_agent_sync_adapter", _boom)
+    p = await _mk(db_session, name="fresh")
+    out = await svc.reconcile_persona(db_session, p)
+    assert out.model is None
+    assert called["hit"] is False
+
+
+async def test_reconcile_noop_when_versions_match_and_model_set(db_session, monkeypatch):
+    p = await _mk(db_session, name="matched")
+    await svc.mark_sync_succeeded(db_session, p, agent_id="a", agent_version="10")
+    p.model = "gpt-5.4-mini"
+    await db_session.commit()
+    _stub_adapter(monkeypatch, {"agent_version": "10", "model": "gpt-5.4-mini"})
+    out = await svc.reconcile_persona(db_session, p)
+    assert out.agent_version == "10"
+    assert out.model == "gpt-5.4-mini"
+
+
+async def test_reconcile_pulls_on_version_mismatch(db_session, monkeypatch):
+    p = await _mk(db_session, name="drifted")
+    await svc.mark_sync_succeeded(db_session, p, agent_id="a", agent_version="10")
+    p.model = "gpt-5.4-mini"
+    await db_session.commit()
+    # Portal bumped the agent to v11 running a different model.
+    _stub_adapter(monkeypatch, {"agent_version": "11", "model": "gpt-5"})
+    out = await svc.reconcile_persona(db_session, p)
+    assert out.agent_version == "11"
+    assert out.model == "gpt-5"
+    assert out.agent_sync_status == "synced"
+
+
+async def test_reconcile_backfills_empty_model_even_when_version_matches(db_session, monkeypatch):
+    # A row synced before the per-persona model column existed: version matches but model is null.
+    p = await _mk(db_session, name="legacy")
+    await svc.mark_sync_succeeded(db_session, p, agent_id="a", agent_version="10")
+    assert p.model is None
+    _stub_adapter(monkeypatch, {"agent_version": "10", "model": "gpt-5.4-mini"})
+    out = await svc.reconcile_persona(db_session, p)
+    assert out.model == "gpt-5.4-mini"
+
+
+async def test_reconcile_noop_when_remote_unavailable(db_session, monkeypatch):
+    p = await _mk(db_session, name="offline")
+    await svc.mark_sync_succeeded(db_session, p, agent_id="a", agent_version="10")
+    p.model = "gpt-5.4-mini"
+    await db_session.commit()
+    _stub_adapter(monkeypatch, None)  # adapter couldn't read the live agent
+    out = await svc.reconcile_persona(db_session, p)
+    assert out.agent_version == "10"
+    assert out.model == "gpt-5.4-mini"
+
+
+async def test_reconcile_default_persona_propagates_model_to_master(db_session, monkeypatch):
+    from app.services import config_service
+
+    # A saved master row exists (endpoint/key/model). Reconciling the DEFAULT persona to a new model
+    # must update the master row's model_or_deployment (runtime-override path).
+    await config_service.upsert_master_config(
+        db_session,
+        endpoint="https://demo.services.ai.azure.com",
+        api_key="k",
+        default_project="demo-prj",
+        model_or_deployment="gpt-5.4-mini",
+        updated_by="admin",
+    )
+    await db_session.commit()
+
+    p = await _mk(db_session, name="def", is_default=True)
+    await svc.mark_sync_succeeded(db_session, p, agent_id="a", agent_version="10")
+    p.model = "gpt-5.4-mini"
+    await db_session.commit()
+
+    # Overlay is a no-op-safe call in tests; stub it so we don't mutate the settings singleton.
+    async def _noop_overlay(db):
+        return True
+
+    monkeypatch.setattr(
+        "app.services.config_overlay.apply_master_config_to_settings", _noop_overlay
+    )
+    _stub_adapter(monkeypatch, {"agent_version": "11", "model": "gpt-5"})
+    await svc.reconcile_persona(db_session, p)
+
+    master = await config_service.get_master_config(db_session)
+    assert master.model_or_deployment == "gpt-5"
