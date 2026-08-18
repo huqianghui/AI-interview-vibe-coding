@@ -134,7 +134,10 @@ const useStyles = makeStyles({
     boxShadow: tokens.shadow4,
   },
   topBarSlot: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalM, minWidth: 0 },
-  topBarRight: { justifyContent: "flex-end" },
+  // The progress slot grows to fill the bar so the rail spreads across the whole row; the channel
+  // switch on the right keeps its natural width.
+  topBarGrow: { flex: 1, minWidth: "240px" },
+  topBarRight: { justifyContent: "flex-end", flexShrink: 0 },
   // Segmented text/voice switch — one pill, two halves.
   segmented: {
     display: "inline-flex",
@@ -538,51 +541,50 @@ export function InterviewPage() {
             <Body1 style={{ opacity: 0.7 }}>{t("tagline")}</Body1>
           </div>
 
-          {/* Status legend (task two): describe each voice state as a tip AND highlight the current
-              one. Only meaningful in voice mode — in text mode there is no live audio state to
-              track, so the whole strip is hidden rather than showing a misleading "idle". */}
-          {voiceActive && (
-            <div
-              className={styles.statusLegend}
-              role="group"
-              aria-label={t("voice.statusLegendLabel")}
-              data-testid="voice-status-legend"
-            >
-              {STATUS_ORDER.map((state) => {
-                const active = badgeState === state;
-                return (
-                  <div
-                    key={state}
-                    className={mergeClasses(styles.statusItem, active && styles.statusItemActive)}
-                    data-state={state}
-                    data-active={active}
-                    aria-current={active ? "true" : undefined}
-                  >
-                    <span
-                      className={styles.statusDot}
-                      style={{ background: STATUS_DOT_COLOR[state] }}
-                      aria-hidden
-                    />
-                    <span className={styles.statusTextCol}>
-                      <Text size={200} className={styles.statusItemLabel}>
-                        {t(`voice.${state}`)}
-                      </Text>
-                      <Text size={100} className={styles.statusItemTip}>
-                        {t(`voice.statusTips.${state}`)}
-                      </Text>
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+          {/* Status legend: describe each state as a tip AND highlight the current one. Shown in
+              both channels — in voice mode it tracks the live audio state (listening/speaking/muted);
+              in text mode there is no live audio, so the "idle/ready" card stays highlighted as a
+              steady reference of what the states mean. */}
+          <div
+            className={styles.statusLegend}
+            role="group"
+            aria-label={t("voice.statusLegendLabel")}
+            data-testid="voice-status-legend"
+          >
+            {STATUS_ORDER.map((state) => {
+              const active = badgeState === state;
+              return (
+                <div
+                  key={state}
+                  className={mergeClasses(styles.statusItem, active && styles.statusItemActive)}
+                  data-state={state}
+                  data-active={active}
+                  aria-current={active ? "true" : undefined}
+                >
+                  <span
+                    className={styles.statusDot}
+                    style={{ background: STATUS_DOT_COLOR[state] }}
+                    aria-hidden
+                  />
+                  <span className={styles.statusTextCol}>
+                    <Text size={200} className={styles.statusItemLabel}>
+                      {t(`voice.${state}`)}
+                    </Text>
+                    <Text size={100} className={styles.statusItemTip}>
+                      {t(`voice.statusTips.${state}`)}
+                    </Text>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
 
           {/* Global top bar: progress (left) · channel switch (right). The live voice state used to
               sit in the center here, but the status legend above already names AND highlights the
               current state — a second badge was redundant and stole room the question progress needs
               as the question count grows. */}
           <div className={styles.topBar} data-testid="interview-topbar">
-            <div className={styles.topBarSlot}>
+            <div className={mergeClasses(styles.topBarSlot, styles.topBarGrow)}>
               <QuestionProgress current={q.index} total={q.total} />
             </div>
             <div className={mergeClasses(styles.topBarSlot, styles.topBarRight)}>{channelSwitch}</div>

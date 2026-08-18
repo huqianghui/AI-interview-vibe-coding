@@ -139,7 +139,7 @@ describe("InterviewPage", () => {
     await waitFor(() => expect(screen.getByText(/no questions available/i)).toBeInTheDocument());
   });
 
-  it("shows the voice status legend with the current state highlighted, and hides it in text mode (task two)", async () => {
+  it("shows the status legend in both channels, highlighting the current state (task two)", async () => {
     await i18n.changeLanguage("en-US");
     const user = userEvent.setup();
     vi.spyOn(client, "startInterview").mockResolvedValue({
@@ -172,16 +172,20 @@ describe("InterviewPage", () => {
     await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
     await screen.findByText("Question one?");
 
-    // Text mode first: the legend must NOT render (no live audio state to describe).
-    expect(screen.queryByTestId("voice-status-legend")).not.toBeInTheDocument();
+    // Text mode: the legend renders as a steady reference with one card per AudioState, and the
+    // "idle/ready" card is highlighted (no live audio yet).
+    const textLegend = await screen.findByTestId("voice-status-legend");
+    expect(textLegend.querySelectorAll("[data-state]")).toHaveLength(4); // idle / listening / speaking / muted
+    const textActive = textLegend.querySelectorAll('[data-active="true"]');
+    expect(textActive).toHaveLength(1);
+    expect(textActive[0].getAttribute("data-state")).toBe("idle");
 
-    // Switch to voice → the legend appears with one card per AudioState, and each tip is present.
+    // Switch to voice → the legend now tracks the live audioState ("listening") as the only highlight.
     await user.click(screen.getByRole("button", { name: /answer by voice/i }));
     const legend = await screen.findByTestId("voice-status-legend");
     const items = legend.querySelectorAll("[data-state]");
     expect(items).toHaveLength(4); // idle / listening / speaking / muted
 
-    // The card matching the live audioState ("listening") is the ONLY highlighted one.
     const active = legend.querySelectorAll('[data-active="true"]');
     expect(active).toHaveLength(1);
     expect(active[0].getAttribute("data-state")).toBe("listening");
