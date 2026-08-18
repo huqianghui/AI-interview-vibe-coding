@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.29.1.0 (2026-08-18)
+
+### Changed
+- **`/admin` refactored into a two-tab workspace.** The page was a single vertical stack of
+  inline-styled cards (Azure connection on top, then banks/questions/rubric), which put the
+  low-frequency runtime config above the high-frequency content work and left the styling out of step
+  with the rest of the app. It's now a controlled `TabList` with **题库与评分标准 / Content** and
+  **Azure 连接 / Connection** tabs; the scoring rubric stays as an inline panel under the selected
+  question (not a separate tab). Migrated from inline styles to the project's Fluent
+  `makeStyles`+`tokens` baseline (matching `InterviewPage`) for consistent spacing, radius, borders,
+  and status colors.
+- **Rubric editor polish.** The inline checklist editor gains a weight-total bar (green at exactly
+  100, amber otherwise), kind-color Badges (required / recommended / forbidden), a read-only
+  `source_quote` display (admin-only surface, P3-safe), and save/generate status feedback.
+- **Cross-navigation between the two admin surfaces.** A top-bar link routes between `/admin`
+  (banks + rubric) and `/admin/agent` (the digital-human persona editor), so they're no longer only
+  reachable by hand-editing the URL.
+
+No backend or API-contract change; all existing `data-testid`s preserved.
+
 ## 0.29.0.0 (2026-08-18)
 
 ### Added

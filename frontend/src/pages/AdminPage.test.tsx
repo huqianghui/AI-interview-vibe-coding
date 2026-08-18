@@ -3,14 +3,22 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { AdminPage } from "./AdminPage";
 import * as admin from "../api/admin";
 import * as auth from "../api/auth";
 
+// AdminPage now uses react-router `Link` (top-bar nav to /admin/agent), so it must render inside a
+// router. A stub route for /admin/agent lets the nav test assert navigation lands there.
 function renderPage() {
   return render(
     <FluentProvider theme={webLightTheme}>
-      <AdminPage />
+      <MemoryRouter initialEntries={["/admin"]}>
+        <Routes>
+          <Route path="/admin" element={<AdminPage />} />
+          <Route path="/admin/agent" element={<div>Agent editor page</div>} />
+        </Routes>
+      </MemoryRouter>
     </FluentProvider>,
   );
 }
@@ -134,6 +142,9 @@ describe("AdminPage", () => {
     renderPage();
     await signIn(user);
 
+    // Connection config lives under the "Azure 连接" tab now — switch to it first.
+    await user.click(await screen.findByTestId("admin-tab-connection"));
+
     // The saved endpoint loads into the panel and the key shows masked (never the raw secret).
     await waitFor(() =>
       expect(screen.getByTestId("cfg-endpoint")).toHaveValue("https://demo.services.ai.azure.com"),
@@ -245,6 +256,7 @@ describe("AdminPage", () => {
 
     renderPage();
     await signIn(user);
+    await user.click(await screen.findByTestId("admin-tab-connection"));
 
     // Before loading: text-input fallbacks are shown, not dropdowns.
     await waitFor(() => expect(screen.getByTestId("cfg-model")).toBeInTheDocument());
@@ -260,5 +272,19 @@ describe("AdminPage", () => {
     await waitFor(() =>
       expect(screen.getByTestId("cfg-status")).toHaveTextContent(/1 model.*1 knowledge base/i),
     );
+  });
+
+  it("links from the top bar to the digital-human agent editor", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    vi.spyOn(admin, "listBanks").mockResolvedValue([]);
+    vi.spyOn(admin, "getAiFoundryConfig").mockResolvedValue(EMPTY_CFG);
+
+    renderPage();
+    await signIn(user);
+
+    // The top-bar nav link routes to /admin/agent (our stub route renders a marker).
+    await user.click(await screen.findByTestId("admin-nav-agent"));
+    await waitFor(() => expect(screen.getByText("Agent editor page")).toBeInTheDocument());
   });
 });

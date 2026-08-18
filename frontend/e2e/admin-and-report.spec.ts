@@ -19,8 +19,10 @@ test("admin authors a bank + checklist, candidate gets a scored report", async (
   await page.getByTestId("admin-username-input").fill(ADMIN_USER);
   await page.getByTestId("admin-password-input").fill(ADMIN_PW);
   await page.getByTestId("admin-login").click();
-  // Logged in → the admin editor heading renders (specific, avoids matching the "Question banks" card).
-  await expect(page.getByRole("heading", { name: /question banks & checklists/i })).toBeVisible();
+  // Logged in → the admin editor's page heading renders. (The two-tab refactor made this the
+  // "Admin — 题库与评分标准" h1; the "题库与评分标准 / Content" tab has role=tab, not heading, so this
+  // resolves to the single page title.)
+  await expect(page.getByRole("heading", { name: /题库与评分标准/ })).toBeVisible();
 
   // --- Admin: create a default bank ---
   const bankName = `E2E SOP Bank ${Date.now()}`;
