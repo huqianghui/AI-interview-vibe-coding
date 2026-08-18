@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.27.1.0 (2026-08-18)
+
+The digital human on the **/interview page** is now stable: it no longer randomly fails to appear
+or vanish mid-interview. The interview page shares the exact same voice stack as the editor
+Playground; its interview-flow actions (speaking each question aloud, "I'm done") exposed three
+latent bugs the Playground never triggers.
+
+### Fixed
+- **Mid-session Voice Live `error` events no longer kill the session.** The page's manual
+  `response.create` (per-question speech, end-of-answer) can collide with a server-VAD
+  auto-response; Azure rejects that one request with an in-band `error` event while the session
+  (WS, audio, avatar video) stays healthy. That event was treated as fatal — the page silently fell
+  back to text ("语音不可用") and hid the live digital human. Such errors are now logged and
+  ignored; a genuine pre-connect failure still rejects and falls back to text.
+- **Avatar returns after a reconnect.** The one-shot avatar-handshake guard was never reset when
+  the WS auto-reconnected, so after any network blip the new session skipped the avatar SDP
+  handshake and only the orb showed. The guard resets per session.
+- **Voice stays retryable.** One transient failure used to permanently disable the "语音作答"
+  button for the rest of the interview; it stays clickable and a successful retry clears the
+  fallback notice.
+- **The digital human stays visible once streaming.** Avatar visibility now follows the actual
+  video state, not the text/voice answer tab — peeking at the text tab no longer blanks a live
+  avatar.
+
 ## 0.27.0.0 (2026-08-18)
 
 The editor's **Instructions** field now always matches what the Azure AI Foundry Portal shows.

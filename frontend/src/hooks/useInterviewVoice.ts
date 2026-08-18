@@ -120,6 +120,10 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
   // Guards the one-shot avatar handshake (Azure sends two session.updated frames; only the second
   // carries ice_servers — fire the handshake once, on whichever frame has them).
   const avatarStartedRef = useRef(false);
+  // True once THIS WS session reached `session.updated`. Used to classify Azure `error` events:
+  // in-band errors on a live session are per-request rejections (e.g. `response.create` colliding
+  // with a server-VAD auto-response) — the session itself is fine; a dead session closes the WS.
+  const sessionLiveRef = useRef(false);
   // Mirrors isMuted for handleMessage's mic-frame callback, which is created once per
   // `session.updated` and must read the LATEST mute state without resubscribing.
   const isMutedRef = useRef(false);
@@ -155,6 +159,7 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
     avatarStream.disconnect();
     audio.cleanupMic();
     avatarStartedRef.current = false;
+    sessionLiveRef.current = false;
   }, [audio, avatarStream]);
 
   /** WS message handler — Azure Voice Live realtime events, relayed near-verbatim by the backend
@@ -191,6 +196,7 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
           const avatarConf = session?.avatar as Record<string, unknown> | undefined;
           const iceServers = toRtcIceServers(avatarConf?.ice_servers);
 
+          sessionLiveRef.current = true;
           setConn("connected");
           setAudioState("idle");
           onConnected();
@@ -278,6 +284,17 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
         case "error": {
           const errInfo = msg.error as Record<string, unknown> | undefined;
           const error = new Error((errInfo?.message as string) || "Voice Live error");
+          // An in-band `error` on an already-live session is a PER-REQUEST rejection, not a dead
+          // session — e.g. our manual `response.create` (speakQuestion / commitAnswer) colliding
+          // with a server-VAD auto-response ("conversation already has an active response"). The
+          // WS is still open, audio/avatar still stream. Treating it as fatal set conn="error",
+          // which made the interview page fall back to text and hide the digital human mid-session
+          // (the "数字人有时候不出现" bug). Log and keep the session; only a pre-connect error is
+          // fatal (the connect() promise must reject so callers can fall back).
+          if (sessionLiveRef.current) {
+            console.warn("[voice] non-fatal Voice Live error event (session stays up):", error.message);
+            break;
+          }
           setConn("error");
           optionsRef.current.onError?.(error);
           onFatalError(error);
@@ -370,6 +387,11 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
             setConn("reconnecting");
             avatarStream.disconnect();
             audio.stopRecording();
+            // Reset the per-session guards so the NEW session's `session.updated` re-fires the
+            // avatar handshake — without this the guard stayed true across reconnects and the
+            // digital human never came back (orb forever after any WS drop).
+            avatarStartedRef.current = false;
+            sessionLiveRef.current = false;
             reconnectTimerRef.current = setTimeout(() => {
               void connect(lastLocaleRef.current, true).catch(() => undefined);
             }, delay);
