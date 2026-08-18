@@ -64,8 +64,11 @@ const useStyles = makeStyles({
     padding: `${tokens.spacingVerticalL} ${tokens.spacingHorizontalXXL}`,
     boxSizing: "border-box",
     width: "100%",
-    // Fill the viewport so the controls column has real height to grow into (auto-fit transcript).
-    minHeight: "calc(100vh - 56px)",
+    // Pin to the viewport height (not just a min) so the stage + transcript stay ON screen: the
+    // grid gets a bounded height to divide, the transcript scrolls internally, and neither the
+    // avatar video nor a long dialogue can push the top bar off-screen or balloon the page.
+    height: "calc(100vh - 56px)",
+    overflow: "hidden",
     display: "flex",
     flexDirection: "column",
   },
@@ -121,7 +124,10 @@ const useStyles = makeStyles({
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
-    minHeight: "560px",
+    // Adapt to the grid's height (bounded by the viewport-height stageWrap) instead of a fixed
+    // 560px that forced the stage taller than the screen. minHeight:0 lets flex shrink it.
+    minHeight: 0,
+    height: "100%",
     borderRadius: tokens.borderRadiusXLarge,
     // Layered deep-violet: a soft radial spotlight on top of a diagonal night gradient, so the
     // digital human sits in a pool of light rather than a flat panel.
@@ -188,6 +194,9 @@ export function InterviewPage() {
   const [micDialogOpen, setMicDialogOpen] = useState(false);
   const [micRetried, setMicRetried] = useState(false);
   const [voiceUnavailable, setVoiceUnavailable] = useState(false);
+  // Intrinsic aspect ratio (w/h) of the live avatar video, so the stage can hug it snugly instead
+  // of leaving a dark gap below the figure. Null until the video reports its dimensions.
+  const [avatarRatio, setAvatarRatio] = useState<number | null>(null);
 
   const interviewRef = useRef<Interview | null>(null);
   interviewRef.current = interview;
@@ -506,8 +515,19 @@ export function InterviewPage() {
           </div>
 
           <div className={styles.grid}>
-            {/* Left: the stage — digital human / orb, dominant. */}
-            <div className={styles.stage} data-testid="interview-stage">
+            {/* Left: the stage — digital human / orb, dominant. Once a live avatar is streaming and
+                its aspect ratio is known, the stage HUGS the video (aspect-ratio sized, capped to
+                the available height, top-aligned) so there's no dark gap below the figure. The orb
+                phase keeps the full-height flush panel. */}
+            <div
+              className={styles.stage}
+              data-testid="interview-stage"
+              style={
+                voice.isAvatarConnected && avatarRatio
+                  ? { aspectRatio: String(avatarRatio), height: "auto", maxHeight: "100%", alignSelf: "start" }
+                  : undefined
+              }
+            >
               <div className={styles.stageAvatar}>
                 {/* Once the digital human is streaming, keep it visible — do NOT gate on the
                     channel tab. Gating on voiceActive hid a LIVE avatar the moment the candidate
@@ -517,6 +537,7 @@ export function InterviewPage() {
                   ref={avatarVideoRef}
                   audioState={badgeState}
                   isAvatarConnected={voice.isAvatarConnected}
+                  onAspectChange={setAvatarRatio}
                 />
               </div>
             </div>
