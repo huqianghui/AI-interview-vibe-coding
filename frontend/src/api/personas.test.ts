@@ -32,6 +32,7 @@ const SAMPLE: personas.PersonaOut = {
   agent_version: "3",
   agent_sync_status: "synced",
   agent_sync_error: null,
+  default_instructions: "You are Interviewer, an interviewer.",
 };
 
 /** Mock fetch to capture requests and return `body` as a fresh 200 JSON response each call

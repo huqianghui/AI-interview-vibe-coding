@@ -201,6 +201,66 @@ async def test_reconcile_noop_when_remote_unavailable(db_session, monkeypatch):
     assert out.model == "gpt-5.4-mini"
 
 
+async def test_reconcile_pulls_portal_edited_instructions(db_session, monkeypatch):
+    # The Portal's instructions differ from ours → a real Portal edit; pull it into prompt_fragment
+    # even when the version happens to match (instructions alone can drift on a same-version read).
+    p = await _mk(db_session, name="edited")
+    await svc.mark_sync_succeeded(db_session, p, agent_id="a", agent_version="10")
+    p.model = "gpt-5.4-mini"
+    await db_session.commit()
+    _stub_adapter(
+        monkeypatch,
+        {
+            "agent_version": "11",
+            "model": "gpt-5.4-mini",
+            "instructions": "You are a strict interviewer. Ask follow-ups.",
+        },
+    )
+    out = await svc.reconcile_persona(db_session, p)
+    assert out.prompt_fragment == "You are a strict interviewer. Ask follow-ups."
+    assert out.agent_version == "11"
+
+
+async def test_reconcile_ignores_generated_default_instructions(db_session, monkeypatch):
+    # The remote instructions equal the auto-generated fallback this app pushes for an empty
+    # fragment — NOT a Portal edit. The fragment must stay empty (empty MEANS "using the default").
+    from app.models.persona import default_instructions
+
+    p = await _mk(db_session, name="Interviewer")
+    await svc.mark_sync_succeeded(db_session, p, agent_id="a", agent_version="10")
+    p.model = "gpt-5.4-mini"
+    await db_session.commit()
+    _stub_adapter(
+        monkeypatch,
+        {
+            "agent_version": "10",
+            "model": "gpt-5.4-mini",
+            "instructions": default_instructions("Interviewer"),
+        },
+    )
+    out = await svc.reconcile_persona(db_session, p)
+    assert out.prompt_fragment == ""
+
+
+async def test_reconcile_keeps_matching_instructions_untouched(db_session, monkeypatch):
+    # Remote equals what we stored → nothing to pull (and no needless commit of the same value).
+    p = await _mk(db_session, name="stable", prompt_fragment="Be kind but thorough.")
+    await svc.mark_sync_succeeded(db_session, p, agent_id="a", agent_version="10")
+    p.model = "gpt-5.4-mini"
+    await db_session.commit()
+    _stub_adapter(
+        monkeypatch,
+        {
+            "agent_version": "10",
+            "model": "gpt-5.4-mini",
+            "instructions": "Be kind but thorough.",
+        },
+    )
+    out = await svc.reconcile_persona(db_session, p)
+    assert out.prompt_fragment == "Be kind but thorough."
+    assert out.agent_version == "10"
+
+
 async def test_reconcile_default_persona_propagates_model_to_master(db_session, monkeypatch):
     from app.services import config_service
 

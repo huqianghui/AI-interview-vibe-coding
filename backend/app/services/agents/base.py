@@ -57,5 +57,8 @@ class AgentSyncAdapter(Protocol):
     async def delete_persona_agent(self, persona: object) -> None: ...
 
     async def fetch_remote_state(self, persona: object) -> dict[str, str] | None:
-        """Read the live agent's ``{agent_version, model}`` (pull), or ``None`` if unavailable."""
+        """Read the live agent's ``{agent_version, model, instructions}`` (pull direction).
+
+        Returns ``None`` when the agent doesn't exist or the read fails.
+        """
         ...
