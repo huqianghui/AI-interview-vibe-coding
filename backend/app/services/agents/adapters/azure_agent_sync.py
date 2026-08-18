@@ -28,6 +28,7 @@ import asyncio
 import time
 from typing import Any
 
+from app.models.persona import default_instructions
 from app.services.agents import foundry_connections
 from app.services.agents.foundry_client import (
     FoundryClientError,
@@ -111,7 +112,7 @@ class AzureAgentSyncAdapter:
         authenticated KB MCPTool) — the global KB binding was retired in favour of per-persona KBs.
         """
         agent_name = self._agent_name(persona)
-        instructions = persona.prompt_fragment or f"You are {persona.name}, an interviewer."
+        instructions = persona.prompt_fragment or default_instructions(persona.name)
         metadata = build_voice_live_metadata(persona, locale=locale, modified_at=int(time.time()))
         knowledge_tools = await self._resolve_kb_tools(knowledge_configs or [])
         tools = build_agent_tools(
@@ -134,12 +135,13 @@ class AzureAgentSyncAdapter:
         }
 
     async def fetch_remote_state(self, persona: Any) -> dict[str, str] | None:
-        """Read the live Foundry agent's latest version + model (pull direction).
+        """Read the live Foundry agent's latest version + model + instructions (pull direction).
 
-        Returns ``{"agent_version": <str>, "model": <str>}`` for the agent backing ``persona``, or
-        ``None`` when the agent doesn't exist or the read fails — reconciliation is best-effort and
-        must never 500. Walks ``AgentDetails.versions.latest.version`` then
-        ``get_version(...).definition.model`` (the ``PromptAgentDefinition.model`` this app writes).
+        Returns ``{"agent_version": <str>, "model": <str>, "instructions": <str>}`` for the agent
+        backing ``persona``, or ``None`` when the agent doesn't exist or the read fails —
+        reconciliation is best-effort and must never 500. Walks
+        ``AgentDetails.versions.latest.version`` then ``get_version(...).definition`` for the
+        ``PromptAgentDefinition``'s ``model`` and ``instructions`` (both fields this app writes).
         """
         try:
             client = await asyncio.to_thread(self._project_client)
@@ -148,7 +150,12 @@ class AzureAgentSyncAdapter:
             version = str(details.versions.latest.version)
             vdetails = await asyncio.to_thread(client.agents.get_version, name, version)
             model = getattr(vdetails.definition, "model", None)
-            return {"agent_version": version, "model": str(model) if model else ""}
+            instructions = getattr(vdetails.definition, "instructions", None)
+            return {
+                "agent_version": version,
+                "model": str(model) if model else "",
+                "instructions": str(instructions) if instructions else "",
+            }
         except Exception:  # noqa: BLE001 — any read failure → no reconcile, not an error
             return None
 

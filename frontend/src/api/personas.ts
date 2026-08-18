@@ -37,12 +37,15 @@ export interface PersonaOut {
   agent_version: string | null;
   agent_sync_status: AgentSyncStatus;
   agent_sync_error: string | null;
+  // Auto-generated instructions the backend pushes to Foundry when prompt_fragment is empty —
+  // shown in the editor as the effective default so it matches what the Foundry Portal displays.
+  default_instructions: string;
 }
 
 /** Fields accepted on create (server owns id + agent-sync bookkeeping). */
 export type PersonaCreate = Omit<
   PersonaOut,
-  "id" | "agent_id" | "agent_version" | "agent_sync_status" | "agent_sync_error"
+  "id" | "agent_id" | "agent_version" | "agent_sync_status" | "agent_sync_error" | "default_instructions"
 >;
 
 /** All fields optional on update (backend PersonaUpdate). */

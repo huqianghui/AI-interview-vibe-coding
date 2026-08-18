@@ -237,6 +237,7 @@ export function AgentEditorPage() {
             tools={form.tools}
             onToolsChange={(tools) => patchForm({ tools })}
             personaId={isNew ? null : current?.id ?? null}
+            defaultInstructions={isNew ? "" : current?.default_instructions ?? ""}
           />
         )
       }

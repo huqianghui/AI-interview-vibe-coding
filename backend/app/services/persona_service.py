@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.persona import AGENT_SYNC_STATUSES, InterviewerPersona
+from app.models.persona import AGENT_SYNC_STATUSES, InterviewerPersona, default_instructions
 
 
 class PersonaError(Exception):
@@ -169,13 +169,20 @@ async def mark_sync_failed(db: AsyncSession, persona: InterviewerPersona, *, err
 
 
 async def reconcile_persona(db: AsyncSession, persona: InterviewerPersona) -> InterviewerPersona:
-    """Pull the live Foundry agent's version + model into the persona when it has drifted.
+    """Pull the live Foundry agent's version + model + instructions into the persona on drift.
 
     An operator can edit the agent directly in the Foundry Portal (changing model/instructions),
     which bumps the agent version but never syncs back to us. On opening the editor we reconcile:
-    read the live agent's latest version + that version's model; if the version differs from what we
-    stored (or we have no model yet — backfill for rows predating the per-persona ``model`` column),
-    Foundry is authoritative → write its version + model onto the persona.
+    read the live agent's latest version + that version's model + instructions; if the version
+    differs from what we stored (or we have no model yet — backfill for rows predating the
+    per-persona ``model`` column), Foundry is authoritative → write its state onto the persona.
+
+    Instructions are pulled into ``prompt_fragment`` only when the remote string is a REAL Portal
+    edit — i.e. it differs from both the stored fragment and the auto-generated default
+    (:func:`app.models.persona.default_instructions`, what the adapter pushes when the fragment is
+    empty). The generated default is never written into the DB: an empty fragment MEANS "using the
+    default", and the editor displays that default as the effective instructions, so UI and Portal
+    stay consistent without polluting the row.
 
     Fail-soft: a never-synced persona, an unavailable agent, or any read error is a no-op (the
     persona is returned unchanged). Never raises — a plain page-load must not 500 on Azure trouble.
@@ -199,10 +206,20 @@ async def reconcile_persona(db: AsyncSession, persona: InterviewerPersona) -> In
 
     remote_version = remote.get("agent_version") or ""
     remote_model = remote.get("model") or ""
-    # Pull when the version drifted OR we have no per-persona model yet (backfill on first open).
+    remote_instructions = remote.get("instructions") or ""
+    # A remote instruction string is a REAL Portal edit only when it differs from what this app
+    # would have pushed itself: the stored fragment, or (for an empty fragment) the generated
+    # default. Equal-to-default stays out of the DB — empty fragment MEANS "using the default".
+    instructions_changed = (
+        bool(remote_instructions)
+        and remote_instructions != persona.prompt_fragment
+        and remote_instructions != default_instructions(persona.name)
+    )
+    # Pull when the version drifted OR we have no per-persona model yet (backfill on first open)
+    # OR the Portal's instructions differ from ours.
     version_changed = bool(remote_version) and remote_version != persona.agent_version
     needs_backfill = bool(remote_model) and not persona.model
-    if not version_changed and not needs_backfill:
+    if not version_changed and not needs_backfill and not instructions_changed:
         return persona
 
     model_changed = bool(remote_model) and remote_model != persona.model
@@ -210,6 +227,8 @@ async def reconcile_persona(db: AsyncSession, persona: InterviewerPersona) -> In
         persona.agent_version = remote_version
     if remote_model:
         persona.model = remote_model
+    if instructions_changed:
+        persona.prompt_fragment = remote_instructions
     persona.agent_sync_status = "synced"
     persona.agent_sync_error = None
     await db.commit()

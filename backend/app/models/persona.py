@@ -26,6 +26,16 @@ from app.models.mixins import TimestampMixin
 AGENT_SYNC_STATUSES = ("none", "pending", "synced", "failed")
 
 
+def default_instructions(name: str) -> str:
+    """The auto-generated agent instructions used when ``prompt_fragment`` is empty.
+
+    Single source of truth for the fallback string: the sync adapter pushes it to Foundry, and the
+    editor UI displays it as the effective default — so what the operator sees in our editor always
+    matches what the Foundry Portal shows, even before they've written custom instructions.
+    """
+    return f"You are {name}, an interviewer."
+
+
 class InterviewerPersona(TimestampMixin, Base):
     __tablename__ = "interviewer_personas"
 
@@ -73,6 +83,15 @@ class InterviewerPersona(TimestampMixin, Base):
     model: Mapped[str | None] = mapped_column(String(100), nullable=True, default=None)
     agent_sync_status: Mapped[str] = mapped_column(String(16), default="none", nullable=False)
     agent_sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    @property
+    def default_instructions(self) -> str:
+        """The generated instructions this persona's agent gets when ``prompt_fragment`` is empty.
+
+        Exposed to the API/editor so the UI can show the effective default instead of a blank
+        field — keeping what the operator sees aligned with the Foundry Portal.
+        """
+        return default_instructions(self.name)
 
     __table_args__ = (
         # SPEC F5 AC #3: at most one enabled default persona, enforced in the DB, not app code.

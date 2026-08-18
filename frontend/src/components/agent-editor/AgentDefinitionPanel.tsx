@@ -54,6 +54,9 @@ export interface AgentDefinitionPanelProps {
   onToolsChange: (tools: ToolConfig[]) => void;
   /** Saved persona id (null for a new, unsaved persona) — drives the per-persona Knowledge section. */
   personaId: string | null;
+  /** Auto-generated instructions the backend pushes to Foundry when the field is empty — shown as
+   * the effective default so the editor matches the Foundry Portal ("" for a new persona). */
+  defaultInstructions?: string;
 }
 
 export function AgentDefinitionPanel({
@@ -70,6 +73,7 @@ export function AgentDefinitionPanel({
   tools,
   onToolsChange,
   personaId,
+  defaultInstructions,
 }: AgentDefinitionPanelProps) {
   const styles = useStyles();
   const voiceModeOn = Boolean(form.character);
@@ -152,18 +156,27 @@ export function AgentDefinitionPanel({
 
       <Divider />
 
-      {/* Instructions */}
+      {/* Instructions — when empty, the backend pushes an auto-generated default to Foundry, so
+          show that default here (placeholder + hint) instead of a blank field. Otherwise the
+          Foundry Portal displays instructions this editor doesn't, which reads as a mismatch. */}
       <div className={styles.section}>
         <Title3>Instructions</Title3>
         <Field>
           <Textarea
             value={form.prompt_fragment}
+            placeholder={defaultInstructions || undefined}
             resize="vertical"
             rows={8}
             onChange={(_, d) => onChange({ prompt_fragment: d.value })}
             data-testid="persona-instructions"
           />
         </Field>
+        {!form.prompt_fragment && defaultInstructions ? (
+          <Text size={200} className={styles.hint} data-testid="persona-instructions-default-hint">
+            Using the auto-generated default shown above — it's what the Foundry agent runs (and
+            what the Azure Portal displays). Type here to replace it.
+          </Text>
+        ) : null}
       </div>
 
       <Divider />

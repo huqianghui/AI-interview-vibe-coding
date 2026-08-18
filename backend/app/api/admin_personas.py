@@ -99,6 +99,9 @@ class PersonaOut(BaseModel):
     agent_version: str | None
     agent_sync_status: str
     agent_sync_error: str | None
+    # The auto-generated instructions pushed to Foundry when prompt_fragment is empty — surfaced so
+    # the editor can display the EFFECTIVE instructions instead of a blank field (Portal parity).
+    default_instructions: str
 
     @classmethod
     def of(cls, p: InterviewerPersona) -> "PersonaOut":

@@ -51,6 +51,7 @@ const PERSONA: personas.PersonaOut = {
   agent_version: "3",
   agent_sync_status: "synced",
   agent_sync_error: null,
+  default_instructions: "You are Demo Interviewer, an interviewer.",
 };
 
 function mockAdminLogin() {
@@ -343,5 +344,74 @@ describe("AgentEditorPage", () => {
     await user.click(screen.getByTestId("persona-save"));
     await waitFor(() => expect(update).toHaveBeenCalled());
     expect(update.mock.calls[0][1].model).toBe("gpt-5");
+  });
+
+  it("shows the auto-generated default instructions when prompt_fragment is empty (Portal parity)", async () => {
+    // An empty Instructions field is what the FOUNDRY agent runs the generated default for — the
+    // editor must show that default (placeholder + hint), not a silent blank, so what the operator
+    // sees here matches what the Azure Portal displays.
+    const user = userEvent.setup();
+    mockAdminLogin();
+    mockDiscovery();
+    mockKnowledge();
+    const blank = { ...PERSONA, prompt_fragment: "" };
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([blank]);
+    vi.spyOn(personas, "getPersona").mockResolvedValue(blank);
+
+    renderPage();
+    await signIn(user);
+    await pickPersona(user, "p1");
+    await waitFor(() => expect(screen.getByTestId("persona-name")).toHaveValue("Demo Interviewer"));
+
+    const textarea = screen.getByTestId("persona-instructions");
+    expect(textarea).toHaveValue("");
+    expect(textarea).toHaveAttribute(
+      "placeholder",
+      "You are Demo Interviewer, an interviewer.",
+    );
+    expect(screen.getByTestId("persona-instructions-default-hint")).toBeInTheDocument();
+  });
+
+  it("hides the default-instructions hint once custom instructions exist", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    mockDiscovery();
+    mockKnowledge();
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([PERSONA]);
+    vi.spyOn(personas, "getPersona").mockResolvedValue(PERSONA);
+
+    renderPage();
+    await signIn(user);
+    await pickPersona(user, "p1");
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-instructions")).toHaveValue("You are an interviewer."),
+    );
+    expect(screen.queryByTestId("persona-instructions-default-hint")).not.toBeInTheDocument();
+  });
+
+  it("reconcile pulls Portal-edited instructions into the field", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    mockDiscovery();
+    mockKnowledge();
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([PERSONA]);
+    vi.spyOn(personas, "getPersona").mockResolvedValue(PERSONA);
+    // Portal edit changed the instructions (and bumped the version) — reconcile pulls both.
+    const pulled = {
+      ...PERSONA,
+      agent_version: "9",
+      prompt_fragment: "You are a strict interviewer. Ask follow-ups.",
+    };
+    vi.spyOn(personas, "reconcilePersona").mockResolvedValue(pulled);
+
+    renderPage();
+    await signIn(user);
+    await pickPersona(user, "p1");
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-instructions")).toHaveValue(
+        "You are a strict interviewer. Ask follow-ups.",
+      ),
+    );
   });
 });
