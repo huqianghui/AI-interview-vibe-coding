@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.27.2.0 (2026-08-18)
+
+### Fixed
+- **"语音不可用" notice no longer shows under a live digital human.** During the silent background
+  reconnect loop, a transient pre-connect error surfaced to the page — setting the
+  voice-unavailable fallback even when the very next reconnect attempt succeeded. Mid-reconnect
+  errors now stay internal (only exhausting all attempts reports a failure), and the page
+  self-heals: whenever the session lands on "connected" while the notice is up, it clears and
+  returns to voice.
+
 ## 0.27.1.0 (2026-08-18)
 
 The digital human on the **/interview page** is now stable: it no longer randomly fails to appear

@@ -186,4 +186,60 @@ describe("useInterviewVoice in-band error events", () => {
     unmount();
     vi.unstubAllGlobals();
   });
+
+  it("does NOT surface a transient error to the page during a background reconnect", async () => {
+    // A WS drop triggers the silent reconnect loop. If an attempt's pre-connect error fired
+    // onError, the interview page showed "语音不可用" even when the NEXT attempt succeeded —
+    // the "live face + voice-unavailable notice" contradiction. Mid-reconnect errors must stay
+    // internal; only exhausting all attempts reports to the page.
+    FakeWebSocket.last = null;
+    vi.useFakeTimers();
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    const onError = vi.fn();
+    let hook!: ReturnType<typeof useInterviewVoice>;
+    function ErrHarness() {
+      hook = useInterviewVoice("iv-1", {
+        locale: "zh-CN",
+        tokenProvider: () => "tok",
+        onError,
+      });
+      return null;
+    }
+    const { unmount } = render(<ErrHarness />);
+
+    // Connect successfully first.
+    let connectP!: Promise<void>;
+    act(() => {
+      connectP = hook.connect("zh-CN");
+    });
+    await act(async () => {
+      for (let i = 0; i < 20 && !FakeWebSocket.last; i++) await Promise.resolve();
+      FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
+      await connectP;
+    });
+    const firstWs = FakeWebSocket.last!;
+
+    // Unexpected close → the hook schedules reconnect attempt #1 (1s backoff).
+    await act(async () => {
+      firstWs.close();
+    });
+    expect(hook.connectionState).toBe("reconnecting");
+
+    // Fire the backoff timer; a NEW WS opens for the reconnect attempt.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1100);
+    });
+    const secondWs = FakeWebSocket.last!;
+    expect(secondWs).not.toBe(firstWs);
+
+    // The reconnect attempt hits a PRE-connect error event — transient, must NOT reach the page.
+    await act(async () => {
+      secondWs.receive({ type: "error", error: { message: "temporarily unavailable" } });
+    });
+    expect(onError).not.toHaveBeenCalled();
+
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 });

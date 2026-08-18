@@ -295,6 +295,16 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
             console.warn("[voice] non-fatal Voice Live error event (session stays up):", error.message);
             break;
           }
+          // During a BACKGROUND reconnect attempt, a pre-connect error is transient: the reconnect
+          // loop will retry (and only reports to the page after all attempts fail). Surfacing it
+          // here flipped the page to "语音不可用" even when the very next retry succeeded — the
+          // "face visible but voice-unavailable notice" contradiction. Reject the attempt (so the
+          // loop advances) but don't call onError.
+          if (reconnectAttemptRef.current > 0) {
+            console.warn("[voice] error during reconnect attempt (will retry):", error.message);
+            onFatalError(error);
+            break;
+          }
           setConn("error");
           optionsRef.current.onError?.(error);
           onFatalError(error);
