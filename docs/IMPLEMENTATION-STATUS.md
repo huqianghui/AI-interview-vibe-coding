@@ -5,7 +5,7 @@ validation state. The spec of record is [`../SPEC.md`](../SPEC.md); the planning
 [`planning/`](planning/); per-release detail is in [`../CHANGELOG.md`](../CHANGELOG.md). To actually
 **verify** the requirements and run the system, see [`VERIFICATION.md`](VERIFICATION.md).
 
-Status as of **v0.28.1.2**. Backend: 411 tests, 86% coverage. Frontend: 97 unit/component tests +
+Status as of **v0.29.0.0**. Backend: 411 tests, 86% coverage. Frontend: 102 unit/component tests +
 Playwright E2E (real Chromium). Every merge passed CI (ruff check + ruff format + pytest;
 tsc + vitest + eslint + Playwright E2E). Local dev / CI run entirely on mock providers — zero Azure
 needed to build or test.
@@ -35,7 +35,7 @@ a fused text/voice interview flow, in phases (branch-per-phase, independently re
 | **F6** Turn-by-turn state machine | ✅ Done | v0.4.1.0 | Channel-agnostic `answer_finalized`; follow-up hook; answer grouping; verbal cue. |
 | **F7** Session memory surfacing | ✅ Done | v0.11.0.0 | Follow-up visibly cites the candidate's prior answer; Foundry-agent knowledge binding. |
 | **F8** Interview report | ✅ Done | v0.10.0.0 | Executive view (grade gauge + narrative + SOP-source-beside-answer) + progressive per-item detail. |
-| **F9** Frontend interview page | ✅ Done | v0.5.0.0 | Avatar/orb, question progress, dual text+voice channel, mic recovery, WebRTC voice broker. |
+| **F9** Frontend interview page | ✅ Done | v0.5.0.0 | Avatar/orb, question progress, dual text+voice channel, mic recovery, WebRTC voice broker. **Live-screen polish (v0.29.0.0):** voice status legend (four states as tip cards, live one highlighted; hidden in text mode), full-width animated question-progress rail (removes the redundant top-bar badge), and the avatar stage fills the grid height with `object-fit:cover` (no letterbox). |
 
 ## Post-demo scope (still in SPEC)
 
@@ -49,7 +49,7 @@ a fused text/voice interview flow, in phases (branch-per-phase, independently re
 | Capability | Status | Shipped |
 |---|---|---|
 | Voice-only presence (audio orb + persona voice) | ✅ Done | v0.5.0.0 |
-| **Avatar video track** (digital-human face) | ✅ Done | v0.13.0.0 — broker requests the `avatar` modality; the voice hook negotiates a recvonly video transceiver and `AvatarView` shows the video, falling back to the orb. |
+| **Avatar video track** (digital-human face) | ✅ Done | v0.13.0.0 — broker requests the `avatar` modality; the voice hook negotiates a recvonly video transceiver and `AvatarView` shows the video, falling back to the orb. **Media-layer self-heal (v0.29.0.0):** the avatar PC recovers from an ICE `disconnected`/`failed` or ended track on its own (3s grace window, then bounded re-handshake with backoff reusing the last ICE servers) instead of falling to the orb for the rest of the session; generation-guarded against stale recoveries. |
 | **Foundry-portal avatar editor** (real-face roster + layout parity) | ✅ Done | v0.22.0.0 — `/admin/agent` matches the AI Foundry portal Playground: full Azure roster (6 video + 27 photo) with real MS-Learn-CDN face thumbnails, top-bar persona switcher + left definition sections + center `AvatarPreview`, style slugs use Azure real names (`casual-sitting`), passed through to Voice Live. |
 | **Foundry-portal agent Tools** (per-persona, real sync) | ✅ Done | v0.23.0.0 — Tools section + "Select a tool" dialog (Configured/Catalog/Custom) matching the portal. `code_interpreter` / `web_search` / public `mcp` really sync into the persona's Foundry agent (`tools_config` → gated → SDK tools); the rest are Preview cards. Connection-auth tools (OpenAPI/A2A/protected MCP/Bing/Search) + MS-hosted connectors deferred. |
 
