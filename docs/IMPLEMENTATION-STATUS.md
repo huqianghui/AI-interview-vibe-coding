@@ -5,7 +5,7 @@ validation state. The spec of record is [`../SPEC.md`](../SPEC.md); the planning
 [`planning/`](planning/); per-release detail is in [`../CHANGELOG.md`](../CHANGELOG.md). To actually
 **verify** the requirements and run the system, see [`VERIFICATION.md`](VERIFICATION.md).
 
-Status as of **v0.28.1.0**. Backend: 411 tests, 86% coverage. Frontend: 97 unit/component tests +
+Status as of **v0.28.1.2**. Backend: 411 tests, 86% coverage. Frontend: 97 unit/component tests +
 Playwright E2E (real Chromium). Every merge passed CI (ruff check + ruff format + pytest;
 tsc + vitest + eslint + Playwright E2E). Local dev / CI run entirely on mock providers — zero Azure
 needed to build or test.
@@ -110,6 +110,17 @@ that an automatable check can pass while the live service rejects." Validated li
   overriding `instructions` in `response.create`. Confirmed via Playwright fake-mic against the real
   `avarda-demo-prj` project (`sdpCreated=true`, `avatarConnected=true`, audio-transcript deltas
   streaming). Contract cross-checked with the sibling AI-Coach project's proven implementation.
+
+- ✅ **Voice full path re-validated on the WS-proxy transport** (v0.28.1.1, 2026-08-18, against
+  `ai-foundary-hu-sweden-central2`): after the v0.26 migration to the backend Voice Live WS proxy
+  (`voice_live_proxy.py`), the full turn was re-verified live via the opt-in Playwright fake-mic E2E
+  (`frontend/e2e/voice-live-azure.spec.ts`, `LIVE_VOICE=1`). Clicking 语音作答 opens
+  `/api/voice-live/ws`; the backend brokers the Azure agent session and relays frames: the browser
+  observes `proxy.connected` → `session.updated` carrying `avatar.ice_servers` →
+  `response.audio_transcript.delta` streaming, with **no** `error` frame and **no** "语音不可用 /
+  voice unavailable" fallback. A diagnostic probe additionally confirmed the 1080p avatar video
+  renders (`1920x1080`), the KB `mcp_list_tools` tool is called, and the avatar transitions
+  speaking↔idle. The spec self-skips unless `LIVE_VOICE=1`, so CI stays zero-Azure.
 
 ### Deploy configuration (v0.15.0.0)
 
