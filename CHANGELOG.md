@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.27.0.0 (2026-08-18)
+
+The editor's **Instructions** field now always matches what the Azure AI Foundry Portal shows.
+Previously an empty field silently pushed an auto-generated `"You are {name}, an interviewer."` to
+Foundry, so the Portal displayed instructions the editor didn't — reading as a mismatch.
+
+### Added
+- **Visible default instructions (Portal parity).** When a persona has no custom instructions, the
+  editor shows the auto-generated default as the field's placeholder plus a hint explaining that
+  this is what the Foundry agent runs (and what the Portal displays); typing replaces it. The
+  default string has a single source of truth (`default_instructions` in the persona model) shared
+  by the sync adapter and the API (`PersonaOut.default_instructions`).
+- **Instructions reconcile with the Portal (like model + version).** `fetch_remote_state` now also
+  reads the live agent's `definition.instructions`, and reconcile-on-open pulls a **real Portal
+  edit** back into the persona's `prompt_fragment` — so an instruction edited in the Portal shows
+  up in the editor. A remote string equal to the stored fragment or to the generated default is
+  NOT pulled: an empty fragment still *means* "using the default", keeping the row clean.
+
 ## 0.26.0.0 (2026-08-17)
 
 The digital human now shows a **live face**, not just the orb. This release migrates the editor's
