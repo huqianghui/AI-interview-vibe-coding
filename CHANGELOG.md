@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.28.1.1 (2026-08-18)
+
+### Fixed
+- **Live voice E2E (`voice-live-azure.spec.ts`) matches the current transport.** The opt-in
+  `LIVE_VOICE=1` spec still asserted on the pre-v0.26 browser-direct `voice-live/realtime` WebSocket,
+  so it timed out with "signaling frames seen: []" against the current build — a stale-test failure,
+  not a voice regression. Voice was migrated to a backend WebSocket proxy (`voice_live_proxy.py`) in
+  v0.26, so the browser now opens a single `/api/voice-live/ws` and the backend relays every Voice
+  Live frame. The spec now listens on `/api/voice-live/ws` and asserts the real, working turn:
+  `proxy.connected` → `session.updated` carrying `avatar.ice_servers` → `response.audio_transcript.delta`
+  streams, with no `error` frame and no "语音不可用 / voice unavailable" fallback. Verified passing
+  against real Azure. Test-only; no runtime behavior change.
+
 ## 0.28.1.0 (2026-08-18)
 
 ### Fixed
