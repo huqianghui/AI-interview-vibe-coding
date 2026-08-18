@@ -46,6 +46,9 @@ export const resources = {
         unmute: "Unmute",
         imDone: "I'm done answering",
         endedFallback: "Voice unavailable — you can continue by text.",
+        transcriptEmpty: "The conversation will appear here as you speak.",
+        roleYou: "You",
+        roleInterviewer: "Interviewer",
       },
       micDialog: {
         title: "Microphone access needed",
@@ -113,6 +116,9 @@ export const resources = {
         unmute: "取消静音",
         imDone: "我答完了",
         endedFallback: "语音不可用 —— 你可以改用文字继续。",
+        transcriptEmpty: "对话内容将在你发言时显示在这里。",
+        roleYou: "你",
+        roleInterviewer: "面试官",
       },
       micDialog: {
         title: "需要麦克风权限",

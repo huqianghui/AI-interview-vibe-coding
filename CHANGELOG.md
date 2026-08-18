@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.28.0.0 (2026-08-18)
+
+The **/interview** live screen was reorganized for a cleaner, more polished look — no change to
+what the interview does, only how it's laid out and styled.
+
+### Changed
+- **Global top bar.** Question progress, the voice-status badge, and the text/voice switch now live
+  in a single full-width glass bar spanning the top of the live screen, instead of being scattered
+  across the stage overlay and answer card. Progress on the left, live voice status centered, the
+  作答方式 switch on the right.
+- **Adaptive transcript.** The conversation panel now grows to fill the available height of the
+  answer column (with internal scrolling and auto-scroll to the newest turn) instead of a fixed
+  220px box, and shows a quiet hint while empty so the layout no longer collapses or jumps.
+- **Refined stage + typography.** The deep-violet stage gains a layered radial spotlight and softer
+  inset/drop shadows; the question text is larger and bolder under a brand-colored eyebrow; and the
+  transcript bubbles use harmonized brand/neutral colors with distinct interviewer/candidate sides.
+
 ## 0.27.2.0 (2026-08-18)
 
 ### Fixed

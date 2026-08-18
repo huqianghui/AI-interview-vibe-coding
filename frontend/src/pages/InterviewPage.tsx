@@ -27,6 +27,7 @@ import {
   Textarea,
   Title2,
   makeStyles,
+  mergeClasses,
   tokens,
 } from "@fluentui/react-components";
 import {
@@ -58,19 +59,59 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalXS,
     marginBottom: tokens.spacingVerticalL,
   },
-  // Full-width two-column stage for the live Q&A.
+  // Full-width stage for the live Q&A: a title, a global top bar, then a two-column body.
   stageWrap: {
     padding: `${tokens.spacingVerticalL} ${tokens.spacingHorizontalXXL}`,
     boxSizing: "border-box",
     width: "100%",
+    // Fill the viewport so the controls column has real height to grow into (auto-fit transcript).
+    minHeight: "calc(100vh - 56px)",
+    display: "flex",
+    flexDirection: "column",
   },
-  grid: {
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 3fr) minmax(360px, 2fr)",
-    gap: tokens.spacingHorizontalXXL,
-    alignItems: "stretch",
+  // Global top bar (P11 rule #3): progress + live voice state + channel switch, spanning the full
+  // width above both columns. Frosted-glass surface so it reads as a control strip, not content.
+  topBar: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: tokens.spacingHorizontalL,
+    flexWrap: "wrap",
+    width: "100%",
     maxWidth: "1400px",
     margin: "0 auto",
+    marginBottom: tokens.spacingVerticalL,
+    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalXL}`,
+    boxSizing: "border-box",
+    borderRadius: tokens.borderRadiusXLarge,
+    background: "linear-gradient(135deg, rgba(124,58,237,0.10) 0%, rgba(168,85,247,0.05) 100%)",
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    backdropFilter: "blur(10px)",
+    boxShadow: tokens.shadow4,
+  },
+  topBarSlot: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalM, minWidth: 0 },
+  topBarCenter: { justifyContent: "center", flex: 1 },
+  topBarRight: { justifyContent: "flex-end" },
+  // Segmented text/voice switch — one pill, two halves.
+  segmented: {
+    display: "inline-flex",
+    padding: "3px",
+    gap: "2px",
+    borderRadius: tokens.borderRadiusCircular,
+    background: tokens.colorNeutralBackground3,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  segBtn: { borderRadius: tokens.borderRadiusCircular, minWidth: "84px" },
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 3fr) minmax(380px, 2fr)",
+    gap: tokens.spacingHorizontalXXL,
+    alignItems: "stretch",
+    width: "100%",
+    maxWidth: "1400px",
+    margin: "0 auto",
+    flex: 1,
+    minHeight: 0,
     "@media (max-width: 900px)": { gridTemplateColumns: "1fr" },
   },
   // Left: the dark "stage" the digital human / orb sits on.
@@ -82,30 +123,45 @@ const useStyles = makeStyles({
     justifyContent: "center",
     minHeight: "560px",
     borderRadius: tokens.borderRadiusXLarge,
-    background: "linear-gradient(160deg, #14162b 0%, #1f2140 60%, #2a1f45 100%)",
+    // Layered deep-violet: a soft radial spotlight on top of a diagonal night gradient, so the
+    // digital human sits in a pool of light rather than a flat panel.
+    background:
+      "radial-gradient(120% 90% at 50% 18%, rgba(124,58,237,0.28) 0%, rgba(124,58,237,0) 55%), " +
+      "linear-gradient(160deg, #121327 0%, #1c1d3a 55%, #291a44 100%)",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05), 0 18px 48px -24px rgba(41,26,68,0.8)",
     overflow: "hidden",
     padding: tokens.spacingVerticalXL,
     "@media (max-width: 900px)": { minHeight: "360px" },
   },
   stageAvatar: { width: "100%", flex: 1, display: "flex", alignItems: "center", justifyContent: "center" },
-  // Status pill overlaid at the bottom of the stage.
-  statusOverlay: {
-    position: "absolute",
-    bottom: tokens.spacingVerticalL,
-    left: "50%",
-    transform: "translateX(-50%)",
-    zIndex: 20,
-  },
-  // Right: the control column.
+  // Right: the control column — a flex column so the transcript can grow to fill leftover height.
   controls: {
     display: "flex",
     flexDirection: "column",
     gap: tokens.spacingVerticalL,
     minWidth: 0,
+    minHeight: 0,
   },
   questionCard: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalM },
-  questionText: { fontSize: tokens.fontSizeBase500, lineHeight: tokens.lineHeightBase500 },
-  channelRow: { display: "flex", gap: tokens.spacingHorizontalS },
+  questionEyebrow: {
+    color: tokens.colorBrandForeground1,
+    textTransform: "uppercase",
+    letterSpacing: "0.06em",
+  },
+  questionText: {
+    fontSize: tokens.fontSizeBase600,
+    lineHeight: tokens.lineHeightBase600,
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  // Wrapper that lets the transcript flex-grow and scroll internally (auto-fit, no fixed height).
+  transcriptFill: { flex: 1, minHeight: "120px", display: "flex", flexDirection: "column" },
+  fallbackNote: {
+    display: "block",
+    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}`,
+    borderRadius: tokens.borderRadiusMedium,
+    background: tokens.colorNeutralBackground3,
+    color: tokens.colorNeutralForeground2,
+  },
   voiceControls: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalS },
   voiceButtons: { display: "flex", gap: tokens.spacingHorizontalS },
 });
@@ -327,12 +383,37 @@ export function InterviewPage() {
     />
   );
 
-  // The answer controls (question card, channel switch, text/voice answer) — shared by both layouts.
+  // The channel switch (text/voice) — a segmented pill that lives in the global top bar.
+  const channelSwitch = (
+    <div className={styles.segmented} role="tablist" aria-label={t("voice.useVoice")}>
+      <Button
+        className={styles.segBtn}
+        size="small"
+        appearance={channel === "text" ? "primary" : "subtle"}
+        onClick={() => setChannel("text")}
+      >
+        {t("voice.useText")}
+      </Button>
+      {/* Never permanently disabled: a transient failure (proxy hiccup, network blip) must stay
+          retryable — startVoice clears voiceUnavailable on a successful reconnect. */}
+      <Button
+        className={styles.segBtn}
+        size="small"
+        appearance={channel === "voice" ? "primary" : "subtle"}
+        onClick={startVoice}
+      >
+        {t("voice.useVoice")}
+      </Button>
+    </div>
+  );
+
+  // The answer controls (question card + text/voice answer). The question card fills its own space;
+  // the transcript below it flex-grows. Progress + status + channel switch now live in the top bar.
   const answerControls = q && (
     <Card className={styles.questionCard}>
       <CardHeader
         header={
-          <Text weight="semibold">
+          <Text size={200} weight="semibold" className={styles.questionEyebrow}>
             {t("questionProgress", { index: q.index + 1, total: q.total })}
           </Text>
         }
@@ -341,26 +422,10 @@ export function InterviewPage() {
         {q.prompt}
       </Body1>
 
-      {/* Channel switch */}
-      <div className={styles.channelRow}>
-        <Button
-          appearance={channel === "text" ? "primary" : "secondary"}
-          onClick={() => setChannel("text")}
-        >
-          {t("voice.useText")}
-        </Button>
-        {/* Never permanently disabled: a transient failure (proxy hiccup, network blip) must stay
-            retryable — startVoice clears voiceUnavailable on a successful reconnect. */}
-        <Button
-          appearance={channel === "voice" ? "primary" : "secondary"}
-          onClick={startVoice}
-        >
-          {t("voice.useVoice")}
-        </Button>
-      </div>
-
       {voiceUnavailable && (
-        <Body1 style={{ display: "block", opacity: 0.7 }}>{t("voice.endedFallback")}</Body1>
+        <Text size={200} className={styles.fallbackNote}>
+          {t("voice.endedFallback")}
+        </Text>
       )}
 
       {channel === "text" && (
@@ -408,7 +473,7 @@ export function InterviewPage() {
     </Card>
   );
 
-  // Live Q&A: full-width two-column stage (avatar dominant left, controls right).
+  // Live Q&A: a global top bar over a full-width two-column stage (avatar left, controls right).
   if (phase === "interviewing" && q) {
     const voiceActive = channel === "voice";
     const badgeState: AudioState = voiceActive ? voice.audioState : "idle";
@@ -419,6 +484,27 @@ export function InterviewPage() {
             <Title2 as="h1">{t("appTitle")}</Title2>
             <Body1 style={{ opacity: 0.7 }}>{t("tagline")}</Body1>
           </div>
+
+          {/* Global top bar: progress (left) · live voice state (center) · channel switch (right). */}
+          <div className={styles.topBar} data-testid="interview-topbar">
+            <div className={styles.topBarSlot}>
+              <QuestionProgress current={q.index} total={q.total} />
+            </div>
+            <div className={mergeClasses(styles.topBarSlot, styles.topBarCenter)}>
+              {voiceActive && (
+                <Badge
+                  size="large"
+                  appearance="filled"
+                  color={AUDIO_BADGE_COLOR[badgeState]}
+                  data-testid="voice-status-badge"
+                >
+                  {t(`voice.${badgeState}`)}
+                </Badge>
+              )}
+            </div>
+            <div className={mergeClasses(styles.topBarSlot, styles.topBarRight)}>{channelSwitch}</div>
+          </div>
+
           <div className={styles.grid}>
             {/* Left: the stage — digital human / orb, dominant. */}
             <div className={styles.stage} data-testid="interview-stage">
@@ -433,25 +519,14 @@ export function InterviewPage() {
                   isAvatarConnected={voice.isAvatarConnected}
                 />
               </div>
-              {voiceActive && (
-                <div className={styles.statusOverlay}>
-                  <Badge
-                    size="large"
-                    appearance="filled"
-                    color={AUDIO_BADGE_COLOR[badgeState]}
-                    data-testid="voice-status-badge"
-                  >
-                    {t(`voice.${badgeState}`)}
-                  </Badge>
-                </div>
-              )}
             </div>
 
-            {/* Right: the control column. */}
+            {/* Right: the control column. Transcript flex-grows to fill the leftover height. */}
             <div className={styles.controls} data-testid="interview-controls">
-              <QuestionProgress current={q.index} total={q.total} />
               {answerControls}
-              <Transcript segments={segments} />
+              <div className={styles.transcriptFill}>
+                <Transcript segments={segments} />
+              </div>
             </div>
           </div>
           {errorBanner}
