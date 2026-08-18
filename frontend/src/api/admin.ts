@@ -57,6 +57,8 @@ export interface AdminQuestion {
   enabled: boolean;
   expected_points: string[];
   max_follow_ups: number;
+  // Items in this question's default checklist (0 = rubric not configured). Drives the status marker.
+  checklist_item_count: number;
 }
 
 export const listBanks = () => adminRequest<Bank[]>("/admin/question-banks");

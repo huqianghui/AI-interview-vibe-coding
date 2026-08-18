@@ -18,11 +18,12 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.interview.checklist_draft import (
     ChecklistDraft,
+    DraftItem,
     fallback_items_from_points,
     gate_source_citations,
     normalize_weights,
@@ -35,6 +36,12 @@ from app.services.agents.registry import get_llm_adapter, get_retrieval_adapter
 
 DRAFT_PROMPT_VERSION = "v1"
 
+# Design B invariant: every question has a NON-EMPTY checklist. When the LLM yields nothing usable
+# and the question has no expected_points to derive from either (e.g. a chit-chat question drafted
+# with no SOP), we synthesize this one generic required item so scoring is never a length-based
+# stub. It is intentionally question-agnostic — the admin can refine it in the editor.
+GENERIC_REQUIRED_ITEM_TEXT = "Answer is on-topic, complete, and accurate."
+
 
 class ChecklistError(Exception):
     """Base class for checklist-service errors."""
@@ -45,14 +52,31 @@ class QuestionNotFound(ChecklistError):
 
 
 def _build_draft_prompt(question_text: str, sop_snippets: list[str]) -> str:
-    """Assemble the LLM drafting instruction. Kept small + explicit; JSON-only output requested."""
+    """Assemble the LLM drafting instruction. Kept small + explicit; JSON-only output requested.
+
+    SOP-optional (Design B / P2): the checklist is drafted from the QUESTION itself. When SOP
+    passages are retrieved they refine the rubric and supply source quotes; when none are (e.g. a
+    chit-chat question, or no SOP corpus is configured at all — the F1 SOP-upload UI does not exist
+    yet), the LLM must still produce a sensible rubric from the question text alone. The old wording
+    ("grounded in the SOP") made the model return nothing when there was no SOP, which is exactly
+    how questions ended up with an empty checklist → stub scoring.
+    """
+    has_sop = bool(sop_snippets)
     sources = "\n".join(f"- {s}" for s in sop_snippets) or "(no SOP passages retrieved)"
+    sop_clause = (
+        "Use the SOP passages below to ground and refine the items, and quote the SOP verbatim in "
+        "source_quote where an item is supported by a passage."
+        if has_sop
+        else "No SOP passages were retrieved. Draft a reasonable rubric from the question text "
+        "alone; leave source_quote empty."
+    )
     return (
-        "You are drafting a scoring checklist for one interview question, grounded in the SOP.\n"
+        "You are drafting a scoring checklist (rubric) for one interview question.\n"
+        f"{sop_clause}\n"
         'Return ONLY a JSON object: {"items": [{"kind", "text", "weight", '
         '"source_quote", "source_page"}]}.\n'
-        "kind is one of required|recommended|forbidden. Weights of required+recommended items "
-        "should sum to about 100. Quote the SOP verbatim in source_quote.\n\n"
+        "kind is one of required|recommended|forbidden. Include at least one required item. "
+        "Weights of required+recommended items should sum to about 100.\n\n"
         f"QUESTION:\n{question_text}\n\nSOP PASSAGES:\n{sources}\n"
     )
 
@@ -112,6 +136,11 @@ async def draft_checklist(
         # Attach the retrieved SOP page to the derived items so they're still source-hinted.
         for it in items:
             it.source_page = primary_page
+
+    # 4. Final non-empty guarantee (Design B): LLM AND expected_points both empty → synthesize one
+    # generic required item so the checklist is never empty (never falls back to stub scoring).
+    if not items:
+        items = [DraftItem(kind="required", text=GENERIC_REQUIRED_ITEM_TEXT, order_index=0)]
 
     normalize_weights(items)
     draft = ChecklistDraft(prompt_version=DRAFT_PROMPT_VERSION, items=items)
@@ -209,6 +238,32 @@ async def update_items(db: AsyncSession, checklist_id: str, raw_items: list[dict
     await db.commit()
     await db.refresh(checklist)
     return checklist
+
+
+async def default_item_counts(db: AsyncSession, question_ids: Sequence[str]) -> dict[str, int]:
+    """Map each question id → number of items in its default checklist (0 if none).
+
+    Feeds the admin editor's per-question rubric status marker ("✓ N items / ⚙ not configured")
+    so discoverability doesn't require opening each question. Admin-only (P3): counts, never item
+    content, and only ever reached through the admin question-editor API.
+    """
+    counts = {qid: 0 for qid in question_ids}
+    if not question_ids:
+        return counts
+    rows = (
+        await db.execute(
+            select(Checklist.question_id, func.count(ChecklistItem.id))
+            .join(ChecklistItem, ChecklistItem.checklist_id == Checklist.id)
+            .where(
+                Checklist.question_id.in_(list(question_ids)),
+                Checklist.is_default.is_(True),
+            )
+            .group_by(Checklist.question_id)
+        )
+    ).all()
+    for qid, n in rows:
+        counts[qid] = int(n)
+    return counts
 
 
 async def _default_checklists(db: AsyncSession, question_id: str) -> list[Checklist]:

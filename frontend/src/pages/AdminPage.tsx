@@ -20,7 +20,14 @@ import {
   Title3,
 } from "@fluentui/react-components";
 import * as admin from "../api/admin";
-import type { AdminQuestion, AiFoundryConfig, Bank, Checklist, ConfigOption } from "../api/admin";
+import type {
+  AdminQuestion,
+  AiFoundryConfig,
+  Bank,
+  Checklist,
+  ChecklistItem,
+  ConfigOption,
+} from "../api/admin";
 import * as auth from "../api/auth";
 
 export function AdminPage() {
@@ -34,6 +41,9 @@ export function AdminPage() {
   const [questions, setQuestions] = useState<AdminQuestion[]>([]);
   const [selectedQuestion, setSelectedQuestion] = useState<string | null>(null);
   const [checklist, setChecklist] = useState<Checklist | null>(null);
+  // Working copy of the checklist's items while editing (F3b). Seeded from `checklist` on load and
+  // on (re)generate; saved back via editChecklistItems, which re-normalizes weights to 100.
+  const [editItems, setEditItems] = useState<ChecklistItem[]>([]);
 
   const [newBankName, setNewBankName] = useState("");
   const [newQuestionText, setNewQuestionText] = useState("");
@@ -117,19 +127,74 @@ export function AdminPage() {
     guard(async () => {
       setSelectedBank(bankId);
       setSelectedQuestion(null);
-      setChecklist(null);
+      adoptChecklist(null);
       setQuestions(await admin.listBankQuestions(bankId));
     });
+
+  // Adopt a freshly loaded/generated/saved checklist as both the display + edit state.
+  const adoptChecklist = (c: Checklist | null) => {
+    setChecklist(c);
+    setEditItems(c ? c.items.map((it) => ({ ...it })) : []);
+  };
 
   const loadChecklist = (questionId: string) =>
     guard(async () => {
       setSelectedQuestion(questionId);
       try {
-        setChecklist(await admin.getChecklist(questionId));
+        adoptChecklist(await admin.getChecklist(questionId));
       } catch {
-        setChecklist(null); // none drafted yet
+        adoptChecklist(null); // none drafted yet
       }
     });
+
+  const KINDS = ["required", "recommended", "forbidden"] as const;
+
+  const setItem = (idx: number, patch: Partial<ChecklistItem>) =>
+    setEditItems((items) => items.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
+
+  const removeItem = (idx: number) =>
+    setEditItems((items) => items.filter((_, i) => i !== idx));
+
+  const addItem = () =>
+    setEditItems((items) => [
+      ...items,
+      {
+        kind: "required",
+        text: "",
+        weight: 0,
+        source_quote: "",
+        source_page: null,
+        order_index: items.length,
+      },
+    ]);
+
+  // Persist edited items. Backend re-normalizes weights to 100 (forbidden → 0), drops invalid
+  // kinds, and returns the saved checklist — adopt it so the editor round-trips (save → reload).
+  const saveChecklist = () =>
+    guard(async () => {
+      if (!checklist) return;
+      const payload = editItems.map(({ kind, text, weight, source_quote, source_page }) => ({
+        kind,
+        text,
+        weight,
+        source_quote,
+        source_page,
+      }));
+      adoptChecklist(await admin.editChecklistItems(checklist.checklist_id, payload));
+    });
+
+  // (Re)generate a checklist from the question via AI, then refresh the question list so the
+  // rubric-status marker reflects the new item count.
+  const generateChecklist = () =>
+    guard(async () => {
+      if (!selectedQuestion) return;
+      adoptChecklist(await admin.draftChecklist(selectedQuestion));
+      if (selectedBank) setQuestions(await admin.listBankQuestions(selectedBank));
+    });
+
+  // Live weight total of the working copy (forbidden items count as their entered weight in the
+  // preview; the backend zeros them on save). Purely informational — save re-normalizes to 100.
+  const editWeightsSum = editItems.reduce((sum, it) => sum + (it.weight || 0), 0);
 
   if (!authed) {
     return (
@@ -347,9 +412,26 @@ export function AdminPage() {
           <ul data-testid="question-list">
             {questions.map((q, i) => (
               <li key={q.question_id} style={{ marginBottom: 6 }}>
-                <Button appearance="subtle" onClick={() => loadChecklist(q.question_id)}>
+                <Text>
                   {q.order_index + 1}. {q.text}
-                </Button>
+                </Text>{" "}
+                <Button
+                  size="small"
+                  appearance={selectedQuestion === q.question_id ? "primary" : "secondary"}
+                  onClick={() => loadChecklist(q.question_id)}
+                  data-testid={`rubric-btn-${q.question_id}`}
+                >
+                  评分标准 / Rubric
+                </Button>{" "}
+                <Text
+                  size={200}
+                  data-testid={`rubric-status-${q.question_id}`}
+                  style={{ color: q.checklist_item_count > 0 ? "#0a7d24" : "#9a6a00" }}
+                >
+                  {q.checklist_item_count > 0
+                    ? `✓ ${q.checklist_item_count} 项 / items`
+                    : "⚙ 未配评分 / not configured"}
+                </Text>{" "}
                 <Button
                   size="small"
                   disabled={i === 0}
@@ -401,40 +483,90 @@ export function AdminPage() {
         </Card>
       )}
 
-      {/* Checklist for the selected question */}
+      {/* Checklist (scoring rubric) for the selected question — editable (F3b) */}
       {selectedQuestion && (
         <Card>
-          <CardHeader header={<Title3>Checklist</Title3>} />
+          <CardHeader header={<Title3>评分标准 / Scoring rubric</Title3>} />
           {checklist ? (
             <>
-              <Body1 style={{ display: "block" }}>
-                Weights total: {checklist.weights_sum} — {checklist.items.length} items
+              <Body1 style={{ display: "block", marginBottom: 8 }}>
+                权重合计 / Weights total: {editWeightsSum} — {editItems.length} 项 / items
+                {editWeightsSum !== 100 && (
+                  <Text data-testid="checklist-weights-hint" style={{ color: "#9a6a00" }}>
+                    {" "}
+                    （保存后按 100 归一 / re-normalized to 100 on save）
+                  </Text>
+                )}
               </Body1>
-              <ul data-testid="checklist-items">
-                {checklist.items.map((it, i) => (
-                  <li key={i}>
-                    <Text weight="semibold">[{it.kind}]</Text> {it.text} (w={it.weight})
-                    {it.source_quote && <Text> — SOP: “{it.source_quote}”</Text>}
+              <ul data-testid="checklist-items" style={{ listStyle: "none", padding: 0 }}>
+                {editItems.map((it, i) => (
+                  <li
+                    key={i}
+                    style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}
+                  >
+                    <Dropdown
+                      aria-label="Rubric item kind"
+                      data-testid={`checklist-kind-${i}`}
+                      selectedOptions={[it.kind]}
+                      value={it.kind}
+                      style={{ minWidth: 150 }}
+                      onOptionSelect={(_, d) => setItem(i, { kind: d.optionValue ?? "required" })}
+                    >
+                      {KINDS.map((k) => (
+                        <Option key={k} value={k}>
+                          {k}
+                        </Option>
+                      ))}
+                    </Dropdown>
+                    <Input
+                      value={it.text}
+                      placeholder="评分要点 / rubric item text"
+                      data-testid={`checklist-text-${i}`}
+                      onChange={(_, d) => setItem(i, { text: d.value })}
+                      style={{ flex: 1 }}
+                    />
+                    <Input
+                      type="number"
+                      value={String(it.weight)}
+                      data-testid={`checklist-weight-${i}`}
+                      onChange={(_, d) => setItem(i, { weight: Number(d.value) || 0 })}
+                      style={{ width: 80 }}
+                    />
+                    <Button
+                      size="small"
+                      data-testid={`checklist-remove-${i}`}
+                      onClick={() => removeItem(i)}
+                    >
+                      删除 / Delete
+                    </Button>
                   </li>
                 ))}
               </ul>
             </>
           ) : (
             <Body1 style={{ display: "block", marginBottom: 8 }}>
-              No checklist drafted for this question yet.
+              这道题还没有评分标准。点“重新生成 / Generate (AI)”从题目自动起草，或手动添加条目。
+              <br />
+              No rubric for this question yet — generate one from the question, or add items manually.
             </Body1>
           )}
-          <Button
-            appearance="primary"
-            onClick={() =>
-              guard(async () => {
-                const c = await admin.draftChecklist(selectedQuestion);
-                setChecklist(c);
-              })
-            }
-          >
-            {checklist ? "Re-draft from SOP" : "Draft from SOP"}
-          </Button>
+          <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+            <Button data-testid="checklist-add-item" onClick={addItem}>
+              添加一条 / Add item
+            </Button>
+            {checklist && (
+              <Button
+                appearance="primary"
+                data-testid="checklist-save"
+                onClick={saveChecklist}
+              >
+                保存 / Save
+              </Button>
+            )}
+            <Button data-testid="checklist-generate" onClick={generateChecklist}>
+              重新生成 / Generate (AI)
+            </Button>
+          </div>
         </Card>
       )}
 

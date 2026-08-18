@@ -92,6 +92,70 @@ async def test_draft_unknown_question_raises(db_session):
         await svc.draft_checklist(db_session, "no-such-question")
 
 
+class _NoSopRetrieval:
+    """A retrieval adapter that finds no SOP passages (no SOP corpus configured)."""
+
+    name = "empty-sop"
+
+    async def retrieve_citations(self, query, *, max_citations=3):
+        return []
+
+
+@pytest.mark.asyncio
+async def test_draft_without_sop_is_non_empty(db_session, monkeypatch):
+    # Design B P2: with NO SOP passages, the LLM still drafts a rubric from the question text; the
+    # checklist must be non-empty with weights summing to 100.
+    monkeypatch.setattr(svc, "get_retrieval_adapter", lambda name=None: _NoSopRetrieval())
+
+    q = await _question(db_session)
+    checklist = await svc.draft_checklist(db_session, q.id)
+    items = await svc.list_items(db_session, checklist.id)
+    assert items  # non-empty
+    assert sum(i.weight for i in items) == 100
+
+
+@pytest.mark.asyncio
+async def test_draft_generic_fallback_when_llm_and_points_empty(db_session, monkeypatch):
+    # Design B final non-empty guarantee: LLM yields nothing AND the question has no
+    # expected_points → synthesize one generic required item (never an empty checklist → stub).
+    class _EmptyLLM:
+        name = "empty"
+
+        async def complete(self, prompt, *, json_mode=False):
+            return "not json"
+
+        async def stream(self, prompt):
+            yield ""
+
+    monkeypatch.setattr(svc, "get_llm_adapter", lambda name=None: _EmptyLLM())
+    monkeypatch.setattr(svc, "get_retrieval_adapter", lambda name=None: _NoSopRetrieval())
+
+    q = await _question(db_session, points=[])
+    checklist = await svc.draft_checklist(db_session, q.id)
+    items = await svc.list_items(db_session, checklist.id)
+    assert len(items) == 1
+    assert items[0].kind == "required"
+    assert items[0].text == svc.GENERIC_REQUIRED_ITEM_TEXT
+    assert items[0].weight == 100
+
+
+@pytest.mark.asyncio
+async def test_default_item_counts(db_session):
+    # The admin editor's rubric-status marker counts items in each question's default checklist.
+    q = await _question(db_session)
+    other = await question_service.add_question(
+        db_session, bank_id=q.bank_id, text="No rubric here.", order_index=1
+    )
+    checklist = await svc.draft_checklist(db_session, q.id)
+    n_items = len(await svc.list_items(db_session, checklist.id))
+
+    counts = await svc.default_item_counts(db_session, [q.id, other.id])
+    assert counts[q.id] == n_items
+    assert counts[other.id] == 0
+    # Empty input is a no-op (no query).
+    assert await svc.default_item_counts(db_session, []) == {}
+
+
 @pytest.mark.asyncio
 async def test_draft_gates_partial_llm_citation(db_session, monkeypatch):
     """A drafted item whose LLM citation is half-present (quote, no page) keeps the item but strips

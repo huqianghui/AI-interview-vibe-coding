@@ -5,7 +5,7 @@ validation state. The spec of record is [`../SPEC.md`](../SPEC.md); the planning
 [`planning/`](planning/); per-release detail is in [`../CHANGELOG.md`](../CHANGELOG.md). To actually
 **verify** the requirements and run the system, see [`VERIFICATION.md`](VERIFICATION.md).
 
-Status as of **v0.29.0.0**. Backend: 411 tests, 86% coverage. Frontend: 102 unit/component tests +
+Status as of **v0.29.0.0**. Backend: 415 tests, 86% coverage. Frontend: 103 unit/component tests +
 Playwright E2E (real Chromium). Every merge passed CI (ruff check + ruff format + pytest;
 tsc + vitest + eslint + Playwright E2E). Local dev / CI run entirely on mock providers — zero Azure
 needed to build or test.
@@ -42,7 +42,7 @@ a fused text/voice interview flow, in phases (branch-per-phase, independently re
 | Feature | Status | Shipped | Notes |
 |---|---|---|---|
 | **F2b** Question-bank admin editor | ✅ Done | v0.12.0.0 | CRUD + reorder + set-default; admin API + `/admin` UI. |
-| **F3b** Checklist admin editor | ✅ Done | v0.12.0.0 | Edit items, re-normalize weights to 100; `/admin` UI. |
+| **F3b** Checklist admin editor | ✅ Done | v0.12.0.0 | Edit items, re-normalize weights to 100; `/admin` UI. **Mandatory-checklist invariant (v0.29.0.0, [`planning/design-B-checklist-mandatory-20260818.md`](planning/design-B-checklist-mandatory-20260818.md)):** every question is auto-drafted a **non-empty** checklist at create time — SOP-optional draft (rubric drafted from the question text when no SOP passage is retrieved) with a generic-required-item fallback so scoring never degrades to a length-based stub; auto-draft is non-blocking on AI failure. The `/admin` editor now surfaces a per-question **评分标准 / Rubric** button + status marker (✓ N items / ⚙ not configured — count only, P3-safe) and a wired editable form (add/edit/delete items, change kind/weight, save → re-normalized to 100, regenerate on demand). |
 
 ## Digital-human avatar (F5/F9)
 

@@ -47,6 +47,16 @@ living specification is [`../../SPEC.md`](../../SPEC.md) at the repo root — st
   on sync. Retires the single global KB → agent binding (F1 SOP scoring retrieval unchanged). Ported
   in shape from AI-Coach's per-HCP KB feature. Shipped v0.24.0.0.
 
+- [`design-B-checklist-mandatory-20260818.md`](design-B-checklist-mandatory-20260818.md) — every
+  question always has a non-empty, human-editable **scoring checklist** (F3b). Root fix for reports
+  showing "占位评分 / coverage 0%": checklist is auto AI-generated **from the question text itself**
+  (SOP-optional) at question-create time, with a system-level non-empty fallback; the already-built
+  `editChecklistItems` PUT is wired into AdminPage as an editable form (kind/text/weight/add/delete/
+  save, re-normalized to 100); empty → one-click regenerate; entry-point discoverability fixed. Zero
+  Azure (mock provider testable), P3 candidate boundary untouched. Out of scope (separate backlog):
+  admin three-tab layout, SOP-upload frontend UI (backend `POST /admin/sop/documents` exists but has
+  no frontend). Approved 2026-08-18 via `/office-hours`.
+
 ## What was intentionally NOT promoted
 
 The gstack project dir also holds machine-local, per-developer working state that does **not**
