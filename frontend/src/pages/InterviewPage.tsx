@@ -274,6 +274,16 @@ export function InterviewPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Self-heal the voice UI: if the session (re)connects while the page still shows the
+  // voice-unavailable fallback (e.g. an error fired mid-reconnect but a later attempt succeeded),
+  // clear the notice and return to voice — a LIVE session must never sit behind "语音不可用".
+  useEffect(() => {
+    if (voice.connectionState === "connected" && voiceUnavailable) {
+      setVoiceUnavailable(false);
+      setChannel("voice");
+    }
+  }, [voice.connectionState, voiceUnavailable]);
+
   // Voice mode: speak the backend-authoritative question text (Phase 4 voice→turn sub-design).
   // When a new prompt is current and voice is connected, have Voice Live read it verbatim rather
   // than let the agent autonomously generate — the backend keeps the question pointer. Keyed on the
