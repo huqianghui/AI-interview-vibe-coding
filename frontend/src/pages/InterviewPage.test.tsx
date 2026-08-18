@@ -139,6 +139,59 @@ describe("InterviewPage", () => {
     await waitFor(() => expect(screen.getByText(/no questions available/i)).toBeInTheDocument());
   });
 
+  it("shows the voice status legend with the current state highlighted, and hides it in text mode (task two)", async () => {
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "in_progress",
+      current_question: { question_id: "q1", prompt: "Question one?", index: 0, total: 2 },
+    });
+    // Mock the voice hook to a STABLE connected session in the "listening" audio state, so the
+    // legend renders deterministically in jsdom (no live WebRTC). The mock mirrors the real return
+    // shape (see useInterviewVoice `return {...}`).
+    // Promise-returning methods are plain arrows (not vi.fn) so afterEach's restoreAllMocks — which
+    // runs before RTL's unmount cleanup — can't clear their implementation and make the page's
+    // teardown effect call `undefined.catch(...)`.
+    const voiceMock = {
+      connect: () => Promise.resolve(),
+      disconnect: () => Promise.resolve(),
+      toggleMute: () => undefined,
+      commitAnswer: () => undefined,
+      speakQuestion: () => true,
+      isMuted: false,
+      connectionState: "connected" as const,
+      audioState: "listening" as const,
+      isAvatarConnected: false,
+    };
+    const voiceModule = await import("../hooks/useInterviewVoice");
+    vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(voiceMock);
+
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+    await screen.findByText("Question one?");
+
+    // Text mode first: the legend must NOT render (no live audio state to describe).
+    expect(screen.queryByTestId("voice-status-legend")).not.toBeInTheDocument();
+
+    // Switch to voice → the legend appears with one card per AudioState, and each tip is present.
+    await user.click(screen.getByRole("button", { name: /answer by voice/i }));
+    const legend = await screen.findByTestId("voice-status-legend");
+    const items = legend.querySelectorAll("[data-state]");
+    expect(items).toHaveLength(4); // idle / listening / speaking / muted
+
+    // The card matching the live audioState ("listening") is the ONLY highlighted one.
+    const active = legend.querySelectorAll('[data-active="true"]');
+    expect(active).toHaveLength(1);
+    expect(active[0].getAttribute("data-state")).toBe("listening");
+    expect(active[0].getAttribute("aria-current")).toBe("true");
+
+    // Tips are rendered (proves the i18n keys resolve for the current locale).
+    expect(screen.getByText(/your voice is being picked up/i)).toBeInTheDocument();
+    expect(screen.getByText(/your mic is off/i)).toBeInTheDocument();
+  });
+
   it("falls back to text when the voice connection fails (P5/P6b)", async () => {
     await i18n.changeLanguage("en-US");
     const user = userEvent.setup();

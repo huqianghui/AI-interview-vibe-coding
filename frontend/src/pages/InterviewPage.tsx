@@ -17,7 +17,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  Badge,
   Body1,
   Button,
   Card,
@@ -59,6 +58,48 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalXS,
     marginBottom: tokens.spacingVerticalL,
   },
+  // Status legend under the header: the four voice states shown side-by-side as tip cards, so the
+  // candidate can read what each state means AND see which one is live right now (the active card is
+  // lifted out of the dimmed row). Educational + a live indicator in one strip.
+  statusLegend: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: tokens.spacingHorizontalS,
+    width: "100%",
+    maxWidth: "1400px",
+    margin: "0 auto",
+    marginBottom: tokens.spacingVerticalL,
+  },
+  statusItem: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: tokens.spacingHorizontalS,
+    flex: "1 1 200px",
+    minWidth: "180px",
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+    borderRadius: tokens.borderRadiusLarge,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    background: tokens.colorNeutralBackground2,
+    // Inactive states recede; the active one is restored to full presence below.
+    opacity: 0.55,
+    transition: "opacity 200ms ease, border-color 200ms ease, box-shadow 200ms ease",
+  },
+  statusItemActive: {
+    opacity: 1,
+    border: `1px solid ${tokens.colorBrandStroke1}`,
+    boxShadow: tokens.shadow4,
+    background: tokens.colorNeutralBackground1,
+  },
+  statusDot: {
+    flexShrink: 0,
+    width: "10px",
+    height: "10px",
+    borderRadius: tokens.borderRadiusCircular,
+    marginTop: "5px",
+  },
+  statusTextCol: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 },
+  statusItemLabel: { fontWeight: tokens.fontWeightSemibold, color: tokens.colorNeutralForeground1 },
+  statusItemTip: { color: tokens.colorNeutralForeground3, lineHeight: tokens.lineHeightBase200 },
   // Full-width stage for the live Q&A: a title, a global top bar, then a two-column body.
   stageWrap: {
     padding: `${tokens.spacingVerticalL} ${tokens.spacingHorizontalXXL}`,
@@ -93,7 +134,6 @@ const useStyles = makeStyles({
     boxShadow: tokens.shadow4,
   },
   topBarSlot: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalM, minWidth: 0 },
-  topBarCenter: { justifyContent: "center", flex: 1 },
   topBarRight: { justifyContent: "flex-end" },
   // Segmented text/voice switch — one pill, two halves.
   segmented: {
@@ -128,6 +168,10 @@ const useStyles = makeStyles({
     // 560px that forced the stage taller than the screen. minHeight:0 lets flex shrink it.
     minHeight: 0,
     height: "100%",
+    // border-box so the vertical padding is INCLUDED in height:100% — otherwise the stage renders
+    // (row height + 40px padding), overflowing the viewport (cropping the figure's legs) and
+    // standing 40px taller than the right column. With border-box it matches the column exactly.
+    boxSizing: "border-box",
     borderRadius: tokens.borderRadiusXLarge,
     // Layered deep-violet: a soft radial spotlight on top of a diagonal night gradient, so the
     // digital human sits in a pool of light rather than a flat panel.
@@ -172,13 +216,16 @@ const useStyles = makeStyles({
   voiceButtons: { display: "flex", gap: tokens.spacingHorizontalS },
 });
 
-/** Fluent Badge color for each voice audio state (status prominence). */
-const AUDIO_BADGE_COLOR: Record<AudioState, "informative" | "success" | "subtle" | "brand"> = {
-  idle: "brand",
-  listening: "informative",
-  speaking: "success",
-  muted: "subtle",
+/** Dot color per state for the status legend, matching each state's semantic hue. */
+const STATUS_DOT_COLOR: Record<AudioState, string> = {
+  idle: tokens.colorBrandForeground1,
+  listening: tokens.colorPaletteBlueForeground2,
+  speaking: tokens.colorPaletteGreenForeground1,
+  muted: tokens.colorNeutralForeground3,
 };
+
+/** Order the four states read left-to-right in the legend. */
+const STATUS_ORDER: AudioState[] = ["idle", "listening", "speaking", "muted"];
 
 export function InterviewPage() {
   const styles = useStyles();
@@ -194,9 +241,6 @@ export function InterviewPage() {
   const [micDialogOpen, setMicDialogOpen] = useState(false);
   const [micRetried, setMicRetried] = useState(false);
   const [voiceUnavailable, setVoiceUnavailable] = useState(false);
-  // Intrinsic aspect ratio (w/h) of the live avatar video, so the stage can hug it snugly instead
-  // of leaving a dark gap below the figure. Null until the video reports its dimensions.
-  const [avatarRatio, setAvatarRatio] = useState<number | null>(null);
 
   const interviewRef = useRef<Interview | null>(null);
   interviewRef.current = interview;
@@ -494,40 +538,63 @@ export function InterviewPage() {
             <Body1 style={{ opacity: 0.7 }}>{t("tagline")}</Body1>
           </div>
 
-          {/* Global top bar: progress (left) · live voice state (center) · channel switch (right). */}
+          {/* Status legend (task two): describe each voice state as a tip AND highlight the current
+              one. Only meaningful in voice mode — in text mode there is no live audio state to
+              track, so the whole strip is hidden rather than showing a misleading "idle". */}
+          {voiceActive && (
+            <div
+              className={styles.statusLegend}
+              role="group"
+              aria-label={t("voice.statusLegendLabel")}
+              data-testid="voice-status-legend"
+            >
+              {STATUS_ORDER.map((state) => {
+                const active = badgeState === state;
+                return (
+                  <div
+                    key={state}
+                    className={mergeClasses(styles.statusItem, active && styles.statusItemActive)}
+                    data-state={state}
+                    data-active={active}
+                    aria-current={active ? "true" : undefined}
+                  >
+                    <span
+                      className={styles.statusDot}
+                      style={{ background: STATUS_DOT_COLOR[state] }}
+                      aria-hidden
+                    />
+                    <span className={styles.statusTextCol}>
+                      <Text size={200} className={styles.statusItemLabel}>
+                        {t(`voice.${state}`)}
+                      </Text>
+                      <Text size={100} className={styles.statusItemTip}>
+                        {t(`voice.statusTips.${state}`)}
+                      </Text>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Global top bar: progress (left) · channel switch (right). The live voice state used to
+              sit in the center here, but the status legend above already names AND highlights the
+              current state — a second badge was redundant and stole room the question progress needs
+              as the question count grows. */}
           <div className={styles.topBar} data-testid="interview-topbar">
             <div className={styles.topBarSlot}>
               <QuestionProgress current={q.index} total={q.total} />
-            </div>
-            <div className={mergeClasses(styles.topBarSlot, styles.topBarCenter)}>
-              {voiceActive && (
-                <Badge
-                  size="large"
-                  appearance="filled"
-                  color={AUDIO_BADGE_COLOR[badgeState]}
-                  data-testid="voice-status-badge"
-                >
-                  {t(`voice.${badgeState}`)}
-                </Badge>
-              )}
             </div>
             <div className={mergeClasses(styles.topBarSlot, styles.topBarRight)}>{channelSwitch}</div>
           </div>
 
           <div className={styles.grid}>
-            {/* Left: the stage — digital human / orb, dominant. Once a live avatar is streaming and
-                its aspect ratio is known, the stage HUGS the video (aspect-ratio sized, capped to
-                the available height, top-aligned) so there's no dark gap below the figure. The orb
-                phase keeps the full-height flush panel. */}
-            <div
-              className={styles.stage}
-              data-testid="interview-stage"
-              style={
-                voice.isAvatarConnected && avatarRatio
-                  ? { aspectRatio: String(avatarRatio), height: "auto", maxHeight: "100%", alignSelf: "start" }
-                  : undefined
-              }
-            >
+            {/* Left: the stage — digital human / orb, dominant. Fills the full grid height so the
+                stage + right column stay bottom-aligned and use the whole viewport. The avatar
+                video inside is `cover`-fit (see AvatarView) so a 16:9 stream fills a tall stage
+                without dark letterbox bands — the surrounding white margin is what gets cropped,
+                not the centered figure. */}
+            <div className={styles.stage} data-testid="interview-stage">
               <div className={styles.stageAvatar}>
                 {/* Once the digital human is streaming, keep it visible — do NOT gate on the
                     channel tab. Gating on voiceActive hid a LIVE avatar the moment the candidate
@@ -537,7 +604,6 @@ export function InterviewPage() {
                   ref={avatarVideoRef}
                   audioState={badgeState}
                   isAvatarConnected={voice.isAvatarConnected}
-                  onAspectChange={setAvatarRatio}
                 />
               </div>
             </div>

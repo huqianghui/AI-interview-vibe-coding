@@ -49,6 +49,13 @@ export const resources = {
         transcriptEmpty: "The conversation will appear here as you speak.",
         roleYou: "You",
         roleInterviewer: "Interviewer",
+        statusLegendLabel: "Voice status",
+        statusTips: {
+          idle: "Ready — the interviewer is waiting for you to start speaking.",
+          listening: "Listening — your voice is being picked up; speak naturally.",
+          speaking: "Speaking — the interviewer is talking; listen, then reply.",
+          muted: "Muted — your mic is off. Tap Unmute to be heard.",
+        },
       },
       micDialog: {
         title: "Microphone access needed",
@@ -119,6 +126,13 @@ export const resources = {
         transcriptEmpty: "对话内容将在你发言时显示在这里。",
         roleYou: "你",
         roleInterviewer: "面试官",
+        statusLegendLabel: "语音状态",
+        statusTips: {
+          idle: "就绪 —— 面试官在等你开始说话。",
+          listening: "聆听中 —— 正在采集你的声音，自然作答即可。",
+          speaking: "回应中 —— 面试官正在说话，听完再回答。",
+          muted: "已静音 —— 你的麦克风已关闭，点「取消静音」即可发声。",
+        },
       },
       micDialog: {
         title: "需要麦克风权限",
