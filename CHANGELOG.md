@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.28.1.2 (2026-08-18)
+
+### Docs
+- **`docs/IMPLEMENTATION-STATUS.md`: voice full path marked live-validated on the WS-proxy transport.**
+  Records that after the v0.26 migration to the backend Voice Live WS proxy, the full voice turn was
+  re-verified live (2026-08-18, `ai-foundary-hu-sweden-central2`) via the opt-in Playwright fake-mic
+  E2E: `proxy.connected` → `session.updated` with `avatar.ice_servers` → transcript deltas, 1080p
+  avatar video, KB `mcp_list_tools` called, no fallback. Docs-only.
+
 ## 0.28.1.1 (2026-08-18)
 
 ### Fixed
