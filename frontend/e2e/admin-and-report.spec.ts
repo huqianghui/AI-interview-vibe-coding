@@ -34,9 +34,11 @@ test("admin authors a bank + checklist, candidate gets a scored report", async (
   await page.getByPlaceholder("New question text").fill("Walk me through your pre-deploy checks.");
   await page.getByRole("button", { name: "Add question" }).click();
 
-  // Open the question, draft its checklist from the SOP (mock LLM → weights=100).
-  await page.getByRole("button", { name: /Walk me through your pre-deploy checks/ }).click();
-  await page.getByRole("button", { name: /Draft from SOP|Re-draft from SOP/ }).click();
+  // Open the question's inline rubric editor and (re)draft its checklist from the question/SOP.
+  // Design B auto-drafts a non-empty checklist at create time; "重新生成 / Generate" re-drafts it
+  // via the mock LLM (weights re-normalized to 100).
+  await page.getByRole("button", { name: /评分标准 \/ Rubric/ }).click();
+  await page.getByTestId("checklist-generate").click();
   await expect(page.getByText(/Weights total: 100/)).toBeVisible();
 
   // Make this the default bank so the candidate interview uses it.

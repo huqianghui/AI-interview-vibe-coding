@@ -80,10 +80,10 @@ test("candidate completes a text interview and reaches a report", async ({ page 
     void pinned;
   }
 
-  // Report reveal.
-  await expect(
-    page.getByText(/面试报告|interview report|报告已就绪|report is ready/i),
-  ).toBeVisible();
+  // Report reveal. Assert on the single, deterministic executive-view container (the same marker the
+  // loop breaks on) — the loose text regex matched the "report ready" banner AND both report titles,
+  // a strict-mode double-match that raced on when the exec row mounted.
+  await expect(page.getByTestId("report-exec")).toBeVisible();
 
   // F7: a follow-up cited the candidate's prior answer during the run.
   expect(sawFollowUpCitation).toBe(true);
