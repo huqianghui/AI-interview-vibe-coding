@@ -78,3 +78,112 @@ describe("useInterviewVoice teardown", () => {
     expect(cleanupMicSpy).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * Regression guard for the mid-session error-event bug (数字人有时候不出现).
+ *
+ * The interview page fires manual `response.create` events (speakQuestion / "I'm done"). With
+ * server-VAD auto-response enabled (v0.26), those can collide with an in-flight auto response and
+ * Azure rejects with an in-band `error` EVENT — the session itself stays alive (WS open, audio and
+ * avatar still streaming). Treating that as fatal flipped conn to "error", which made the interview
+ * page fall back to text and hide the live digital human. A mid-session error must be non-fatal;
+ * only a PRE-connect error may reject the connect() flow.
+ */
+describe("useInterviewVoice in-band error events", () => {
+  class FakeWebSocket {
+    static last: FakeWebSocket | null = null;
+    static OPEN = 1;
+    readyState = 1;
+    onmessage: ((e: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+    sent: string[] = [];
+    constructor(public url: string) {
+      FakeWebSocket.last = this;
+    }
+    send(data: string) {
+      this.sent.push(data);
+    }
+    close() {
+      this.readyState = 3;
+      this.onclose?.();
+    }
+    receive(msg: unknown) {
+      this.onmessage?.({ data: JSON.stringify(msg) });
+    }
+  }
+
+  it("keeps the session alive on an error event AFTER session.updated (non-fatal)", async () => {
+    FakeWebSocket.last = null;
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    const onError = vi.fn();
+    let hook!: ReturnType<typeof useInterviewVoice>;
+    function ErrHarness() {
+      hook = useInterviewVoice("iv-1", {
+        locale: "zh-CN",
+        tokenProvider: () => "tok",
+        onError,
+      });
+      return null;
+    }
+    const { unmount } = render(<ErrHarness />);
+
+    // Drive a successful connect: open the WS and deliver session.updated. connect() awaits the
+    // audio-context/mic setup before creating the WS, so flush microtasks until the WS exists.
+    let connectP!: Promise<void>;
+    act(() => {
+      connectP = hook.connect("zh-CN");
+    });
+    await act(async () => {
+      for (let i = 0; i < 20 && !FakeWebSocket.last; i++) await Promise.resolve();
+      FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
+      await connectP;
+    });
+    expect(hook.connectionState).toBe("connected");
+
+    // A mid-session error event (e.g. response.create collided with a VAD auto-response) must NOT
+    // kill the session: state stays connected, no onError to the page.
+    await act(async () => {
+      FakeWebSocket.last!.receive({
+        type: "error",
+        error: { message: "Conversation already has an active response" },
+      });
+    });
+    expect(hook.connectionState).toBe("connected");
+    expect(onError).not.toHaveBeenCalled();
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("still rejects connect() on an error event BEFORE session.updated (fatal)", async () => {
+    FakeWebSocket.last = null;
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    const onError = vi.fn();
+    let hook!: ReturnType<typeof useInterviewVoice>;
+    function ErrHarness() {
+      hook = useInterviewVoice("iv-1", {
+        locale: "zh-CN",
+        tokenProvider: () => "tok",
+        onError,
+      });
+      return null;
+    }
+    const { unmount } = render(<ErrHarness />);
+
+    let connectP!: Promise<void>;
+    act(() => {
+      connectP = hook.connect("zh-CN");
+      connectP.catch(() => undefined);
+    });
+    await act(async () => {
+      for (let i = 0; i < 20 && !FakeWebSocket.last; i++) await Promise.resolve();
+      FakeWebSocket.last!.receive({ type: "error", error: { message: "agent not found" } });
+      await expect(connectP).rejects.toThrow("agent not found");
+    });
+    expect(onError).toHaveBeenCalled();
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+});

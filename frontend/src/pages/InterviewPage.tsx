@@ -339,9 +339,10 @@ export function InterviewPage() {
         >
           {t("voice.useText")}
         </Button>
+        {/* Never permanently disabled: a transient failure (proxy hiccup, network blip) must stay
+            retryable — startVoice clears voiceUnavailable on a successful reconnect. */}
         <Button
           appearance={channel === "voice" ? "primary" : "secondary"}
-          disabled={voiceUnavailable}
           onClick={startVoice}
         >
           {t("voice.useVoice")}
@@ -412,10 +413,14 @@ export function InterviewPage() {
             {/* Left: the stage — digital human / orb, dominant. */}
             <div className={styles.stage} data-testid="interview-stage">
               <div className={styles.stageAvatar}>
+                {/* Once the digital human is streaming, keep it visible — do NOT gate on the
+                    channel tab. Gating on voiceActive hid a LIVE avatar the moment the candidate
+                    peeked at the text tab (the "出现了又消失" symptom); the stream itself is
+                    unaffected by the tab, so visibility follows only the actual video state. */}
                 <AvatarView
                   ref={avatarVideoRef}
                   audioState={badgeState}
-                  isAvatarConnected={voiceActive && voice.isAvatarConnected}
+                  isAvatarConnected={voice.isAvatarConnected}
                 />
               </div>
               {voiceActive && (
