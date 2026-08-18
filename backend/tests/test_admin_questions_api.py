@@ -78,6 +78,29 @@ async def test_edit_and_delete_question(client):
     assert listing == []
 
 
+async def test_add_question_auto_creates_checklist(client):
+    # Design B: creating a question auto-drafts a non-empty checklist (mock LLM in CI). The
+    # response and the listing both report a non-zero checklist_item_count.
+    bank = (await client.post("/admin/question-banks", headers=AUTH, json={"name": "B"})).json()
+    bank_id = bank["bank_id"]
+    created = (
+        await client.post(
+            f"/admin/question-banks/{bank_id}/questions",
+            headers=AUTH,
+            json={"text": "Describe the safety procedure."},
+        )
+    ).json()
+    assert created["checklist_item_count"] > 0
+
+    listing = (await client.get(f"/admin/question-banks/{bank_id}/questions", headers=AUTH)).json()
+    assert listing[0]["checklist_item_count"] == created["checklist_item_count"]
+
+    # The auto-created checklist is fetchable and non-empty.
+    got = await client.get(f"/admin/checklists/questions/{created['question_id']}", headers=AUTH)
+    assert got.status_code == 200
+    assert len(got.json()["items"]) > 0
+
+
 async def test_reorder_questions(client):
     bank = (await client.post("/admin/question-banks", headers=AUTH, json={"name": "B"})).json()
     bank_id = bank["bank_id"]

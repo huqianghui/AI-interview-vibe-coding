@@ -12,10 +12,11 @@ reorder) rides on ``create_bank`` / ``add_question`` here; the demo ships seed +
 
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.checklist import Checklist, ChecklistItem
 from app.models.question import Question, QuestionBank
 
 
@@ -150,6 +151,18 @@ async def update_question(db: AsyncSession, question_id: str, **changes: object)
 
 async def delete_question(db: AsyncSession, question_id: str) -> None:
     q = await get_question(db, question_id)
+    # Cascade: a question's checklists + their items reference it by FK (no DB-level ON DELETE
+    # cascade on the SQLite schema), so delete them first or the question DELETE hits a FK
+    # constraint. Every question now owns a checklist (Design B: created at build time), which is
+    # what surfaced this — previously only manually-drafted questions had one.
+    checklist_ids = (
+        (await db.execute(select(Checklist.id).where(Checklist.question_id == question_id)))
+        .scalars()
+        .all()
+    )
+    if checklist_ids:
+        await db.execute(delete(ChecklistItem).where(ChecklistItem.checklist_id.in_(checklist_ids)))
+        await db.execute(delete(Checklist).where(Checklist.question_id == question_id))
     await db.delete(q)
     await db.commit()
 

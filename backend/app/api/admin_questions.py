@@ -6,18 +6,23 @@ exposes ``expected_points``; these admin routes DO surface it (it's the intervie
 to the rubric) and are gated by ``require_admin`` (SPEC P3).
 """
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.dependencies import require_role
+from app.services import checklist_service
 from app.services import question_service as svc
 from app.services.question_service import (
     QuestionBankConflict,
     QuestionBankNotFound,
     QuestionNotFound,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/admin/question-banks",
@@ -67,6 +72,9 @@ class QuestionOut(BaseModel):
     enabled: bool
     expected_points: list[str]
     max_follow_ups: int
+    # Number of items in this question's default checklist (0 = no rubric configured yet). Drives
+    # the editor's rubric-status marker; a count, never rubric content, so P3 stays intact.
+    checklist_item_count: int = 0
 
 
 class ReorderIn(BaseModel):
@@ -84,7 +92,7 @@ def _bank_out(bank) -> BankOut:
     )
 
 
-def _question_out(q) -> QuestionOut:
+def _question_out(q, checklist_item_count: int = 0) -> QuestionOut:
     import json
 
     try:
@@ -100,6 +108,7 @@ def _question_out(q) -> QuestionOut:
         enabled=q.enabled,
         expected_points=points,
         max_follow_ups=q.max_follow_ups,
+        checklist_item_count=checklist_item_count,
     )
 
 
@@ -138,7 +147,8 @@ async def list_questions(bank_id: str, db: AsyncSession = Depends(get_db)) -> li
     except QuestionBankNotFound as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bank not found") from exc
     rows = await svc.list_questions_for_bank(db, bank_id, enabled_only=False)
-    return [_question_out(q) for q in rows]
+    counts = await checklist_service.default_item_counts(db, [q.id for q in rows])
+    return [_question_out(q, counts.get(q.id, 0)) for q in rows]
 
 
 @router.post(
@@ -164,7 +174,17 @@ async def add_question(
         max_follow_ups=body.max_follow_ups,
         follow_up_prompt=body.follow_up_prompt,
     )
-    return _question_out(q)
+    # Design B invariant: every question has a non-empty, editable checklist from the moment it is
+    # created — drafted from the question text (SOP-optional). We do this here (not in add_question)
+    # so a drafting failure can never roll back the already-committed question: the AI call is a
+    # best-effort convenience, not part of the create transaction. On failure the question still
+    # exists with no checklist and the admin can regenerate/author it in the editor.
+    try:
+        await checklist_service.draft_checklist(db, q.id)
+    except Exception:  # noqa: BLE001 — never block question creation on rubric drafting
+        logger.warning("auto-draft checklist failed for question %s", q.id, exc_info=True)
+    counts = await checklist_service.default_item_counts(db, [q.id])
+    return _question_out(q, counts.get(q.id, 0))
 
 
 @router.patch("/questions/{question_id}", response_model=QuestionOut)

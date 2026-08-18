@@ -153,6 +153,80 @@ describe("AdminPage", () => {
     await waitFor(() => expect(screen.getByTestId("cfg-status")).toHaveTextContent(/saved/i));
   });
 
+  it("edits and saves a question's checklist (rubric), round-tripping the normalized result", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    vi.spyOn(admin, "getAiFoundryConfig").mockResolvedValue(EMPTY_CFG);
+    vi.spyOn(admin, "listBanks").mockResolvedValue([
+      {
+        bank_id: "b1",
+        name: "Demo Bank",
+        description: "",
+        language: "zh-CN",
+        enabled: true,
+        is_default: true,
+      },
+    ]);
+    vi.spyOn(admin, "listBankQuestions").mockResolvedValue([
+      {
+        question_id: "q1",
+        text: "How are you?",
+        language: "zh-CN",
+        order_index: 0,
+        enabled: true,
+        expected_points: [],
+        max_follow_ups: 0,
+        checklist_item_count: 2,
+      },
+    ]);
+    vi.spyOn(admin, "getChecklist").mockResolvedValue({
+      checklist_id: "c1",
+      question_id: "q1",
+      prompt_version: "v1",
+      weights_sum: 100,
+      items: [
+        { kind: "required", text: "on topic", weight: 60, source_quote: "", source_page: null, order_index: 0 },
+        { kind: "recommended", text: "specific", weight: 40, source_quote: "", source_page: null, order_index: 1 },
+      ],
+    });
+    const editItems = vi.spyOn(admin, "editChecklistItems").mockResolvedValue({
+      checklist_id: "c1",
+      question_id: "q1",
+      prompt_version: "v1",
+      weights_sum: 100,
+      items: [
+        { kind: "required", text: "on topic and complete", weight: 100, source_quote: "", source_page: null, order_index: 0 },
+      ],
+    });
+
+    renderPage();
+    await signIn(user);
+
+    // Open the bank → its questions, with the rubric-status marker showing the item count.
+    await user.click(await screen.findByText("Demo Bank"));
+    await waitFor(() => expect(screen.getByTestId("rubric-status-q1")).toHaveTextContent(/2/));
+
+    // Open the rubric editor for the question.
+    await user.click(screen.getByTestId("rubric-btn-q1"));
+    await waitFor(() => expect(screen.getByTestId("checklist-text-0")).toHaveValue("on topic"));
+
+    // Edit the first item's text and save → editChecklistItems is called with the working set.
+    await user.clear(screen.getByTestId("checklist-text-0"));
+    await user.type(screen.getByTestId("checklist-text-0"), "on topic and complete");
+    await user.click(screen.getByTestId("checklist-save"));
+
+    await waitFor(() => expect(editItems).toHaveBeenCalled());
+    expect(editItems).toHaveBeenCalledWith(
+      "c1",
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "required", text: "on topic and complete" }),
+      ]),
+    );
+    // The normalized server response is adopted (1 item, w=100).
+    await waitFor(() => expect(screen.getByTestId("checklist-text-0")).toHaveValue("on topic and complete"));
+    expect(screen.queryByTestId("checklist-text-1")).not.toBeInTheDocument();
+  });
+
   it("loads model + knowledge-base options from the Foundry API into dropdowns", async () => {
     const user = userEvent.setup();
     mockAdminLogin();
