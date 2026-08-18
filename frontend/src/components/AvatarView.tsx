@@ -28,17 +28,21 @@ const useStyles = makeStyles({
     alignItems: "center",
     justifyContent: "center",
     // Fill the (flex-grown) stage so the avatar video is as large as the space allows, rather than a
-    // fixed small box. Falls back to a sensible min so a voice-only orb still has presence.
+    // fixed small box. minHeight:0 so it never forces the bounded stage to overflow the viewport.
     width: "100%",
     height: "100%",
-    minHeight: "360px",
+    minHeight: 0,
   },
   video: {
     position: "absolute",
     inset: "0",
     width: "100%",
     height: "100%",
-    objectFit: "cover",
+    // `contain` (not `cover`): fit the whole figure inside the stage so the face is never cropped
+    // off the top or zoomed in when the stage is short/wide. Anchored to the top so the head stays
+    // in view when letterboxed.
+    objectFit: "contain",
+    objectPosition: "center top",
     borderRadius: "12px",
     transition: "opacity 300ms ease",
   },
@@ -50,11 +54,13 @@ interface AvatarViewProps {
   audioState: AudioState;
   /** True once a real avatar video track is playing → show video, hide the orb. */
   isAvatarConnected: boolean;
+  /** Reports the avatar video's intrinsic aspect ratio (w/h) so the stage can hug it (no dark gap). */
+  onAspectChange?: (ratio: number) => void;
 }
 
 /** Ref is the `<video>` element the voice hook attaches the avatar stream to (via `videoRef`). */
 export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function AvatarView(
-  { audioState, isAvatarConnected },
+  { audioState, isAvatarConnected, onAspectChange },
   ref,
 ) {
   const styles = useStyles();
@@ -67,6 +73,12 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
         muted
         className={mergeClasses(styles.video, isAvatarConnected ? styles.shown : styles.hidden)}
         data-testid="avatar-video"
+        onLoadedMetadata={(e) => {
+          const v = e.currentTarget;
+          if (v.videoWidth > 0 && v.videoHeight > 0) {
+            onAspectChange?.(v.videoWidth / v.videoHeight);
+          }
+        }}
       />
       {!isAvatarConnected && <AudioOrb audioState={audioState} />}
     </div>

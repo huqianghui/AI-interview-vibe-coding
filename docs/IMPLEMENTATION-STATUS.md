@@ -5,7 +5,7 @@ validation state. The spec of record is [`../SPEC.md`](../SPEC.md); the planning
 [`planning/`](planning/); per-release detail is in [`../CHANGELOG.md`](../CHANGELOG.md). To actually
 **verify** the requirements and run the system, see [`VERIFICATION.md`](VERIFICATION.md).
 
-Status as of **v0.28.0.0**. Backend: 411 tests, 86% coverage. Frontend: 97 unit/component tests +
+Status as of **v0.28.1.0**. Backend: 411 tests, 86% coverage. Frontend: 97 unit/component tests +
 Playwright E2E (real Chromium). Every merge passed CI (ruff check + ruff format + pytest;
 tsc + vitest + eslint + Playwright E2E). Local dev / CI run entirely on mock providers — zero Azure
 needed to build or test.

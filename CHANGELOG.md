@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.28.1.0 (2026-08-18)
+
+### Fixed
+- **Live /interview screen no longer overflows the viewport.** The stage used an unbounded
+  `min-height`, so once the digital-human video (or a long transcript) rendered, the whole page
+  grew past the screen and pushed the new top bar off-screen. The live layout is now pinned to the
+  viewport height (`100vh`) with internal scrolling, so the top bar, stage, and transcript always
+  stay on one screen and the transcript scrolls internally.
+- **The digital human is sized "刚刚好" — the stage hugs the avatar.** The stage now takes the
+  avatar video's own aspect ratio (reported on `loadedmetadata`), capped to the available height and
+  top-aligned, so there's no large dark gap below the figure. The video uses `object-fit: contain`
+  (was `cover`), so the full figure — including the face — is always visible instead of cropped or
+  zoomed. The voice-only orb keeps the full-height stage panel.
+
 ## 0.28.0.0 (2026-08-18)
 
 The **/interview** live screen was reorganized for a cleaner, more polished look — no change to
