@@ -16,6 +16,17 @@
  * merely once the RTCPeerConnection finishes negotiating — matches the existing frame-gate pattern
  * used by the direct-WebRTC `useInterviewVoice` so `AvatarView`'s fallback orb never shows a blank
  * connected-but-frameless box.
+ *
+ * MEDIA-LAYER SELF-HEAL (the "数字人掉成球且回不来" fix): the avatar media path is INDEPENDENT of
+ * the main Voice Live WS, so `useInterviewVoice`'s WS-close reconnect does NOT cover an avatar-only
+ * media drop (TURN relay churn, NAT rebind, Azure ending the avatar track between turns). Before,
+ * `oniceconnectionstatechange` only logged and `track.onended` flipped straight to the orb with no
+ * path back — one media blip meant orb for the rest of the session. Now this hook recovers on its
+ * own: a transient ICE `disconnected` is given a short grace window (no orb flash if it self-heals);
+ * a `failed` state or an ended track — or a grace window that expires still-down — triggers a bounded
+ * re-handshake (rebuild the PC, re-send `session.avatar.connect`, await a fresh `server_sdp`) reusing
+ * the last ICE servers + WS-send callback, up to MAX_RECOVERY_ATTEMPTS with backoff. The recovery
+ * budget resets once real frames paint again, so a later independent drop gets a fresh set of tries.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
@@ -24,6 +35,15 @@ import type { RefObject } from "react";
 const ICE_GATHERING_TIMEOUT_MS = 8000;
 /** Azure's SDP answer (`session.avatar.connecting`) must arrive within this window. */
 const SERVER_SDP_TIMEOUT_MS = 15000;
+/** An ICE `disconnected` often self-heals (brief network blip). Wait this long before treating it
+ * as a real drop and rebuilding — so a momentary blip never flashes the fallback orb. `failed` is
+ * terminal and skips this grace (it won't recover without a full renegotiation). */
+const DISCONNECTED_GRACE_MS = 3000;
+/** Cap re-handshake attempts per drop so a persistently-broken media path can't loop forever (the
+ * orb is the honest fallback once we give up). Budget resets when real frames paint again. */
+const MAX_RECOVERY_ATTEMPTS = 3;
+/** Backoff before each re-handshake attempt (index = attempt-1). */
+const RECOVERY_BACKOFF_MS = [500, 1500, 3000];
 
 export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -37,12 +57,30 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
   // failure AI-Coach avoids by always mounting its <video>. We instead re-attach defensively.
   const pendingStreamRef = useRef<MediaStream | null>(null);
 
-  /**
-   * Start the avatar WebRTC handshake.
-   * @param iceServers ICE servers from `session.updated`'s `session.avatar.ice_servers`.
-   * @param sendSdpOffer Sends the base64-encoded SDP offer as `session.avatar.connect` over the
-   *   Voice Live WS (caller's responsibility — this hook has no WS reference).
-   */
+  // --- self-heal state -----------------------------------------------------------------------
+  // Last handshake inputs, stashed so a media-only drop can re-handshake without waiting for a new
+  // `session.updated` (the WS is usually still open through an avatar media blip).
+  const iceServersRef = useRef<RTCIceServer[]>([]);
+  const sendOfferRef = useRef<((clientSdp: string) => Promise<void> | void) | null>(null);
+  const recoveryAttemptsRef = useRef(0);
+  const recoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const graceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recoveringRef = useRef(false);
+  // Bumped by disconnect()/connect() so a stale in-flight recovery (or a dead PC's late event) can
+  // detect it's been superseded and bail instead of clobbering the current connection.
+  const genRef = useRef(0);
+
+  const clearTimers = useCallback(() => {
+    if (recoveryTimerRef.current) {
+      clearTimeout(recoveryTimerRef.current);
+      recoveryTimerRef.current = null;
+    }
+    if (graceTimerRef.current) {
+      clearTimeout(graceTimerRef.current);
+      graceTimerRef.current = null;
+    }
+  }, []);
+
   /** Attach a video MediaStream to the <video> element + flip `isConnected` once it paints real
    * frames. Safe to call repeatedly; a no-op if the element isn't mounted yet (the stream stays in
    * `pendingStreamRef` and the ref-watching effect below re-attaches it once it mounts). */
@@ -75,6 +113,10 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
           settled = true;
           stopPolling();
           console.info(`[avatar-stream] video HAS frames: ${videoEl.videoWidth}x${videoEl.videoHeight}`);
+          // Real frames are painting again → this drop (if any) is fully recovered; hand the next
+          // independent drop a fresh recovery budget.
+          recoveryAttemptsRef.current = 0;
+          recoveringRef.current = false;
           setIsConnected(true);
         }
       };
@@ -99,31 +141,60 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
     [videoRef],
   );
 
-  const connect = useCallback(
-    async (iceServers: RTCIceServer[], sendSdpOffer: (clientSdp: string) => Promise<void> | void) => {
-      console.info("[avatar-stream] connect() entry, iceServers=", iceServers.length);
-      pendingStreamRef.current = null;
-      if (videoRef.current) videoRef.current.srcObject = null;
+  // Forward declaration so wirePc (used by both connect and recovery) can call the recovery routine.
+  const attemptRecoveryRef = useRef<((reason: string) => void) | null>(null);
 
-      const pc = new RTCPeerConnection({
-        iceServers: iceServers.length > 0 ? iceServers : undefined,
-        bundlePolicy: "max-bundle",
-      });
-      pcRef.current = pc;
-      console.info("[avatar-stream] RTCPeerConnection created");
-
+  /** Wire connection/track handlers on a freshly-built PC. Shared by the initial connect and every
+   * recovery rebuild. Guards every state-triggered action on `pc === pcRef.current` so a superseded
+   * (closed) PC's late-firing event can't touch the live connection. */
+  const wirePc = useCallback(
+    (pc: RTCPeerConnection) => {
       pc.onconnectionstatechange = () => {
         console.info("[avatar-stream] connectionState:", pc.connectionState);
       };
       pc.oniceconnectionstatechange = () => {
-        console.info("[avatar-stream] iceConnectionState:", pc.iceConnectionState);
+        if (pc !== pcRef.current) return;
+        const state = pc.iceConnectionState;
+        console.info("[avatar-stream] iceConnectionState:", state);
+        if (state === "connected" || state === "completed") {
+          // Recovered (or never really lost) — cancel any pending grace/rebuild.
+          if (graceTimerRef.current) {
+            clearTimeout(graceTimerRef.current);
+            graceTimerRef.current = null;
+          }
+          return;
+        }
+        if (state === "failed") {
+          // Terminal: won't self-heal without renegotiation → rebuild now.
+          attemptRecoveryRef.current?.("ice-failed");
+          return;
+        }
+        if (state === "disconnected") {
+          // Often a transient blip. Give it a grace window to self-heal before rebuilding, so we
+          // don't flash the orb or tear down a connection that's about to come back on its own.
+          if (graceTimerRef.current) return;
+          graceTimerRef.current = setTimeout(() => {
+            graceTimerRef.current = null;
+            if (pc !== pcRef.current) return;
+            const s = pc.iceConnectionState;
+            if (s === "disconnected" || s === "failed") {
+              attemptRecoveryRef.current?.("ice-disconnected-grace-expired");
+            }
+          }, DISCONNECTED_GRACE_MS);
+        }
       };
 
       pc.ontrack = (event) => {
         console.info("[avatar-stream] ontrack kind=", event.track.kind, "streams=", event.streams.length);
         if (event.track.kind === "video") {
           const stream = event.streams[0] ?? new MediaStream([event.track]);
-          event.track.onended = () => setIsConnected(false);
+          event.track.onended = () => {
+            // A video track ending is a strong drop signal — try to rebuild rather than fall to the
+            // orb forever (the pre-fix behavior). Guarded so a stale PC's ended track is ignored.
+            if (pc !== pcRef.current) return;
+            console.warn("[avatar-stream] video track ended → attempting recovery");
+            attemptRecoveryRef.current?.("track-ended");
+          };
           attachStream(stream);
           return;
         }
@@ -134,9 +205,21 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
         audio.style.display = "none";
         document.body.appendChild(audio);
         audio.play().catch(() => undefined);
+        // Replace any previous audio element (recovery builds a new track) to avoid orphans.
+        if (audioElRef.current) {
+          audioElRef.current.srcObject = null;
+          audioElRef.current.remove();
+        }
         audioElRef.current = audio;
       };
+    },
+    [attachStream],
+  );
 
+  /** Run one offer/answer handshake on `pc`: gather ICE, send the base64 offer via `sendSdpOffer`,
+   * await the server SDP answer, apply it. Rejects on ICE/SDP timeout. Shared by connect + recovery. */
+  const runHandshake = useCallback(
+    async (pc: RTCPeerConnection, sendSdpOffer: (clientSdp: string) => Promise<void> | void) => {
       // Two recvonly transceivers, registered BEFORE createOffer — the avatar only streams TO us.
       pc.addTransceiver("video", { direction: "recvonly" });
       pc.addTransceiver("audio", { direction: "recvonly" });
@@ -182,7 +265,104 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
       await pc.setRemoteDescription({ type: "answer", sdp: serverSdp });
       console.info("[avatar-stream] setRemoteDescription success; awaiting first video frame");
     },
-    [videoRef, attachStream],
+    [],
+  );
+
+  /** Rebuild the avatar media connection after a drop, reusing the last ICE servers + WS-send
+   * callback. Bounded by MAX_RECOVERY_ATTEMPTS with backoff; falls back to the orb when exhausted. */
+  const attemptRecovery = useCallback(
+    (reason: string) => {
+      const sendSdpOffer = sendOfferRef.current;
+      if (!sendSdpOffer) return; // never connected / already disconnected — nothing to rebuild.
+      if (recoveringRef.current) return; // a rebuild is already in flight.
+
+      if (recoveryAttemptsRef.current >= MAX_RECOVERY_ATTEMPTS) {
+        console.warn(
+          `[avatar-stream] recovery exhausted after ${MAX_RECOVERY_ATTEMPTS} attempts (${reason}); showing orb`,
+        );
+        recoveringRef.current = false;
+        setIsConnected(false);
+        return;
+      }
+
+      recoveringRef.current = true;
+      const attempt = ++recoveryAttemptsRef.current;
+      const backoff = RECOVERY_BACKOFF_MS[attempt - 1] ?? 3000;
+      console.warn(`[avatar-stream] recovery attempt ${attempt}/${MAX_RECOVERY_ATTEMPTS} (${reason}) in ${backoff}ms`);
+      // Show the orb while we rebuild — the frozen last frame would otherwise masquerade as live.
+      setIsConnected(false);
+      clearTimers();
+
+      const gen = genRef.current;
+      recoveryTimerRef.current = setTimeout(() => {
+        recoveryTimerRef.current = null;
+        if (gen !== genRef.current) return; // superseded by disconnect()/reconnect — abandon.
+
+        // Tear down the old PC before rebuilding.
+        if (pcRef.current) {
+          pcRef.current.close();
+          pcRef.current = null;
+        }
+        if (videoRef.current) videoRef.current.srcObject = null;
+
+        const pc = new RTCPeerConnection({
+          iceServers: iceServersRef.current.length > 0 ? iceServersRef.current : undefined,
+          bundlePolicy: "max-bundle",
+        });
+        pcRef.current = pc;
+        wirePc(pc);
+        console.info("[avatar-stream] recovery: RTCPeerConnection rebuilt");
+
+        runHandshake(pc, sendSdpOffer)
+          .then(() => {
+            // Handshake applied. `recoveringRef` stays true until real frames paint (reset in
+            // reflectDimensions) so overlapping ICE events don't spawn a second rebuild meanwhile.
+            console.info("[avatar-stream] recovery handshake completed; awaiting frames");
+          })
+          .catch((err: unknown) => {
+            if (gen !== genRef.current) return;
+            console.warn("[avatar-stream] recovery handshake failed", err);
+            recoveringRef.current = false;
+            // Retry the next attempt (bounded); attemptRecovery re-checks the budget.
+            attemptRecoveryRef.current?.("recovery-handshake-failed");
+          });
+      }, backoff);
+    },
+    [clearTimers, runHandshake, videoRef, wirePc],
+  );
+  attemptRecoveryRef.current = attemptRecovery;
+
+  /**
+   * Start the avatar WebRTC handshake.
+   * @param iceServers ICE servers from `session.updated`'s `session.avatar.ice_servers`.
+   * @param sendSdpOffer Sends the base64-encoded SDP offer as `session.avatar.connect` over the
+   *   Voice Live WS (caller's responsibility — this hook has no WS reference).
+   */
+  const connect = useCallback(
+    async (iceServers: RTCIceServer[], sendSdpOffer: (clientSdp: string) => Promise<void> | void) => {
+      console.info("[avatar-stream] connect() entry, iceServers=", iceServers.length);
+      // Fresh session: reset recovery bookkeeping and stash inputs for any later media-only rebuild.
+      genRef.current++;
+      clearTimers();
+      recoveringRef.current = false;
+      recoveryAttemptsRef.current = 0;
+      iceServersRef.current = iceServers;
+      sendOfferRef.current = sendSdpOffer;
+
+      pendingStreamRef.current = null;
+      if (videoRef.current) videoRef.current.srcObject = null;
+
+      const pc = new RTCPeerConnection({
+        iceServers: iceServers.length > 0 ? iceServers : undefined,
+        bundlePolicy: "max-bundle",
+      });
+      pcRef.current = pc;
+      wirePc(pc);
+      console.info("[avatar-stream] RTCPeerConnection created");
+
+      await runHandshake(pc, sendSdpOffer);
+    },
+    [clearTimers, runHandshake, videoRef, wirePc],
   );
 
   // Re-attach the avatar stream if the <video> element mounts AFTER `ontrack` already fired. The
@@ -209,6 +389,12 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
   }, []);
 
   const disconnect = useCallback(() => {
+    genRef.current++; // supersede any in-flight recovery so its timer/handshake bails.
+    clearTimers();
+    recoveringRef.current = false;
+    recoveryAttemptsRef.current = 0;
+    sendOfferRef.current = null;
+    iceServersRef.current = [];
     sdpResolverRef.current = null;
     pendingStreamRef.current = null;
     if (pcRef.current) {
@@ -222,7 +408,7 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
       audioElRef.current = null;
     }
     setIsConnected(false);
-  }, [videoRef]);
+  }, [clearTimers, videoRef]);
 
   return { connect, disconnect, handleServerSdp, isConnected };
 }

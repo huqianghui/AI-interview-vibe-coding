@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.29.0.0 (2026-08-18)
+
+### Added
+- **Digital-human self-heal — the avatar recovers from a media-layer drop instead of falling to the
+  orb forever (数字人掉成球且回不来).** The avatar's video/audio ride a *separate* `RTCPeerConnection`
+  from the main Voice Live WS, so the WS-close reconnect never covered an avatar-only media drop
+  (TURN relay churn, NAT rebind, Azure ending the track between turns). Before, `oniceconnectionstatechange`
+  only logged and `track.onended` flipped straight to the orb with no path back — one blip meant orb
+  for the rest of the session. Now `useAvatarStream` recovers on its own: a transient ICE
+  `disconnected` gets a 3s grace window (no orb flash if it self-heals); an ICE `failed`, an ended
+  track, or a grace window that expires still-down triggers a bounded re-handshake (rebuild the PC,
+  re-send `session.avatar.connect`, await a fresh `server_sdp`) reusing the last ICE servers, up to
+  3 attempts with 500/1500/3000ms backoff. A generation counter supersedes stale in-flight recoveries
+  on `disconnect()`/reconnect, and the recovery budget resets once real frames paint again. Covered
+  by a new `useAvatarStream.test.tsx` regression suite (failed→rebuild, transient→no-rebuild,
+  disconnect cancels rebuild, bounded attempts).
+- **Voice status legend on the live interview screen.** In voice mode the four audio states
+  (Ready / Listening / Speaking / Muted) render as a strip of tip cards under the header — each with
+  a one-line explanation — and the live state is lifted out of the dimmed row so the candidate can
+  read what each state means *and* see which one is active. Hidden in text mode (no live audio state
+  to describe). New bilingual `voice.statusLegendLabel` + `voice.statusTips.*` strings.
+
+### Changed
+- **Question progress is a full-width, dynamic rail.** The old centered dot-cluster is now a
+  fraction label plus a rail that flex-grows to fill the top bar, with an animated gradient fill that
+  eases toward the current question and a gently pulsing active dot — it reads as progress and no
+  longer hugs one side as the question count grows.
+- **Removed the redundant live-state badge from the top bar.** The status legend already names and
+  highlights the current voice state, so the second badge in the top-bar center was redundant and
+  stole room the question progress needs. The top bar is now progress (left) · channel switch (right).
+- **Avatar video fills the stage (`object-fit: cover`).** The stage no longer hugs the reported
+  video aspect ratio; it fills the full grid height (`box-sizing: border-box` so vertical padding is
+  counted in `height:100%`), and the 16:9 stream is `cover`-fit — cropping the figure's wide white
+  side margins, never the centered person — so there are no dark letterbox bands and the stage stays
+  bottom-aligned with the control column.
+
 ## 0.28.1.2 (2026-08-18)
 
 ### Docs
