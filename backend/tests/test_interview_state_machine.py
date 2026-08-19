@@ -225,6 +225,64 @@ async def test_verbal_cue_source_strips_cue_from_stored_answer(db_session):
     assert "substantive answer" in answer.content
 
 
+# --- empty-answer rejection (requirement 3) --------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blank", ["", "   ", "\n\t "])
+async def test_answer_finalized_rejects_empty_content(db_session, blank):
+    # Defense in depth behind the API 422: an empty/whitespace answer must never advance the
+    # interview or be stored as a silent blank ("未作答" in the report).
+    cand = await _candidate(db_session)
+    interview = await state_machine.start_interview(db_session, cand.id)
+    with pytest.raises(InterviewStateError):
+        await state_machine.answer_finalized(db_session, interview, blank)
+    # Still on the first question — nothing advanced, no candidate answer recorded (only the
+    # opening interviewer question turn exists).
+    assert interview.current_question_index == 0
+    turns = await _turns(db_session, interview.id)
+    assert [t for t in turns if t.role == "candidate"] == []
+
+
+@pytest.mark.asyncio
+async def test_answer_finalized_rejects_verbal_cue_that_strips_to_empty(db_session):
+    # A verbal-cue message that is ONLY the cue ("我答完了") strips to empty content — it must be
+    # rejected, not stored as a blank answer that advances the interview.
+    cand = await _candidate(db_session)
+    interview = await state_machine.start_interview(db_session, cand.id)
+    with pytest.raises(InterviewStateError):
+        await state_machine.answer_finalized(db_session, interview, "我答完了", source="verbal_cue")
+    assert interview.current_question_index == 0
+
+
+# --- pre-scoring review (requirement 4) ------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_review_answers_pairs_by_question_id_in_bank_order(db_session):
+    # Requirement 2/4: review pairs each candidate answer to its question by explicit question_id
+    # and returns them in bank order — the exact contract the frontend review screen relies on.
+    cand = await _candidate(db_session)
+    interview = await state_machine.start_interview(db_session, cand.id)
+    interview = await _answer_until_complete(db_session, interview)
+    assert interview.status == "completed"
+
+    answers = await state_machine.review_answers(db_session, interview)
+    assert answers, "a completed interview must have answers to review"
+    # Bank order: indices are strictly ascending and each carries its own prompt + answer text.
+    indices = [a["index"] for a in answers]
+    assert indices == sorted(indices)
+    for a in answers:
+        assert a["question_id"]
+        assert a["prompt"]
+        assert a["answer_text"].strip()
+    # Each returned question_id matches the bank question at that index (paired, not positional).
+    for a in answers:
+        bank_q = question_at(QUESTIONS, a["index"])
+        assert bank_q is not None
+        assert bank_q.id == a["question_id"]
+
+
 # --- resume (F6 edge b) ----------------------------------------------------
 
 

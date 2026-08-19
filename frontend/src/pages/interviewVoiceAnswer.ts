@@ -2,6 +2,12 @@
  * Pure helper for finalizing a voice answer turn (Phase 4), split out of InterviewPage so the
  * page file only exports a component (react-refresh) and this logic is unit-testable without the
  * live voice path (which can't run in jsdom).
+ *
+ * NOTE: the live page no longer calls this. `onVoiceDone` now awaits `useInterviewVoice`'s
+ * `commitAnswer()`, which resolves THIS turn's finalized transcript directly from the STT
+ * round-trip (fixing the stale-`segments` race that submitted the previous turn's text). This
+ * pure helper + its unit tests are retained as a cheap, side-effect-free utility and can be
+ * removed in a later cleanup.
  */
 import type { TranscriptSegment } from "../types/voice";
 

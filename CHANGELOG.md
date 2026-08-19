@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.30.0.0 (2026-08-19)
+
+### Fixed
+- **Voice answers no longer report "未作答" or land on the wrong question.** Both defects traced to
+  one frontend race: STT transcription is async — the user's transcript arrives only via Azure Voice
+  Live's `conversation.item.input_audio_transcription.completed` event, on a server round-trip *after*
+  the candidate taps "我说完了". `InterviewPage` used to read the transcript synchronously right after
+  `commitAnswer()` and POST immediately, so each question submitted the **previous** turn's transcript
+  (empty for Q1) then auto-advanced — producing both the blank answer and the whole-set off-by-one
+  shift. `commitAnswer()` now returns a `Promise<string>` that resolves **this turn's** finalized
+  transcript (or `""` on an 8s timeout / teardown — fail-closed, never hangs the UI), and the page
+  submits the awaited text. The backend was never wrong (answers pair to questions by explicit
+  `question_id` at every hop), so fixing the race makes the ordering defect disappear on its own.
+
+### Added
+- **Pre-scoring review phase — finishing the last question no longer auto-scores.** A new `review`
+  phase (`GET /candidate/interview/{id}/review` + `ReviewView`) shows every question with the
+  candidate's own finalized answer in bank order; scoring starts only on an explicit
+  **提交并评测 / Submit & evaluate** click, so the candidate can review the whole set holistically
+  first. Entering `review` also releases the mic (`voice.disconnect()`).
+
+### Changed
+- **Empty answers are rejected at three layers.** Frontend voice gate (`!spoken.trim()` shows a
+  retryable notice, no advance), frontend text gate (submit button `disabled`), backend Pydantic
+  `AnswerIn` validator → 422, and a defensive `answer_finalized` empty-content guard → 409. The
+  backend guard also fixed a real bug: a `verbal_cue` message that is only the cue (e.g. "我答完了")
+  strips to empty and used to be accepted silently.
+
+See [`docs/planning/spec-voice-transcript-race-explicit-submit.md`](docs/planning/spec-voice-transcript-race-explicit-submit.md).
+
 ## 0.29.1.0 (2026-08-18)
 
 ### Changed

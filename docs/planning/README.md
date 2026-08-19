@@ -57,6 +57,15 @@ living specification is [`../../SPEC.md`](../../SPEC.md) at the repo root — st
   admin three-tab layout, SOP-upload frontend UI (backend `POST /admin/sop/documents` exists but has
   no frontend). Approved 2026-08-18 via `/office-hours`.
 
+- [`spec-voice-transcript-race-explicit-submit.md`](spec-voice-transcript-race-explicit-submit.md) —
+  fixes the on-device report defects ("未作答" blank + off-by-one order) rooted in one frontend race:
+  a voice answer was submitted before its async STT transcript landed. `commitAnswer()` now returns a
+  `Promise` resolving this turn's transcript (fail-closed on timeout/teardown). Adds a pre-scoring
+  **review** phase (`GET /{id}/review` + `ReviewView`) so the last answer no longer auto-scores —
+  scoring starts only on an explicit **提交并评测** click — plus three-layer empty-answer rejection
+  (also fixes a verbal-cue-strips-to-empty bug). Backend unchanged in shape (pairs by `question_id`).
+  Approved via plan mode; shipped v0.30.0.0.
+
 ## What was intentionally NOT promoted
 
 The gstack project dir also holds machine-local, per-developer working state that does **not**

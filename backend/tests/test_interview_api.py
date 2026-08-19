@@ -211,6 +211,103 @@ async def test_missing_interview_is_404(client):
     assert resp.status_code == 404
 
 
+# --- Empty-answer rejection + pre-scoring review (requirements 3 & 4) --------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blank", ["", "   ", "\n\t "])
+async def test_answer_rejects_empty_text(client, blank):
+    # Requirement 3: an empty (or whitespace-only) answer cannot pass — 422 at the edge, so a blank
+    # voice/text submission never reaches the state machine or shows up as "unanswered" in a report.
+    headers = await _new_candidate_headers(client)
+    interview_id = (await client.post("/candidate/interview/start", headers=headers)).json()[
+        "interview_session_id"
+    ]
+    resp = await client.post(
+        f"/candidate/interview/{interview_id}/answer",
+        headers=headers,
+        json={"text": blank, "source": "text"},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_answer_rejects_verbal_cue_that_strips_to_empty(client):
+    # A verbal-cue message that is ONLY the cue ("我答完了") passes the 422 non-blank check (it has
+    # content) but strips to empty in the state machine — must be rejected (409), never recorded as
+    # a silent blank answer.
+    headers = await _new_candidate_headers(client)
+    interview_id = (await client.post("/candidate/interview/start", headers=headers)).json()[
+        "interview_session_id"
+    ]
+    resp = await client.post(
+        f"/candidate/interview/{interview_id}/answer",
+        headers=headers,
+        json={"text": "我答完了", "source": "verbal_cue"},
+    )
+    assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_review_requires_completion(client):
+    # Requirement 4: the review screen is only meaningful once every question is answered — a still
+    # in_progress interview is a 409, the same "not before completion" contract as /report.
+    headers = await _new_candidate_headers(client)
+    interview_id = (await client.post("/candidate/interview/start", headers=headers)).json()[
+        "interview_session_id"
+    ]
+    resp = await client.get(f"/candidate/interview/{interview_id}/review", headers=headers)
+    assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_review_returns_answers_in_bank_order(client):
+    # After completion, /review returns every answered question + the candidate's own answer, in
+    # bank order (requirement 2), candidate-safe (no rubric/score fields).
+    headers = await _new_candidate_headers(client)
+    start = (await client.post("/candidate/interview/start", headers=headers)).json()
+    interview_id = start["interview_session_id"]
+
+    status_body = start
+    n = 0
+    for _ in range(20):
+        if status_body["status"] == "completed":
+            break
+        n += 1
+        status_body = (
+            await client.post(
+                f"/candidate/interview/{interview_id}/answer",
+                headers=headers,
+                json={"text": f"distinct answer number {n}", "source": "text"},
+            )
+        ).json()
+    assert status_body["status"] == "completed"
+
+    resp = await client.get(f"/candidate/interview/{interview_id}/review", headers=headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["interview_session_id"] == interview_id
+    # Answers are in ascending bank order.
+    indices = [a["index"] for a in body["answers"]]
+    assert indices == sorted(indices)
+    # Candidate-safe payload: prompt + answer only, no rubric-linked fields (P3).
+    flat = str(body).lower()
+    for leaked in ("expected_points", "checklist", "rubric", "weight", "judgment"):
+        assert leaked not in flat
+
+
+@pytest.mark.asyncio
+async def test_review_ownership_guarded(client):
+    # Another candidate cannot read this interview's review — 404 (no existence leak).
+    headers_a = await _new_candidate_headers(client)
+    headers_b = await _new_candidate_headers(client)
+    interview_id = (await client.post("/candidate/interview/start", headers=headers_a)).json()[
+        "interview_session_id"
+    ]
+    resp = await client.get(f"/candidate/interview/{interview_id}/review", headers=headers_b)
+    assert resp.status_code == 404
+
+
 # --- Voice session (SPEC F9) ------------------------------------------------
 
 
@@ -230,7 +327,7 @@ async def test_voice_session_requires_anon_session(client):
 
 @pytest.mark.asyncio
 async def test_voice_session_404_for_unowned_interview(client):
-    _headers_a, interview_id = await _start_interview(client)
+    _, interview_id = await _start_interview(client)
     headers_b = await _new_candidate_headers(client)
     resp = await client.post(
         f"/candidate/interview/{interview_id}/voice/session", headers=headers_b

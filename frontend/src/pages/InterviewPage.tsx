@@ -31,22 +31,26 @@ import {
 } from "@fluentui/react-components";
 import {
   getReport,
+  getReview,
   resumeInterview,
   startInterview,
   submitAnswer,
+  type AnsweredQuestion,
   type Interview,
   type Report,
 } from "../api/client";
 import { MicAccessError, useInterviewVoice } from "../hooks/useInterviewVoice";
-import { collectVoiceAnswer } from "./interviewVoiceAnswer";
 import type { AudioState, TranscriptSegment } from "../types/voice";
 import { AvatarView } from "../components/AvatarView";
 import { QuestionProgress } from "../components/QuestionProgress";
 import { MicPermissionDialog } from "../components/MicPermissionDialog";
 import { Transcript } from "../components/Transcript";
 import { ReportView } from "../components/ReportView";
+import { ReviewView } from "../components/ReviewView";
 
-type Phase = "idle" | "orientation" | "interviewing" | "scoring" | "scored";
+// "review" (requirement 4): once all questions are answered the interview is `completed` but NOT
+// scored — the candidate reviews every answer and must explicitly submit before scoring starts.
+type Phase = "idle" | "orientation" | "interviewing" | "review" | "scoring" | "scored";
 type Channel = "text" | "voice";
 
 const useStyles = makeStyles({
@@ -236,6 +240,9 @@ export function InterviewPage() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [interview, setInterview] = useState<Interview | null>(null);
   const [report, setReport] = useState<Report | null>(null);
+  // The pre-scoring review list (requirement 4): every answered question + answer, in bank order,
+  // fetched from the backend so it survives a reload and matches exactly what gets scored.
+  const [reviewAnswers, setReviewAnswers] = useState<AnsweredQuestion[]>([]);
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -247,11 +254,15 @@ export function InterviewPage() {
 
   const interviewRef = useRef<Interview | null>(null);
   interviewRef.current = interview;
+  // Remember the question count seen during the interview: `current_question` (and its `total`) is
+  // null once the interview completes, so the scoring-progress copy would otherwise show "/ 0".
+  // We latch the last-known total here and fall back to it (then the report's actual count).
+  const questionTotalRef = useRef(0);
+  if (interview?.current_question?.total) {
+    questionTotalRef.current = interview.current_question.total;
+  }
   // The avatar video element the voice hook attaches a digital-human track to (F5/F9).
   const avatarVideoRef = useRef<HTMLVideoElement | null>(null);
-  // Final voice-transcript segment ids already POSTed, so a turn with multiple final segments
-  // (candidate paused mid-answer) submits ALL of them once — not just the latest (content-loss fix).
-  const submittedSegmentIds = useRef<Set<string>>(new Set());
   // The prompt text last spoken aloud in voice mode, so we don't re-speak it on every re-render
   // (keyed on the text so a follow-up on the same question_id is still spoken).
   const spokenQuestionId = useRef<string | null>(null);
@@ -305,12 +316,13 @@ export function InterviewPage() {
       setInterview(iv);
       setAnswer("");
       if (iv.status === "completed") {
-        // Scoring-in-progress beat (P10) before the report reveal.
-        setPhase("scoring");
+        // Requirement 4: all questions answered → do NOT auto-score. Drop into the review phase so
+        // the candidate can read every answer back and explicitly submit. Release the mic eagerly —
+        // there is no more voice interaction until (and unless) a new interview starts.
         await voice.disconnect().catch(() => undefined);
-        const r = await getReport(iv.interview_session_id);
-        setReport(r);
-        setPhase("scored");
+        const review = await getReview(iv.interview_session_id);
+        setReviewAnswers(review.answers);
+        setPhase("review");
       }
     },
     [voice],
@@ -324,18 +336,33 @@ export function InterviewPage() {
       await advanceOrComplete(updated);
     });
 
-  // Voice "I'm done answering" (P13): the transcript of this turn is the finalized answer.
+  // Voice "I'm done answering" (P13): commitAnswer() resolves THIS turn's finalized transcript once
+  // the async STT round-trip lands (and after it's been emitted to the panel), so we never submit a
+  // stale/empty answer or shift answers by one question (the report-misalignment race). Option A —
+  // use the promise's resolved value, never the `segments` closure.
   const onVoiceDone = () =>
     guard(async () => {
       const iv = interviewRef.current;
       if (!iv) return;
-      voice.commitAnswer();
-      // ALL of this turn's not-yet-submitted final user segments join into the answer (content-loss
-      // fix); mark them submitted so the next turn starts clean.
-      const { text: spoken, ids } = collectVoiceAnswer(segments, submittedSegmentIds.current);
-      ids.forEach((id) => submittedSegmentIds.current.add(id));
+      const spoken = await voice.commitAnswer();
+      if (!spoken.trim()) {
+        // Requirement 3: an empty answer cannot pass. Don't advance — let the candidate speak again.
+        setError(t("voice.emptyAnswer"));
+        return;
+      }
       const updated = await submitAnswer(iv.interview_session_id, spoken, "voice");
       await advanceOrComplete(updated);
+    });
+
+  // Requirement 4: scoring only begins when the candidate explicitly submits from the review screen.
+  const onSubmitForScoring = () =>
+    guard(async () => {
+      const iv = interviewRef.current;
+      if (!iv) return;
+      setPhase("scoring");
+      const r = await getReport(iv.interview_session_id);
+      setReport(r);
+      setPhase("scored");
     });
 
   const startVoice = useCallback(async () => {
@@ -415,9 +442,13 @@ export function InterviewPage() {
   }, [channel, voice, currentPrompt]);
 
   const q = interview?.current_question ?? null;
+  // Denominator: the report's real per-question count once it's back, else the total we latched
+  // during the interview (current_question is null in the scoring phase, so q.total is gone).
+  // Scoring is one batch call (no per-answer streaming), so the numerator just reads 1 there.
+  const scoringTotal = report?.per_question.length || questionTotalRef.current || 1;
   const scoringNarr = t("transition.scoring", {
-    n: (q?.index ?? 0) + 1,
-    total: q?.total ?? report?.per_question.length ?? 0,
+    n: Math.min((q?.index ?? 0) + 1, scoringTotal),
+    total: scoringTotal,
   });
 
   const errorBanner = error && (
@@ -660,6 +691,11 @@ export function InterviewPage() {
             <CardHeader header={<Text weight="semibold">{t("noQuestions.title")}</Text>} />
             <Body1 style={{ display: "block" }}>{t("noQuestions.body")}</Body1>
           </Card>
+        )}
+
+        {/* Pre-scoring review (requirement 4): read every answer back, then explicitly submit. */}
+        {phase === "review" && (
+          <ReviewView answers={reviewAnswers} busy={busy} onSubmit={onSubmitForScoring} />
         )}
 
         {/* Scoring-in-progress beat (P10) */}
