@@ -477,3 +477,225 @@ describe("useInterviewVoice commitAnswer", () => {
     vi.unstubAllGlobals();
   });
 });
+
+/**
+ * Regression guard for the "数字人不说话" bug (avatar renders but never speaks the next question).
+ *
+ * Production uses server-VAD (create_response=True): Azure auto-creates a response the moment the
+ * user stops speaking. So when the page calls speakQuestion(next) — or commitAnswer nudges the turn
+ * — there is usually ALREADY an active response, and a naive conversation.item.create +
+ * response.create collides: Azure rejects with `conversation_already_has_active_response` and the
+ * backend-authoritative next question is silently dropped (the avatar improvises instead, then goes
+ * quiet). The fix (Plan A): CANCEL the in-flight response and QUEUE the question, then speak it on
+ * the `response.done` that follows the cancel. A collision rejection re-queues the same attempt.
+ */
+describe("useInterviewVoice speakQuestion cancel-then-speak", () => {
+  class FakeWebSocket {
+    static last: FakeWebSocket | null = null;
+    static OPEN = 1;
+    readyState = 1;
+    onmessage: ((e: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+    sent: string[] = [];
+    constructor(public url: string) {
+      FakeWebSocket.last = this;
+    }
+    send(data: string) {
+      this.sent.push(data);
+    }
+    close() {
+      this.readyState = 3;
+      this.onclose?.();
+    }
+    receive(msg: unknown) {
+      this.onmessage?.({ data: JSON.stringify(msg) });
+    }
+  }
+
+  async function connectHook() {
+    FakeWebSocket.last = null;
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    let hook!: ReturnType<typeof useInterviewVoice>;
+    function SpeakHarness() {
+      hook = useInterviewVoice("iv-1", { locale: "zh-CN", tokenProvider: () => "tok" });
+      return null;
+    }
+    const { unmount } = render(<SpeakHarness />);
+    let connectP!: Promise<void>;
+    act(() => {
+      connectP = hook.connect("zh-CN");
+    });
+    await act(async () => {
+      for (let i = 0; i < 20 && !FakeWebSocket.last; i++) await Promise.resolve();
+      FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
+      await connectP;
+    });
+    return { getHook: () => hook, ws: () => FakeWebSocket.last!, unmount };
+  }
+
+  // Parse each sent frame's `type`, in order, for readable assertions on the wire sequence.
+  const sentTypes = (ws: FakeWebSocket) =>
+    ws.sent.map((s) => (JSON.parse(s) as { type?: string }).type);
+
+  it("speaks immediately (item.create + response.create) when the conversation is idle", async () => {
+    const { getHook, ws, unmount } = await connectHook();
+
+    act(() => {
+      expect(getHook().speakQuestion("Question one.")).toBe(true);
+    });
+
+    const types = sentTypes(ws());
+    expect(types).toContain("conversation.item.create");
+    expect(types).toContain("response.create");
+    expect(types).not.toContain("response.cancel");
+    // The verbatim text rides on the assistant item.
+    const item = ws().sent
+      .map((s) => JSON.parse(s) as { type?: string; item?: { content?: { text?: string }[] } })
+      .find((m) => m.type === "conversation.item.create");
+    expect(item?.item?.content?.[0]?.text).toBe("Question one.");
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("cancels and defers when a response is active, then speaks on response.done", async () => {
+    const { getHook, ws, unmount } = await connectHook();
+
+    // A server-VAD auto-response is in flight.
+    await act(async () => {
+      ws().receive({ type: "response.created" });
+    });
+
+    // The page wants to speak the next question NOW — must cancel, not collide.
+    act(() => {
+      expect(getHook().speakQuestion("The next question.")).toBe(true);
+    });
+    let types = sentTypes(ws());
+    expect(types).toContain("response.cancel");
+    // Nothing spoken yet — no assistant item / response.create while still active.
+    expect(types).not.toContain("conversation.item.create");
+
+    // The cancel resolves to response.done; the queued question now flushes onto the idle convo.
+    await act(async () => {
+      ws().receive({ type: "response.done" });
+    });
+    types = sentTypes(ws());
+    expect(types).toContain("conversation.item.create");
+    expect(types.filter((t) => t === "response.create").length).toBe(1);
+    const item = ws().sent
+      .map((s) => JSON.parse(s) as { type?: string; item?: { content?: { text?: string }[] } })
+      .find((m) => m.type === "conversation.item.create");
+    expect(item?.item?.content?.[0]?.text).toBe("The next question.");
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps only the latest queued question (latest-wins) across rapid speakQuestion calls", async () => {
+    const { getHook, ws, unmount } = await connectHook();
+
+    await act(async () => {
+      ws().receive({ type: "response.created" });
+    });
+    act(() => {
+      getHook().speakQuestion("stale question");
+      getHook().speakQuestion("fresh question");
+    });
+
+    await act(async () => {
+      ws().receive({ type: "response.done" });
+    });
+    const spoken = ws().sent
+      .map((s) => JSON.parse(s) as { type?: string; item?: { content?: { text?: string }[] } })
+      .filter((m) => m.type === "conversation.item.create")
+      .map((m) => m.item?.content?.[0]?.text);
+    expect(spoken).toEqual(["fresh question"]);
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("re-queues the attempt on a collision rejection and speaks it after response.done", async () => {
+    const { getHook, ws, unmount } = await connectHook();
+
+    // Idle by our optimistic view, so speakQuestion emits directly...
+    act(() => {
+      getHook().speakQuestion("Colliding question.");
+    });
+    expect(sentTypes(ws())).toContain("response.create");
+
+    // ...but Azure had a server-VAD auto-response we hadn't seen: it rejects the collision.
+    await act(async () => {
+      ws().receive({
+        type: "error",
+        error: {
+          code: "conversation_already_has_active_response",
+          message: "Conversation already has an active response",
+        },
+      });
+    });
+    // Session stays alive; the attempt is re-queued (not dropped).
+    expect(getHook().connectionState).toBe("connected");
+
+    // When the real auto-response finishes, the re-queued question is spoken.
+    await act(async () => {
+      ws().receive({ type: "response.done" });
+    });
+    const spoken = ws().sent
+      .map((s) => JSON.parse(s) as { type?: string; item?: { content?: { text?: string }[] } })
+      .filter((m) => m.type === "conversation.item.create")
+      .map((m) => m.item?.content?.[0]?.text);
+    expect(spoken).toContain("Colliding question.");
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("returns false and sends nothing when the socket is not open", async () => {
+    const { getHook, ws, unmount } = await connectHook();
+    const before = ws().sent.length;
+    // Simulate a closed socket.
+    ws().readyState = 3;
+    act(() => {
+      expect(getHook().speakQuestion("won't send")).toBe(false);
+    });
+    expect(ws().sent.length).toBe(before);
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("commitAnswer skips the response.create nudge while a response is active", async () => {
+    const { getHook, ws, unmount } = await connectHook();
+
+    // A response is in flight (server-VAD auto-response after the user stopped speaking).
+    await act(async () => {
+      ws().receive({ type: "response.created" });
+    });
+    const before = sentTypes(ws()).filter((t) => t === "response.create").length;
+
+    // "I'm done" with no buffered transcript arms a pending commit — but must NOT fire a colliding
+    // response.create while a response is already active.
+    act(() => {
+      void getHook().commitAnswer();
+    });
+    const after = sentTypes(ws()).filter((t) => t === "response.create").length;
+    expect(after).toBe(before);
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("commitAnswer still nudges (response.create) when the conversation is idle", async () => {
+    const { getHook, ws, unmount } = await connectHook();
+    // No active response — the nudge is needed to advance a manual-VAD turn.
+    act(() => {
+      void getHook().commitAnswer();
+    });
+    expect(sentTypes(ws())).toContain("response.create");
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+});
