@@ -139,6 +139,20 @@ describe("AgentEditorPage", () => {
     expect(auth.getToken()).toBe("");
   });
 
+  it("falls back to the login gate when a residual token is invalid (no 401 storm)", async () => {
+    // Regression: a leftover token in sessionStorage used to flip the page straight to authed, which
+    // then fired listPersonas() with a dead bearer → 401s. Now we validate via me() first, and an
+    // invalid token drops us to the login form without ever calling the personas API.
+    sessionStorage.setItem("admin_api_token", "stale-token");
+    vi.spyOn(auth, "me").mockResolvedValue(null); // me() clears the token and returns null on 401
+    const listSpy = vi.spyOn(personas, "listPersonas").mockResolvedValue([PERSONA]);
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByTestId("agent-username-input")).toBeInTheDocument());
+    expect(listSpy).not.toHaveBeenCalled();
+  });
+
   it("selecting a persona renders the definition panel + config drawer regions", async () => {
     const user = userEvent.setup();
     mockAdminLogin();

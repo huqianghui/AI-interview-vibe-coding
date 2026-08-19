@@ -122,6 +122,20 @@ describe("AdminPage", () => {
     expect(auth.getToken()).toBe(""); // token cleared on role rejection
   });
 
+  it("falls back to the login gate when a residual token is invalid (no 401 storm)", async () => {
+    // Regression: a leftover token in sessionStorage used to flip the page straight to authed, which
+    // then fired protected requests with a dead bearer → a wall of 401s. Now we validate via me()
+    // first, and an invalid token drops us to the login form without ever calling the admin API.
+    sessionStorage.setItem("admin_api_token", "stale-token");
+    vi.spyOn(auth, "me").mockResolvedValue(null); // me() clears the token and returns null on 401
+    const listBanks = vi.spyOn(admin, "listBanks").mockResolvedValue([]);
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByTestId("admin-username-input")).toBeInTheDocument());
+    expect(listBanks).not.toHaveBeenCalled();
+  });
+
   it("loads the AI Foundry config (masked key) and saves an update", async () => {
     const user = userEvent.setup();
     mockAdminLogin();
