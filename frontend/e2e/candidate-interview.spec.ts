@@ -63,6 +63,15 @@ test("candidate completes a text interview and reaches a report", async ({ page 
         .catch(() => false));
     if (reportUp) break;
 
+    // After the last answer the interview enters the pre-scoring review screen (v0.30.0.0): the
+    // report no longer auto-renders — the candidate must explicitly click 提交并评测 to start scoring.
+    const submitEval = page.getByTestId("submit-and-evaluate");
+    if (await submitEval.isVisible().catch(() => false)) {
+      await submitEval.click();
+      await page.waitForTimeout(250);
+      continue;
+    }
+
     const box = page.getByRole("textbox");
     if (!(await box.isVisible().catch(() => false))) break;
 

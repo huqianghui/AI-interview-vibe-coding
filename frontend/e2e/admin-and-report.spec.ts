@@ -58,6 +58,14 @@ test("admin authors a bank + checklist, candidate gets a scored report", async (
 
   for (let i = 0; i < 20; i++) {
     if (await page.getByTestId("report-exec").isVisible().catch(() => false)) break;
+    // v0.30.0.0: the last answer lands on the pre-scoring review screen; scoring starts only on an
+    // explicit 提交并评测 click, not automatically.
+    const submitEval = page.getByTestId("submit-and-evaluate");
+    if (await submitEval.isVisible().catch(() => false)) {
+      await submitEval.click();
+      await page.waitForTimeout(250);
+      continue;
+    }
     const box = page.getByRole("textbox");
     if (!(await box.isVisible().catch(() => false))) break;
     await box.fill("I verify the runbook and confirm the change ticket before deploying.");
