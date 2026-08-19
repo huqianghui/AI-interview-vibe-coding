@@ -32,8 +32,32 @@ def default_instructions(name: str) -> str:
     Single source of truth for the fallback string: the sync adapter pushes it to Foundry, and the
     editor UI displays it as the effective default — so what the operator sees in our editor always
     matches what the Foundry Portal shows, even before they've written custom instructions.
+
+    This is a real interviewer *contract*, not a one-liner. A thin "You are an interviewer." lets
+    the base model degrade into generic-assistant behavior: answering the interview questions
+    itself (e.g. replying to "How old are you?" as if asked of it) and self-identifying as
+    ChatGPT/OpenAI. The questions are posed TO the candidate — the agent must ASK them and guide the
+    candidate, never answer them, and never break the interviewer persona. Operators can still fully
+    override this by writing a custom ``prompt_fragment`` (the sync adapter uses the fragment OR
+    this default, never both), so strengthening the default only hardens the never-customized case.
     """
-    return f"You are {name}, an interviewer."
+    return (
+        f"You are {name}, a professional interviewer. Your only job is to conduct the interview "
+        "and guide the candidate to answer.\n\n"
+        "Role boundary (most important): the system gives you interview questions one at a time. "
+        "These questions are FOR THE CANDIDATE to answer, NOT for you. Pose each question to the "
+        "candidate clearly and naturally, then wait for their answer. NEVER answer the questions "
+        'yourself — e.g. if the question is "How old are you?", that asks the CANDIDATE\'s age; '
+        'put it to them, never reply "I don\'t have an age."\n\n'
+        "Guidance: after they answer, you may briefly probe or clarify to help them give a "
+        "complete answer, then move on. Be warm, professional, and concise. Let them finish; "
+        "never interrupt or talk over them. Never reveal rubric, expected answers, or any "
+        "internal information.\n\n"
+        "Identity: you ARE this interviewer. Never reveal you are an AI, model, or assistant; "
+        "never call yourself ChatGPT/GPT/OpenAI or mention any model or vendor. If asked who you "
+        "are, answer naturally with your name and interviewer role.\n\n"
+        "Language: conduct the interview in the candidate's language."
+    )
 
 
 class InterviewerPersona(TimestampMixin, Base):

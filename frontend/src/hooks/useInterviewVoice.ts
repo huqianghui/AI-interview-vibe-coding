@@ -149,6 +149,15 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
     parts: string[];
     timer: ReturnType<typeof setTimeout>;
   } | null>(null);
+  // Buffers user transcripts that land BETWEEN commits. Under server-VAD (azure_semantic_vad +
+  // end-of-utterance detection, our production config) Azure auto-segments speech and emits the
+  // `input_audio_transcription.completed` event as soon as the user stops talking — i.e. BEFORE
+  // they click "I'm done". Those pre-click transcripts have no armed pending to land in, so without
+  // this buffer they reached only the transcript panel and were lost to `commitAnswer()`, which
+  // then timed out to "" → the false "我们没有听到你的回答" error even though the answer was on screen.
+  // `commitAnswer` drains this first; it's cleared on drain and on teardown so nothing leaks across
+  // turns or sessions.
+  const userSegmentsSinceCommitRef = useRef<string[]>([]);
   const optionsRef = useRef(options);
   optionsRef.current = options;
 
@@ -187,6 +196,9 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
     audio.cleanupMic();
     avatarStartedRef.current = false;
     sessionLiveRef.current = false;
+    // Drop any buffered user transcript — a new session starts a fresh turn; carrying stale
+    // segments across a disconnect/reconnect would mis-attribute them to the next answer.
+    userSegmentsSinceCommitRef.current = [];
     // Settle a commit still waiting on a transcript that will never arrive now that the WS is
     // going away — otherwise `await commitAnswer()` hangs forever on disconnect/reconnect/unmount.
     settlePendingCommit();
@@ -288,13 +300,19 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
           // resolves the answer bubble is already on screen ("fully shown before submit").
           if (transcript)
             emit("user", transcript, true, `user-${++transcriptIdCounter.current}`);
-          // If "I'm done" armed a commit, this is THIS turn's final user transcript — record it and
-          // resolve the awaiter. Resolve on the FIRST completed event after the manual commit (one
-          // response.create → one completed in the normal manual-turn case).
           const pending = pendingCommitRef.current;
           if (pending) {
+            // "I'm done" was clicked and is waiting: this completed event is (part of) THIS turn's
+            // final transcript — record it and resolve the awaiter (manual-VAD / click-before-STT
+            // ordering).
             if (transcript) pending.parts.push(transcript);
             settlePendingCommit();
+          } else if (transcript) {
+            // No commit armed yet — under server-VAD this transcript arrived BEFORE the click.
+            // Buffer it so the next commitAnswer() can drain it instead of hanging on a completed
+            // event that already fired. (This was the empty-answer bug: the panel showed the bubble
+            // but commitAnswer never saw the text.)
+            userSegmentsSinceCommitRef.current.push(transcript);
           }
           break;
         }
@@ -520,6 +538,24 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
   const commitAnswer = useCallback((): Promise<string> => {
     // Defensively settle any prior armed commit (e.g. a double-click) before arming a fresh one.
     settlePendingCommit();
+
+    // Drain any user transcript(s) that already arrived this turn. Under server-VAD (our production
+    // config) the `input_audio_transcription.completed` event fires when the user STOPS speaking —
+    // typically BEFORE they click "I'm done" — so the answer is usually already buffered here. If
+    // so, resolve immediately with it; no need to wait for (or time out on) a completed event that
+    // has already fired. This is the fix for the empty-answer bug.
+    const buffered = userSegmentsSinceCommitRef.current;
+    if (buffered.length > 0) {
+      const text = buffered.join(" ").trim();
+      userSegmentsSinceCommitRef.current = [];
+      // Still nudge the agent's turn along so the conversation flows as before (server-VAD may have
+      // already auto-responded; a redundant response.create is a harmless per-request no-op).
+      send({ type: "response.create" });
+      return Promise.resolve(text);
+    }
+
+    // Nothing buffered yet — the click beat the STT round-trip (fast speaker, or manual-VAD). Arm a
+    // pending commit and wait for the next completed event, failing closed to "" after the timeout.
     return new Promise<string>((resolve) => {
       const timer = setTimeout(() => {
         const pending = pendingCommitRef.current;

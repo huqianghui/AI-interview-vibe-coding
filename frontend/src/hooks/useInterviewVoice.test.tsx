@@ -358,6 +358,92 @@ describe("useInterviewVoice commitAnswer", () => {
     vi.unstubAllGlobals();
   });
 
+  it("resolves with a transcript that arrived BEFORE the click (server-VAD ordering)", async () => {
+    // Production config is server-VAD (azure_semantic_vad + end-of-utterance detection): Azure
+    // auto-segments and emits the completed event when the user STOPS speaking — before they click
+    // "I'm done". This is the exact ordering that produced the false "我们没有听到你的回答" bug: the
+    // panel showed the answer but commitAnswer resolved "". The buffer must capture it.
+    const { getHook, ws, unmount } = await connectHook();
+
+    // Transcript lands first (user stopped talking; VAD fired), with NO commit armed yet.
+    await act(async () => {
+      ws().receive({
+        type: "conversation.item.input_audio_transcription.completed",
+        transcript: "The answer I spoke before clicking.",
+      });
+    });
+
+    // THEN the user clicks "I'm done": commitAnswer must resolve with the already-arrived text,
+    // not wait/time out.
+    let committed!: Promise<string>;
+    act(() => {
+      committed = getHook().commitAnswer();
+    });
+    await expect(committed).resolves.toBe("The answer I spoke before clicking.");
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("joins multiple pre-click segments into one answer (server-VAD multi-utterance)", async () => {
+    const { getHook, ws, unmount } = await connectHook();
+
+    await act(async () => {
+      ws().receive({
+        type: "conversation.item.input_audio_transcription.completed",
+        transcript: "First I check the runbook.",
+      });
+      ws().receive({
+        type: "conversation.item.input_audio_transcription.completed",
+        transcript: "Then I confirm the change ticket.",
+      });
+    });
+
+    let committed!: Promise<string>;
+    act(() => {
+      committed = getHook().commitAnswer();
+    });
+    await expect(committed).resolves.toBe(
+      "First I check the runbook. Then I confirm the change ticket.",
+    );
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("does not leak a pre-click transcript into the NEXT turn's commit", async () => {
+    const { getHook, ws, unmount } = await connectHook();
+
+    // Turn 1: transcript arrives before click, drained by commit.
+    await act(async () => {
+      ws().receive({
+        type: "conversation.item.input_audio_transcription.completed",
+        transcript: "Turn one answer.",
+      });
+    });
+    let commit1!: Promise<string>;
+    act(() => {
+      commit1 = getHook().commitAnswer();
+    });
+    await expect(commit1).resolves.toBe("Turn one answer.");
+
+    // Turn 2: buffer must be empty now, so a click with no new transcript waits then fails closed —
+    // it must NOT re-resolve turn one's text.
+    vi.useFakeTimers();
+    let commit2!: Promise<string>;
+    act(() => {
+      commit2 = getHook().commitAnswer();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8_500);
+    });
+    await expect(commit2).resolves.toBe("");
+    vi.useRealTimers();
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
   it("does not leak a transcript across turns (each commit resolves its own turn's text)", async () => {
     const { getHook, ws, unmount } = await connectHook();
 
