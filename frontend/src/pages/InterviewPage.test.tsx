@@ -7,7 +7,7 @@
  * Voice is exercised via the P5/503 fallback path (no live WebRTC in jsdom).
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import "../i18n";
@@ -65,7 +65,7 @@ describe("InterviewPage", () => {
     expect(screen.getByRole("button")).toBeInTheDocument();
   });
 
-  it("runs start → orientation → ask → answer → scoring → report", async () => {
+  it("runs start → orientation → ask → answer → review → explicit submit → report", async () => {
     await i18n.changeLanguage("en-US");
     const user = userEvent.setup();
     vi.spyOn(client, "startInterview").mockResolvedValue({
@@ -78,7 +78,14 @@ describe("InterviewPage", () => {
       status: "completed",
       current_question: null,
     });
-    vi.spyOn(client, "getReport").mockResolvedValue({
+    vi.spyOn(client, "getReview").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "completed",
+      answers: [
+        { question_id: "q1", prompt: "Question one?", index: 0, answer_text: "a sufficiently long answer" },
+      ],
+    });
+    const getReportSpy = vi.spyOn(client, "getReport").mockResolvedValue({
       interview_session_id: "iv1",
       status: "scored",
       coverage_pct: 100,
@@ -104,9 +111,109 @@ describe("InterviewPage", () => {
     await user.type(screen.getByRole("textbox"), "a sufficiently long answer");
     await user.click(screen.getByRole("button", { name: /submit answer/i }));
 
-    // Report-ready reveal.
+    // Requirement 4: the last answer does NOT auto-score — the review screen shows every answer and
+    // scoring only starts on an explicit submit. Assert we land on review with getReport NOT called.
+    await waitFor(() => expect(screen.getByTestId("review")).toBeInTheDocument());
+    expect(screen.getByTestId("review-answer")).toHaveTextContent("a sufficiently long answer");
+    expect(getReportSpy).not.toHaveBeenCalled();
+
+    // Explicit "Submit & evaluate" → scoring → report-ready reveal.
+    await user.click(screen.getByTestId("submit-and-evaluate"));
     await waitFor(() => expect(screen.getByText(/100%/)).toBeInTheDocument());
+    expect(getReportSpy).toHaveBeenCalledTimes(1);
     expect(screen.getByText(/met/)).toBeInTheDocument();
+  });
+
+  it("rejects an empty voice answer without submitting or advancing (requirement 3)", async () => {
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "in_progress",
+      current_question: { question_id: "q1", prompt: "Question one?", index: 0, total: 2 },
+    });
+    const submitSpy = vi.spyOn(client, "submitAnswer");
+    // Voice hook: connected + "I'm done" resolves an EMPTY transcript (no speech / STT round-trip
+    // produced nothing) — the page must reject it, not POST an empty answer.
+    const voiceMock = {
+      connect: () => Promise.resolve(),
+      disconnect: () => Promise.resolve(),
+      toggleMute: () => undefined,
+      commitAnswer: () => Promise.resolve("   "), // whitespace-only → still empty after trim
+      speakQuestion: () => true,
+      isMuted: false,
+      connectionState: "connected" as const,
+      audioState: "idle" as const,
+      isAvatarConnected: false,
+    };
+    const voiceModule = await import("../hooks/useInterviewVoice");
+    vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(voiceMock);
+
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+    await screen.findByText("Question one?");
+
+    await user.click(screen.getByRole("button", { name: /answer by voice/i }));
+    await user.click(await screen.findByRole("button", { name: /i'm done answering/i }));
+
+    // The empty-answer notice shows; no answer was submitted; still on the same question.
+    await waitFor(() =>
+      expect(screen.getByText(/we didn't catch an answer/i)).toBeInTheDocument(),
+    );
+    expect(submitSpy).not.toHaveBeenCalled();
+    expect(screen.getByText("Question one?")).toBeInTheDocument();
+  });
+
+  it("submits the awaited transcript, not a stale/empty synchronous read (race regression)", async () => {
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "in_progress",
+      current_question: { question_id: "q1", prompt: "Question one?", index: 0, total: 2 },
+    });
+    const submitSpy = vi.spyOn(client, "submitAnswer").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "in_progress",
+      current_question: { question_id: "q2", prompt: "Question two?", index: 1, total: 2 },
+    });
+    // The STT round-trip lands AFTER the click: commitAnswer resolves late, with THIS turn's text.
+    // The page must submit exactly that resolved value (not the empty state captured at click time).
+    let resolveCommit!: (t: string) => void;
+    const voiceMock = {
+      connect: () => Promise.resolve(),
+      disconnect: () => Promise.resolve(),
+      toggleMute: () => undefined,
+      commitAnswer: () => new Promise<string>((res) => { resolveCommit = res; }),
+      speakQuestion: () => true,
+      isMuted: false,
+      connectionState: "connected" as const,
+      audioState: "idle" as const,
+      isAvatarConnected: false,
+    };
+    const voiceModule = await import("../hooks/useInterviewVoice");
+    vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(voiceMock);
+
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+    await screen.findByText("Question one?");
+
+    await user.click(screen.getByRole("button", { name: /answer by voice/i }));
+    await user.click(await screen.findByRole("button", { name: /i'm done answering/i }));
+
+    // Nothing submitted yet — the transcript hasn't landed.
+    expect(submitSpy).not.toHaveBeenCalled();
+
+    // The STT round-trip resolves with the real answer.
+    await act(async () => {
+      resolveCommit("This is my spoken answer.");
+    });
+
+    await waitFor(() =>
+      expect(submitSpy).toHaveBeenCalledWith("iv1", "This is my spoken answer.", "voice"),
+    );
   });
 
   it("resumes an in-progress interview on mount (edge b)", async () => {
@@ -157,7 +264,7 @@ describe("InterviewPage", () => {
       connect: () => Promise.resolve(),
       disconnect: () => Promise.resolve(),
       toggleMute: () => undefined,
-      commitAnswer: () => undefined,
+      commitAnswer: () => Promise.resolve(""),
       speakQuestion: () => true,
       isMuted: false,
       connectionState: "connected" as const,

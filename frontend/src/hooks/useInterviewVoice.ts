@@ -72,6 +72,12 @@ export interface UseInterviewVoiceOptions {
 const MAX_RECONNECT = 3;
 const RECONNECT_DELAYS = [1000, 2000, 4000];
 const CONNECT_TIMEOUT_MS = 30_000;
+// Upper bound on how long `commitAnswer()` waits for the STT round-trip after "I'm done": the
+// user transcript only arrives asynchronously via `conversation.item.input_audio_transcription
+// .completed`, on a server round-trip AFTER the commit. If it never lands (WS hiccup, no speech),
+// fail closed to "" so the UI never hangs — the caller rejects an empty answer and lets the user
+// retry.
+const COMMIT_TRANSCRIPT_TIMEOUT_MS = 8_000;
 
 /** Wire shape of one entry in `session.updated`'s `session.avatar.ice_servers` (matches the Azure
  * SDK's `IceServer.as_dict()`: each server carries its OWN username/credential). */
@@ -133,8 +139,29 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
   // of blocking it serially. The `session.updated` handler awaits this before `startRecording`, and
   // `connect()` awaits it after the WS is up so a mic denial still rejects as a MicAccessError.
   const micReadyRef = useRef<Promise<void> | null>(null);
+  // Bridges the async STT round-trip back to `commitAnswer()`'s awaiter. When "I'm done" is
+  // clicked, `commitAnswer` arms this ref (with a timeout) and returns a Promise; the transcription
+  // `.completed` handler pushes the final text, cancels the timer, and resolves it. This is what
+  // guarantees a voice answer is submitted with the ACTUAL transcript of THIS turn, not the empty
+  // (or stale previous-turn) value that a synchronous read would capture before the round-trip.
+  const pendingCommitRef = useRef<{
+    resolve: (text: string) => void;
+    parts: string[];
+    timer: ReturnType<typeof setTimeout>;
+  } | null>(null);
   const optionsRef = useRef(options);
   optionsRef.current = options;
+
+  // Settle any armed commit with whatever transcript has accumulated so far (usually ""). Called
+  // from the transcription handler (with the just-arrived text already pushed) and from teardown
+  // paths (disconnect / reconnect / unmount) so `await commitAnswer()` can never hang past the WS.
+  const settlePendingCommit = useCallback(() => {
+    const pending = pendingCommitRef.current;
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    pendingCommitRef.current = null;
+    pending.resolve(pending.parts.join(" ").trim());
+  }, []);
 
   const setConn = useCallback((state: VoiceConnectionState) => {
     setConnectionState(state);
@@ -160,7 +187,10 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
     audio.cleanupMic();
     avatarStartedRef.current = false;
     sessionLiveRef.current = false;
-  }, [audio, avatarStream]);
+    // Settle a commit still waiting on a transcript that will never arrive now that the WS is
+    // going away — otherwise `await commitAnswer()` hangs forever on disconnect/reconnect/unmount.
+    settlePendingCommit();
+  }, [audio, avatarStream, settlePendingCommit]);
 
   /** WS message handler — Azure Voice Live realtime events, relayed near-verbatim by the backend
    * proxy (plus its own `proxy.connected` bootstrap frame). */
@@ -252,10 +282,22 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
         case "input_audio_buffer.speech_stopped":
           setAudio("idle");
           break;
-        case "conversation.item.input_audio_transcription.completed":
-          if (msg.transcript)
-            emit("user", msg.transcript as string, true, `user-${++transcriptIdCounter.current}`);
+        case "conversation.item.input_audio_transcription.completed": {
+          const transcript = (msg.transcript as string | undefined) ?? "";
+          // Always feed the transcript panel first, so by the time commitAnswer()'s promise
+          // resolves the answer bubble is already on screen ("fully shown before submit").
+          if (transcript)
+            emit("user", transcript, true, `user-${++transcriptIdCounter.current}`);
+          // If "I'm done" armed a commit, this is THIS turn's final user transcript — record it and
+          // resolve the awaiter. Resolve on the FIRST completed event after the manual commit (one
+          // response.create → one completed in the normal manual-turn case).
+          const pending = pendingCommitRef.current;
+          if (pending) {
+            if (transcript) pending.parts.push(transcript);
+            settlePendingCommit();
+          }
           break;
+        }
 
         case "response.created":
           setAudio("speaking");
@@ -312,7 +354,7 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
         }
       }
     },
-    [audio, avatarStream, send, setAudio, setConn],
+    [audio, avatarStream, send, setAudio, setConn, settlePendingCommit],
   );
 
   const connect = useCallback(
@@ -466,10 +508,29 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
     });
   }, [audio, setAudio]);
 
-  /** Signal end-of-answer to Voice Live (paired with the manual "I'm done" control, P13). */
-  const commitAnswer = useCallback(() => {
-    send({ type: "response.create" });
-  }, [send]);
+  /** Signal end-of-answer to Voice Live and RESOLVE with THIS turn's final user transcript (P13).
+   *
+   * Paired with the manual "I'm done" control. Because STT is asynchronous — the user transcript
+   * only arrives later via `conversation.item.input_audio_transcription.completed`, on a server
+   * round-trip AFTER the commit — the caller must submit the resolved value, NOT read `segments`
+   * synchronously (which would capture the empty/previous-turn state and mis-attribute every
+   * answer). Resolves with the joined transcript, or "" if none arrives within
+   * `COMMIT_TRANSCRIPT_TIMEOUT_MS` or the connection tears down first (fail-closed, never hangs).
+   */
+  const commitAnswer = useCallback((): Promise<string> => {
+    // Defensively settle any prior armed commit (e.g. a double-click) before arming a fresh one.
+    settlePendingCommit();
+    return new Promise<string>((resolve) => {
+      const timer = setTimeout(() => {
+        const pending = pendingCommitRef.current;
+        if (!pending) return;
+        pendingCommitRef.current = null;
+        resolve(pending.parts.join(" ").trim());
+      }, COMMIT_TRANSCRIPT_TIMEOUT_MS);
+      pendingCommitRef.current = { resolve, parts: [], timer };
+      send({ type: "response.create" });
+    });
+  }, [send, settlePendingCommit]);
 
   /** Speak the backend-provided question text verbatim (SPEC Phase 4 voice→turn sub-design).
    *

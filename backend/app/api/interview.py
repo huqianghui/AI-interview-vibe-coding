@@ -11,7 +11,7 @@ Voice sources (voice / verbal_cue) share the same answer_finalized event and are
 from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -59,6 +59,17 @@ class AnswerIn(BaseModel):
     text: str
     source: str = "text"
 
+    @field_validator("text")
+    @classmethod
+    def _text_not_blank(cls, v: str) -> str:
+        # Requirement 3: every question must be answered — an empty (or whitespace-only) answer
+        # cannot pass. Reject at the edge with a 422 so a blank voice/text submission never reaches
+        # the state machine or the report as an "unanswered" gap. The state machine keeps a
+        # defensive check for the verbal-cue path (a cue that strips to empty).
+        if not v.strip():
+            raise ValueError("Answer text must not be empty")
+        return v
+
 
 class ReportOut(BaseModel):
     interview_session_id: str
@@ -73,6 +84,26 @@ class ReportOut(BaseModel):
     warnings: list[str] = []
     # F8 executive-headline narrative (1-2 sentences, strengths + main gap). Empty for stub path.
     narrative: str = ""
+
+
+class AnsweredQuestionOut(BaseModel):
+    """One question + the candidate's finalized answer, for the pre-scoring review screen.
+
+    Candidate-safe (P3): prompt + the answer the candidate gave, in bank order. Deliberately
+    carries NO checklist / score / rubric — review happens before scoring, and scoring stays
+    interviewer-internal until the report.
+    """
+
+    question_id: str
+    prompt: str
+    index: int
+    answer_text: str
+
+
+class ReviewOut(BaseModel):
+    interview_session_id: str
+    status: str
+    answers: list[AnsweredQuestionOut]
 
 
 class VoiceSessionOut(BaseModel):
@@ -208,6 +239,34 @@ async def report(
     except InterviewStateError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return ReportOut(**result)
+
+
+@router.get("/{interview_id}/review", response_model=ReviewOut)
+async def review(
+    interview_id: str,
+    candidate: AnonymousCandidateSession = Depends(get_anonymous_session),
+    db: AsyncSession = Depends(get_db),
+) -> ReviewOut:
+    """Every question + the candidate's finalized answer, in bank order, for the pre-scoring
+    review screen (requirement 4: the candidate reviews holistically, then explicitly submits).
+
+    Ownership-guarded like every candidate route. Only meaningful once all questions are answered,
+    so a still-``in_progress`` interview is a 409 — the same "not before completion" contract as
+    ``/report``. Backend-sourced (not client-accumulated) so it survives a reload and can never
+    disagree with what gets scored: it reuses the SAME question_id join that scoring uses.
+    """
+    session = await _owned_interview(db, interview_id, candidate)
+    if session.status not in ("completed", "scored"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot review in status {session.status!r}",
+        )
+    answers = await state_machine.review_answers(db, session)
+    return ReviewOut(
+        interview_session_id=session.id,
+        status=session.status,
+        answers=[AnsweredQuestionOut(**a) for a in answers],
+    )
 
 
 class VoiceSessionIn(BaseModel):

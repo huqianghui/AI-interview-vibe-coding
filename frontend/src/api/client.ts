@@ -63,6 +63,22 @@ export interface Report {
   warnings?: string[];
 }
 
+/** One question + the candidate's finalized answer, for the pre-scoring review screen. Mirrors
+ * `AnsweredQuestionOut`. No rubric/score — review happens before scoring (P3). */
+export interface AnsweredQuestion {
+  question_id: string;
+  prompt: string;
+  index: number;
+  answer_text: string;
+}
+
+/** Every answered question in bank order, for the review-before-submit screen. Mirrors `ReviewOut`. */
+export interface Review {
+  interview_session_id: string;
+  status: string;
+  answers: AnsweredQuestion[];
+}
+
 export type AnswerSource = "text" | "voice" | "verbal_cue";
 
 /** WebRTC connection info brokered by the backend (SPEC F9). Mirrors `VoiceSessionOut`. */
@@ -205,6 +221,13 @@ export async function submitAnswer(
 
 export async function getReport(interviewId: string): Promise<Report> {
   return request<Report>(`/candidate/interview/${interviewId}/report`, { method: "POST" });
+}
+
+/** Fetch every answered question + answer in bank order for the pre-scoring review screen
+ * (requirement 4). Backend-sourced so it survives a reload and matches what gets scored. Only
+ * valid once the interview is completed/scored (409 otherwise). */
+export async function getReview(interviewId: string): Promise<Review> {
+  return request<Review>(`/candidate/interview/${interviewId}/review`);
 }
 
 /**

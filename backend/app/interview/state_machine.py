@@ -129,6 +129,13 @@ async def answer_finalized(
     # the stored/scored answer is the substance the candidate actually gave.
     content = strip_verbal_cue(text) if source == "verbal_cue" else text
 
+    # Requirement 3: an empty answer cannot pass. The API layer already 422s a blank ``text``, but
+    # a verbal-cue message that is ONLY the cue (e.g. "我答完了") strips to empty here and would
+    # otherwise be recorded as a silent blank answer — reject it so no question is finalized without
+    # substance. Route catches InterviewStateError → 409.
+    if not content.strip():
+        raise InterviewStateError("Answer content must not be empty")
+
     follow_ups_asked = await _follow_ups_asked(db, session.id, current.id)
     next_turn_index = await _next_turn_index(db, session.id)
     # This candidate turn is a follow-up answer iff at least one follow-up has already been asked.
@@ -370,6 +377,32 @@ async def _candidate_answers(db: AsyncSession, session_id: str) -> list[tuple[st
         .all()
     )
     return group_answers([(t.question_id, t.content) for t in rows])
+
+
+async def review_answers(db: AsyncSession, session: InterviewSession) -> list[dict]:
+    """Every question that has a candidate answer, paired with that answer, in bank order.
+
+    Powers the pre-scoring review screen (requirement 4). Reuses the SAME question_id join that
+    ``score_and_finalize`` uses (``resolve_questions`` + ``_candidate_answers``), so the review list
+    can never disagree with what gets scored, and the order matches the question bank exactly
+    (requirement 2). Candidate-safe: only prompt + the grouped answer text, no rubric (P3).
+    """
+    questions = await resolve_questions(db)
+    answers_by_id = dict(await _candidate_answers(db, session.id))
+    out: list[dict] = []
+    for index, q in enumerate(questions):
+        answer_text = answers_by_id.get(q.id)
+        if answer_text is None:
+            continue
+        out.append(
+            {
+                "question_id": q.id,
+                "prompt": q.prompt,
+                "index": index,
+                "answer_text": answer_text,
+            }
+        )
+    return out
 
 
 def _now() -> datetime:

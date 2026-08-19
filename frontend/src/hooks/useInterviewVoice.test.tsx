@@ -243,3 +243,151 @@ describe("useInterviewVoice in-band error events", () => {
     vi.unstubAllGlobals();
   });
 });
+
+/**
+ * Regression guard for the report-misalignment + empty-first-answer race (真机面试报告"未作答" + 顺序错位).
+ *
+ * STT transcription is ASYNC: the user's transcript only arrives via
+ * `conversation.item.input_audio_transcription.completed`, on a server round-trip AFTER "I'm done"
+ * is clicked. The page must submit THIS turn's resolved transcript, not a synchronous read of stale
+ * state. `commitAnswer()` returns a Promise that resolves with the finalized transcript (or "" on
+ * timeout / teardown, fail-closed, never hanging).
+ */
+describe("useInterviewVoice commitAnswer", () => {
+  class FakeWebSocket {
+    static last: FakeWebSocket | null = null;
+    static OPEN = 1;
+    readyState = 1;
+    onmessage: ((e: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+    sent: string[] = [];
+    constructor(public url: string) {
+      FakeWebSocket.last = this;
+    }
+    send(data: string) {
+      this.sent.push(data);
+    }
+    close() {
+      this.readyState = 3;
+      this.onclose?.();
+    }
+    receive(msg: unknown) {
+      this.onmessage?.({ data: JSON.stringify(msg) });
+    }
+  }
+
+  // Connect the hook over a FakeWebSocket and return the live handle + the socket. Mirrors the
+  // connect dance used by the in-band-error tests above.
+  async function connectHook() {
+    FakeWebSocket.last = null;
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    let hook!: ReturnType<typeof useInterviewVoice>;
+    function CommitHarness() {
+      hook = useInterviewVoice("iv-1", { locale: "zh-CN", tokenProvider: () => "tok" });
+      return null;
+    }
+    const { unmount } = render(<CommitHarness />);
+    let connectP!: Promise<void>;
+    act(() => {
+      connectP = hook.connect("zh-CN");
+    });
+    await act(async () => {
+      for (let i = 0; i < 20 && !FakeWebSocket.last; i++) await Promise.resolve();
+      FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
+      await connectP;
+    });
+    return { getHook: () => hook, ws: () => FakeWebSocket.last!, unmount };
+  }
+
+  it("resolves with THIS turn's transcript once the completed event lands", async () => {
+    const { getHook, ws, unmount } = await connectHook();
+
+    let committed!: Promise<string>;
+    act(() => {
+      committed = getHook().commitAnswer();
+    });
+    // A manual commit fires a bare response.create requesting the turn's transcription.
+    expect(ws().sent.some((s) => s.includes('"response.create"'))).toBe(true);
+
+    await act(async () => {
+      ws().receive({
+        type: "conversation.item.input_audio_transcription.completed",
+        transcript: "My spoken answer.",
+      });
+    });
+    await expect(committed).resolves.toBe("My spoken answer.");
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("resolves \"\" when no transcript arrives before the timeout (fail-closed, never hangs)", async () => {
+    vi.useFakeTimers();
+    const { getHook, unmount } = await connectHook();
+
+    let committed!: Promise<string>;
+    act(() => {
+      committed = getHook().commitAnswer();
+    });
+    // Advance past COMMIT_TRANSCRIPT_TIMEOUT_MS (8s) with no completed event.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8_500);
+    });
+    await expect(committed).resolves.toBe("");
+
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("settles a pending commit on disconnect so the awaiter never hangs", async () => {
+    const { getHook, unmount } = await connectHook();
+
+    let committed!: Promise<string>;
+    act(() => {
+      committed = getHook().commitAnswer();
+    });
+    // Teardown before any transcript arrives — cleanup() must resolve the pending commit.
+    await act(async () => {
+      await getHook().disconnect();
+    });
+    await expect(committed).resolves.toBe("");
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("does not leak a transcript across turns (each commit resolves its own turn's text)", async () => {
+    const { getHook, ws, unmount } = await connectHook();
+
+    // Turn 1.
+    let commit1!: Promise<string>;
+    act(() => {
+      commit1 = getHook().commitAnswer();
+    });
+    await act(async () => {
+      ws().receive({
+        type: "conversation.item.input_audio_transcription.completed",
+        transcript: "First answer.",
+      });
+    });
+    await expect(commit1).resolves.toBe("First answer.");
+
+    // Turn 2 — must resolve the SECOND turn's text, not the first's, and not a concatenation.
+    let commit2!: Promise<string>;
+    act(() => {
+      commit2 = getHook().commitAnswer();
+    });
+    await act(async () => {
+      ws().receive({
+        type: "conversation.item.input_audio_transcription.completed",
+        transcript: "Second answer.",
+      });
+    });
+    await expect(commit2).resolves.toBe("Second answer.");
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+});

@@ -5,7 +5,7 @@ validation state. The spec of record is [`../SPEC.md`](../SPEC.md); the planning
 [`planning/`](planning/); per-release detail is in [`../CHANGELOG.md`](../CHANGELOG.md). To actually
 **verify** the requirements and run the system, see [`VERIFICATION.md`](VERIFICATION.md).
 
-Status as of **v0.29.1.0**. Backend: 415 tests, 86% coverage. Frontend: 104 unit/component tests +
+Status as of **v0.30.0.0**. Backend: 427 tests, 86% coverage. Frontend: 113 unit/component tests +
 Playwright E2E (real Chromium). Every merge passed CI (ruff check + ruff format + pytest;
 tsc + vitest + eslint + Playwright E2E). Local dev / CI run entirely on mock providers — zero Azure
 needed to build or test.
@@ -35,7 +35,7 @@ a fused text/voice interview flow, in phases (branch-per-phase, independently re
 | **F6** Turn-by-turn state machine | ✅ Done | v0.4.1.0 | Channel-agnostic `answer_finalized`; follow-up hook; answer grouping; verbal cue. |
 | **F7** Session memory surfacing | ✅ Done | v0.11.0.0 | Follow-up visibly cites the candidate's prior answer; Foundry-agent knowledge binding. |
 | **F8** Interview report | ✅ Done | v0.10.0.0 | Executive view (grade gauge + narrative + SOP-source-beside-answer) + progressive per-item detail. |
-| **F9** Frontend interview page | ✅ Done | v0.5.0.0 | Avatar/orb, question progress, dual text+voice channel, mic recovery, WebRTC voice broker. **Live-screen polish (v0.29.0.0):** voice status legend (four states as tip cards, live one highlighted; hidden in text mode), full-width animated question-progress rail (removes the redundant top-bar badge), and the avatar stage fills the grid height with `object-fit:cover` (no letterbox). |
+| **F9** Frontend interview page | ✅ Done | v0.5.0.0 | Avatar/orb, question progress, dual text+voice channel, mic recovery, WebRTC voice broker. **Live-screen polish (v0.29.0.0):** voice status legend (four states as tip cards, live one highlighted; hidden in text mode), full-width animated question-progress rail (removes the redundant top-bar badge), and the avatar stage fills the grid height with `object-fit:cover` (no letterbox). **Voice-transcript race + explicit-submit flow (v0.30.0.0, [`planning/spec-voice-transcript-race-explicit-submit.md`](planning/spec-voice-transcript-race-explicit-submit.md)):** STT transcription is async — the user transcript arrives only via `conversation.item.input_audio_transcription.completed` on a server round-trip *after* "I'm done". `commitAnswer()` now returns a `Promise<string>` that resolves **this turn's** finalized transcript (or `""` on an 8s timeout / teardown, fail-closed, never hangs), so the page submits the awaited text instead of a stale synchronous read — fixing both the report "未作答" blank and the one-off answer/question misalignment (requirements 1 & 2). A new **`review` phase** shows every question + the candidate's own finalized answer in bank order (`GET /{id}/review` + `ReviewView`); the last answer no longer auto-scores — scoring starts only on an explicit **提交并评测 / Submit & evaluate** click (requirement 4). Empty answers are rejected at three layers — frontend voice gate (`!spoken.trim()`), frontend text gate (button `disabled`), backend Pydantic 422 + defensive state-machine 409 (which also fixed a real bug: a verbal-cue message that strips to empty was silently accepted) (requirement 3). |
 
 ## Post-demo scope (still in SPEC)
 
