@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.30.2.0 (2026-08-19)
+
+### Fixed
+- **The digital human speaks every question again (数字人不说话).** In avatar voice mode the
+  interviewer's next question would appear as text in the transcript but was never read aloud —
+  the candidate saw a silent avatar mid-interview. Root cause: with server-side voice activity
+  detection, Azure automatically starts a spoken response the moment the candidate stops talking.
+  When the candidate then tapped **我答完了 / I'm done** and the app asked the avatar to read the
+  next question, that request collided with Azure's already-running response and was rejected
+  (`conversation_already_has_active_response`); the rejection was never retried, so the question
+  went unspoken. The app now cancels any in-flight response first, queues the exact question text,
+  and speaks it as soon as the current response finishes — always reading the latest question
+  (rapid taps collapse to the newest), and re-queuing automatically if a collision still slips
+  through. The manual "keep talking" nudge no longer fires while a response is already active.
+
 ## 0.30.0.0 (2026-08-19)
 
 ### Fixed
