@@ -31,7 +31,12 @@ const NEW = "__new__";
 export function AgentEditorPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [authed, setAuthed] = useState(Boolean(auth.getToken()));
+  const [authed, setAuthed] = useState(false);
+  // A residual token in sessionStorage is NOT proof of a live session (it may be expired, or signed
+  // with a rotated secret_key). Start in a "checking" state whenever a token exists so we validate
+  // it via me() before rendering the editor — otherwise we'd fire protected requests with a stale
+  // token and get a wall of 401s while the page pretends we're logged in.
+  const [authChecking, setAuthChecking] = useState(Boolean(auth.getToken()));
   const [error, setError] = useState<string | null>(null);
 
   const [list, setList] = useState<personas.PersonaOut[]>([]);
@@ -59,6 +64,23 @@ export function AgentEditorPage() {
     () => guard(async () => setList(await personas.listPersonas())),
     [guard],
   );
+
+  // On mount, validate any residual token before trusting it. me() clears the token on a 401, so a
+  // failed check drops us to the login form instead of hammering /admin/personas with a dead bearer.
+  useEffect(() => {
+    if (!authChecking) return;
+    let cancelled = false;
+    void (async () => {
+      const user = await auth.me();
+      if (cancelled) return;
+      if (user && user.role === "admin") setAuthed(true);
+      else auth.clearToken();
+      setAuthChecking(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authChecking]);
 
   useEffect(() => {
     if (authed) void refreshList();
@@ -153,6 +175,14 @@ export function AgentEditorPage() {
         setRetrying(false);
       }
     });
+
+  if (authChecking) {
+    return (
+      <div style={{ maxWidth: 420, margin: "0 auto", padding: 24 }}>
+        <Body1>正在验证登录状态…</Body1>
+      </div>
+    );
+  }
 
   if (!authed) {
     return (
