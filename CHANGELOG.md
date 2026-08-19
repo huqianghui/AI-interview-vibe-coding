@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.30.3.0 (2026-08-19)
+
+### Fixed
+- **The admin pages now ask you to log in instead of silently failing.** Returning to `/admin` or
+  `/admin/agent` after your session had expired used to show the workspace as if you were still
+  signed in, then quietly break: the persona list and config never loaded, and the browser console
+  filled with `401 Unauthorized` errors with no login prompt in sight. The pages now verify your
+  saved sign-in the moment they open — showing a brief "正在验证登录状态…" check — and drop you to
+  the login form whenever it's no longer valid, so you get a clear way back in instead of a dead,
+  half-loaded screen. No protected data is requested until you're actually authenticated.
+
 ## 0.30.2.0 (2026-08-19)
 
 ### Fixed
