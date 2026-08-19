@@ -133,6 +133,23 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
   // Mirrors isMuted for handleMessage's mic-frame callback, which is created once per
   // `session.updated` and must read the LATEST mute state without resubscribing.
   const isMutedRef = useRef(false);
+  // True while Azure has a response in flight (between `response.created` and `response.done`).
+  // Under server-VAD (create_response=True, our production config) Azure AUTO-creates a response
+  // the moment the user stops speaking, so at the instant the page wants to speak the next
+  // question (or nudge a reply) there is usually ALREADY an active response. Firing our manual
+  // `response.create` then collides and Azure rejects it with
+  // `conversation_already_has_active_response` — which is exactly why the backend-authoritative
+  // next question was never spoken (the "数字人不说话" bug): the agent kept improvising its
+  // auto-response and our verbatim question read was dropped. This ref lets speakQuestion cancel
+  // the in-flight response and defer the real question until it ends.
+  const activeResponseRef = useRef(false);
+  // A question text queued by speakQuestion while a response was active. Flushed (as an assistant
+  // item + response.create) once `response.done` clears the active response. Latest-wins: a newer
+  // question supersedes an older queued one (the backend only ever advances forward).
+  const pendingSpeakTextRef = useRef<string | null>(null);
+  // The question text of the most recent speakQuestion attempt, kept so a collision rejection
+  // (`conversation_already_has_active_response`) can re-queue exactly that text for retry.
+  const lastSpokenAttemptRef = useRef<string | null>(null);
   // Holds the in-flight `initMic()` promise for THIS connect. The mic is initialized CONCURRENTLY
   // with the WS open (they're independent — mic frames don't start until `session.updated`), so the
   // few-hundred-ms getUserMedia + worklet load overlaps the multi-second WS/Azure handshake instead
@@ -160,6 +177,9 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
   const userSegmentsSinceCommitRef = useRef<string[]>([]);
   const optionsRef = useRef(options);
   optionsRef.current = options;
+  // Forward ref so handleMessage's `response.done` case can flush a queued question without
+  // depending on speakQuestion (declared below). Set once speakQuestion is defined.
+  const flushPendingSpeakRef = useRef<(() => void) | null>(null);
 
   // Settle any armed commit with whatever transcript has accumulated so far (usually ""). Called
   // from the transcription handler (with the just-arrived text already pushed) and from teardown
@@ -196,6 +216,12 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
     audio.cleanupMic();
     avatarStartedRef.current = false;
     sessionLiveRef.current = false;
+    // Reset turn-response bookkeeping so a reconnect starts idle (no stale "active response" that
+    // would make the first speakQuestion needlessly cancel, and no queued question from a dead
+    // session leaking into the new one).
+    activeResponseRef.current = false;
+    pendingSpeakTextRef.current = null;
+    lastSpokenAttemptRef.current = null;
     // Drop any buffered user transcript — a new session starts a fresh turn; carrying stale
     // segments across a disconnect/reconnect would mis-attribute them to the next answer.
     userSegmentsSinceCommitRef.current = [];
@@ -318,6 +344,7 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
         }
 
         case "response.created":
+          activeResponseRef.current = true;
           setAudio("speaking");
           break;
         case "response.audio.delta":
@@ -337,8 +364,13 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
             );
           break;
         case "response.done":
+          activeResponseRef.current = false;
           setAudio("idle");
           optionsRef.current.onResponseDone?.();
+          // A question queued while a response was in flight can now be spoken: the conversation is
+          // idle, so the assistant-item + response.create won't collide. This is what makes the
+          // NEXT question actually get read aloud after the server-VAD auto-response ends.
+          flushPendingSpeakRef.current?.();
           break;
 
         case "error": {
@@ -353,6 +385,19 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
           // fatal (the connect() promise must reject so callers can fall back).
           if (sessionLiveRef.current) {
             console.warn("[voice] non-fatal Voice Live error event (session stays up):", error.message);
+            // A collision rejection (`conversation_already_has_active_response`) means a response is
+            // in fact still active even though our optimistic `activeResponseRef` said otherwise
+            // (e.g. a server-VAD auto-response started between our check and send). Mark it active
+            // and re-queue the just-attempted question so it retries on the next `response.done`,
+            // instead of being silently dropped (the bug: the next question never got spoken).
+            const code = errInfo?.code as string | undefined;
+            if (code === "conversation_already_has_active_response") {
+              activeResponseRef.current = true;
+              if (lastSpokenAttemptRef.current) {
+                pendingSpeakTextRef.current = lastSpokenAttemptRef.current;
+                lastSpokenAttemptRef.current = null;
+              }
+            }
             break;
           }
           // During a BACKGROUND reconnect attempt, a pre-connect error is transient: the reconnect
@@ -548,9 +593,12 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
     if (buffered.length > 0) {
       const text = buffered.join(" ").trim();
       userSegmentsSinceCommitRef.current = [];
-      // Still nudge the agent's turn along so the conversation flows as before (server-VAD may have
-      // already auto-responded; a redundant response.create is a harmless per-request no-op).
-      send({ type: "response.create" });
+      // Nudge the agent's turn along ONLY if nothing is already responding. Under server-VAD
+      // (production) Azure has usually auto-created the response already, so an unconditional
+      // response.create here just collides (`conversation_already_has_active_response`) — it's the
+      // extra rejection this fix removes. On manual-VAD (no auto-response) the nudge is still needed
+      // to advance the turn, hence the guard rather than dropping it outright.
+      if (!activeResponseRef.current) send({ type: "response.create" });
       return Promise.resolve(text);
     }
 
@@ -564,9 +612,27 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
         resolve(pending.parts.join(" ").trim());
       }, COMMIT_TRANSCRIPT_TIMEOUT_MS);
       pendingCommitRef.current = { resolve, parts: [], timer };
-      send({ type: "response.create" });
+      if (!activeResponseRef.current) send({ type: "response.create" });
     });
   }, [send, settlePendingCommit]);
+
+  // Emit the assistant-item + response.create pair that makes Voice Live read `text` verbatim.
+  // Assumes no response is currently active (checked by the callers). Records the attempt so a
+  // collision rejection can re-queue it.
+  const emitSpeak = useCallback(
+    (text: string) => {
+      lastSpokenAttemptRef.current = text;
+      send({
+        type: "conversation.item.create",
+        item: { type: "message", role: "assistant", content: [{ type: "text", text }] },
+      });
+      // Optimistically mark active so a rapid second speakQuestion (or a commit nudge) defers
+      // instead of colliding; the real `response.created` confirms it, `response.done` clears it.
+      activeResponseRef.current = true;
+      send({ type: "response.create" });
+    },
+    [send],
+  );
 
   /** Speak the backend-provided question text verbatim (SPEC Phase 4 voice→turn sub-design).
    *
@@ -577,20 +643,43 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
    * overriding `instructions` in `response.create` ("Overriding instructions in response.create is
    * not supported", live-verified), so the verbatim text rides as the assistant item and a bare
    * `response.create` follows — same pattern as the old data-channel transport, now over the WS.
+   *
+   * CANCEL-THEN-SPEAK (the "数字人不说话" fix): under server-VAD (create_response=True, production)
+   * Azure AUTO-creates a response when the user stops speaking, so at the moment the page wants to
+   * read the next question there is usually already an active response. Firing our
+   * conversation.item.create + response.create then collides — Azure rejects with
+   * `conversation_already_has_active_response` and the verbatim question is silently dropped (the
+   * agent's own improvised auto-reply plays instead, diverging from the question card, then goes
+   * quiet). So when a response is active we CANCEL it and QUEUE the question; the `response.done`
+   * that follows the cancel flushes the queued text onto an idle conversation, where it can't
+   * collide. Returns true if the request was sent OR queued (the caller latches "spoken" either
+   * way — the queue guarantees it's read once the conversation frees up).
    */
   const speakQuestion = useCallback(
     (text: string): boolean => {
       const ws = wsRef.current;
       if (!text || ws?.readyState !== WebSocket.OPEN) return false;
-      send({
-        type: "conversation.item.create",
-        item: { type: "message", role: "assistant", content: [{ type: "text", text }] },
-      });
-      send({ type: "response.create" });
+      if (activeResponseRef.current) {
+        // A response (usually the server-VAD auto-response) is in flight — cancel it and queue this
+        // question to be spoken when the resulting `response.done` lands. Latest-wins.
+        pendingSpeakTextRef.current = text;
+        send({ type: "response.cancel" });
+        return true;
+      }
+      emitSpeak(text);
       return true;
     },
-    [send],
+    [emitSpeak, send],
   );
+
+  // Flush a queued question once the conversation goes idle (`response.done`). Held in a ref so
+  // handleMessage's `response.done` case can call it without a declaration-order cycle.
+  flushPendingSpeakRef.current = () => {
+    const text = pendingSpeakTextRef.current;
+    if (!text) return;
+    pendingSpeakTextRef.current = null;
+    emitSpeak(text);
+  };
 
   // Teardown must run ONLY on unmount. `cleanup`'s identity changes every render (it closes over
   // `audio`/`avatarStream`, both fresh objects each render), so depending on `[cleanup]` here made

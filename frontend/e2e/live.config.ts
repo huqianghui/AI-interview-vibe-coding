@@ -14,7 +14,7 @@ const BASE = process.env.BASE || "http://localhost:5173";
 
 export default defineConfig({
   testDir: ".",
-  testMatch: /(voice-live-azure|avatar-diagnostic|avatar-stability-probe|anon-recovery)\.spec\.ts/,
+  testMatch: /(voice-live-azure|avatar-diagnostic|avatar-stability-probe|audio-diagnostic|audio-turn2-diagnostic|anon-recovery)\.spec\.ts/,
   timeout: 120_000,
   expect: { timeout: 15_000 },
   fullyParallel: false,
@@ -28,7 +28,12 @@ export default defineConfig({
       args: [
         "--use-fake-ui-for-media-stream",
         "--use-fake-device-for-media-stream",
-        "--autoplay-policy=no-user-gesture-required",
+        // When FAKE_AUDIO points at a WAV file, the fake mic plays it (spoken user answer for
+        // full-turn diagnostics); otherwise Chromium's default beep tone is used.
+        ...(process.env.FAKE_AUDIO ? [`--use-file-for-fake-audio-capture=${process.env.FAKE_AUDIO}`] : []),
+        // STRICT_AUTOPLAY=1 drops the permissive flag to reproduce real-Chrome autoplay policy
+        // (the hidden avatar <audio> element's play() can be rejected there).
+        ...(process.env.STRICT_AUTOPLAY === "1" ? [] : ["--autoplay-policy=no-user-gesture-required"]),
       ],
     },
   },
