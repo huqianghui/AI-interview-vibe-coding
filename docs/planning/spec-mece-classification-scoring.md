@@ -84,8 +84,18 @@ recomputed on demand), so the aggregation change is localised.
   (`ingest_document`, offline) into a `filename → SopDocument.id` map, creates the bank as the
   enabled default, adds the questions, and authors each rubric **programmatically** (bypassing the
   LLM draft path so real `source_document_id`s are bound) as 6 `required` dimensions + the critical
-  gates + the advisory gate. The evidence/traceability dimension binds to the question's
-  **first-cited** ingested document.
+  gates + the advisory gate.
+- **Per-dimension SOP citation routing.** A question's *Source Hints* usually cite several
+  documents (a process SOP/WI, a job description, an escalation SOP, …). The importer resolves the
+  hint text to **every** cited ingested document (in citation order), then routes each dimension to
+  its most relevant one by category keywords: factual-accuracy & completeness → the process
+  SOP/WI; role/accountability → the job description or governance handbook; risk/escalation → the
+  issue-management/escalation SOP; evidence/traceability → the question's primary (first-cited)
+  document and keeps the full multi-document hint label. A dimension with no category match falls
+  back to the primary cited document so it is **never left uncited**. **Clarity carries no source**
+  — it judges expression, not any document. Net result: **5 of 6 dimensions per question** point
+  back to a concrete SOP (clarity intentionally unbound), each with the specific hint fragment that
+  named its document as the `source_quote`.
 - **Idempotent:** skips an existing bank unless `--force` (which cascade-deletes the prior bank +
   its questions/checklists first). SOP docs are re-ingested only when absent or previously failed.
 
@@ -103,8 +113,8 @@ recomputed on demand), so the aggregation change is localised.
 - checklist model/migration: `advisory` round-trips; `update_items` passthrough.
 - importer: runs against a **synthetic** source dir in `tmp_path` (fabricated questions + `.txt`
   stand-in SOPs — never real client material) asserting bank-as-sole-default, 9 questions,
-  6-dim weights summing to 100, gates + advisory, evidence dimension bound to an ingested document,
-  idempotency, and `--force` rebuild.
+  6-dim weights summing to 100, gates + advisory, **5 of 6 dimensions bound to an ingested
+  document** (clarity unbound), idempotency, and `--force` rebuild.
 - frontend vitest: three-tier outcome headline + cap note + neutral conflict disclosure; gauge
   outcome-awareness.
 
