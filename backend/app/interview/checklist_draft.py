@@ -28,6 +28,10 @@ class DraftItem:
     source_document_id: str | None = None
     source_page: str | None = None
     order_index: int = 0
+    # Advisory forbidden item (known unvalidated source conflict): fires "violated" + a disclosure
+    # warning but does
+    # NOT cap the outcome. Only meaningful on forbidden items; ignored elsewhere.
+    advisory: bool = False
 
 
 @dataclass
@@ -109,6 +113,7 @@ def parse_draft_items(
                 source_document_id=source_document_id,
                 source_page=(str(raw["source_page"]) if raw.get("source_page") else None),
                 order_index=len(items),
+                advisory=bool(raw.get("advisory", False)) and kind == "forbidden",
             )
         )
     return items

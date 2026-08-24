@@ -29,6 +29,9 @@ class Question:
     # Expected answer points (F3 checklist links here). NEVER candidate-facing (P3) — the read API
     # projects it out; it rides here only so scoring can reach it later without a second query.
     expected_points: tuple[str, ...] = ()
+    # Relative weight in the interview-level aggregate (default 1 = equal weighting). Rides here so
+    # score_and_finalize can aggregate sum(score*weight)/sum(weight) without a second query.
+    weight: int = 1
 
 
 # Built-in fallback used only when no default bank is seeded — keeps the F6 spine runnable.
@@ -73,6 +76,7 @@ async def resolve_questions(db: AsyncSession) -> tuple[Question, ...]:
             max_follow_ups=row.max_follow_ups,
             follow_up_prompt=row.follow_up_prompt,
             expected_points=parse_points(row.expected_points),
+            weight=row.weight,
         )
         for row in rows
     )

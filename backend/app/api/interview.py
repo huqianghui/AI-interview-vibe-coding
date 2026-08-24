@@ -81,6 +81,11 @@ class ReportOut(BaseModel):
     # for the stub path). Per-item judgments + SOP/answer quotes live inside per_question entries.
     total_score: float | None = None
     grade: str | None = None
+    # Classification rating: Meets Expectations / Needs Improvement / Does Not Meet.
+    # ``capped`` is True when a confirmed critical error forced the outcome to Needs Improvement
+    # (per-question ``outcome``/``capped`` ride in per_question entries). None for the stub path.
+    outcome: str | None = None
+    capped: bool = False
     warnings: list[str] = []
     # F8 executive-headline narrative (1-2 sentences, strengths + main gap). Empty for stub path.
     narrative: str = ""

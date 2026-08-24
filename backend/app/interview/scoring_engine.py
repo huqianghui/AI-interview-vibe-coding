@@ -33,6 +33,21 @@ logger = logging.getLogger(__name__)
 JUDGMENTS = ("met", "partially_met", "not_met", "violated")
 _STATE_CREDIT = {"met": 1.0, "partially_met": 0.5, "not_met": 0.0, "violated": 0.0}
 
+# Classification rating (from the evaluation contract). The report headline is one of these three
+# outcomes rather than a raw letter grade: a confirmed critical error caps the result at
+# "Needs Improvement" regardless of the numeric score (see ``cap_outcome``).
+MEETS_EXPECTATIONS = "Meets Expectations"
+NEEDS_IMPROVEMENT = "Needs Improvement"
+DOES_NOT_MEET = "Does Not Meet"
+OUTCOMES = (MEETS_EXPECTATIONS, NEEDS_IMPROVEMENT, DOES_NOT_MEET)
+# Best (index 0) → worst; used to take the more-severe of the natural and capped outcomes.
+_OUTCOME_SEVERITY = {MEETS_EXPECTATIONS: 0, NEEDS_IMPROVEMENT: 1, DOES_NOT_MEET: 2}
+
+# Score → outcome thresholds (0-100). Aligned to the existing B=70 / D=40 letter boundaries so the
+# classification never disagrees with the legacy grade at the band edges.
+OUTCOME_MEETS_MIN = 70.0
+OUTCOME_NEEDS_MIN = 40.0
+
 # An answer shorter than this (after strip) can't meet any rubric item — recalibrated for a SINGLE
 # Q&A turn, deliberately NOT the reference's 100-char aggregate-transcript number (SPEC P7).
 MIN_MEANINGFUL_LEN = 20
@@ -48,6 +63,9 @@ class RubricItem:
     weight: int
     source_quote: str = ""
     source_page: str | None = None
+    # Advisory forbidden item: fires "violated" + a warning (disclosure) but does NOT cap the
+    # outcome. Carries a known, unvalidated source conflict. Ignored for non-forbidden items.
+    advisory: bool = False
 
 
 @dataclass(frozen=True)
@@ -62,6 +80,8 @@ class ItemJudgment:
     answer_quote: str
     source_quote: str
     source_page: str | None = None
+    # Mirrors RubricItem.advisory: a fired advisory forbidden discloses but doesn't cap the outcome.
+    advisory: bool = False
 
 
 @dataclass(frozen=True)
@@ -71,6 +91,10 @@ class QuestionResult:
     coverage_pct: float  # (met + 0.5*partial) / count of weighted items, 0-100
     items: list[ItemJudgment]
     warnings: list[str] = field(default_factory=list)
+    # Classification headline for this question. ``capped`` is True when a confirmed
+    # (non-advisory) critical error forced the outcome down to "Needs Improvement".
+    outcome: str = MEETS_EXPECTATIONS
+    capped: bool = False
 
 
 class ScoringIncomplete(Exception):
@@ -114,10 +138,15 @@ def enforce_and_score(
         if judgment not in JUDGMENTS:
             judgment = "not_met"
 
-        # Rail #2: a fired forbidden item is always "violated" + a warning, no matter the text.
+        # Rail #2: a fired forbidden item is always "violated" + a warning, no matter the text. An
+        # advisory forbidden item is disclosed distinctly so it never reads as a
+        # hard critical error and never caps the outcome below.
         if it.kind == "forbidden" and judgment != "not_met":
             judgment = "violated"
-            warnings.append(f"Forbidden item triggered: {it.text}")
+            if it.advisory:
+                warnings.append(f"Advisory item disclosed (does not cap): {it.text}")
+            else:
+                warnings.append(f"Forbidden item triggered: {it.text}")
 
         # Rail #1: empty/too-short answers can't have met anything — force not_met (but keep a
         # genuinely-violated forbidden as violated: a brief forbidden statement still counts).
@@ -134,16 +163,26 @@ def enforce_and_score(
                 answer_quote=str(raw.get("answer_quote", "")).strip(),
                 source_quote=it.source_quote,
                 source_page=it.source_page,
+                advisory=it.advisory,
             )
         )
 
     score, coverage = _weighted_score(items)
+    # Classification: natural outcome from the score, then cap to "Needs Improvement" if a
+    # confirmed (non-advisory) critical error fired. Advisory disclosures are excluded from the cap.
+    natural = outcome_for_score(score)
+    critical_fired = any(
+        it.kind == "forbidden" and it.judgment == "violated" and not it.advisory for it in items
+    )
+    outcome, capped = cap_outcome(natural, critical_fired=critical_fired)
     return QuestionResult(
         question_id=question_id,
         score=score,
         coverage_pct=coverage,
         items=items,
         warnings=warnings,
+        outcome=outcome,
+        capped=capped,
     )
 
 
@@ -169,6 +208,36 @@ def grade_for_score(score: float) -> str:
     if score >= 40:
         return "D"
     return "F"
+
+
+def outcome_for_score(score: float) -> str:
+    """Map a 0-100 score to the classification rating (the *natural*, pre-cap outcome).
+
+    Thresholds align to the legacy B=70 / D=40 letter boundaries so the classification never
+    disagrees with :func:`grade_for_score` at a band edge: ``>=70`` Meets, ``40-69`` Needs
+    Improvement, ``<40`` Does Not Meet.
+    """
+    if score >= OUTCOME_MEETS_MIN:
+        return MEETS_EXPECTATIONS
+    if score >= OUTCOME_NEEDS_MIN:
+        return NEEDS_IMPROVEMENT
+    return DOES_NOT_MEET
+
+
+def cap_outcome(natural: str, *, critical_fired: bool) -> tuple[str, bool]:
+    """Apply the critical-error cap to a natural outcome.
+
+    A confirmed critical error (a non-advisory forbidden item fired) caps the result at "Needs
+    Improvement": the returned outcome is the **more severe** of the natural outcome and the cap, so
+    an already-worse "Does Not Meet" is preserved. ``capped`` is True only when the cap actually
+    moved the outcome (natural was "Meets Expectations"). Advisory disclosures never reach here.
+    """
+    if not critical_fired:
+        return natural, False
+    if _OUTCOME_SEVERITY[natural] >= _OUTCOME_SEVERITY[NEEDS_IMPROVEMENT]:
+        # Already at or below the cap — the critical error changes nothing about the headline.
+        return natural, False
+    return NEEDS_IMPROVEMENT, True
 
 
 def build_narrative(results: list[QuestionResult]) -> str:
