@@ -1,5 +1,5 @@
 /** ReportView (SPEC F8): executive view, side-by-side SOP/answer evidence, detail toggle, stub. */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
@@ -7,6 +7,14 @@ import "../i18n";
 import i18n from "../i18n";
 import { ReportView } from "./ReportView";
 import type { Report } from "../api/client";
+
+// The citation link fetches the source document via the client (auth header path); mock it so the
+// component test stays a pure render + click test with no network.
+vi.mock("../api/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/client")>();
+  return { ...actual, fetchSopDocument: vi.fn() };
+});
+import { fetchSopDocument } from "../api/client";
 
 function renderReport(report: Report) {
   return render(
@@ -56,6 +64,10 @@ const SCORED: Report = {
 };
 
 describe("ReportView", () => {
+  beforeEach(() => {
+    vi.mocked(fetchSopDocument).mockReset();
+  });
+
   it("renders the executive view: grade, narrative, warning, side-by-side evidence", async () => {
     await i18n.changeLanguage("en-US");
     renderReport(SCORED);
@@ -106,6 +118,45 @@ describe("ReportView", () => {
     expect(screen.queryByTestId("report-detail")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("toggle-detail"));
     expect(screen.getByTestId("report-detail")).toBeInTheDocument();
+  });
+
+  it("renders the SOP source as a clickable link when the item cites a document", async () => {
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    vi.mocked(fetchSopDocument).mockResolvedValue("blob:mock-url");
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+
+    renderReport({
+      ...SCORED,
+      per_question: [
+        {
+          ...SCORED.per_question[0],
+          items: [
+            {
+              ...SCORED.per_question[0].items![0],
+              source_document_id: "doc-1",
+              source_document_name: "SOP.pdf",
+            },
+          ],
+        },
+      ],
+    });
+
+    // Exec-view evidence renders the source as a link (not plain text) and clicking it fetches +
+    // opens the document.
+    const link = screen.getAllByTestId("sop-source-link")[0];
+    await user.click(link);
+    expect(fetchSopDocument).toHaveBeenCalledWith("iv1", "doc-1");
+    expect(openSpy).toHaveBeenCalledWith("blob:mock-url", "_blank", "noopener,noreferrer");
+    openSpy.mockRestore();
+  });
+
+  it("renders the SOP source as plain text when the item has no cited document", async () => {
+    await i18n.changeLanguage("en-US");
+    renderReport(SCORED); // SCORED items carry no source_document_id
+    expect(screen.queryByTestId("sop-source-link")).not.toBeInTheDocument();
+    // The source label text is still present in the evidence card.
+    expect(screen.getByTestId("report-evidence")).toHaveTextContent(/SOP source/i);
   });
 
   it("renders a stub report as a minimal list", async () => {

@@ -30,7 +30,9 @@ from app.interview.scoring_engine import (
     outcome_for_score,
 )
 from app.interview.verbal_cue import strip_verbal_cue
+from app.models.checklist import Checklist, ChecklistItem
 from app.models.interview import InterviewSession, InterviewTurn
+from app.models.sop import SopDocument
 from app.services import scoring_service
 
 # Sources that can finalize an answer (P9). All route through answer_finalized().
@@ -220,6 +222,14 @@ async def score_and_finalize(db: AsyncSession, session: InterviewSession) -> dic
 
     answers = await _candidate_answers(db, session.id)
 
+    # SOP document_id → display name, so each scored item can carry a human-readable source label
+    # alongside the id the report links to. One query up front (SOP corpus is small); items whose
+    # source doc was deleted simply resolve to no name and the link falls back to the page label.
+    doc_names = {
+        doc_id: name
+        for doc_id, name in (await db.execute(select(SopDocument.id, SopDocument.name))).all()
+    }
+
     per_question: list[dict] = []
     weighted_sum = 0.0
     weight_total = 0
@@ -265,6 +275,11 @@ async def score_and_finalize(db: AsyncSession, session: InterviewSession) -> dic
                         "answer_quote": it.answer_quote,
                         "source_quote": it.source_quote,
                         "source_page": it.source_page,
+                        # Clickable-citation anchors: the id the candidate SOP endpoint serves, and
+                        # a display name for the link text. Both None/absent when the item has no
+                        # linked SOP document (the report then shows plain source text, no link).
+                        "source_document_id": it.source_document_id,
+                        "source_document_name": doc_names.get(it.source_document_id),
                     }
                     for it in result.items
                 ],
@@ -409,6 +424,32 @@ async def _candidate_answers(db: AsyncSession, session_id: str) -> list[tuple[st
         .all()
     )
     return group_answers([(t.question_id, t.content) for t in rows])
+
+
+async def cited_document_ids(db: AsyncSession, session: InterviewSession) -> set[str]:
+    """The set of SOP document ids the candidate is allowed to open for THIS interview.
+
+    Authorization scope for the candidate SOP endpoint (the clickable-citation feature): a document
+    is reachable only if a default-checklist item of a question this interview actually answered
+    cites it. This is the IDOR guard — a candidate cannot fetch an arbitrary SOP document id, only
+    the specific sources behind their own report's citations. Returns an empty set (deny-all) for an
+    interview with no cited sources.
+    """
+    answered_qids = {qid for qid, _ in await _candidate_answers(db, session.id)}
+    if not answered_qids:
+        return set()
+    rows = (
+        await db.execute(
+            select(ChecklistItem.source_document_id)
+            .join(Checklist, ChecklistItem.checklist_id == Checklist.id)
+            .where(
+                Checklist.question_id.in_(answered_qids),
+                Checklist.is_default.is_(True),
+                ChecklistItem.source_document_id.is_not(None),
+            )
+        )
+    ).all()
+    return {doc_id for (doc_id,) in rows if doc_id}
 
 
 async def review_answers(db: AsyncSession, session: InterviewSession) -> list[dict]:

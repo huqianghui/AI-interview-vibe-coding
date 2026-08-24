@@ -491,3 +491,131 @@ async def test_text_answer_works_after_failed_voice_session(client, db_session):
     )
     assert answer.status_code == 200
     assert answer.json()["current_question"]["index"] == 1
+
+
+# --- Clickable citation: candidate can open a cited SOP source document --------------------
+#
+# Deliberate, tightly-scoped relaxation of P4/P12: a candidate may open ONLY the source documents
+# cited by their OWN scored report, server-mediated (no raw blob URL). Two guards, both 404.
+
+
+async def _seed_question_citing_doc(db_session, *, doc_bytes: bytes = b"%PDF-1.4 fake sop bytes"):
+    """Seed a default bank + one question + a default checklist whose required item cites a real
+    stored SOP document. Returns (document_id, document_name). Mirrors the live importer shape:
+    ``ChecklistItem.source_document_id`` → ``SopDocument`` with bytes in the blob store."""
+    from app.models.checklist import Checklist, ChecklistItem
+    from app.models.sop import SopDocument
+    from app.services import question_service
+    from app.services.storage import get_storage
+
+    bank = await question_service.create_bank(db_session, name="B", is_default=True)
+    q = await question_service.add_question(
+        db_session, bank_id=bank.id, text="Describe the safety procedure.", order_index=0
+    )
+    doc_name = "安全操作规程.pdf"  # non-ASCII: exercises the RFC 5987 filename* path
+    blob_path = get_storage().save("test/sop-cited.pdf", doc_bytes)
+    doc = SopDocument(
+        name=doc_name,
+        blob_path=blob_path,
+        content_type="application/pdf",
+        size=len(doc_bytes),
+        status="indexed",
+    )
+    db_session.add(doc)
+    await db_session.flush()
+    checklist = Checklist(question_id=q.id, is_default=True)
+    db_session.add(checklist)
+    await db_session.flush()
+    db_session.add(
+        ChecklistItem(
+            checklist_id=checklist.id,
+            kind="required",
+            text="Follow the documented steps in order.",
+            weight=100,
+            source_quote="Follow the documented steps in order.",
+            source_document_id=doc.id,
+            source_page="p.1",
+            order_index=0,
+        )
+    )
+    await db_session.commit()
+    return doc.id, doc_name
+
+
+async def _complete_interview(client, headers) -> str:
+    interview_id = (await client.post("/candidate/interview/start", headers=headers)).json()[
+        "interview_session_id"
+    ]
+    status_body = {"status": "in_progress"}
+    for _ in range(20):
+        if status_body["status"] == "completed":
+            break
+        status_body = (
+            await client.post(
+                f"/candidate/interview/{interview_id}/answer",
+                headers=headers,
+                json={
+                    "text": "I followed each documented step and checked safety.",
+                    "source": "text",
+                },
+            )
+        ).json()
+    await client.post(f"/candidate/interview/{interview_id}/report", headers=headers)
+    return interview_id
+
+
+@pytest.mark.asyncio
+async def test_sop_document_served_for_cited_doc_of_owned_interview(client, db_session):
+    doc_bytes = b"%PDF-1.4 fake sop bytes"
+    doc_id, doc_name = await _seed_question_citing_doc(db_session, doc_bytes=doc_bytes)
+    headers = await _new_candidate_headers(client)
+    interview_id = await _complete_interview(client, headers)
+
+    # The report should carry the citation's document id (proof the link target is wired through).
+    report = (
+        await client.post(f"/candidate/interview/{interview_id}/report", headers=headers)
+    ).json()
+    item = report["per_question"][0]["items"][0]
+    assert item["source_document_id"] == doc_id
+    assert item["source_document_name"] == doc_name
+
+    resp = await client.get(f"/candidate/interview/{interview_id}/sop/{doc_id}", headers=headers)
+    assert resp.status_code == 200
+    assert resp.content == doc_bytes
+    assert resp.headers["content-type"].startswith("application/pdf")
+    # Inline preview + RFC 5987 non-ASCII filename.
+    assert "inline" in resp.headers["content-disposition"]
+    assert "filename*=UTF-8''" in resp.headers["content-disposition"]
+
+
+@pytest.mark.asyncio
+async def test_sop_document_requires_anon_session(client, db_session):
+    doc_id, _ = await _seed_question_citing_doc(db_session)
+    headers = await _new_candidate_headers(client)
+    interview_id = await _complete_interview(client, headers)
+    # No X-Anon-Session header → 401 (auth guard runs before ownership/citation).
+    resp = await client.get(f"/candidate/interview/{interview_id}/sop/{doc_id}")
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_sop_document_404_for_unowned_interview(client, db_session):
+    doc_id, _ = await _seed_question_citing_doc(db_session)
+    headers_a = await _new_candidate_headers(client)
+    interview_id = await _complete_interview(client, headers_a)
+    # Candidate B cannot read A's interview citations — same 404 as missing (no existence leak).
+    headers_b = await _new_candidate_headers(client)
+    resp = await client.get(f"/candidate/interview/{interview_id}/sop/{doc_id}", headers=headers_b)
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_sop_document_404_for_uncited_or_unknown_id(client, db_session):
+    await _seed_question_citing_doc(db_session)
+    headers = await _new_candidate_headers(client)
+    interview_id = await _complete_interview(client, headers)
+    # An arbitrary / uncited document id is indistinguishable from a missing one (IDOR guard).
+    resp = await client.get(
+        f"/candidate/interview/{interview_id}/sop/not-a-cited-doc", headers=headers
+    )
+    assert resp.status_code == 404

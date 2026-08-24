@@ -73,6 +73,11 @@ export const resources = {
       report: {
         title: "Interview report",
         sopSource: "SOP source",
+        // Clickable citation: tooltip/aria on the source link, and the transient "opening…" and
+        // failure states while the document is fetched.
+        openSource: "Open source document",
+        openingSource: "Opening…",
+        openSourceFailed: "Couldn't open the source document.",
         candidateAnswer: "Candidate answer",
         showDetail: "Show detailed breakdown",
         hideDetail: "Hide detailed breakdown",
@@ -168,6 +173,10 @@ export const resources = {
       report: {
         title: "面试报告",
         sopSource: "SOP 出处",
+        // 可点击引用：来源链接的提示/aria 文案，以及抓取文件期间的“打开中”与失败状态。
+        openSource: "打开来源文件",
+        openingSource: "打开中…",
+        openSourceFailed: "无法打开来源文件。",
         candidateAnswer: "候选人回答",
         showDetail: "展开详细拆解",
         hideDetail: "收起详细拆解",

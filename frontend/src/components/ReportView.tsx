@@ -22,12 +22,14 @@ import {
   Button,
   Card,
   CardHeader,
+  Link,
   Text,
   Title3,
   makeStyles,
   tokens,
 } from "@fluentui/react-components";
 import type { Report, QuestionScore, ScoredItem, Outcome } from "../api/client";
+import { fetchSopDocument } from "../api/client";
 import { ScoreGauge } from "./ScoreGauge";
 
 const useStyles = makeStyles({
@@ -108,6 +110,75 @@ function firstEvidence(report: Report): ScoredItem | null {
     }
   }
   return null;
+}
+
+/**
+ * The report's SOP-source label. When the cited item carries a ``source_document_id`` we render the
+ * label as a clickable link that fetches the source file (with the anon-session header) and opens it
+ * in a new tab so the candidate can preview the original document; otherwise it's plain text.
+ *
+ * We can't use a naked ``<a href>`` because the candidate auth is a header, not a cookie — a raw
+ * navigation would 401. So the click fetches bytes → blob object URL → new tab. The blob URL is
+ * revoked shortly after opening (long enough for the tab to load) to avoid leaking object URLs.
+ */
+function SopSourceLink({
+  interviewId,
+  item,
+  suffix,
+}: {
+  interviewId: string;
+  item: ScoredItem;
+  suffix?: string;
+}) {
+  const { t } = useTranslation();
+  const [state, setState] = useState<"idle" | "opening" | "failed">("idle");
+  const label = `${t("report.sopSource")}${item.source_page ? ` · ${item.source_page}` : ""}`;
+
+  if (!item.source_document_id) {
+    return (
+      <>
+        {label}
+        {suffix}
+      </>
+    );
+  }
+
+  const docId = item.source_document_id;
+  const open = async () => {
+    if (state === "opening") return;
+    setState("opening");
+    try {
+      const url = await fetchSopDocument(interviewId, docId);
+      window.open(url, "_blank", "noopener,noreferrer");
+      // Give the new tab time to load before releasing the object URL.
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      setState("idle");
+    } catch {
+      setState("failed");
+    }
+  };
+
+  return (
+    <>
+      <Link
+        as="button"
+        type="button"
+        onClick={open}
+        disabled={state === "opening"}
+        title={item.source_document_name ?? t("report.openSource")}
+        data-testid="sop-source-link"
+      >
+        {label}
+        {state === "opening" ? ` · ${t("report.openingSource")}` : ""}
+      </Link>
+      {suffix}
+      {state === "failed" && (
+        <Text size={200} style={{ color: tokens.colorPaletteRedForeground1, marginLeft: 6 }}>
+          {t("report.openSourceFailed")}
+        </Text>
+      )}
+    </>
+  );
 }
 
 export function ReportView({ report }: { report: Report }) {
@@ -198,8 +269,7 @@ export function ReportView({ report }: { report: Report }) {
         <div className={styles.sideBySide} data-testid="report-evidence">
           <div className={styles.quoteCard}>
             <Text size={200} weight="semibold" className={styles.quoteLabel}>
-              {t("report.sopSource")}
-              {evidence.source_page ? ` · ${evidence.source_page}` : ""}
+              <SopSourceLink interviewId={report.interview_session_id} item={evidence} />
             </Text>
             <Text className={styles.quote}>"{evidence.source_quote}"</Text>
           </div>
@@ -252,8 +322,11 @@ export function ReportView({ report }: { report: Report }) {
                     )}
                     {it.source_quote && (
                       <Text size={200} className={styles.quote}>
-                        {t("report.sopSource")}
-                        {it.source_page ? ` · ${it.source_page}` : ""}: "{it.source_quote}"
+                        <SopSourceLink
+                          interviewId={report.interview_session_id}
+                          item={it}
+                          suffix={`: "${it.source_quote}"`}
+                        />
                       </Text>
                     )}
                   </div>
