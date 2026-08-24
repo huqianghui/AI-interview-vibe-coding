@@ -38,7 +38,7 @@ from app.services.voice_providers import VoiceCredential, get_voice_provider
 from app.utils.azure_endpoints import endpoint_host, to_cognitive_services_endpoint
 
 # Locale the broker defaults to when the caller doesn't pin one (matches F5 metadata fallback).
-DEFAULT_LOCALE = "zh-CN"
+DEFAULT_LOCALE = "en-US"
 
 
 class VoiceBrokerError(Exception):

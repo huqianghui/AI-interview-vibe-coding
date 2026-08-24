@@ -422,7 +422,7 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
 
   const connect = useCallback(
     async (locale?: string, isReconnect = false): Promise<void> => {
-      const effectiveLocale = locale ?? optionsRef.current.locale ?? "zh-CN";
+      const effectiveLocale = locale ?? optionsRef.current.locale ?? "en-US";
       lastLocaleRef.current = effectiveLocale;
       if (!isReconnect) reconnectAttemptRef.current = 0;
       intentionalCloseRef.current = false;
