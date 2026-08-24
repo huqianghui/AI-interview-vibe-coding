@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.31.2.0 (2026-08-24)
+
+### Changed
+- **The voice interviewer stays on the question and won't over-probe.** The default digital-human
+  interviewer contract now bounds its free-form follow-ups: at most **one short follow-up per
+  question**, and it must **stay on the system's current question** — it may not invent new
+  questions, wander to another topic, or change the subject on its own (the system decides which
+  question comes next). If it does drift, it briefly acknowledges and returns to the original
+  question. This fixes the demo behavior where the voice agent occasionally asked an off-topic
+  follow-up and then had to self-correct mid-interview.
+- This only affects personas that use the auto-generated default instructions (no custom
+  `prompt_fragment`); an operator's custom instructions are never overridden. It is a
+  prompt/behavior bound only — **scoring is unchanged**: follow-up *questions* are never graded, an
+  answered follow-up still folds into that question's single answer group, and an unanswered
+  follow-up neither penalizes nor alters the score (SPEC F6/F7).
+- **Applies on next persona sync.** The tightened contract is pushed to Foundry when the persona is
+  next synced (edit + save the persona in `/admin/agent`, or the reconcile-on-open path); an agent
+  already synced in a live environment keeps its previous instructions until then.
+
 ## 0.31.1.0 (2026-08-24)
 
 ### Added

@@ -21,6 +21,22 @@ async def test_get_missing_raises(db_session):
         await svc.get_persona(db_session, "nope")
 
 
+def test_default_instructions_converge_follow_ups():
+    """The fallback interviewer contract (F6/F7) bounds the agent's free-form voice follow-ups:
+    at most one short follow-up per question, and no self-initiated topic drift — the system
+    controls which question comes next. Guards against silently loosening the persona contract."""
+    from app.models.persona import default_instructions
+
+    text = default_instructions("Ava").lower()
+    # At most one follow-up per question.
+    assert "at most one" in text and "follow-up" in text
+    # Stay on the current question; do not invent new topics / switch subject.
+    assert "current question" in text
+    assert "do not introduce new topics" in text
+    # Self-correct on drift rather than running with it.
+    assert "drifted" in text and "return to the original question" in text
+
+
 async def test_first_default_is_the_default(db_session):
     p = await _mk(db_session, name="D", is_default=True)
     assert (await svc.get_default_persona(db_session)).id == p.id
