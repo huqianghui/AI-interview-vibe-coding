@@ -23,7 +23,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.interview.memory import build_follow_up_prompt
 from app.interview.questions import question_at, resolve_questions
 from app.interview.scoring import group_answers
-from app.interview.scoring_engine import build_narrative, grade_for_score
+from app.interview.scoring_engine import (
+    build_narrative,
+    cap_outcome,
+    grade_for_score,
+    outcome_for_score,
+)
 from app.interview.verbal_cue import strip_verbal_cue
 from app.models.interview import InterviewSession, InterviewTurn
 from app.services import scoring_service
@@ -209,13 +214,19 @@ async def score_and_finalize(db: AsyncSession, session: InterviewSession) -> dic
     # question_id → prompt text, so the scorer can build a cross-language judging prompt.
     questions = await resolve_questions(db)
     prompt_by_id = {q.id: q.prompt for q in questions}
+    # question_id → aggregate weight (default 1). A question weighted 0 or missing still scores per
+    # question but contributes nothing to the interview-level mean.
+    weight_by_id = {q.id: max(q.weight, 0) for q in questions}
+
     answers = await _candidate_answers(db, session.id)
 
     per_question: list[dict] = []
-    question_scores: list[float] = []
+    weighted_sum = 0.0
+    weight_total = 0
     all_warnings: list[str] = []
     graded_results: list = []
     any_graded = False
+    any_capped = False
 
     for question_id, answer_text in answers:
         result = await scoring_service.score_answer_against_checklist(
@@ -229,20 +240,27 @@ async def score_and_finalize(db: AsyncSession, session: InterviewSession) -> dic
             per_question.append(scoring_service.stub_result_dict(question_id, answer_text))
             continue
         any_graded = True
-        question_scores.append(result.score)
+        q_weight = weight_by_id.get(question_id, 1)
+        weighted_sum += result.score * q_weight
+        weight_total += q_weight
         all_warnings.extend(result.warnings)
         graded_results.append(result)
+        any_capped = any_capped or result.capped
         per_question.append(
             {
                 "question_id": result.question_id,
                 "score": result.score,
                 "coverage_pct": result.coverage_pct,
                 "grade": grade_for_score(result.score),
+                "outcome": result.outcome,
+                "capped": result.capped,
+                "weight": q_weight,
                 "items": [
                     {
                         "kind": it.kind,
                         "judgment": it.judgment,
                         "weight": it.weight,
+                        "advisory": it.advisory,
                         "rationale": it.rationale,
                         "answer_quote": it.answer_quote,
                         "source_quote": it.source_quote,
@@ -254,8 +272,20 @@ async def score_and_finalize(db: AsyncSession, session: InterviewSession) -> dic
             }
         )
 
-    # Interview-level score = mean of graded question scores; coverage mirrors it (F8 aggregates).
-    total_score = round(sum(question_scores) / len(question_scores), 1) if question_scores else 0.0
+    # Interview-level score = weight-weighted mean of graded question scores (SPEC F8). Weights
+    # default to 1, so an all-equal bank reproduces the historical simple mean; stub questions are
+    # excluded from both numerator and denominator. Falls back to a plain count if every graded
+    # question is weighted 0 (never divide by zero).
+    if weight_total > 0:
+        total_score = round(weighted_sum / weight_total, 1)
+    elif graded_results:
+        total_score = round(sum(r.score for r in graded_results) / len(graded_results), 1)
+    else:
+        total_score = 0.0
+
+    # Interview-level classification: the natural outcome from the aggregate score, capped to "Needs
+    # Improvement" if ANY graded question was capped by a confirmed critical error.
+    outcome, outcome_capped = cap_outcome(outcome_for_score(total_score), critical_fired=any_capped)
 
     session.status = "scored"
     await db.commit()
@@ -267,6 +297,8 @@ async def score_and_finalize(db: AsyncSession, session: InterviewSession) -> dic
         "coverage_pct": total_score,
         "total_score": total_score,
         "grade": grade_for_score(total_score) if any_graded else None,
+        "outcome": outcome if any_graded else None,
+        "capped": outcome_capped,
         "narrative": build_narrative(graded_results) if any_graded else "",
         "per_question": per_question,
         "warnings": all_warnings,

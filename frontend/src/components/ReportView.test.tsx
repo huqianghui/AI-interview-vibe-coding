@@ -68,6 +68,37 @@ describe("ReportView", () => {
     expect(evidence).toHaveTextContent("I followed each documented step");
   });
 
+  it("renders the classification outcome headline and a critical-error cap note", async () => {
+    await i18n.changeLanguage("en-US");
+    renderReport({
+      ...SCORED,
+      outcome: "Needs Improvement",
+      capped: true,
+    });
+    expect(screen.getByTestId("report-outcome")).toHaveTextContent("Needs Improvement");
+    expect(screen.getByTestId("score-gauge")).toHaveAttribute("data-outcome", "Needs Improvement");
+    // The cap explanation is shown; a critical-error warning stays as a (red) warning.
+    expect(screen.getByTestId("report-capped")).toHaveTextContent(/critical error/i);
+    expect(screen.getByTestId("report-warning")).toBeInTheDocument();
+    // No advisory disclosure was raised here.
+    expect(screen.queryByTestId("report-disclosure")).not.toBeInTheDocument();
+  });
+
+  it("renders a CONFLICT-001 advisory disclosure neutrally (not as a failure, no cap)", async () => {
+    await i18n.changeLanguage("en-US");
+    renderReport({
+      ...SCORED,
+      outcome: "Meets Expectations",
+      capped: false,
+      warnings: ["Advisory item disclosed (does not cap): PD review timeline conflict"],
+    });
+    expect(screen.getByTestId("report-outcome")).toHaveTextContent("Meets Expectations");
+    // A disclosure note is shown; it is NOT a red warning and there is NO cap note.
+    expect(screen.getByTestId("report-disclosure")).toHaveTextContent(/disclosed for transparency/i);
+    expect(screen.queryByTestId("report-warning")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("report-capped")).not.toBeInTheDocument();
+  });
+
   it("progressively discloses the per-item detail", async () => {
     await i18n.changeLanguage("en-US");
     const user = userEvent.setup();

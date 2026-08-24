@@ -96,6 +96,7 @@ async def score_answer_against_checklist(
             weight=row.weight,
             source_quote=row.source_quote,
             source_page=row.source_page,
+            advisory=row.advisory,
         )
         for row in item_rows
     ]

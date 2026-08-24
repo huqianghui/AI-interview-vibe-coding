@@ -55,6 +55,11 @@ class Question(TimestampMixin, Base):
     # 0-based position within the bank; the state machine advances by this order.
     order_index: Mapped[int] = mapped_column(Integer, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
+    # Relative weight of this question in the interview-level aggregate score. Default 1 = every
+    # question counts equally (the historical simple-mean behaviour). A bank can weight questions
+    # unequally (e.g. a synthesis question worth more); the state machine aggregates
+    # sum(score*weight)/sum(weight) over graded questions.
+    weight: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     language: Mapped[str] = mapped_column(String(16), default="zh-CN", nullable=False)
     # JSON list of expected answer points that F3 checklist items link to. NEVER candidate-facing
     # (P3) — stored here, projected out of candidate responses at the API layer.

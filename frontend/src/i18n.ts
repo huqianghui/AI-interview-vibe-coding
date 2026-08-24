@@ -84,6 +84,18 @@ export const resources = {
           not_met: "Not met",
           violated: "Violated",
         },
+        // Classification rating (the executive headline) + the two explanatory notes.
+        outcomeLabel: "Overall rating",
+        outcome: {
+          "Meets Expectations": "Meets Expectations",
+          "Needs Improvement": "Needs Improvement",
+          "Does Not Meet": "Does Not Meet",
+        },
+        cappedNote:
+          "Capped to Needs Improvement: a critical error was confirmed against the authoritative SOP.",
+        disclosure: "Disclosure",
+        disclosureNote:
+          "A known source conflict was raised. It is disclosed for transparency and does not reduce the score.",
       },
       review: {
         title: "Review your answers",
@@ -167,6 +179,16 @@ export const resources = {
           not_met: "未达标",
           violated: "违规",
         },
+        // 分类评级(报告 headline)+ 两条说明注记。
+        outcomeLabel: "总体评价",
+        outcome: {
+          "Meets Expectations": "达到预期",
+          "Needs Improvement": "有待改进",
+          "Does Not Meet": "未达预期",
+        },
+        cappedNote: "已封顶为「有待改进」:回答中存在与权威 SOP 冲突的关键错误。",
+        disclosure: "披露",
+        disclosureNote: "已提示一处已知的资料冲突。此处仅作透明披露,不影响评分。",
       },
       review: {
         title: "回顾你的回答",

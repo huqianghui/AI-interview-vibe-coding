@@ -3,11 +3,16 @@
 import pytest
 
 from app.interview.scoring_engine import (
+    DOES_NOT_MEET,
+    MEETS_EXPECTATIONS,
+    NEEDS_IMPROVEMENT,
     RubricItem,
     ScoringIncomplete,
     build_narrative,
+    cap_outcome,
     enforce_and_score,
     grade_for_score,
+    outcome_for_score,
 )
 
 _LONG = "This is a sufficiently detailed answer that clears the length rail comfortably."
@@ -146,3 +151,90 @@ def test_build_narrative_flags_violation():
 
 def test_build_narrative_empty_when_nothing_graded():
     assert build_narrative([]) == ""
+
+
+# --- classification rating (outcome) + critical-error cap ------------------------------------
+
+
+def test_outcome_for_score_bands():
+    # Thresholds align to the B=70 / D=40 letter boundaries.
+    assert outcome_for_score(100) == MEETS_EXPECTATIONS
+    assert outcome_for_score(70) == MEETS_EXPECTATIONS  # boundary is inclusive
+    assert outcome_for_score(69.9) == NEEDS_IMPROVEMENT
+    assert outcome_for_score(40) == NEEDS_IMPROVEMENT  # boundary is inclusive
+    assert outcome_for_score(39.9) == DOES_NOT_MEET
+    assert outcome_for_score(0) == DOES_NOT_MEET
+
+
+def test_cap_outcome_moves_meets_to_needs_when_critical_fires():
+    outcome, capped = cap_outcome(MEETS_EXPECTATIONS, critical_fired=True)
+    assert outcome == NEEDS_IMPROVEMENT
+    assert capped is True
+
+
+def test_cap_outcome_no_cap_when_no_critical():
+    outcome, capped = cap_outcome(MEETS_EXPECTATIONS, critical_fired=False)
+    assert outcome == MEETS_EXPECTATIONS
+    assert capped is False
+
+
+def test_cap_outcome_preserves_more_severe_does_not_meet():
+    # A cap never *improves* an already-worse outcome, and doesn't flag itself as the cause.
+    outcome, capped = cap_outcome(DOES_NOT_MEET, critical_fired=True)
+    assert outcome == DOES_NOT_MEET
+    assert capped is False
+
+
+def test_high_score_capped_to_needs_improvement_on_critical_error():
+    # A near-perfect numeric answer that trips a (non-advisory) forbidden item is capped.
+    rubric = _rubric()
+    judgments = [
+        {"item_id": "i1", "judgment": "met"},
+        {"item_id": "i2", "judgment": "met"},
+        {"item_id": "i3", "judgment": "met", "rationale": "invented a timeline"},  # → violated
+    ]
+    result = enforce_and_score("q1", _LONG, rubric, judgments)
+    assert result.score == 100.0  # weighted score ignores the weight-0 forbidden
+    assert result.outcome == NEEDS_IMPROVEMENT
+    assert result.capped is True
+
+
+def test_advisory_forbidden_discloses_but_does_not_cap():
+    # Known-conflict disclosure: an advisory forbidden fires "violated" + a disclosure
+    # warning, but the outcome follows the score (no cap).
+    rubric = [
+        RubricItem(item_id="i1", kind="required", text="does X", weight=100, source_quote="SOP X"),
+        RubricItem(
+            item_id="c1",
+            kind="forbidden",
+            text="PD review timeline conflict",
+            weight=0,
+            advisory=True,
+        ),
+    ]
+    judgments = [
+        {"item_id": "i1", "judgment": "met"},
+        {"item_id": "c1", "judgment": "violated", "rationale": "cited 30 days"},
+    ]
+    result = enforce_and_score("q1", _LONG, rubric, judgments)
+    assert result.score == 100.0
+    assert result.outcome == MEETS_EXPECTATIONS  # NOT capped
+    assert result.capped is False
+    advisory_item = next(it for it in result.items if it.item_id == "c1")
+    assert advisory_item.judgment == "violated"
+    assert advisory_item.advisory is True
+    assert any("Advisory item disclosed" in w for w in result.warnings)
+    assert not any("Forbidden item triggered" in w for w in result.warnings)
+
+
+def test_low_score_without_critical_is_does_not_meet():
+    rubric = _rubric()
+    judgments = [
+        {"item_id": "i1", "judgment": "not_met"},
+        {"item_id": "i2", "judgment": "not_met"},
+        {"item_id": "i3", "judgment": "not_met"},
+    ]
+    result = enforce_and_score("q1", _LONG, rubric, judgments)
+    assert result.score == 0.0
+    assert result.outcome == DOES_NOT_MEET
+    assert result.capped is False  # low score is natural, not a cap

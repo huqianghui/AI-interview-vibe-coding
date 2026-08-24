@@ -71,6 +71,7 @@ async def add_question(
     language: str = "zh-CN",
     expected_points: str = "[]",
     enabled: bool = True,
+    weight: int = 1,
     max_follow_ups: int = 0,
     follow_up_prompt: str = "Can you walk me through that in a bit more detail?",
 ) -> Question:
@@ -82,6 +83,7 @@ async def add_question(
         language=language,
         expected_points=expected_points,
         enabled=enabled,
+        weight=weight,
         max_follow_ups=max_follow_ups,
         follow_up_prompt=follow_up_prompt,
     )

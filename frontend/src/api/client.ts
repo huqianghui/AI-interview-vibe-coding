@@ -27,11 +27,20 @@ export interface ScoredItem {
   kind: string; // required | recommended | forbidden
   judgment: string; // met | partially_met | not_met | violated
   weight: number;
+  // Advisory forbidden gate (known unvalidated source conflict): when violated it is DISCLOSED but does not cap
+  // the outcome. The UI renders such a hit as a neutral disclosure note, not a red failure.
+  advisory?: boolean;
   rationale: string;
   answer_quote: string;
   source_quote: string;
   source_page: string | null;
 }
+
+/**
+ * Classification rating. The report headline is one of these three tiers; a confirmed
+ * critical error caps a would-be higher outcome down to "Needs Improvement".
+ */
+export type Outcome = "Meets Expectations" | "Needs Improvement" | "Does Not Meet";
 
 /**
  * One question's result. A scored entry (is_stub false) carries score/grade/items; a stub entry
@@ -44,6 +53,11 @@ export interface QuestionScore {
   score?: number;
   coverage_pct?: number;
   grade?: string;
+  // Per-question classification + whether a critical error capped it, and the question's
+  // aggregate weight in the interview-level mean.
+  outcome?: Outcome;
+  capped?: boolean;
+  weight?: number;
   items?: ScoredItem[];
   // Stub fields:
   judgment?: string;
@@ -59,6 +73,10 @@ export interface Report {
   // F4/F8 scored-report fields (null/empty for the stub path).
   total_score?: number | null;
   grade?: string | null;
+  // Interview-level classification rating + whether a confirmed critical error capped it to
+  // "Needs Improvement". null for the stub path.
+  outcome?: Outcome | null;
+  capped?: boolean;
   narrative?: string;
   warnings?: string[];
 }
