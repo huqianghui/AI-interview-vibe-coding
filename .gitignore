@@ -11,6 +11,15 @@ _sop_storage/
 backend/_sop_storage/
 storage/materials/
 backend/storage/
+# Client-supplied source material (training bank + real SOP/WI/JD docs). PUBLIC repo — real client
+# content (role names, document numbers, SOP sections, KPI thresholds) must NEVER be committed.
+# Ingested into the (gitignored) DB at deploy time via the local-only importer script below.
+EU_avatar_inspector_interview/
+# The interview-bank importer + its test carry client-specific strings (bank/role names, conflict
+# figures, real source filenames), so they stay local-only deploy artifacts — never committed to
+# the PUBLIC repo. Run the importer at deploy time from a local checkout; it writes only to the DB.
+backend/scripts/import_rfcsm_bank.py
+backend/tests/test_import_rfcsm_bank.py
 # Local dev SQLite DB — never commit.
 *.db
 backend/*.db

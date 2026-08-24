@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.31.0.0 (2026-08-24)
+
+### Added
+- **Interview reports now give a clear overall rating instead of a letter grade.** Every scored
+  report leads with one of three ratings — **达到预期 / Meets Expectations**, **有待改进 / Needs
+  Improvement**, or **未达预期 / Does Not Meet** — shown as a colour-coded badge beside the score
+  gauge, which now takes its colour from the rating. The numeric score and detailed breakdown are
+  still there; the rating just makes the bottom line legible at a glance for a non-expert reviewer.
+- **A critical mistake caps the rating, with the reason shown.** When an answer contradicts the
+  authoritative SOP, invents a procedure, oversteps the role, mishandles a safety/compliance risk,
+  or states a guess as fact, the overall rating is held at **有待改进 / Needs Improvement** no matter
+  how high the raw score — and the report explains that it was capped and why.
+- **Known, unverified source conflicts are disclosed, not penalised.** Where the source material
+  itself is known to disagree with itself and hasn't yet been validated by the owner, touching that
+  point raises a neutral **披露 / Disclosure** note for transparency — it is deliberately *not*
+  treated as a failure and does *not* lower the rating.
+- **Six-dimension scoring rubric.** Questions can now be scored on a uniform weighted rubric —
+  factual/procedural accuracy, completeness, role/accountability boundary, evidence/traceability,
+  risk judgement/escalation, and clarity — so the report reflects *how* an answer fell short, not
+  just a single number.
+- **Per-question weighting.** Questions can carry a weight so the interview total is a weighted
+  average, letting more important questions count for more (defaults to equal weighting — existing
+  interviews score exactly as before).
+- **Deploy-time importer for a real inspection-interview bank.** A local operator script ingests a
+  supplied document set (PDF/DOCX/text), builds the interview bank as the default, and wires each
+  question's rubric to the exact source document it cites — all into the local database. The script,
+  the supplied content, and the database all stay local; none is committed to the repository.
+
+### Changed
+- The interview-level score is now a **weighted mean** of per-question scores rather than a simple
+  average (equal weights reproduce the previous number exactly).
+
 ## 0.30.3.0 (2026-08-19)
 
 ### Fixed

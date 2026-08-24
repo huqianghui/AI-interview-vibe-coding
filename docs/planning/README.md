@@ -66,6 +66,15 @@ living specification is [`../../SPEC.md`](../../SPEC.md) at the repo root — st
   (also fixes a verbal-cue-strips-to-empty bug). Backend unchanged in shape (pairs by `question_id`).
   Approved via plan mode; shipped v0.30.0.0.
 
+- [`spec-mece-classification-scoring.md`](spec-mece-classification-scoring.md) — extends F4/F8 from
+  an A–F letter grade to a client-facing **classification rating** (*Meets Expectations / Needs
+  Improvement / Does Not Meet*) driven by six weighted MECE dimensions, with **critical-error
+  capping** and a **pending-conflict disclosure exemption**; adds per-question weighting (weighted
+  interview mean, fixing the prior simple-average gap) and a **deploy-time importer** that F1-ingests
+  a real inspection-interview document set and authors each rubric programmatically with true SOP
+  source binding — all into the gitignored DB, with no client content in any committed file.
+  Approved via plan mode; shipped v0.31.0.0.
+
 ## What was intentionally NOT promoted
 
 The gstack project dir also holds machine-local, per-developer working state that does **not**

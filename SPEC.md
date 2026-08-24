@@ -143,6 +143,19 @@ Per-item checklist comparison, 4-state judgment + rationale + SOP quote, coverag
   item in the answer forces `violated` + warning; (3) empty answer never scores high (rail fires);
   (4) English SOP + Chinese answer scores correctly (cross-language); (5) total = weighted sum,
   reproducible at temp 0.1.
+- **Classification rating + MECE contract (v0.31.0.0, [`docs/planning/spec-mece-classification-scoring.md`](docs/planning/spec-mece-classification-scoring.md)):**
+  on top of the weighted 0–100 score, the engine emits a client-facing **classification rating** —
+  *Meets Expectations (≥70) / Needs Improvement (40–69) / Does Not Meet (<40)* (thresholds aligned
+  to the B=70 / D=40 letter boundaries; the letter grade is kept internally). A confirmed critical
+  error (`forbidden` `violated`) **caps** the overall rating at *Needs Improvement* regardless of
+  score. A gate may be flagged `advisory` (`checklist_item.advisory`): an advisory violation is
+  **disclosed** (a distinct warning) but **excluded** from the cap, for a known-but-unvalidated
+  source conflict that must surface without hard-failing. A question may carry a **6-dimension MECE
+  rubric** (6 weighted `required` dimensions summing to 100 + shared critical-error gates); this is
+  just a rubric shape, so the 4-state weighted scoring is unchanged. Per-question `weight`
+  (`question.weight`, default 1) makes the interview total a **weight-normalised mean** of graded
+  question scores (fixing the prior simple-average). A deploy-time importer authors such rubrics
+  programmatically with real SOP source binding into the gitignored DB (no client content committed).
 
 ### F5 — Interviewer digital human
 
@@ -225,6 +238,11 @@ Foundry agent built-in session memory + an explicit demo moment.
 - **AC:** (1) scored session produces a report with total + per-question breakdown; (2) missing
   knowledge points + forbidden violations aggregated; (3) Excel export downloads and opens; (4)
   report only available when session status = scored.
+- **Classification headline (v0.31.0.0):** the executive view leads with the F4 **classification
+  rating** badge (colour-tiered) beside the gauge; a **cap note** appears when a critical error
+  capped the rating, and a pending-conflict **disclosure** renders as a neutral note (not a red
+  failure). Per-question `outcome`/`capped`/`weight` ride in the report DTO. The report has no
+  persisted table — it is recomputed on demand — so aggregation lives solely in the state machine.
 
 ### F9 — Frontend interview page
 
