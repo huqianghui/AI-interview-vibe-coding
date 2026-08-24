@@ -34,6 +34,11 @@ export interface ScoredItem {
   answer_quote: string;
   source_quote: string;
   source_page: string | null;
+  // The SOP document this item cites, for the report's clickable citation link. When present, the
+  // report renders the source label as a link that opens the document via fetchSopDocument; when
+  // null/absent it shows plain source text. source_document_name is a display label for the link.
+  source_document_id?: string | null;
+  source_document_name?: string | null;
 }
 
 /**
@@ -246,6 +251,33 @@ export async function getReport(interviewId: string): Promise<Report> {
  * valid once the interview is completed/scored (409 otherwise). */
 export async function getReview(interviewId: string): Promise<Review> {
   return request<Review>(`/candidate/interview/${interviewId}/review`);
+}
+
+/**
+ * Fetch a cited SOP source document and return a blob object URL the caller can open in a new tab
+ * (the report's clickable citations). We fetch bytes with the X-Anon-Session header rather than
+ * linking the endpoint directly, because the anon session is a header — not a cookie — so a naked
+ * `<a href>` navigation would be unauthenticated (401). The blob URL also keeps the session token
+ * out of the address bar and lets the browser preview a PDF/text inline. Callers should
+ * URL.revokeObjectURL the returned url when done. Throws on a non-2xx (e.g. 404 for an uncited id).
+ */
+export async function fetchSopDocument(
+  interviewId: string,
+  documentId: string,
+): Promise<string> {
+  const token = getToken();
+  const headers = new Headers();
+  if (token) headers.set("X-Anon-Session", token);
+  const resp = await fetch(
+    `${BASE}/candidate/interview/${interviewId}/sop/${encodeURIComponent(documentId)}`,
+    { headers },
+  );
+  if (!resp.ok) {
+    const detail = await resp.text().catch(() => "");
+    throw new Error(`${resp.status} ${resp.statusText}: ${detail}`);
+  }
+  const blob = await resp.blob();
+  return URL.createObjectURL(blob);
 }
 
 /**

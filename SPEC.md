@@ -346,6 +346,18 @@ owner's call are tracked separately (see the /autoplan approval gate, not this f
   server-mediated citation text). Note that `prompt_fragment` / SOP-derived agent instructions
   persist in Azure Foundry control plane (outside DB encryption) — keep SOP verbatim content out
   of agent metadata; reference checklist logic, not raw SOP text.
+  - **P4a. Report-citation source preview (deliberate scoped relaxation, shipped v0.31.1.0).** A
+    candidate MAY open the specific SOP source documents cited by their OWN scored report, so a
+    report citation is a clickable link that previews the original file in the browser (owner
+    request: "候选人直接可点开原文件"). This is still server-mediated — the raw `blob_path` is never
+    exposed; the endpoint `GET /candidate/interview/{id}/sop/{document_id}` streams bytes only
+    behind TWO guards, both returning an identical 404 (never leak existence): (1) **ownership** —
+    the interview must belong to the caller's anon session; (2) **citation scope (IDOR)** — the
+    `document_id` must be cited by a default-checklist item of a question this interview actually
+    answered. The browser fetches with the `X-Anon-Session` header (not a naked URL), so the token
+    never lands in a link/address bar. This narrows, but does NOT reverse, P4: uncited documents and
+    other candidates' citations remain unreachable, and P12 (no live-Q&A sources panel) is unchanged
+    — access is post-scoring only.
 
 ### Robustness (Eng — High/Med)
 - **P5. Voice session rejected, not silently degraded, if `agent_sync_status != synced`** (F6/F9
@@ -378,7 +390,9 @@ owner's call are tracked separately (see the /autoplan approval gate, not this f
   transcript, (3) progress indicator, (4) transcript secondary, (5) sources-panel.
 - **P12. sources-panel is NOT candidate-facing during live Q&A.** Showing raw SOP citations to the
   candidate mid-interview looks like leaking the rubric. Citations surface in the scoring/report
-  phase (and admin/reviewer view), not during the live answer.
+  phase (and admin/reviewer view), not during the live answer. (Post-scoring, the report's citations
+  are clickable and open their source file — see **P4a**; this is report-phase only and does not
+  loosen the live-Q&A rule here.)
 - **P13. Candidate has a visible manual "I'm done answering" control** (button/hotkey), paired with
   the verbal-cue fallback — never solely at the mercy of a silence heuristic. Add a low-anxiety
   "still listening…" affordance and a brief grace beat before advancing. Add a short pre-Q1

@@ -9,8 +9,10 @@ Voice sources (voice / verbal_cue) share the same answer_finalized event and are
 """
 
 from dataclasses import asdict
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import Response
 from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +23,9 @@ from app.interview import state_machine
 from app.interview.state_machine import ANSWER_SOURCES, InterviewStateError
 from app.models.anonymous_session import AnonymousCandidateSession
 from app.models.interview import InterviewSession
+from app.models.sop import SopDocument
 from app.services import question_service, voice_broker
+from app.services.storage import get_storage
 from app.services.voice_broker import DEFAULT_LOCALE, VoiceAgentNotSynced, VoiceUnavailable
 
 router = APIRouter(prefix="/candidate/interview", tags=["interview"])
@@ -310,3 +314,50 @@ async def voice_session(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
         ) from exc
     return VoiceSessionOut(interview_session_id=session.id, **asdict(vs))
+
+
+@router.get("/{interview_id}/sop/{document_id}")
+async def sop_document(
+    interview_id: str,
+    document_id: str,
+    candidate: AnonymousCandidateSession = Depends(get_anonymous_session),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Serve one SOP source document so a candidate can open a report citation in the browser.
+
+    This is a deliberate, tightly-scoped relaxation of the SOP-privacy boundary (SPEC P4/P12): a
+    candidate may open ONLY the specific source documents cited by their OWN scored report, and only
+    server-mediated — the raw ``blob_path`` is never exposed, and the frontend fetches these bytes
+    with the ``X-Anon-Session`` header (not a naked URL), so the file previews inline without the
+    token ever landing in a link. Two independent guards, both 404 (never leak existence):
+
+    - **Ownership** — the interview must belong to this candidate's session (``_owned_interview``).
+    - **Citation scope (IDOR guard)** — ``document_id`` must be cited by a default-checklist item of
+      a question this interview actually answered (``cited_document_ids``). An arbitrary or uncited
+      id is indistinguishable from a missing one.
+    """
+    session = await _owned_interview(db, interview_id, candidate)
+    allowed = await state_machine.cited_document_ids(db, session)
+    if document_id not in allowed:
+        # Same 404 whether uncited, unknown, or not-owned: don't reveal which SOP documents exist.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    doc = (
+        await db.execute(select(SopDocument).where(SopDocument.id == document_id))
+    ).scalar_one_or_none()
+    if doc is None or not doc.blob_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    try:
+        content = get_storage().load(doc.blob_path)
+    except (FileNotFoundError, OSError) as exc:
+        # The row exists but its bytes are gone (e.g. a pruned storage root) — 404, not a 500.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
+        ) from exc
+    # Inline so the browser previews (PDF/text) rather than force-downloading; RFC 5987 filename*
+    # carries a non-ASCII (e.g. Chinese) document name safely.
+    disposition = f"inline; filename*=UTF-8''{quote(doc.name)}"
+    return Response(
+        content=content,
+        media_type=doc.content_type or "application/octet-stream",
+        headers={"Content-Disposition": disposition},
+    )

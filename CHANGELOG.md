@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.31.1.0 (2026-08-24)
+
+### Added
+- **Report citations are now clickable — open the original source file in the browser.** In the
+  final evaluation report, each SOP citation that is backed by a source document is a link: clicking
+  it opens that document in a new tab so the candidate can read the original file, instead of seeing
+  only a filename and section label. Both the executive-view side-by-side evidence and the
+  per-question detail rows link through. Citations without a linked document still render as plain
+  text.
+
+### Security
+- **Scoped access, not an open door.** A candidate can open *only* the specific documents cited by
+  *their own* scored report. The endpoint that serves a source file
+  (`GET /candidate/interview/{id}/sop/{document_id}`) enforces two guards, each returning an
+  identical `404` so it never reveals which documents exist: (1) the interview must belong to the
+  caller's session, and (2) the requested document must actually be cited by a question that
+  interview answered. The raw storage path is never exposed, and the browser fetches the bytes with
+  the candidate's session header (not a URL that carries the token), previewing the file inline.
+  This is a deliberate, narrow relaxation of the SOP-privacy boundary (SPEC P4a), post-scoring only
+  — it does not change the live-interview rule that citations are never shown mid-answer (P12).
+
 ## 0.31.0.1 (2026-08-24)
 
 ### Changed

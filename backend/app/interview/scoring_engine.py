@@ -63,6 +63,9 @@ class RubricItem:
     weight: int
     source_quote: str = ""
     source_page: str | None = None
+    # The SOP document this item was drawn from — the anchor for the report's clickable citation
+    # link. None when the rubric item has no linked document (e.g. hand-authored without a source).
+    source_document_id: str | None = None
     # Advisory forbidden item: fires "violated" + a warning (disclosure) but does NOT cap the
     # outcome. Carries a known, unvalidated source conflict. Ignored for non-forbidden items.
     advisory: bool = False
@@ -80,6 +83,8 @@ class ItemJudgment:
     answer_quote: str
     source_quote: str
     source_page: str | None = None
+    # Carried through from the RubricItem so the report can render a link back to the source doc.
+    source_document_id: str | None = None
     # Mirrors RubricItem.advisory: a fired advisory forbidden discloses but doesn't cap the outcome.
     advisory: bool = False
 
@@ -163,6 +168,7 @@ def enforce_and_score(
                 answer_quote=str(raw.get("answer_quote", "")).strip(),
                 source_quote=it.source_quote,
                 source_page=it.source_page,
+                source_document_id=it.source_document_id,
                 advisory=it.advisory,
             )
         )
