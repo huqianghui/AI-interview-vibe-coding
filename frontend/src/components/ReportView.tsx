@@ -27,12 +27,14 @@ import {
   makeStyles,
   tokens,
 } from "@fluentui/react-components";
-import type { Report, QuestionScore, ScoredItem } from "../api/client";
+import type { Report, QuestionScore, ScoredItem, Outcome } from "../api/client";
 import { ScoreGauge } from "./ScoreGauge";
 
 const useStyles = makeStyles({
   execRow: { display: "flex", gap: "24px", alignItems: "center", flexWrap: "wrap" },
   narrative: { flex: "1 1 260px" },
+  outcomeHead: { display: "flex", alignItems: "baseline", gap: "8px", marginBottom: "4px" },
+  outcomeLabel: { color: tokens.colorNeutralForeground3 },
   warning: {
     marginTop: "8px",
     padding: "8px 12px",
@@ -40,6 +42,24 @@ const useStyles = makeStyles({
     background: tokens.colorPaletteRedBackground2,
     color: tokens.colorPaletteRedForeground1,
   },
+  // Capped-to-Needs-Improvement banner: a confirmed critical error, styled as a firm (red) note.
+  cappedNote: {
+    marginTop: "8px",
+    padding: "8px 12px",
+    borderRadius: tokens.borderRadiusMedium,
+    background: tokens.colorPaletteRedBackground2,
+    color: tokens.colorPaletteRedForeground1,
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  // CONFLICT-001 advisory disclosure: neutral (not a failure) — transparency, no score impact.
+  disclosure: {
+    marginTop: "8px",
+    padding: "8px 12px",
+    borderRadius: tokens.borderRadiusMedium,
+    background: tokens.colorNeutralBackground3,
+    color: tokens.colorNeutralForeground2,
+  },
+  disclosureLabel: { fontWeight: tokens.fontWeightSemibold, marginRight: "6px" },
   sideBySide: {
     display: "grid",
     gridTemplateColumns: "1fr 1fr",
@@ -69,6 +89,16 @@ const JUDGMENT_COLOR: Record<string, "success" | "warning" | "danger" | "subtle"
   not_met: "subtle",
   violated: "danger",
 };
+
+const OUTCOME_COLOR: Record<Outcome, "success" | "warning" | "danger"> = {
+  "Meets Expectations": "success",
+  "Needs Improvement": "warning",
+  "Does Not Meet": "danger",
+};
+
+/** The backend tags an advisory (CONFLICT-001) disclosure with this stable English prefix so it can
+ * be told apart from a hard critical-error warning regardless of the display locale. */
+const ADVISORY_PREFIX = "Advisory item disclosed";
 
 /** First scored item with both a SOP quote and an answer quote — the side-by-side proof (P14). */
 function firstEvidence(report: Report): ScoredItem | null {
@@ -108,6 +138,13 @@ export function ReportView({ report }: { report: Report }) {
   const evidence = firstEvidence(report);
   const grade = report.grade ?? "F";
   const score = report.total_score ?? 0;
+  const outcome = report.outcome ?? null;
+
+  // Separate the neutral CONFLICT-001 disclosure(s) from hard critical-error warnings so each gets
+  // its own styling: a disclosure is transparency (does not cap), a warning is a failure to flag.
+  const warnings = report.warnings ?? [];
+  const disclosures = warnings.filter((w) => w.startsWith(ADVISORY_PREFIX));
+  const criticalWarnings = warnings.filter((w) => !w.startsWith(ADVISORY_PREFIX));
 
   return (
     <Card>
@@ -121,15 +158,36 @@ export function ReportView({ report }: { report: Report }) {
 
       {/* Executive view */}
       <div className={styles.execRow} data-testid="report-exec">
-        <ScoreGauge score={score} grade={grade} />
+        <ScoreGauge score={score} grade={grade} outcome={outcome} />
         <div className={styles.narrative}>
           <Title3 as="h2">{t("report.title")}</Title3>
+          {outcome && (
+            <div className={styles.outcomeHead} data-testid="report-outcome">
+              <Text size={200} className={styles.outcomeLabel}>
+                {t("report.outcomeLabel")}:
+              </Text>
+              <Badge color={OUTCOME_COLOR[outcome]} appearance="filled" size="large">
+                {t(`report.outcome.${outcome}`)}
+              </Badge>
+            </div>
+          )}
           {report.narrative && (
             <Body1 style={{ display: "block", marginTop: 8 }}>{report.narrative}</Body1>
           )}
-          {(report.warnings ?? []).map((w, i) => (
+          {report.capped && (
+            <div className={styles.cappedNote} data-testid="report-capped">
+              {t("report.cappedNote")}
+            </div>
+          )}
+          {criticalWarnings.map((w, i) => (
             <div key={i} className={styles.warning} data-testid="report-warning">
               {w}
+            </div>
+          ))}
+          {disclosures.map((_w, i) => (
+            <div key={i} className={styles.disclosure} data-testid="report-disclosure">
+              <Text className={styles.disclosureLabel}>{t("report.disclosure")}:</Text>
+              {t("report.disclosureNote")}
             </div>
           ))}
         </div>
@@ -170,8 +228,10 @@ export function ReportView({ report }: { report: Report }) {
           {report.per_question.map((q: QuestionScore, qi) => (
             <AccordionItem value={q.question_id} key={q.question_id}>
               <AccordionHeader>
-                {t("report.questionN", { n: qi + 1 })} — {q.grade ?? ""} ({Math.round(q.score ?? 0)}
-                /100)
+                {t("report.questionN", { n: qi + 1 })} —{" "}
+                {q.outcome ? t(`report.outcome.${q.outcome}`) : (q.grade ?? "")} (
+                {Math.round(q.score ?? 0)}
+                /100){q.capped ? " ⚑" : ""}
               </AccordionHeader>
               <AccordionPanel>
                 {(q.items ?? []).map((it, ii) => (
