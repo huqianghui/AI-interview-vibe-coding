@@ -150,6 +150,15 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
   // The question text of the most recent speakQuestion attempt, kept so a collision rejection
   // (`conversation_already_has_active_response`) can re-queue exactly that text for retry.
   const lastSpokenAttemptRef = useRef<string | null>(null);
+  // The question text most recently handed to a real `response.create` for reading. This is the
+  // per-text idempotency guard for the verbatim path (the "读三遍" fix): the cancel/queue/flush and
+  // collision-retry machinery below has SEVERAL routes into `emitSpeak` (the idle path, the
+  // `response.done` flush, the collision re-queue), and every `response.done` fires the flush — so
+  // without this guard the same backend question was re-emitted on successive done events and Azure
+  // read it 2–3 times as separate responses (each a separate transcript bubble). emitSpeak refuses
+  // to re-read a text equal to this ref; a collision rejection clears it so exactly ONE retry of a
+  // genuinely-rejected attempt is still allowed.
+  const spokenTextRef = useRef<string | null>(null);
   // Holds the in-flight `initMic()` promise for THIS connect. The mic is initialized CONCURRENTLY
   // with the WS open (they're independent — mic frames don't start until `session.updated`), so the
   // few-hundred-ms getUserMedia + worklet load overlaps the multi-second WS/Azure handshake instead
@@ -222,6 +231,7 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
     activeResponseRef.current = false;
     pendingSpeakTextRef.current = null;
     lastSpokenAttemptRef.current = null;
+    spokenTextRef.current = null;
     // Drop any buffered user transcript — a new session starts a fresh turn; carrying stale
     // segments across a disconnect/reconnect would mis-attribute them to the next answer.
     userSegmentsSinceCommitRef.current = [];
@@ -345,6 +355,11 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
 
         case "response.created":
           activeResponseRef.current = true;
+          // A response is now genuinely in flight, so any prior speak attempt was ACCEPTED (not
+          // rejected). Clear the retry slot so a later, unrelated collision error can't re-queue an
+          // already-read question — that clear-then-retry cycle was a duplicate-read path feeding
+          // the "读三遍" symptom. Only a collision `error` re-arms a retry.
+          lastSpokenAttemptRef.current = null;
           setAudio("speaking");
           break;
         case "response.audio.delta":
@@ -395,6 +410,12 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
               activeResponseRef.current = true;
               if (lastSpokenAttemptRef.current) {
                 pendingSpeakTextRef.current = lastSpokenAttemptRef.current;
+                // This attempt was REJECTED — it was never actually read, so clear the per-text
+                // idempotency guard for it. That lets the single re-queued retry through emitSpeak
+                // (the guard only blocks re-reading a text that a live response.create accepted).
+                if (spokenTextRef.current === lastSpokenAttemptRef.current) {
+                  spokenTextRef.current = null;
+                }
                 lastSpokenAttemptRef.current = null;
               }
             }
@@ -619,9 +640,18 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
   // Emit the assistant-item + response.create pair that makes Voice Live read `text` verbatim.
   // Assumes no response is currently active (checked by the callers). Records the attempt so a
   // collision rejection can re-queue it.
+  //
+  // IDEMPOTENT per text (the "读三遍" fix): if `text` was already handed to a real response.create
+  // and not since rejected, we do NOT emit it again — the several routes into emitSpeak (idle
+  // speak, the response.done flush, the collision re-queue) would otherwise re-read the same
+  // backend question on successive `response.done` events, so Azure spoke it 2–3 times. The flush
+  // path clears its own queue entry regardless, so a redundant flush of an already-spoken question
+  // becomes a genuine no-op instead of a duplicate read.
   const emitSpeak = useCallback(
     (text: string) => {
+      if (spokenTextRef.current === text) return;
       lastSpokenAttemptRef.current = text;
+      spokenTextRef.current = text;
       send({
         type: "conversation.item.create",
         item: { type: "message", role: "assistant", content: [{ type: "text", text }] },

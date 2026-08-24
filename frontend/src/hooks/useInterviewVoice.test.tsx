@@ -646,7 +646,150 @@ describe("useInterviewVoice speakQuestion cancel-then-speak", () => {
       .map((s) => JSON.parse(s) as { type?: string; item?: { content?: { text?: string }[] } })
       .filter((m) => m.type === "conversation.item.create")
       .map((m) => m.item?.content?.[0]?.text);
-    expect(spoken).toContain("Colliding question.");
+    // The rejected first attempt is re-queued and read after response.done. (Its response.create
+    // was rejected, so the first item.create is never voiced — only the retry produces a spoken
+    // response; the user hears the question once.) Assert the retry ACTUALLY fired: two frames for
+    // this text (the rejected attempt + the retry). If the collision handler stops clearing
+    // spokenTextRef, the idempotency guard swallows the retry (only 1 frame) and the re-queued
+    // question is never voiced — the masked-regression this count guards against.
+    expect(spoken.filter((t) => t === "Colliding question.").length).toBe(2);
+    // And exactly two response.create attempts: the rejected one and the surviving retry.
+    expect(sentTypes(ws()).filter((t) => t === "response.create").length).toBe(2);
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("reads a question exactly ONCE even when response.done fires repeatedly (读三遍 fix)", async () => {
+    // The regression: every `response.done` fires the pending-speak flush, and several routes lead
+    // back into emitSpeak — so a single backend question was re-emitted on successive done events
+    // and Azure read it 2–3 times (each a separate transcript bubble). One question text must map
+    // to exactly one conversation.item.create + response.create, no matter how many done events land.
+    const { getHook, ws, unmount } = await connectHook();
+
+    act(() => {
+      getHook().speakQuestion("How do you know your trials are under control?");
+    });
+    // The real response starts and ends; then more done events arrive (avatar audio segments, a
+    // stray auto-response completing, etc.). None may re-read the already-spoken question.
+    await act(async () => {
+      ws().receive({ type: "response.created" });
+      ws().receive({ type: "response.done" });
+      ws().receive({ type: "response.done" });
+      ws().receive({ type: "response.done" });
+    });
+
+    const reads = ws()
+      .sent.map((s) => JSON.parse(s) as { type?: string; item?: { content?: { text?: string }[] } })
+      .filter((m) => m.type === "conversation.item.create")
+      .map((m) => m.item?.content?.[0]?.text);
+    expect(reads).toEqual(["How do you know your trials are under control?"]);
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("re-speaking the SAME current prompt is a no-op (idempotent per text)", async () => {
+    // The page keys speakQuestion on the prompt text, but a reconnect/re-render can call it again
+    // with the same current prompt. That must not queue a second read of a question already voiced.
+    const { getHook, ws, unmount } = await connectHook();
+
+    act(() => {
+      getHook().speakQuestion("Same question.");
+    });
+    await act(async () => {
+      ws().receive({ type: "response.created" });
+      ws().receive({ type: "response.done" });
+    });
+    // Same text again while idle — no new read.
+    act(() => {
+      getHook().speakQuestion("Same question.");
+    });
+
+    const reads = ws()
+      .sent.map((s) => JSON.parse(s) as { type?: string; item?: { content?: { text?: string }[] } })
+      .filter((m) => m.type === "conversation.item.create")
+      .map((m) => m.item?.content?.[0]?.text);
+    expect(reads).toEqual(["Same question."]);
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("does not re-queue an already-accepted question when a stray collision error arrives later", async () => {
+    // Once response.created confirms the question was accepted, lastSpokenAttemptRef is cleared. A
+    // later, UNRELATED collision error (e.g. a commitAnswer nudge colliding with a VAD response)
+    // must NOT resurrect that accepted question into the pending-speak slot — doing so re-read it on
+    // the next response.done, one of the routes that fed the 读三遍 symptom.
+    const { getHook, ws, unmount } = await connectHook();
+
+    act(() => {
+      getHook().speakQuestion("Accepted question.");
+    });
+    // Azure accepts it: response.created lands, closing the retry slot for this attempt.
+    await act(async () => {
+      ws().receive({ type: "response.created" });
+    });
+
+    // A stray collision error arrives afterwards (a different frame collided). Nothing to re-queue.
+    await act(async () => {
+      ws().receive({
+        type: "error",
+        error: {
+          code: "conversation_already_has_active_response",
+          message: "Conversation already has an active response",
+        },
+      });
+      ws().receive({ type: "response.done" });
+    });
+
+    const reads = ws()
+      .sent.map((s) => JSON.parse(s) as { type?: string; item?: { content?: { text?: string }[] } })
+      .filter((m) => m.type === "conversation.item.create")
+      .map((m) => m.item?.content?.[0]?.text);
+    expect(reads).toEqual(["Accepted question."]);
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("resets the per-text guard across a disconnect/reconnect so a fresh session re-reads", async () => {
+    // spokenTextRef is session state — cleanup() must reset it. Otherwise a reconnect that re-speaks
+    // the same current question (the page keys on prompt text, unchanged across a reconnect) would be
+    // silently swallowed and the candidate would sit in silence on the new session.
+    const { getHook, ws, unmount } = await connectHook();
+
+    act(() => {
+      getHook().speakQuestion("Resumed question.");
+    });
+    await act(async () => {
+      ws().receive({ type: "response.created" });
+      ws().receive({ type: "response.done" });
+    });
+
+    // Tear the session down (cleanup resets spokenTextRef), then reconnect fresh.
+    await act(async () => {
+      await getHook().disconnect();
+    });
+    let reconnectP!: Promise<void>;
+    act(() => {
+      reconnectP = getHook().connect("zh-CN");
+    });
+    await act(async () => {
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+      ws().receive({ type: "session.updated", session: {} });
+      await reconnectP;
+    });
+
+    // Same text on the NEW socket must actually read — the guard was reset by cleanup.
+    act(() => {
+      getHook().speakQuestion("Resumed question.");
+    });
+    const reads = ws()
+      .sent.map((s) => JSON.parse(s) as { type?: string; item?: { content?: { text?: string }[] } })
+      .filter((m) => m.type === "conversation.item.create")
+      .map((m) => m.item?.content?.[0]?.text);
+    expect(reads).toEqual(["Resumed question."]);
 
     unmount();
     vi.unstubAllGlobals();

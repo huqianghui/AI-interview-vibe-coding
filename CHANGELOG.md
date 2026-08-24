@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.31.0.2 (2026-08-24)
+
+### Fixed
+- **The digital-human interviewer now reads each question exactly once.** A question was sometimes
+  spoken (and shown as a transcript bubble) two or three times. Under server-VAD, Azure Voice Live
+  auto-creates a response when the candidate stops speaking, and several internal routes lead back
+  into the "read this question" path — the idle speak, the `response.done` flush that fires on
+  *every* done event, and the collision re-queue — so the same backend question was re-emitted as a
+  fresh `response.create` on successive `response.done` events and Azure voiced it 2–3 times. Added
+  a per-text idempotency guard (`spokenTextRef` in `useInterviewVoice.ts`): a question that a live
+  `response.create` already accepted is never re-read, while a genuinely *rejected* attempt
+  (`conversation_already_has_active_response`) still gets exactly one retry, and the guard resets on
+  disconnect so a reconnected session re-reads the current question. A stray collision error arriving
+  after a question was accepted can no longer resurrect it into the pending-speak slot.
+
 ## 0.31.0.1 (2026-08-24)
 
 ### Changed
