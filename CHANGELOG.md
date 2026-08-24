@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.31.0.1 (2026-08-24)
+
+### Changed
+- **The interview now defaults to English.** A first-time visitor (no saved language preference)
+  gets an English UI and, more importantly, an English-speaking digital-human interviewer — so an
+  English question bank no longer gets read out and evaluated in Chinese by default. The language
+  picker still switches to 中文 at any time, and a returning visitor keeps whatever they last chose.
+  Under the hood this flips three defaults that all fed the old zh-CN fallback: the i18next initial
+  language (`i18n.ts`), the voice-connect locale fallback (`useInterviewVoice.ts`), and the backend
+  voice broker's `DEFAULT_LOCALE` (`voice_broker.py`), which the interviewer persona resolves as
+  "the candidate's language."
+
 ## 0.31.0.0 (2026-08-24)
 
 ### Added

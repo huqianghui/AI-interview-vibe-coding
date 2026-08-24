@@ -207,7 +207,7 @@ const stored =
 
 void i18n.use(initReactI18next).init({
   resources,
-  lng: stored ?? "zh-CN",
+  lng: stored ?? "en-US",
   fallbackLng: "en-US",
   interpolation: { escapeValue: false },
 });
