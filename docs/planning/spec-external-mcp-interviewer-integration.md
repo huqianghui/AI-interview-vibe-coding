@@ -499,3 +499,68 @@ want the interview's scores/citations shown in *our* report, or want a hard guar
 never leaked to the candidate, that is Shape 2 / option ② — a real (medium) build, not a config
 toggle. The ①+hook middle path is a possible optimization only, and only if 12.3 holds, and it does
 **not** close the rubric-leak boundary.
+
+---
+
+## 13. Option ② implementation skeleton — WHEN do we call the MCP? (the two call sites)
+
+For option ② (backend-as-MCP-client), the recurring engineering question is *when* our code invokes
+the MCP. The answer is **two well-defined moments, both of which are already existing call sites in
+`state_machine.py`** — we don't invent new plumbing, we swap the local logic behind these seams for
+"call the MCP". And crucially: unlike ①, **the call is driven synchronously by our code off the
+candidate's answer event — not "whenever the model feels like it".** That is the whole point of ②.
+
+### 13.1 Call site 1 — serving questions: `resolve_questions(db)`
+
+Every place that needs questions today (`start_interview:90`, `answer_finalized:130`,
+`score_and_finalize:217`) already routes through the single `resolve_questions(db)`. Today it reads
+the local bank. This is the **source seam**: `BankInterviewSource` (current) vs `McpInterviewSource`
+(calls the MCP for questions). If the MCP owns question serving, **this is where we call it.**
+
+### 13.2 Call site 2 — submitting the answer / getting the score: `answer_finalized()`
+
+`answer_finalized:115` is documented as **"the single channel-agnostic finalization event (P9)"** —
+text or voice, every answer converges here. This is the natural hook to submit the answer to the
+MCP. *Which* of the two scoring functions carries the MCP call depends on the afternoon's Flow A/B:
+
+- **Flow A (MCP scores):** when the current question is fully answered (the `answer_finalized:180`
+  else-branch that advances), call `await mcp_client.submit_answer(question, answer)`, take back the
+  six-dimension scores + citations, persist them. Whether we score per-question or all at the end
+  depends on whether the MCP is stateful (§7 Q2).
+- **Flow B (we score):** **no MCP call at answer time at all.** The MCP is only touched at call site
+  1 (serving). Scoring stays on our shipped F4 engine in `score_and_finalize:205` — zero new MCP
+  calls.
+
+### 13.3 Timeline (Flow A, per-question)
+
+```
+candidate starts
+  └─ start_interview → resolve_questions()
+        └─[McpSource] call MCP for Q1 (event=main_question)          ← call site 1
+  avatar speaks the question; candidate answers (voice)
+  └─ answer_finalized (answer lands — the P9 convergence point)
+        ├─[Flow A] call MCP submit_answer(current Q, answer)         ← call site 2
+        │     └─ take back public (speak/display) + private (six-dim scores, kept backend-only)
+        └─ get next question (may be the same MCP return, or another call)   ← call site 1
+  ...loop...
+  last question answered → score_and_finalize
+        ├─[Flow A] aggregate the per-question scores the MCP returned → F8 report
+        └─[Flow B] compute with our F4 engine → F8 report (no MCP)
+```
+
+### 13.4 The one contract-shape mismatch to resolve
+
+`resolve_questions` today returns **all questions at once** (`tuple[Question]`). The MCP is
+**one-question-at-a-time, async, turn-driven**. So `McpInterviewSource` is not a drop-in — it must
+adapt the MCP's per-turn async stream into a shape the state machine can consume: either lazily
+(call the MCP once per `get_current_question`) or prefetch. Which design is viable depends on two
+answers we're getting this afternoon:
+
+- **Stateful vs stateless** (§7 Q2) → decides whether every turn must echo back the prior
+  `final_session_state_json`, and therefore whether we persist it in the DB between turns.
+- **Submit-answer tool schema** (§7 Q1) → decides exactly what the `mcp_client.submit_answer(...)`
+  line in `answer_finalized` passes.
+
+**So "when do we call it" is already answered by the code (call sites 1 + 2); what the afternoon
+must still supply is "what to pass" (schema) and "whether to carry state" (stateful/stateless)** —
+i.e. §11 Step 3. Once those land, this skeleton is directly buildable in plan mode.

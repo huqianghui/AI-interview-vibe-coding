@@ -469,3 +469,59 @@ realtime 事件(`response.audio.delta`、`response.audio_transcript.delta`、ava
 **给客户的结论:** "挂 MCP 工具"(形态一、≈0 开发)**仅当结果由客户从自己的 server 取用、我们不解析不展示任何东西**时才成立。
 一旦客户想把面试的分数/引用显示在**我们**报告里,或想要"rubric 绝不泄漏给候选人"的硬保证,那就是形态二/方案②——
 一次真实的(中等)开发,不是一个配置开关。①+hook 中间路线只是可能的优化项,且仅当 12.3 成立,且**并不能关闭 rubric 泄漏边界**。
+
+---
+
+## 13. 方案②实现骨架——我们**什么时候**调 MCP?(两个调用点)
+
+方案②(后端当 MCP client)反复出现的工程问题就是:我们的代码**什么时候**去调 MCP。答案是
+**两个明确的时机,而且这两个时机在 `state_machine.py` 里都已经是现成的调用点**——我们不新造管道,
+只是把这两个接缝背后的本地逻辑换成"调 MCP"。关键在于:与①不同,**调用是由候选人的作答事件、
+我们代码同步驱动的——不是"模型想调才调"**。这正是②的意义所在。
+
+### 13.1 调用点 1——出题:`resolve_questions(db)`
+
+现在所有需要题目的地方(`start_interview:90`、`answer_finalized:130`、`score_and_finalize:217`)
+**都走同一个 `resolve_questions(db)`**。它现在读本地题库。这就是 **source 接缝**:
+`BankInterviewSource`(现状)vs `McpInterviewSource`(调 MCP 出题)。如果 MCP 负责出题,**就在这里调它**。
+
+### 13.2 调用点 2——交答案 / 拿分:`answer_finalized()`
+
+`answer_finalized:115` 的注释写明它是**"唯一的、与通道无关的 finalization 点(P9)"**——不管打字还是语音,
+每个答案都汇聚到这里。这就是"把答案提交给 MCP"的天然挂点。具体挂在哪个评分函数,取决于下午确认的**方案 A / B**:
+
+- **方案 A(MCP 算分):** 当前题答满、准备进下一题时(`answer_finalized:180` 的 else 分支),
+  调 `await mcp_client.submit_answer(当前题, 答案)`,拿回六维分 + citations 并留存。逐题即时算还是最后一次性算,
+  取决于 MCP 是否无状态(§7 问题2)。
+- **方案 B(我们算分):** **答题时完全不调 MCP。** MCP 只在调用点 1(出题)被碰。评分仍走现有的 F4 引擎
+  (`score_and_finalize:205`),一个新的 MCP 调用都不加。
+
+### 13.3 时序(方案 A,逐题)
+
+```
+候选人开始面试
+  └─ start_interview → resolve_questions()
+        └─[McpSource] 调 MCP 拿第 1 题 (event=main_question)          ← 调用点1
+  数字人念题、候选人语音作答
+  └─ answer_finalized(答案落定——P9 汇聚点)
+        ├─[方案A] 调 MCP submit_answer(当前题, 答案)                  ← 调用点2
+        │     └─ 拿回 public(说/展示) + private(六维分, 仅后端留存)
+        └─ 拿下一题(可能同一个 MCP 返回, 也可能再调一次)             ← 调用点1
+  ...循环...
+  最后一题答完 → score_and_finalize
+        ├─[方案A] 聚合 MCP 已返回的各题分 → F8 报告
+        └─[方案B] 用我们 F4 引擎算 → F8 报告(不碰 MCP)
+```
+
+### 13.4 唯一要解决的契约形状不匹配
+
+`resolve_questions` 现在**一次性返回所有题**(`tuple[Question]`)。而 MCP 是**每轮一题、异步、按回合推进**。
+所以 `McpInterviewSource` 不是无缝替换——它得把"MCP 的逐题异步流"适配成状态机能消费的形状:要么逐题拉取
+(每次 `get_current_question` 调一次 MCP),要么预取。哪种设计可行,取决于下午要拿到的两个答案:
+
+- **有状态 vs 无状态**(§7 问题2)→ 决定是否每轮都要回传上一轮的 `final_session_state_json`,
+  以及我们要不要在 DB 里逐轮留存它。
+- **提交答案的 tool schema**(§7 问题1)→ 决定 `answer_finalized` 里那行 `mcp_client.submit_answer(...)` 到底传什么。
+
+**所以"什么时候调"代码里已经答清楚了(调用点 1 + 2);下午还需补齐的是"传什么"(schema)和
+"要不要带状态"(有/无状态)**——即 §11 第 3 步。这两条一到,本骨架即可直接进 plan mode 开工。
