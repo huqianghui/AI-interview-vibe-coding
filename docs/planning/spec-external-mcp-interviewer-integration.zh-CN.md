@@ -1,8 +1,12 @@
 # 规格文档（中文）— 外部 MCP 面试官集成（分析 + 客户确认前置）
 
-**状态：** 分析阶段。已收到客户第一轮答复（2026-08-25，见 §9）——范围收敛为**逐题、无状态**模型；
-但**仍有一处硬矛盾未解决**（§9.2），须在开工前锁定。
-**日期：** 2026-08-25（2026-08-25 补入客户第一轮答复）
+**状态：** **架构已锁定（2026-08-25 下午第二轮，见 §14）。** 第一轮把范围收敛为逐题模型（§9）；
+第二轮拍板：**两种模式并存、每场面试二选一、互相独立**——(1) **MCP 模式**：出题+评估+报告全在客户 MCP 侧，
+我们后端当**极薄 MCP client**，每轮传 `user context + sessionId`、拿回 `speech_text/display_text/终止flag`，
+只负责"念+显示+见终止即结束"，**不评分、不建 F8 报告、不在本地存 state**；(2) **现有模式**：不变，走我们 F4 引擎。
+§9.2 那处"谁算分"的硬矛盾**已消解**（由模式决定，不是二者混算）。**唯一未决且不阻塞**：公网端点鉴权（等客户
+MCP server ready 再谈，§14.4）+ 完整 tool schema（客户后给，§14.3）。
+**日期：** 2026-08-25（上午补第一轮 §9；下午补第二轮定稿 §14）
 **说明：** 本文是英文版 [`spec-external-mcp-interviewer-integration.md`](spec-external-mcp-interviewer-integration.md) 的中文对照版，内容对齐。
 **关联：** [`../../SPEC.md`](../../SPEC.md) 的 F4/F6/F7/F8、[`spec-mece-classification-scoring.md`](spec-mece-classification-scoring.md)、
 [`spec-voice-live-agent-contract.md`](spec-voice-live-agent-contract.md)、
@@ -513,7 +517,7 @@ realtime 事件(`response.audio.delta`、`response.audio_transcript.delta`、ava
         └─[方案B] 用我们 F4 引擎算 → F8 报告(不碰 MCP)
 ```
 
-### 13.4 唯一要解决的契约形状不匹配
+### 13.4 唯一要解决的契约形状不匹配（第一轮遗留——已被 §14 覆盖，保留作推演记录）
 
 `resolve_questions` 现在**一次性返回所有题**(`tuple[Question]`)。而 MCP 是**每轮一题、异步、按回合推进**。
 所以 `McpInterviewSource` 不是无缝替换——它得把"MCP 的逐题异步流"适配成状态机能消费的形状:要么逐题拉取
@@ -525,3 +529,87 @@ realtime 事件(`response.audio.delta`、`response.audio_transcript.delta`、ava
 
 **所以"什么时候调"代码里已经答清楚了(调用点 1 + 2);下午还需补齐的是"传什么"(schema)和
 "要不要带状态"(有/无状态)**——即 §11 第 3 步。这两条一到,本骨架即可直接进 plan mode 开工。
+
+---
+
+## 14. 客户第二轮答复（2026-08-25 下午）——最终架构锁定
+
+> 本节是**拍板结论**，覆盖 §9-§13 中所有"待定 / 分叉 / 推演"。当本节与前文冲突时，**以本节为准**。
+> 前文保留作分析历史。
+
+### 14.1 定案：两种模式并存、每场二选一、互相独立
+
+| | **MCP 模式** | **现有模式（不变）** |
+|---|---|---|
+| 出题 | 客户 MCP server | 我们的题库（F2） |
+| 评估 / 打分 | **客户 MCP 侧** | **我们的 F4 引擎** |
+| 报告 | **客户侧**（结果活在它那边） | 我们的 F8 报告 |
+| 我们的角色 | **数字人 + 语音的壳子**（后端极薄 MCP client） | 全栈（现状） |
+| 我们是否评分/建报告/存 rubric | **否** | 是 |
+
+**关键：两种模式不混算。** 一场面试按 persona 二选一（source 接缝的价值）。**不做**"同一场两边各算一遍"，
+**不做**"MCP 挂了回退本地"（后续优化项，第一版不做）。
+
+### 14.2 §9.2 那处硬矛盾——已消解
+
+第一轮纠结的"Q05 分数谁算"（流程 A vs 流程 B）**不再是问题**：由**模式**决定，不是二者混算。
+- MCP 模式 → 分数/报告全在 MCP 侧，我们**不解析、不展示、不评分**。
+- 现有模式 → 我们 F4 引擎算，跟今天上线的一样。
+
+客户原话要点：**"不存在谁说了算"**；**"没有提交答案接口"** 的真实含义是——不是单独的 submit endpoint，
+而是**每轮把 user context 传给 MCP，MCP 通过返回值里的"终止标志"告诉我们面试结束**，我们据此收尾，其余全是 MCP 的任务。
+
+### 14.3 技术形态：不是"挂工具"，是后端当 MCP client（②的极薄变体）
+
+> ★ 本节纠正一个易被误解的点：**商业上是"形态一"（评分/报告归 MCP），但技术上不能用"挂 Foundry agent 工具"实现。**
+
+**客户明确：MCP 不能配进 prompt agent 的 tools 里（不走 Foundry agent-tool 那条路），要由我们自己配置 + 自己触发。**
+这与"我们需要拿到 `speech_text` / `display_text` 去念+显示"完全自洽——只有**我们后端亲自当 client** 才拿得到这两个字段：
+
+- 排除 §12 的 **① 挂 Foundry 工具**（返回只进云端模型上下文，`display_text` 回不到我们后端）。
+- 排除 §12 的 **①+hook**（同样进模型上下文，且不由我们受控触发）。
+- **只剩 §12 的 ② 后端当 MCP client**——但比原评估**薄得多**：因为我们**不评分、不建报告、不存 state**。
+
+**每轮循环（MCP 模式）：**
+```
+我们后端 → MCP：{ user_context, sessionId }      // sessionId 为空 = new session
+MCP → 我们后端：{ sessionId, speech_text, display_text, is_terminated }
+  ├─ display_text  → 屏幕显示（清洗掉内部题号 RFCMS-Q0x）
+  ├─ speech_text   → 交给语音层，数字人念出来
+  ├─ sessionId     → 我们持有、下一轮原样回传（唯一要持有的状态）
+  └─ is_terminated → true 则本场结束，收尾；false 则等候选人作答→带 context 再调一轮
+```
+
+**Schema（客户后给，当前掌握的形状）：**
+- **输入**：`user_context`（本轮候选人作答/对话内容）+ `sessionId`（MCP 上一轮返回的；**为空 = 新会话**）
+- **输出**：`sessionId` + `is_terminated`（终止标志）**+ `speech_text` + `display_text`**（★后两者是我们壳子的必需字段，
+  需在客户给完整 schema 时**明确确认字段名/结构**——见 14.5 TODO）
+
+### 14.4 状态归属——彻底简化（§13.4 大难题消失）
+
+会话状态由 **`sessionId` 维护，且状态活在 MCP 内部**。我们**只持有这个不透明的 sessionId 并逐轮回传**，
+**不需要**在自己 DB 里存/逐轮回灌 `final_session_state_json`。→ §13.4 那个"逐题异步流 vs 一次性题目数组"的
+契约不匹配、以及"要不要在 DB 逐轮留存 state"的纠结，**全部消失**。`state_machine.py` 在 MCP 模式下几乎不编排：
+传 context / 收返回 / 到终止就结束 / 把 speech 交给数字人。
+
+### 14.5 仍未决、但**不阻塞**的两项
+
+- ⏸️ **公网端点鉴权**：今天未谈。**等客户 MCP server ready 再继续**（§11 第 4 步顺延）。
+  仍需最终明确：token/鉴权模型 + 凭据如何提供 + 候选人 context 经公网传至客户机房的边界表述。
+- 🔲 **完整 tool schema（客户后给）**，届时逐字段确认：
+  - `speech_text` / `display_text` 的**确切字段名与结构**（★壳子必需，务必确认，别只拿到 sessionId+flag）。
+  - `user_context` 传**纯文本**还是**整段对话**？
+  - 是否有 **locale / 语言**参数（当前只用英文，见 §9 问题9）。
+  - **调用哪个 MCP tool（工具名）** + 一个**完整往返示例**（首轮 new session + 中间轮 + 终止轮各一）。
+  - MCP 侧是否也会**自己产生追问（follow_up）**——若会，需与我们语音追问对齐避免抢主（§7 附录）。
+
+### 14.6 会后内部动作（修订）
+
+- ☑ 架构、模式、状态归属已回填本节（§14）。
+- 🔲 **离线适配器原型**仍值得先做（不依赖客户、不阻塞）：`display_text` 清洗（丢弃 `RFCMS-Q0x`）+
+  public/private 拆分 + citation 文件名→`SopDocument.id` 映射（§6）。**注意**：MCP 模式下我们不建 F8 报告，
+  但 `display_text` 清洗 + 语音喂入这条链仍要原型验证。
+- 🔲 拿到完整 schema + 鉴权后，`McpInterviewSource`（极薄 client 变体）即可进 plan mode 开工。
+- ✋ **不新建 repo**、**不新造 MCP 配置界面**的前提不变；但**配置入口不能复用"给 persona 挂 agent 工具"的 ToolPicker**
+  （客户明确 MCP 不进 agent tools）——需要一个**我们自己的 MCP 连接配置**（server_url + 鉴权），由后端读取并主动触发。
+  这是相较原 §11 第 0 步的**修正点**。

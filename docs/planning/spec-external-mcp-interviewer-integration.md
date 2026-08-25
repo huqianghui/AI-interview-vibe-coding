@@ -1,8 +1,14 @@
 # Spec — External MCP interviewer integration (analysis + client-confirmation gate)
 
-**Status:** Analysis. First client answers received 2026-08-25 (see §9) — scope collapses to a
-**per-question, stateless** model; **one hard contradiction remains open** (§9.2) before build.
-**Date:** 2026-08-25 (updated 2026-08-25 with first client round)
+**Status:** **Architecture locked (2026-08-25 PM, second round — see §14).** Round one collapsed scope
+to a per-question model (§9); round two settled it: **two modes coexist, one is chosen per interview,
+fully independent** — (1) **MCP mode**: question-serving + scoring + report all live on the client's MCP
+side; our backend is a **thin MCP client** that each turn sends `user context + sessionId` and gets back
+`speech_text/display_text/terminated flag`, doing only "speak + display + end on terminate" — **no scoring,
+no F8 report, no local state**; (2) **Existing mode**: unchanged, our F4 engine. The §9.2 "who scores"
+contradiction is **resolved** (decided by mode, not mixed). **Only open, non-blocking:** public-endpoint
+auth (revisit when the client's MCP server is ready, §14.4) + the full tool schema (client to provide, §14.3).
+**Date:** 2026-08-25 (AM: first round §9; PM: second-round final §14)
 **Author:** analysis pass over a client-provided MCP result sample.
 **Related:** [`../../SPEC.md`](../../SPEC.md) F4/F6/F7/F8, [`spec-mece-classification-scoring.md`](spec-mece-classification-scoring.md),
 [`spec-voice-live-agent-contract.md`](spec-voice-live-agent-contract.md),
@@ -548,7 +554,7 @@ candidate starts
         └─[Flow B] compute with our F4 engine → F8 report (no MCP)
 ```
 
-### 13.4 The one contract-shape mismatch to resolve
+### 13.4 The one contract-shape mismatch to resolve (round-one leftover — superseded by §14, kept as analysis record)
 
 `resolve_questions` today returns **all questions at once** (`tuple[Question]`). The MCP is
 **one-question-at-a-time, async, turn-driven**. So `McpInterviewSource` is not a drop-in — it must
@@ -564,3 +570,106 @@ answers we're getting this afternoon:
 **So "when do we call it" is already answered by the code (call sites 1 + 2); what the afternoon
 must still supply is "what to pass" (schema) and "whether to carry state" (stateful/stateless)** —
 i.e. §11 Step 3. Once those land, this skeleton is directly buildable in plan mode.
+
+---
+
+## 14. Second client round (2026-08-25 PM) — final architecture lock
+
+> This section is the **decision of record** and supersedes every "open / fork / speculative" item in
+> §9-§13. **Where this section conflicts with earlier text, this section wins.** Earlier text is kept
+> as analysis history.
+
+### 14.1 Decided: two modes coexist, one per interview, fully independent
+
+| | **MCP mode** | **Existing mode (unchanged)** |
+|---|---|---|
+| Question serving | Client MCP server | Our question bank (F2) |
+| Evaluation / scoring | **Client MCP side** | **Our F4 engine** |
+| Report | **Client side** (results live there) | Our F8 report |
+| Our role | **Digital-human + voice shell** (thin backend MCP client) | Full stack (status quo) |
+| Do we score / build report / hold rubric | **No** | Yes |
+
+**Key: the two modes are never mixed.** An interview picks one per persona (the value of the source
+seam). We do **not** do "both sides score the same session," and **not** "fall back to local if MCP is
+down" (later optimization, not v1).
+
+### 14.2 The §9.2 hard contradiction — resolved
+
+The round-one agony over "who scores Q05" (Flow A vs Flow B) **is no longer a question**: it's decided
+by **mode**, not mixed.
+- MCP mode → scores/report live entirely on the MCP side; we **do not parse, display, or score**.
+- Existing mode → our F4 engine scores, exactly as shipped today.
+
+Client's words: **"there's no question of who decides"**; **"no submit-answer interface"** actually means —
+not a separate submit endpoint, but **each turn we pass user context to the MCP, and the MCP tells us via a
+"terminated" flag in its return that the interview is over**, at which point we wrap up; everything else is
+the MCP's job.
+
+### 14.3 Technical form: not "attach a tool," but backend-as-MCP-client (a thin variant of ②)
+
+> ★ This corrects an easy misread: **commercially it's "form one" (scoring/report belong to the MCP), but
+> technically it cannot be built by attaching a Foundry agent tool.**
+
+**Client is explicit: the MCP must NOT be configured inside the prompt agent's tools (not the Foundry
+agent-tool path); we configure and trigger it ourselves.** This is fully consistent with "we need
+`speech_text` / `display_text` to speak + display" — only **our backend acting as the client** can obtain
+those two fields:
+
+- Rules out §12 **① attach Foundry tool** (return goes only into the cloud model context; `display_text`
+  never reaches our backend).
+- Rules out §12 **①+hook** (same — into model context, and not triggered under our control).
+- **Leaves only §12 ② backend-as-MCP-client** — but **much thinner** than first estimated, because we
+  **don't score, don't build a report, don't persist state**.
+
+**Per-turn loop (MCP mode):**
+```
+our backend → MCP:  { user_context, sessionId }      // empty sessionId = new session
+MCP → our backend:  { sessionId, speech_text, display_text, is_terminated }
+  ├─ display_text  → on-screen display (strip internal question ids RFCMS-Q0x)
+  ├─ speech_text   → hand to the voice layer, digital human speaks it
+  ├─ sessionId     → we hold it, echo it back verbatim next turn (the only state we hold)
+  └─ is_terminated → true ⇒ this session ends, wrap up; false ⇒ await candidate answer → call again with context
+```
+
+**Schema (client to provide; shape known so far):**
+- **Input**: `user_context` (this turn's candidate answer/dialogue) + `sessionId` (from the MCP's prior
+  return; **empty = new session**)
+- **Output**: `sessionId` + `is_terminated` (terminate flag) **+ `speech_text` + `display_text`** (★ the
+  latter two are required by our shell and must be **confirmed by exact field name/structure** when the
+  client provides the full schema — see 14.5 TODO)
+
+### 14.4 State ownership — fully simplified (§13.4's hard problem disappears)
+
+Session state is keyed by **`sessionId`, and the state lives inside the MCP**. We **only hold this opaque
+sessionId and echo it back each turn**; we do **not** persist/replay `final_session_state_json` in our DB.
+→ §13.4's "per-turn async stream vs all-at-once question array" mismatch, and the "persist state per turn"
+worry, **both vanish**. In MCP mode `state_machine.py` barely orchestrates: pass context / receive / end on
+terminate / hand speech to the digital human.
+
+### 14.5 Still open but **non-blocking**
+
+- ⏸️ **Public-endpoint auth**: not discussed today. **Revisit when the client's MCP server is ready**
+  (§11 Step 4 deferred). Still to finalize: token/auth model + how credentials are supplied + the boundary
+  wording for candidate context traversing the public internet to the client's data center.
+- 🔲 **Full tool schema (client to provide)**, confirm field-by-field when it lands:
+  - The **exact field names and structure** of `speech_text` / `display_text` (★ required by the shell —
+    make sure we get these, not just sessionId+flag).
+  - Is `user_context` **plain text** or the **full dialogue**?
+  - Is there a **locale / language** parameter (English only for now, §9 Q9)?
+  - **Which MCP tool (name)** + a **full round-trip example** (first turn new-session + a middle turn +
+    the terminate turn).
+  - Whether the MCP **produces its own follow-ups** — if so, align with our voice follow-ups to avoid
+    contention (§7 appendix).
+
+### 14.6 Post-meeting internal actions (revised)
+
+- ☑ Architecture, modes, state ownership backfilled here (§14).
+- 🔲 The **offline adapter prototype** is still worth doing first (no client dependency, non-blocking):
+  `display_text` cleanup (drop `RFCMS-Q0x`) + public/private split + citation filename→`SopDocument.id`
+  mapping (§6). **Note**: in MCP mode we don't build the F8 report, but the `display_text` cleanup + voice
+  feed chain still needs prototyping.
+- 🔲 Once the full schema + auth land, `McpInterviewSource` (the thin-client variant) is buildable in plan mode.
+- ✋ **No new repo** and **no new MCP config UI** premises stand; but the config entry **cannot reuse the
+  ToolPicker** that "attaches an agent tool to a persona" (client explicit: MCP does not go into agent
+  tools) — we need **our own MCP connection config** (server_url + auth), read by the backend and triggered
+  by us. This is the **correction** to the original §11 Step 0.
