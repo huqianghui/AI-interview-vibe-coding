@@ -209,11 +209,39 @@ detection.
   fallback (candidate says "我答完了"/"done" → detected in transcript). Silence threshold configurable.
 - **Follow-up hook:** per-question `max_follow_ups` config (demo default 0 or 1); when >0, an
   optional follow-up turn is generated and its content joins the answer group for scoring.
+- **Two follow-up generators (by channel), one scoring rule.** Follow-ups are produced differently
+  on the two transports, but the scoring semantics are identical:
+  - **Text channel — deterministic, non-LLM.** `build_follow_up_prompt` (F7,
+    `interview/memory.py`) quotes a snippet (≤80 chars) of the candidate's just-given answer and
+    appends the question's fixed `follow_up_prompt` probe. Gated by `max_follow_ups` (default `0`);
+    triggered in `answer_finalized` when `follow_ups_asked < max_follow_ups`, which stays on the
+    same question. Because it is pure string composition, it never drifts off-topic.
+  - **Voice channel — LLM, Foundry persona.** The digital-human agent probes on its own per the
+    persona contract (`persona.default_instructions`). These follow-ups are free-form model output;
+    left unbounded they can wander and self-correct ("you're right, I changed topics — let's stay
+    on the original question"). The default contract now **converges** them: at most ONE short
+    follow-up per question, stay strictly on the system's current question (never invent new
+    topics/questions or switch subject), and if drift happens, acknowledge and return to the
+    original question. Operators can still fully override via a custom `prompt_fragment`. This is a
+    persona-instruction bound, not scoring logic — it makes the demo run tighter but does not change
+    what gets graded.
+- **Follow-up scoring semantics (what actually affects the grade).** Scoring reads ONLY candidate
+  turns (`_candidate_answers` → `group_answers`), grouped by `question_id` into one Answer per
+  question, and judges that Answer against the question's default checklist:
+  - The interviewer's follow-up **question text is never scored** — only the checklist and the
+    candidate's own words drive the grade.
+  - An **answered** follow-up is joined (blank-line-separated) into that question's single Answer,
+    so it can complete/strengthen that question's coverage — never a separate extra question.
+  - An **unanswered** follow-up produces no candidate turn, so it is absent from the Answer: no
+    "missed follow-up" penalty and no score impact. Coverage reflects only what the candidate
+    actually said versus the checklist.
 - **AC:** (1) session advances question 1→N, one question at a time; (2) text and voice both drive
   the same state machine; (3) voice: silence timeout advances; verbal cue advances immediately;
   neither cuts off mid-sentence in a clean demo run; (4) follow-up turn (when enabled) is recorded
   and included in that question's answer group; (5) status transitions
-  created→in_progress→completed→scored enforced.
+  created→in_progress→completed→scored enforced; (6) follow-up **prompts** are excluded from
+  scoring and an unanswered follow-up neither penalizes nor alters the score (only grouped
+  candidate answers are judged against the checklist).
 
 ### F7 — Session memory surfacing
 
@@ -223,6 +251,10 @@ Foundry agent built-in session memory + an explicit demo moment.
 - **Explicit demo moment:** the interviewer's follow-up prompt references an earlier answer in the
   same session (e.g., "你第二题提到X,这里为什么…"). Implemented as a follow-up-turn prompt that
   passes prior-turn context to the agent.
+- **Voice gets this "for free"** from the Foundry prompt-agent's built-in conversation memory (F5);
+  `build_follow_up_prompt` is the deterministic, transport-agnostic version that also drives the
+  text channel and CI. See F6 "Two follow-up generators" for how each channel synthesizes the
+  follow-up and why only grouped candidate answers (not the follow-up prompts) are scored.
 - **AC:** (1) within one interview, a follow-up visibly cites content from an earlier question's
   answer; (2) the citation is accurate to what the candidate actually said (from interview_turn).
 
@@ -302,7 +334,9 @@ F7 Memory (rides on F5+F6)
 - Multi-tenancy / org isolation.
 - Server-side PDF (Excel + browser print only).
 - Dynamic follow-up scoring beyond the reserved hook (follow-up content is captured & scorable, but
-  advanced adaptive questioning is post-demo).
+  advanced adaptive questioning is post-demo). (The voice agent's free-form follow-ups ARE now
+  bounded by the default persona contract — one short follow-up, no topic drift — see F6; that is a
+  prompt-level bound, not adaptive-questioning scope.)
 - Cross-session candidate memory (only in-session memory for the demo).
 
 ## 9. Blocking pre-work from client (before/early in build)

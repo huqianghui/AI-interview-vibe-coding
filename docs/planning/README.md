@@ -75,6 +75,19 @@ living specification is [`../../SPEC.md`](../../SPEC.md) at the repo root — st
   source binding — all into the gitignored DB, with no client content in any committed file.
   Approved via plan mode; shipped v0.31.0.0.
 
+- [`spec-external-mcp-interviewer-integration.md`](spec-external-mcp-interviewer-integration.md) —
+  **analysis / NOT approved, blocked on client answers.** A client-provided MCP result sample
+  (`final_session_state_json` / `public_response_json` / `speech_word_count`) turns out to be a
+  **parallel implementation of the same rf-CSM interview** our F4/F6 already ship — so integrating
+  it is a "who owns the brain" decision, not an "add a tool" task. Documents the field-level
+  correspondence to our engine, the data problems (double-JSON encoding, `RFCMS-Q0x` id leak in
+  `display_text`, results≠covered mismatch, missing answer-submission contract + session id,
+  file-name-not-document-id citations that break clickable SOP links), and why attaching it as a
+  Foundry-agent tool (Path 1) is a trap vs. backend-as-MCP-client (Path 2). Ends with the blocking
+  questions to bring back to the client. Pre-implementation gate. Chinese counterpart:
+  [`spec-external-mcp-interviewer-integration.zh-CN.md`](spec-external-mcp-interviewer-integration.zh-CN.md)
+  (content-aligned, plus a client-ready 10-question confirmation checklist in §附).
+
 ## What was intentionally NOT promoted
 
 The gstack project dir also holds machine-local, per-developer working state that does **not**
