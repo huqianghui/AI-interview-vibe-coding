@@ -28,21 +28,44 @@ from app.interview.scoring_engine import (
     ScoringIncomplete,
     enforce_and_score,
 )
-from app.services import checklist_service
+from app.services import checklist_service, sop_context
 from app.services.agents.registry import get_llm_adapter
 
 logger = logging.getLogger(__name__)
 
 MAX_SCORING_ATTEMPTS = 2
 
+# Feature C — SOP source-context injection. Each rubric item can carry, beyond its one-line
+# ``source_quote``, a fuller slice of the original SOP passage it was drawn from so the judge reads
+# the item in context rather than from a single quote. Bounded per item AND per question so a long
+# SOP can't blow up the prompt.
+SOURCE_CONTEXT_PER_ITEM_CHARS = 600
+SOURCE_CONTEXT_TOTAL_CHARS = 3000
 
-def _build_scoring_prompt(question_text: str, answer_text: str, rubric: list[RubricItem]) -> str:
-    """Cross-language per-item judging prompt; JSON-only output keyed by item_id."""
-    lines = [
-        f"[{it.item_id}] ({it.kind}) {it.text}"
-        + (f'  — SOP: "{it.source_quote}"' if it.source_quote else "")
-        for it in rubric
-    ]
+
+def _build_scoring_prompt(
+    question_text: str,
+    answer_text: str,
+    rubric: list[RubricItem],
+    source_context: dict[str, str] | None = None,
+) -> str:
+    """Cross-language per-item judging prompt; JSON-only output keyed by item_id.
+
+    ``source_context`` (feature C) maps ``item_id`` → a fuller SOP passage for that item. When
+    present it is appended after the item's short quote as supporting reference text. It is
+    reference-only — the judge still decides per item against the checklist ``text``; the rubric,
+    weighting, and rails are unchanged.
+    """
+    source_context = source_context or {}
+    lines = []
+    for it in rubric:
+        line = f"[{it.item_id}] ({it.kind}) {it.text}"
+        if it.source_quote:
+            line += f'  — SOP: "{it.source_quote}"'
+        passage = source_context.get(it.item_id)
+        if passage:
+            line += f"\n    原文依据 / SOP source passage: {passage}"
+        lines.append(line)
     rubric_block = "\n".join(lines)
     return (
         "You are scoring one interview answer against a fixed checklist derived from an SOP.\n"
@@ -55,6 +78,30 @@ def _build_scoring_prompt(question_text: str, answer_text: str, rubric: list[Rub
         "Judge every item — do not omit any.\n\n"
         f"QUESTION:\n{question_text}\n\nCHECKLIST:\n{rubric_block}\n\nANSWER:\n{answer_text}\n"
     )
+
+
+async def _collect_source_context(db: AsyncSession, rubric: list[RubricItem]) -> dict[str, str]:
+    """Map item_id → fuller SOP passage for items that link a source document (feature C).
+
+    Bounded twice: each item gets at most ``SOURCE_CONTEXT_PER_ITEM_CHARS``, and once the running
+    total reaches ``SOURCE_CONTEXT_TOTAL_CHARS`` no further passages are added (later items simply
+    keep their one-line quote). Items with no ``source_document_id`` are skipped.
+    """
+    out: dict[str, str] = {}
+    budget = SOURCE_CONTEXT_TOTAL_CHARS
+    for it in rubric:
+        if budget <= 0 or not it.source_document_id:
+            continue
+        passage = await sop_context.get_source_context(
+            db,
+            document_id=it.source_document_id,
+            page_label=it.source_page,
+            max_chars=min(SOURCE_CONTEXT_PER_ITEM_CHARS, budget),
+        )
+        if passage:
+            out[it.item_id] = passage
+            budget -= len(passage)
+    return out
 
 
 def _parse_judgments(raw_output: str) -> list[dict]:
@@ -75,11 +122,17 @@ async def score_answer_against_checklist(
     question_text: str,
     answer_text: str,
     llm_provider: str | None = None,
+    include_source_context: bool = True,
 ) -> QuestionResult | None:
     """Score one answer against the question's default checklist, or None if none is authored.
 
     Returns None when the question has no checklist (caller falls back to the stub). Retries once
     on an incomplete LLM judgment set before surfacing the failure.
+
+    ``include_source_context`` (feature C, default on) attaches each item's fuller SOP passage to
+    the prompt as reference. It is a pure prompt enrichment — the pure scoring engine
+    (:func:`enforce_and_score`) never sees it, so the weighted score for a given set of judgments is
+    identical whether or not it is on. Set False to fall back to the historical quote-only prompt.
     """
     checklist = await checklist_service.get_default_checklist(db, question_id)
     if checklist is None:
@@ -102,8 +155,14 @@ async def score_answer_against_checklist(
         for row in item_rows
     ]
 
+    # Feature C: reassemble each item's fuller SOP passage (bounded per item and in total). Purely
+    # for the prompt; not passed to the scoring engine, so scores stay reproducible.
+    source_context: dict[str, str] = {}
+    if include_source_context:
+        source_context = await _collect_source_context(db, rubric)
+
     llm = get_llm_adapter(llm_provider)
-    prompt = _build_scoring_prompt(question_text, answer_text, rubric)
+    prompt = _build_scoring_prompt(question_text, answer_text, rubric, source_context)
     last_error: ScoringIncomplete | None = None
     for attempt in range(MAX_SCORING_ATTEMPTS):
         raw = await llm.complete(prompt, json_mode=True)

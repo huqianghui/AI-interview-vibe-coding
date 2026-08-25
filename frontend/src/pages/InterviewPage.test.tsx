@@ -117,11 +117,84 @@ describe("InterviewPage", () => {
     expect(screen.getByTestId("review-answer")).toHaveTextContent("a sufficiently long answer");
     expect(getReportSpy).not.toHaveBeenCalled();
 
-    // Explicit "Submit & evaluate" → scoring → report-ready reveal.
+    // Explicit "Submit & evaluate" → scoring → report-ready reveal. The SOP coverage check
+    // (feature D) defaults OFF, so the report request opts out (second arg false).
     await user.click(screen.getByTestId("submit-and-evaluate"));
     await waitFor(() => expect(screen.getByText(/100%/)).toBeInTheDocument());
     expect(getReportSpy).toHaveBeenCalledTimes(1);
+    expect(getReportSpy).toHaveBeenCalledWith("iv1", false);
     expect(screen.getByText(/met/)).toBeInTheDocument();
+  });
+
+  it("opts into the SOP coverage check when ticked, and renders the advisory panel (feature D)", async () => {
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "in_progress",
+      current_question: { question_id: "q1", prompt: "Question one?", index: 0, total: 1 },
+    });
+    vi.spyOn(client, "submitAnswer").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "completed",
+      current_question: null,
+    });
+    vi.spyOn(client, "getReview").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "completed",
+      answers: [
+        { question_id: "q1", prompt: "Question one?", index: 0, answer_text: "a sufficiently long answer" },
+      ],
+    });
+    const getReportSpy = vi.spyOn(client, "getReport").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "scored",
+      coverage_pct: 100,
+      total_score: 88,
+      grade: "B",
+      outcome: "Meets Expectations",
+      per_question: [
+        {
+          question_id: "q1",
+          is_stub: false,
+          score: 88,
+          grade: "B",
+          outcome: "Meets Expectations",
+          items: [],
+        },
+      ],
+      is_stub: false,
+      // Feature D advisory finding, grouped per question — must render, and never as a failure.
+      sop_coverage: [
+        {
+          question_id: "q1",
+          question_text: "Question one?",
+          missing: [{ point: "Confirm the customer's identity first", sop_evidence: "verify ID before proceeding" }],
+        },
+      ],
+    });
+
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+    await screen.findByText("Question one?");
+    await user.type(screen.getByRole("textbox"), "a sufficiently long answer");
+    await user.click(screen.getByRole("button", { name: /submit answer/i }));
+
+    // On the review screen: the coverage switch is present and defaults OFF.
+    await screen.findByTestId("review");
+    const toggle = screen.getByTestId("sop-coverage-check");
+    expect(toggle).not.toBeChecked();
+
+    // Tick it, then submit → the report request opts IN (second arg true).
+    await user.click(toggle);
+    expect(toggle).toBeChecked();
+    await user.click(screen.getByTestId("submit-and-evaluate"));
+    await waitFor(() => expect(getReportSpy).toHaveBeenCalledWith("iv1", true));
+
+    // The advisory panel renders the uncovered point; it is reference-only, not a score change.
+    const panel = await screen.findByTestId("report-sop-coverage");
+    expect(panel).toHaveTextContent("Confirm the customer's identity first");
   });
 
   it("rejects an empty voice answer without submitting or advancing (requirement 3)", async () => {

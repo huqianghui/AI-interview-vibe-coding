@@ -93,6 +93,17 @@ class ReportOut(BaseModel):
     warnings: list[str] = []
     # F8 executive-headline narrative (1-2 sentences, strengths + main gap). Empty for stub path.
     narrative: str = ""
+    # Feature D (opt-in): reference-only "SOP points the rubric may not cover", per question. None
+    # when the check wasn't requested or found nothing. Advisory — never affects any score above.
+    sop_coverage: list[dict] | None = None
+
+
+class ReportOptionsIn(BaseModel):
+    """Optional scoring options for the report route. Body is optional; defaults preserve today's
+    behaviour (no coverage check, no extra LLM calls)."""
+
+    # Feature D: run the SOP original-text coverage check. Default off.
+    sop_coverage_check: bool = False
 
 
 class AnsweredQuestionOut(BaseModel):
@@ -239,12 +250,16 @@ async def answer(
 @router.post("/{interview_id}/report", response_model=ReportOut)
 async def report(
     interview_id: str,
+    options: ReportOptionsIn | None = None,
     candidate: AnonymousCandidateSession = Depends(get_anonymous_session),
     db: AsyncSession = Depends(get_db),
 ) -> ReportOut:
     session = await _owned_interview(db, interview_id, candidate)
+    sop_coverage_check = options.sop_coverage_check if options else False
     try:
-        result = await state_machine.score_and_finalize(db, session)
+        result = await state_machine.score_and_finalize(
+            db, session, sop_coverage_check=sop_coverage_check
+        )
     except InterviewStateError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return ReportOut(**result)
