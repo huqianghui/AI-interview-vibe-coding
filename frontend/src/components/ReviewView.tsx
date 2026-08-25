@@ -9,12 +9,14 @@
  * Candidate-safe (P3): prompt + the answer they gave. Deliberately NO score/rubric/checklist —
  * that stays interviewer-internal until the report renders after this button is pressed.
  */
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Body1,
   Button,
   Card,
   CardHeader,
+  Switch,
   Text,
   Title3,
   makeStyles,
@@ -38,6 +40,18 @@ const useStyles = makeStyles({
     whiteSpace: "pre-wrap",
   },
   actions: { display: "flex", justifyContent: "flex-end", marginTop: "8px" },
+  // The opt-in coverage-check row sits just above the submit action: a Switch (default off) plus a
+  // small hint that spells out what ticking it does and — importantly — that it does not affect the
+  // score. House style mirrors AgentDefinitionPanel's Switch + <Text size={200}> hint.
+  option: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px",
+    padding: "12px",
+    borderRadius: tokens.borderRadiusMedium,
+    background: tokens.colorNeutralBackground2,
+  },
+  optionHint: { color: tokens.colorNeutralForeground3 },
 });
 
 export function ReviewView({
@@ -47,10 +61,13 @@ export function ReviewView({
 }: {
   answers: AnsweredQuestion[];
   busy: boolean;
-  onSubmit: () => void;
+  onSubmit: (sopCoverageCheck: boolean) => void;
 }) {
   const styles = useStyles();
   const { t } = useTranslation();
+  // Feature D opt-in: default OFF. Ticked, it runs the reference-only "SOP coverage" audit that is
+  // appended to the report and never changes a score.
+  const [sopCoverageCheck, setSopCoverageCheck] = useState(false);
 
   return (
     <div className={styles.root} data-testid="review">
@@ -75,10 +92,23 @@ export function ReviewView({
         </Card>
       ))}
 
+      <div className={styles.option} data-testid="sop-coverage-option">
+        <Switch
+          label={t("review.sopCoverageCheck.label")}
+          checked={sopCoverageCheck}
+          disabled={busy}
+          onChange={(_, d) => setSopCoverageCheck(d.checked)}
+          data-testid="sop-coverage-check"
+        />
+        <Text size={200} className={styles.optionHint}>
+          {t("review.sopCoverageCheck.hint")}
+        </Text>
+      </div>
+
       <div className={styles.actions}>
         <Button
           appearance="primary"
-          onClick={onSubmit}
+          onClick={() => onSubmit(sopCoverageCheck)}
           disabled={busy}
           data-testid="submit-and-evaluate"
         >

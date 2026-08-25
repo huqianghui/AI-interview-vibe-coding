@@ -69,6 +69,23 @@ export interface QuestionScore {
   rationale?: string;
 }
 
+/** One "SOP point the checklist may not cover" — a single advisory finding from the opt-in
+ * coverage check. `point` is the uncovered requirement in the model's words; `sop_evidence` is a
+ * short verbatim span from the SOP passage supporting it. Reference-only: never affects a score. */
+export interface SopCoveragePoint {
+  point: string;
+  sop_evidence: string;
+}
+
+/** The opt-in SOP coverage check's findings for ONE question — its uncovered points grouped under
+ * the question they belong to. Mirrors the backend's `{question_id, question_text, missing}` shape.
+ * Only questions with at least one uncovered point appear. */
+export interface SopCoverageQuestion {
+  question_id: string;
+  question_text: string;
+  missing: SopCoveragePoint[];
+}
+
 export interface Report {
   interview_session_id: string;
   status: string;
@@ -84,6 +101,10 @@ export interface Report {
   capped?: boolean;
   narrative?: string;
   warnings?: string[];
+  // Feature D (opt-in): advisory "SOP points the rubric may not cover", grouped per question.
+  // Present only when the candidate ticked the coverage check AND something was found. Never
+  // affects the score.
+  sop_coverage?: SopCoverageQuestion[] | null;
 }
 
 /** One question + the candidate's finalized answer, for the pre-scoring review screen. Mirrors
@@ -242,8 +263,19 @@ export async function submitAnswer(
   });
 }
 
-export async function getReport(interviewId: string): Promise<Report> {
-  return request<Report>(`/candidate/interview/${interviewId}/report`, { method: "POST" });
+/**
+ * Score the interview and return the report. `sopCoverageCheck` (feature D, default off) opts into
+ * the advisory "SOP original-text coverage" audit — an extra reference-only pass that never changes
+ * a score. When false we still send the body so the flag is explicit; the backend also accepts none.
+ */
+export async function getReport(
+  interviewId: string,
+  sopCoverageCheck = false,
+): Promise<Report> {
+  return request<Report>(`/candidate/interview/${interviewId}/report`, {
+    method: "POST",
+    body: JSON.stringify({ sop_coverage_check: sopCoverageCheck }),
+  });
 }
 
 /** Fetch every answered question + answer in bank order for the pre-scoring review screen

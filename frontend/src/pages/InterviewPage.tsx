@@ -355,12 +355,14 @@ export function InterviewPage() {
     });
 
   // Requirement 4: scoring only begins when the candidate explicitly submits from the review screen.
-  const onSubmitForScoring = () =>
+  // `sopCoverageCheck` (feature D opt-in, default off) rides through to the report request; on, it
+  // adds the advisory SOP-coverage audit to the report without touching any score.
+  const onSubmitForScoring = (sopCoverageCheck: boolean) =>
     guard(async () => {
       const iv = interviewRef.current;
       if (!iv) return;
       setPhase("scoring");
-      const r = await getReport(iv.interview_session_id);
+      const r = await getReport(iv.interview_session_id, sopCoverageCheck);
       setReport(r);
       setPhase("scored");
     });

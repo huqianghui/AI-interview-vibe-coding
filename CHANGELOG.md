@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.32.0.0 (2026-08-25)
+
+### Added
+- **Scoring now shows the grader the fuller SOP passage behind each rubric item (feature C, on by
+  default).** At scoring time, every checklist item that links a source document gets its fuller
+  original SOP passage — reassembled from `SopChunk` by `source_document_id` + `source_page` — 
+  appended to the judging prompt, instead of only the one-line `source_quote`. This addresses the
+  client's concern that a grader seeing a single short quote might misread a criterion. **The scoring
+  engine is unchanged:** the reassembled passage only enriches the prompt and never enters
+  `enforce_and_score`, so the same set of judgments always yields the same score (rails + weighting
+  are byte-identical). A `max_chars` guard (~600 chars/item) bounds token cost.
+- **Optional "SOP coverage check" the candidate can tick before submitting (feature D, off by
+  default).** On the review screen, a switch — *"Also run an SOP coverage check"* — lets the
+  candidate opt into an advisory audit that compares the rubric against the original SOP text and
+  lists *"SOP points the checklist may not cover"*, appended to the report for reference only. It
+  **never affects any score**: per-question scores and the total are byte-identical whether or not
+  it is enabled. Default off means zero extra LLM calls and behaviour identical to before. A parse
+  failure or missing SOP text degrades silently to "no findings" rather than erroring the report.
+
+### Docs
+- Rewrote §4 of `docs/planning/knowledge-evaluation-explainer.zh-CN.md` (client briefing) from
+  "optional proposals" to the shipped state: C default-on, D opt-in (default off), both explicitly
+  non-scoring, with D's toggle location and the "does not affect the score" wording for client
+  conversations.
+
 ## 0.31.1.0 (2026-08-24)
 
 ### Added

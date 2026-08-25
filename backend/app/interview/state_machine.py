@@ -33,7 +33,7 @@ from app.interview.verbal_cue import strip_verbal_cue
 from app.models.checklist import Checklist, ChecklistItem
 from app.models.interview import InterviewSession, InterviewTurn
 from app.models.sop import SopDocument
-from app.services import scoring_service
+from app.services import scoring_service, sop_coverage
 
 # Sources that can finalize an answer (P9). All route through answer_finalized().
 ANSWER_SOURCES = ("text", "voice", "verbal_cue")
@@ -202,13 +202,20 @@ async def answer_finalized(
     return session
 
 
-async def score_and_finalize(db: AsyncSession, session: InterviewSession) -> dict:
+async def score_and_finalize(
+    db: AsyncSession, session: InterviewSession, *, sop_coverage_check: bool = False
+) -> dict:
     """Score a completed interview against each question's checklist and flip status to ``scored``.
 
     F4: each answer is graded against its question's default checklist into a 4-state judgment per
     item with SOP + answer quotes (the traceable, weighted score the demo leads with). A question
     with no checklist authored yet falls back to the length-based stub row, so the report always
     covers every question. Only allowed once ``completed`` (F8 AC #4: report only when scored).
+
+    ``sop_coverage_check`` (feature D, default off) is a reference-only audit: when on, each
+    graded question is additionally checked for SOP points its checklist may not cover, and the
+    findings are attached under ``sop_coverage``. It NEVER affects any score — the numbers below
+    are computed from the checklist alone regardless of this flag.
     """
     if session.status not in ("completed", "scored"):
         raise InterviewStateError(f"Cannot score in status {session.status!r}")
@@ -237,6 +244,9 @@ async def score_and_finalize(db: AsyncSession, session: InterviewSession) -> dic
     graded_results: list = []
     any_graded = False
     any_capped = False
+    # Feature D: reference-only "SOP points the rubric may not cover", collected per question when
+    # the opt-in flag is on. Never touches any score below.
+    coverage_findings: list[dict] = []
 
     for question_id, answer_text in answers:
         result = await scoring_service.score_answer_against_checklist(
@@ -250,6 +260,20 @@ async def score_and_finalize(db: AsyncSession, session: InterviewSession) -> dic
             per_question.append(scoring_service.stub_result_dict(question_id, answer_text))
             continue
         any_graded = True
+        if sop_coverage_check:
+            missing = await sop_coverage.check_question_coverage(
+                db,
+                question_id=question_id,
+                question_text=prompt_by_id.get(question_id, ""),
+            )
+            if missing:
+                coverage_findings.append(
+                    {
+                        "question_id": question_id,
+                        "question_text": prompt_by_id.get(question_id, ""),
+                        "missing": missing,
+                    }
+                )
         q_weight = weight_by_id.get(question_id, 1)
         weighted_sum += result.score * q_weight
         weight_total += q_weight
@@ -318,6 +342,9 @@ async def score_and_finalize(db: AsyncSession, session: InterviewSession) -> dic
         "per_question": per_question,
         "warnings": all_warnings,
         "is_stub": not any_graded,
+        # Feature D: present only when the opt-in check ran and found something; None otherwise so
+        # the report renders the panel only when there are findings. Never affects the scores above.
+        "sop_coverage": coverage_findings if (sop_coverage_check and coverage_findings) else None,
     }
 
 

@@ -83,6 +83,27 @@ const useStyles = makeStyles({
   },
   itemHead: { display: "flex", gap: "8px", alignItems: "center" },
   quote: { color: tokens.colorNeutralForeground2, fontStyle: "italic" },
+  // Feature D (opt-in): the advisory "SOP points the checklist may not cover" panel. Neutral
+  // styling — it is reference-only and explicitly does NOT affect the score, so it must not read as
+  // a failure. Sits below the scored detail.
+  coverage: {
+    marginTop: "20px",
+    padding: "12px 16px",
+    borderRadius: tokens.borderRadiusMedium,
+    background: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  coverageHint: { color: tokens.colorNeutralForeground3, display: "block", marginBottom: "8px" },
+  coverageGroup: { marginTop: "12px" },
+  coverageQuestion: { display: "block", marginBottom: "4px" },
+  coveragePoint: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "2px",
+    padding: "6px 0",
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  coverageEvidence: { color: tokens.colorNeutralForeground3, fontStyle: "italic" },
 });
 
 const JUDGMENT_COLOR: Record<string, "success" | "warning" | "danger" | "subtle"> = {
@@ -335,6 +356,40 @@ export function ReportView({ report }: { report: Report }) {
             </AccordionItem>
           ))}
         </Accordion>
+      )}
+
+      {/* Feature D (opt-in): advisory SOP-coverage findings. Rendered only when the candidate ran
+          the check AND it surfaced something. Reference-only — it never affected the score above. */}
+      {report.sop_coverage && report.sop_coverage.length > 0 && (
+        <div className={styles.coverage} data-testid="report-sop-coverage">
+          <Title3 as="h3">{t("report.sopCoverage.title")}</Title3>
+          <Text size={200} className={styles.coverageHint}>
+            {t("report.sopCoverage.hint")}
+          </Text>
+          {report.sop_coverage.map((group, gi) => (
+            <div key={group.question_id ?? gi} className={styles.coverageGroup}>
+              <Text weight="semibold" className={styles.coverageQuestion}>
+                {group.question_text ||
+                  t("report.questionN", {
+                    n:
+                      report.per_question.findIndex(
+                        (q) => q.question_id === group.question_id,
+                      ) + 1,
+                  })}
+              </Text>
+              {group.missing.map((m, mi) => (
+                <div key={mi} className={styles.coveragePoint}>
+                  <Text>{m.point}</Text>
+                  {m.sop_evidence && (
+                    <Text size={200} className={styles.coverageEvidence}>
+                      {t("report.sopSource")}: "{m.sop_evidence}"
+                    </Text>
+                  )}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
       )}
     </Card>
   );

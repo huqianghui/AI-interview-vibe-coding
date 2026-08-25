@@ -101,11 +101,21 @@ export const resources = {
         disclosure: "Disclosure",
         disclosureNote:
           "A known source conflict was raised. It is disclosed for transparency and does not reduce the score.",
+        // Feature D (opt-in) advisory panel: SOP points the checklist may not cover. Reference-only.
+        sopCoverage: {
+          title: "SOP coverage notes",
+          hint: "For reference only — SOP points the checklist may not fully cover. These do not affect your score.",
+        },
       },
       review: {
         title: "Review your answers",
         body: "You've answered every question. Read them over — when you're ready, submit to start SOP-based scoring.",
         action: "Submit & evaluate",
+        // Feature D opt-in: default off. Ticking it runs an advisory SOP-coverage audit.
+        sopCoverageCheck: {
+          label: "Also run an SOP coverage check",
+          hint: "Optional. Compares your checklist against the original SOP and flags points it may not cover — added to the report for reference only. It does not affect your score and takes a little longer.",
+        },
       },
     },
   },
@@ -198,11 +208,21 @@ export const resources = {
         cappedNote: "已封顶为「有待改进」:回答中存在与权威 SOP 冲突的关键错误。",
         disclosure: "披露",
         disclosureNote: "已提示一处已知的资料冲突。此处仅作透明披露,不影响评分。",
+        // 功能 D(可选)提示板块:评价标准可能未覆盖的 SOP 要点,仅作参考。
+        sopCoverage: {
+          title: "SOP 原文覆盖度提示",
+          hint: "仅供参考 —— 列出评价标准可能未完全覆盖的 SOP 要点。这些内容不影响你的评分。",
+        },
       },
       review: {
         title: "回顾你的回答",
         body: "你已回答完所有问题。请整体回顾一遍 —— 准备好后,点击提交即可开始按 SOP 评测。",
         action: "提交并评测",
+        // 功能 D 可选项:默认关闭。勾选后额外做一次 SOP 原文覆盖度体检(仅作提示)。
+        sopCoverageCheck: {
+          label: "同时进行 SOP 原文覆盖度体检",
+          hint: "可选项。将本次评价标准与 SOP 原文比对,标出可能未覆盖的要点,追加到报告中仅供参考。不影响你的评分,且会略微增加耗时。",
+        },
       },
     },
   },

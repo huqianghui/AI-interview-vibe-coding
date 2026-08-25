@@ -58,6 +58,15 @@ class MockLLMAdapter(LLMAdapter):
     async def complete(self, prompt: str, *, json_mode: bool = False) -> str:
         if json_mode:
             lowered = prompt.lower()
+            # Feature D coverage marker is checked FIRST: its prompt also contains the words
+            # "scoring checklist" (it audits one), so the checklist-draft branch below would
+            # otherwise shadow it and return the wrong shape.
+            if "auditing sop coverage" in lowered:
+                # One deterministic "uncovered point" so tests exercise the parse path.
+                return (
+                    '{"missing": [{"point": "mock uncovered SOP point", '
+                    '"sop_evidence": "mock SOP evidence"}]}'
+                )
             if "scoring checklist" in lowered:
                 return _mock_checklist_draft()
             if "scoring one interview answer" in lowered:
