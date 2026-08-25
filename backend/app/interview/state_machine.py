@@ -163,8 +163,12 @@ async def answer_finalized(
         # Owe another follow-up: ask it and stay on this question. F7 memory moment — the follow-up
         # references what the candidate just said (from this turn's content), so the interviewer
         # visibly remembers across turns rather than asking a canned probe.
+        # Follow-up lead-in language follows the SESSION language, i.e. the language of the
+        # system-served question — not the candidate's answer. A candidate who replies in another
+        # language must not flip the interview language (matches the persona's verbatim-language
+        # directive and the "follow session locale" strategy).
         follow_up_text = build_follow_up_prompt(
-            current.follow_up_prompt, content, locale=_infer_locale(content)
+            current.follow_up_prompt, content, locale=_infer_locale(current.prompt)
         )
         db.add(
             InterviewTurn(
@@ -483,10 +487,12 @@ def _now() -> datetime:
 
 
 def _infer_locale(text: str) -> str:
-    """Rough locale for the follow-up lead-in: zh-CN if the answer is mostly CJK, else en-US.
+    """Rough locale for the follow-up lead-in: zh-CN if ``text`` is mostly CJK, else en-US.
 
-    The follow-up should read back in the candidate's language; a per-answer heuristic avoids
-    threading bank/persona locale through the finalize path for what is a cosmetic lead-in.
+    Fed the system-served QUESTION prompt (the session language), not the candidate's answer, so
+    the lead-in follows the interview language rather than flipping to whatever the candidate
+    happened to type. A text heuristic avoids threading bank/persona locale through the finalize
+    path for what is a cosmetic lead-in.
     """
     cjk = sum(1 for ch in text if "一" <= ch <= "鿿")
     letters = sum(1 for ch in text if ch.isalpha())
