@@ -6,7 +6,11 @@ name: Deploy App
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    # The deploy OIDC federated credential is bound to these branches. `main` is the eventual
+    # steady state; `feat/azure-cicd-deploy` lets the first CI/CD deploy run from the feature branch
+    # without merging to main first (workflow_dispatch can't target a workflow that isn't yet on the
+    # default branch, but push-triggered runs use the workflow from the pushed commit).
+    branches: [main, feat/azure-cicd-deploy]
     paths:
       - "backend/**"
       - "frontend/**"
