@@ -13,6 +13,15 @@ param githubRepo string
 param githubBranch string
 param githubEnvironmentName string = ''
 
+// Some GitHub orgs/repos present the OIDC subject in *immutable-ID* form
+// (repo:<owner>@<ownerId>/<repo>@<repoId>:ref:...) instead of the plain
+// repo:<owner>/<repo>:ref:... form. Azure matches the subject exactly, so when the immutable form
+// is presented, supply the owner/repo numeric IDs here to create a second matching credential.
+// Leave empty to create only the plain-text credential. (Look up IDs with
+// `gh api /repos/<owner>/<repo> --jq '{owner: .owner.id, repo: .id}'`.)
+param githubOwnerId string = ''
+param githubRepoId string = ''
+
 var identityName = 'id-${namePrefix}-${environmentName}-github-deploy'
 // A federated-credential *resource name* cannot contain '/', but branch names can (e.g.
 // "feat/azure-cicd-deploy"). Sanitize the name only; the OIDC *subject* keeps the real branch.
@@ -20,6 +29,9 @@ var credentialName = 'github-${replace(githubBranch, '/', '-')}'
 var repositorySubject = 'repo:${githubOwner}/${githubRepo}:ref:refs/heads/${githubBranch}'
 var environmentCredentialName = 'github-env-${githubEnvironmentName}'
 var environmentSubject = 'repo:${githubOwner}/${githubRepo}:environment:${githubEnvironmentName}'
+var hasImmutableIds = !empty(githubOwnerId) && !empty(githubRepoId)
+var immutableCredentialName = 'github-immutable-${replace(githubBranch, '/', '-')}'
+var immutableSubject = 'repo:${githubOwner}@${githubOwnerId}/${githubRepo}@${githubRepoId}:ref:refs/heads/${githubBranch}'
 
 resource githubDeploymentIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   name: identityName
@@ -39,11 +51,29 @@ resource githubFederatedCredential 'Microsoft.ManagedIdentity/userAssignedIdenti
   }
 }
 
+resource githubImmutableFederatedCredential 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2023-01-31' = if (hasImmutableIds) {
+  parent: githubDeploymentIdentity
+  name: immutableCredentialName
+  dependsOn: [
+    githubFederatedCredential
+  ]
+  properties: {
+    issuer: 'https://token.actions.githubusercontent.com'
+    subject: immutableSubject
+    audiences: [
+      'api://AzureADTokenExchange'
+    ]
+  }
+}
+
 resource githubEnvironmentFederatedCredential 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2023-01-31' = if (!empty(githubEnvironmentName)) {
   parent: githubDeploymentIdentity
   name: environmentCredentialName
+  // Federated-credential writes to one identity must be serialized (concurrent writes 409). Chain
+  // off the immutable credential when it exists, else the plain one.
   dependsOn: [
     githubFederatedCredential
+    githubImmutableFederatedCredential
   ]
   properties: {
     issuer: 'https://token.actions.githubusercontent.com'

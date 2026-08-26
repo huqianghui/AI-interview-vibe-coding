@@ -90,6 +90,12 @@ param githubRepo string = 'AI-interview-vibe-coding'
 @description('GitHub branch allowed to deploy through OIDC.')
 param githubBranch string = 'main'
 
+@description('Optional GitHub numeric owner ID. Set alongside githubRepoId when the repo presents the immutable-ID OIDC subject form. Look up: gh api /repos/<owner>/<repo> --jq .owner.id')
+param githubOwnerId string = ''
+
+@description('Optional GitHub numeric repo ID. Set alongside githubOwnerId for the immutable-ID OIDC subject form. Look up: gh api /repos/<owner>/<repo> --jq .id')
+param githubRepoId string = ''
+
 @description('Optional GitHub Environment allowed to deploy through OIDC. Defaults to environmentName.')
 param githubEnvironmentName string = environmentName
 
@@ -173,6 +179,8 @@ module githubOidc './modules/github-oidc.bicep' = {
     githubOwner: githubOwner
     githubRepo: githubRepo
     githubBranch: githubBranch
+    githubOwnerId: githubOwnerId
+    githubRepoId: githubRepoId
     githubEnvironmentName: githubEnvironmentName
   }
 }
