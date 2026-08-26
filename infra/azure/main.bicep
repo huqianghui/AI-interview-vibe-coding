@@ -87,8 +87,8 @@ param githubOwner string = 'huqianghui'
 @description('GitHub repository name for OIDC federation.')
 param githubRepo string = 'AI-interview-vibe-coding'
 
-@description('GitHub branch allowed to deploy through OIDC.')
-param githubBranch string = 'main'
+@description('GitHub branches allowed to deploy through OIDC (one federated credential per branch). main is the steady-state deploy branch.')
+param githubBranches array = ['main']
 
 @description('Optional GitHub numeric owner ID. Set alongside githubRepoId when the repo presents the immutable-ID OIDC subject form. Look up: gh api /repos/<owner>/<repo> --jq .owner.id')
 param githubOwnerId string = ''
@@ -178,7 +178,7 @@ module githubOidc './modules/github-oidc.bicep' = {
     tags: commonTags
     githubOwner: githubOwner
     githubRepo: githubRepo
-    githubBranch: githubBranch
+    githubBranches: githubBranches
     githubOwnerId: githubOwnerId
     githubRepoId: githubRepoId
     githubEnvironmentName: githubEnvironmentName

@@ -21,6 +21,9 @@
     "voiceLiveApiVersion": { "value": "2026-01-01-preview" },
     "githubOwner": { "value": "huqianghui" },
     "githubRepo": { "value": "AI-interview-vibe-coding" },
-    "githubBranch": { "value": "main" }
+    "githubBranches": { "value": ["main"] },
+    "_comment_immutable": "Set githubOwnerId/githubRepoId only if GitHub presents the immutable-ID OIDC subject (repo:owner@<id>/repo@<id>:ref:...); Azure Login fails AADSTS700213 otherwise. Look up: gh api /repos/<owner>/<repo> --jq '{owner:.owner.id, repo:.id}'.",
+    "githubOwnerId": { "value": "" },
+    "githubRepoId": { "value": "" }
   }
 }

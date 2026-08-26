@@ -4,13 +4,12 @@ name: Deploy App
 # Sweden Central). Keyless: logs in with the GitHub OIDC federated identity (see infra/azure). The
 # app seeds itself at boot (ephemeral SQLite) so there is NO separate bootstrap job to run.
 on:
+  # Now that this workflow lives on the default branch (main), workflow_dispatch works for manual
+  # runs, and pushes to main touching the app deploy automatically. The deploy OIDC federated
+  # credential is bound to main (see infra/azure/modules/github-oidc.bicep githubBranches).
   workflow_dispatch:
   push:
-    # The deploy OIDC federated credential is bound to these branches. `main` is the eventual
-    # steady state; `feat/azure-cicd-deploy` lets the first CI/CD deploy run from the feature branch
-    # without merging to main first (workflow_dispatch can't target a workflow that isn't yet on the
-    # default branch, but push-triggered runs use the workflow from the pushed commit).
-    branches: [main, feat/azure-cicd-deploy]
+    branches: [main]
     paths:
       - "backend/**"
       - "frontend/**"
