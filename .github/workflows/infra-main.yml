@@ -1,0 +1,33 @@
+name: Infra Validation
+
+# Validate the Bicep templates + shell scripts on any change under infra/.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra-main.yml"
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra-main.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  infra-validation:
+    name: Bicep + shell validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bicep build
+        run: az bicep build --file infra/azure/main.bicep
+
+      - name: Shell script syntax check
+        run: |
+          for f in infra/azure/scripts/*.sh; do
+            echo "checking $f"
+            bash -n "$f"
+          done

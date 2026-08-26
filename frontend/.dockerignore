@@ -1,0 +1,10 @@
+# Keep the build context small and reproducible: npm ci reinstalls node_modules inside the build
+# stage, and the build regenerates dist. Test artifacts and local state never belong in the image.
+node_modules/
+dist/
+playwright-report/
+test-results/
+.playwright/
+e2e/
+.DS_Store
+*.log

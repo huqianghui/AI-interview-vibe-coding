@@ -88,6 +88,18 @@ living specification is [`../../SPEC.md`](../../SPEC.md) at the repo root — st
   [`spec-external-mcp-interviewer-integration.zh-CN.md`](spec-external-mcp-interviewer-integration.zh-CN.md)
   (content-aligned, plus a client-ready 10-question confirmation checklist in §附).
 
+- [`spec-azure-cicd-deploy.md`](spec-azure-cicd-deploy.md) — the CI/CD + Azure deployment plan
+  (Container Apps, **Sweden Central**, co-located with the reused Foundry resource). Mirrors the
+  sibling AI-Coach infra but simpler: **managed-identity** auth throughout, **ephemeral SQLite**
+  reseeded every boot (no DB PaaS), and **boot-time self-seeding** in `backend/entrypoint.sh`
+  (`alembic upgrade head` → optional private-blob client-bundle fetch+import → `uvicorn`) — which
+  replaces the reference's separate bootstrap Job (a Job's disk can't seed the app replica's
+  per-replica SQLite). The gitignored client importer + source docs never enter the public repo or
+  the CI image; they arrive through a private `client-bundle` blob pulled at boot. Bicep drops all
+  AI-resource creation (Foundry reused, granted to the backend MI by
+  `infra/azure/scripts/grant-foundry-rbac.sh`). Single `public` env. Approved via plan mode;
+  shipped v0.33.0.0.
+
 ## What was intentionally NOT promoted
 
 The gstack project dir also holds machine-local, per-developer working state that does **not**

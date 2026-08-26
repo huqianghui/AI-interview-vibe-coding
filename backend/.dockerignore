@@ -1,0 +1,29 @@
+# Keep the image clean AND preserve the repo's security model. The client interview importer and
+# its source docs are gitignored (see repo .gitignore) — absent from CI checkouts, but present in
+# a local dev tree. They must NEVER be baked into the image: they arrive at boot from the private
+# client-bundle blob (see entrypoint.sh / fetch_client_bundle.py). Excluding them here means a
+# LOCAL `docker build` produces the same client-free image CI does.
+scripts/import_rfcsm_bank.py
+tests/test_import_rfcsm_bank.py
+EU_avatar_inspector_interview/
+
+# Secrets & local state — never copy into the build context.
+.env
+.env.*
+!.env.example
+*.db
+.coverage
+.pytest_cache/
+.ruff_cache/
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.DS_Store
+
+# Local SOP blob storage (uploaded bytes live here in dev).
+_sop_storage/
+storage/
+
+# Tests aren't needed in the runtime image.
+tests/

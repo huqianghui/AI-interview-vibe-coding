@@ -1,0 +1,11 @@
+{
+  "_comment": "Deploy profile consumed by .github/workflows/deploy-app.yml. Filled from the `githubActions` output of the one-time `az deployment sub create` (see infra/azure/README.md). None of these are secrets — the OIDC login is keyless and the app secrets are Container App native secrets.",
+  "AZURE_CLIENT_ID": "6d9af56a-909f-4d50-87bc-b1c80ed241fd",
+  "AZURE_TENANT_ID": "16b3c013-d300-468d-ac64-7eda0820b6d3",
+  "AZURE_SUBSCRIPTION_ID": "7a03e9b8-18d6-48e7-b186-0ec68da9e86f",
+  "AZURE_RESOURCE_GROUP": "rg-aiinterview-public-swedencentral",
+  "ACR_NAME": "aiinterviewpublicacr",
+  "BACKEND_APP_NAME": "ca-aiinterview-public-backend",
+  "FRONTEND_APP_NAME": "ca-aiinterview-public-frontend",
+  "HEALTH_CHECK": "backend"
+}

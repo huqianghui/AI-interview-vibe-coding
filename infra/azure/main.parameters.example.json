@@ -1,0 +1,26 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "_comment": "Copy to main.parameters.json (gitignored) and fill in. Secrets are @secure() — never commit real values; the file below carries placeholders only. Globally-unique names (ACR, storage) must be changed. Foundry values come from the EXISTING resource you are reusing (Sweden Central).",
+  "parameters": {
+    "namePrefix": { "value": "aiinterview" },
+    "environmentName": { "value": "public" },
+    "location": { "value": "swedencentral" },
+    "containerRegistryName": { "value": "aiinterviewpublicacr" },
+    "storageAccountName": { "value": "aiinterviewpublicst" },
+    "secretKey": { "value": "<generate: openssl rand -hex 32>" },
+    "encryptionKey": { "value": "<generate: python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\">" },
+    "seedAdminPassword": { "value": "<choose a strong admin password>" },
+    "adminApiToken": { "value": "<generate: openssl rand -hex 32>" },
+    "azureFoundryEndpoint": { "value": "https://<existing-foundry-account>.cognitiveservices.azure.com/" },
+    "foundryProjectEndpoint": { "value": "https://<existing-foundry-account>.services.ai.azure.com/api/projects/<project>" },
+    "azureFoundryDefaultProject": { "value": "<existing-project-name>" },
+    "_comment_models": "Both MUST be deployments that exist on your Foundry resource. gpt-4o is NOT deployed on the demo resource and 404s — use a model you have deployed (e.g. gpt-4o-mini).",
+    "foundryAgentModel": { "value": "gpt-4o-mini" },
+    "voiceLiveDefaultModel": { "value": "gpt-4o-mini" },
+    "voiceLiveApiVersion": { "value": "2026-01-01-preview" },
+    "githubOwner": { "value": "huqianghui" },
+    "githubRepo": { "value": "AI-interview-vibe-coding" },
+    "githubBranch": { "value": "main" }
+  }
+}

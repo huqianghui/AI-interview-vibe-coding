@@ -1,0 +1,150 @@
+name: Deploy App
+
+# Build + deploy the backend and frontend images to Azure Container Apps (single public env,
+# Sweden Central). Keyless: logs in with the GitHub OIDC federated identity (see infra/azure). The
+# app seeds itself at boot (ephemeral SQLite) so there is NO separate bootstrap job to run.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - ".github/workflows/deploy-app.yml"
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  BACKEND_IMAGE_NAME: ai-interview-backend
+  FRONTEND_IMAGE_NAME: ai-interview-frontend
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  deploy:
+    name: Deploy public app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load deployment profile
+        id: profile
+        env:
+          PROFILE_PATH: infra/azure/environments/public.json
+        run: |
+          if [ ! -f "$PROFILE_PATH" ]; then
+            echo "::error::Deployment profile not found: $PROFILE_PATH"
+            exit 1
+          fi
+          for name in \
+            AZURE_CLIENT_ID \
+            AZURE_TENANT_ID \
+            AZURE_SUBSCRIPTION_ID \
+            AZURE_RESOURCE_GROUP \
+            ACR_NAME \
+            BACKEND_APP_NAME \
+            FRONTEND_APP_NAME \
+            HEALTH_CHECK
+          do
+            value=$(jq -r --arg name "$name" '.[$name] // empty' "$PROFILE_PATH")
+            echo "$name=$value" >> "$GITHUB_ENV"
+          done
+          echo "azure_client_id=$(jq -r '.AZURE_CLIENT_ID' "$PROFILE_PATH")" >> "$GITHUB_OUTPUT"
+          echo "azure_tenant_id=$(jq -r '.AZURE_TENANT_ID' "$PROFILE_PATH")" >> "$GITHUB_OUTPUT"
+          echo "azure_subscription_id=$(jq -r '.AZURE_SUBSCRIPTION_ID' "$PROFILE_PATH")" >> "$GITHUB_OUTPUT"
+
+      - name: Validate deployment configuration
+        run: |
+          missing=0
+          for name in \
+            AZURE_CLIENT_ID \
+            AZURE_TENANT_ID \
+            AZURE_SUBSCRIPTION_ID \
+            AZURE_RESOURCE_GROUP \
+            ACR_NAME \
+            BACKEND_APP_NAME \
+            FRONTEND_APP_NAME
+          do
+            if [ -z "${!name}" ] || [ "${!name}" = "null" ] || [[ "${!name}" == "<"*">" ]]; then
+              echo "::error::$name is required (fill infra/azure/environments/public.json from the deployment output)"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ steps.profile.outputs.azure_client_id }}
+          tenant-id: ${{ steps.profile.outputs.azure_tenant_id }}
+          subscription-id: ${{ steps.profile.outputs.azure_subscription_id }}
+
+      - name: Build and push backend image
+        run: |
+          az acr build \
+            --registry "$ACR_NAME" \
+            --image "$BACKEND_IMAGE_NAME:$IMAGE_TAG" \
+            --file backend/Dockerfile \
+            backend/
+
+      - name: Deploy backend Container App
+        run: |
+          az containerapp update \
+            --name "$BACKEND_APP_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --image "$ACR_NAME.azurecr.io/$BACKEND_IMAGE_NAME:$IMAGE_TAG"
+
+      - name: Get backend FQDN
+        id: backend-fqdn
+        run: |
+          fqdn=$(az containerapp show \
+            --name "$BACKEND_APP_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query properties.configuration.ingress.fqdn \
+            --output tsv)
+          echo "fqdn=$fqdn" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push frontend image
+        run: |
+          # No VITE_API_BASE_URL build-arg: the SPA calls the relative "/api" base and nginx
+          # reverse-proxies it to BACKEND_URL (injected at container start, below).
+          az acr build \
+            --registry "$ACR_NAME" \
+            --image "$FRONTEND_IMAGE_NAME:$IMAGE_TAG" \
+            --file frontend/Dockerfile \
+            frontend/
+
+      - name: Deploy frontend Container App
+        run: |
+          az containerapp update \
+            --name "$FRONTEND_APP_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --image "$ACR_NAME.azurecr.io/$FRONTEND_IMAGE_NAME:$IMAGE_TAG" \
+            --set-env-vars "BACKEND_URL=https://${{ steps.backend-fqdn.outputs.fqdn }}"
+
+      - name: Verify deployment
+        run: |
+          frontend_fqdn=$(az containerapp show \
+            --name "$FRONTEND_APP_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query properties.configuration.ingress.fqdn \
+            --output tsv)
+          echo "Frontend URL: https://$frontend_fqdn"
+          echo "Backend URL:  https://${{ steps.backend-fqdn.outputs.fqdn }}"
+          # The backend serves /health at root; the frontend nginx serves its own /health.
+          if [ "$HEALTH_CHECK" = "frontend" ]; then
+            health_url="https://$frontend_fqdn/health"
+          else
+            health_url="https://${{ steps.backend-fqdn.outputs.fqdn }}/health"
+          fi
+          for i in $(seq 1 15); do
+            if curl -sf "$health_url" > /dev/null; then
+              echo "Health check passed: $health_url"
+              exit 0
+            fi
+            echo "Attempt $i/15 - waiting 10s..."
+            sleep 10
+          done
+          echo "::error::Health check failed: $health_url"
+          exit 1

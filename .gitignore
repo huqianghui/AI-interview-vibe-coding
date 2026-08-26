@@ -28,6 +28,11 @@ backend/*.db
 .env
 .env.*
 !.env.example
+# Bicep deploy parameters carry secrets (@secure params) + real Foundry endpoints — never commit.
+# Only main.parameters.example.json (placeholders) is tracked.
+infra/azure/main.parameters.json
+# Compiled Bicep output.
+infra/azure/*.json.tmp
 # Playwright E2E artifacts
 frontend/playwright-report/
 frontend/test-results/

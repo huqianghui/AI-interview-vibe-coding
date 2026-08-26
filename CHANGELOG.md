@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.33.0.0 (2026-08-26)
+
+### Added
+- **Full CI/CD deployment to Azure Container Apps (Sweden Central).** New `infra/azure/` Bicep
+  (subscription-scope `main.bicep` + modules) provisions the resource group, Log Analytics/App
+  Insights, a user-assigned managed identity, Basic ACR, a keyless Storage account (private
+  `client-bundle` + `materials` containers), the Container Apps environment +
+  backend/frontend apps, a GitHub OIDC federated deploy identity, and all role assignments. **No
+  AI-resource creation** — the existing Foundry / Voice Live resource is reused; the backend MI is
+  granted access on it out-of-band by `infra/azure/scripts/grant-foundry-rbac.sh` (cross-RG).
+- **Managed-identity, keyless auth end to end.** Both apps run as a user-assigned MI
+  (`AZURE_CLIENT_ID` selects it for `DefaultAzureCredential`); GitHub Actions deploys via OIDC with
+  no stored cloud credentials. The four runtime secrets are delivered as **Container App native
+  secrets** (encrypted at rest by the platform) rather than Key Vault `secretRef`s: the target
+  MCAPS subscription's Azure Policy force-disables Key Vault public network access (reverts within
+  seconds of any write), which a VNet-less Container App cannot reach. The secrets still never enter
+  the repo — they are passed as `@secure()` Bicep params from the gitignored `main.parameters.json`.
+- **Boot-time self-seeding for ephemeral SQLite (no DB PaaS).** New `backend/entrypoint.sh` runs
+  `alembic upgrade head` → optional private-blob client-bundle fetch + import
+  (`backend/scripts/fetch_client_bundle.py`, MI auth) → `exec uvicorn` (lifespan seeds the generic
+  demo bank + admin). Replaces the reference's separate bootstrap Job, which can't seed a per-replica
+  ephemeral DB. `CLIENT_BUNDLE_BLOB` unset → public-demo mode (generic bank only). **This first
+  deploy ships in public-demo mode:** the same subscription policy that disables Key Vault also
+  force-disables the Storage account's public network access, so the "private blob pulled at boot"
+  client-bundle channel is unreachable from a VNet-less Container App. Seeding the real rf-CSM client
+  bank is deferred to a follow-up that adds a Storage private endpoint + VNet-integrated Container
+  Apps environment.
+- **Containerization.** New `backend/Dockerfile` + `frontend/Dockerfile` (node build → nginx serve)
+  and `frontend/nginx.conf` (SPA fallback + `/api` reverse-proxy with WebSocket upgrade for Voice
+  Live). New `.github/workflows/deploy-app.yml` (OIDC → `az acr build` → `az containerapp update` →
+  health check) and `.github/workflows/infra-main.yml` (`az bicep build` + `bash -n`).
+
+### Security
+- `backend/.dockerignore` excludes the gitignored client importer, its test, and
+  `EU_avatar_inspector_interview/` so a local `docker build` produces the same client-free image CI
+  does; client content is designed to reach the container only via the private `client-bundle` blob
+  pulled at boot (deferred this release — see above). Deploy parameters
+  (`infra/azure/main.parameters.json`) are gitignored — only the placeholder `*.example.json` is
+  tracked.
+
+### Docs
+- New `infra/azure/README.md` (one-time setup + IaC reference) and
+  `docs/planning/spec-azure-cicd-deploy.md` (promoted plan). `docs/IMPLEMENTATION-STATUS.md` gains an
+  "Azure CI/CD deployment (v0.33.0.0)" section.
+
 ## 0.32.0.0 (2026-08-25)
 
 ### Added

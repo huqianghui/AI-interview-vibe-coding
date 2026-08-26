@@ -5,7 +5,7 @@ validation state. The spec of record is [`../SPEC.md`](../SPEC.md); the planning
 [`planning/`](planning/); per-release detail is in [`../CHANGELOG.md`](../CHANGELOG.md). To actually
 **verify** the requirements and run the system, see [`VERIFICATION.md`](VERIFICATION.md).
 
-Status as of **v0.31.2.0**. Backend: 445 tests, 86% coverage. Frontend: 130 unit/component tests +
+Status as of **v0.33.0.0**. Backend: 445 tests, 86% coverage. Frontend: 130 unit/component tests +
 Playwright E2E (real Chromium). Every merge passed CI (ruff check + ruff format + pytest;
 tsc + vitest + eslint + Playwright E2E). Local dev / CI run entirely on mock providers — zero Azure
 needed to build or test.
@@ -138,3 +138,47 @@ Runtime config precedence is **DB > .env > code default**:
   `gpt-4o` (the neutral code default) is NOT deployed on the demo resource and 404s on agent-create /
   Voice Live; deployed there: `gpt-5.4-mini`, `gpt-4o-mini`, `gpt-5.4`, `gpt-5`. Set a deployed model
   in the config page (or `FOUNDRY_AGENT_MODEL` / `VOICE_LIVE_DEFAULT_MODEL` in `.env`).
+
+### Azure CI/CD deployment (v0.33.0.0)
+
+Full deploy pipeline to **Azure Container Apps** in **Sweden Central** (co-located with the reused
+Foundry resource). Plan: [`planning/spec-azure-cicd-deploy.md`](planning/spec-azure-cicd-deploy.md);
+one-time setup + IaC: [`../infra/azure/README.md`](../infra/azure/README.md).
+
+- **Compute** — backend + frontend Container Apps, **single replica each** (`min=max=1`): ephemeral
+  SQLite is per-replica, and Voice Live WS affinity stays trivial. Frontend nginx serves the SPA and
+  reverse-proxies `/api` (incl. the `/api/voice-live/ws` upgrade) to the backend same-origin (no
+  CORS). Backend containerized `python:3.11-slim`, `pip install -e ".[azure]"`.
+- **Auth = managed identity, keyless** — a user-assigned MI runs both apps; `AZURE_CLIENT_ID` selects
+  it for `DefaultAzureCredential` (backend `azure_auth.py` is already Entra-first). Granted AcrPull +
+  Storage Blob Data Reader by Bicep; **Cognitive Services User + Azure AI
+  Developer on the EXISTING Foundry account** by `infra/azure/scripts/grant-foundry-rbac.sh` (cross-RG,
+  out of Bicep scope). GitHub Actions deploys via **OIDC federated identity** (no stored cloud creds).
+- **Data = ephemeral SQLite, reseeded every boot** (no DB PaaS). `backend/entrypoint.sh`:
+  `alembic upgrade head` → (if `CLIENT_BUNDLE_BLOB` set) fetch the private client bundle from the
+  `client-bundle` blob via MI + run the importer → `exec uvicorn`, whose lifespan idempotently seeds
+  the generic demo bank + admin. This **replaces the reference's separate bootstrap Job** (a Job's
+  disk can't seed the app replica's own SQLite).
+- **Client-content security preserved** — the gitignored importer + source docs never enter the
+  public repo or the CI image (enforced by `backend/.dockerignore`); they are designed to arrive only
+  through the private `client-bundle` blob uploaded once out-of-band. `CLIENT_BUNDLE_BLOB` unset →
+  public-demo mode (generic bank only). Secrets (`SECRET_KEY`/`ENCRYPTION_KEY`/`SEED_ADMIN_PASSWORD`/
+  `ADMIN_API_TOKEN`) are **Container App native secrets** (encrypted at rest by the platform),
+  passed as `@secure()` Bicep params from the gitignored `main.parameters.json`, never in the repo.
+  Key Vault was dropped: the target MCAPS subscription's Azure Policy force-disables KV public
+  network access, unreachable from a VNet-less Container App.
+- **IaC** — subscription-scope `infra/azure/main.bicep` creates the RG + Log Analytics/App Insights,
+  MI, Basic ACR, keyless Storage (private `client-bundle` + `materials`), Container
+  Apps env + both apps, GitHub OIDC identity, and role assignments (no Key Vault — see above).
+  **No AI-resource creation** (Foundry/Voice Live reused). Workflows:
+  [`.github/workflows/infra-main.yml`](../.github/workflows/infra-main.yml)
+  (`az bicep build` + `bash -n`) and [`.github/workflows/deploy-app.yml`](../.github/workflows/deploy-app.yml)
+  (OIDC login → `az acr build` both images → `az containerapp update` → health check). Single
+  `public` env profile in `infra/azure/environments/public.json`.
+- **Validation state** — Bicep compiles clean (`az bicep build`, no warnings); shell scripts pass
+  `bash -n`; `fetch_client_bundle.py` passes ruff check + format. **Live infra provisioned on Azure
+  (Sweden Central, 2026-08-26):** `az deployment sub create` succeeded (RG
+  `rg-aiinterview-public-swedencentral`); backend MI granted Foundry RBAC; deploy profile backfilled.
+  App images are built + rolled out by `deploy-app.yml`. Shipped in **public-demo mode** (real
+  rf-CSM bank deferred — Storage public-access policy blocks the boot-time bundle fetch; a follow-up
+  adds a Storage private endpoint + VNet-integrated Container Apps env).
