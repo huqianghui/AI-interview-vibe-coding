@@ -33,6 +33,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     Also overlays the saved DB master AI Foundry config onto settings (DB > .env > code default)
     so a previously-saved config is live on boot — also best-effort, never blocks startup.
 
+    Seeds the default interviewer persona (fixed id → reuses one stable Foundry agent, never an
+    orphan per boot) so voice works and the editor auto-selects it out of the box — its Foundry sync
+    runs in the BACKGROUND (below) so a slow/absent Foundry never delays boot.
+
     Finally, pre-warms the cached Entra credential in the BACKGROUND so the first Voice Live
     connect doesn't pay the 1-3s DefaultAzureCredential chain walk (env → IMDS/managed identity →
     az CLI) inline — a fire-and-forget task, so a slow/absent credential never delays boot.
@@ -41,6 +45,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
     from app.db import async_session_factory
     from app.services.config_overlay import apply_master_config_to_settings
+    from app.services.persona_seed import seed_default_persona
     from app.services.question_seed import seed_default_bank
     from app.services.user_seed import seed_default_admin
 
@@ -56,17 +61,24 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         pass
     try:
         async with async_session_factory() as session:
+            await seed_default_persona(session)
+    except Exception:  # noqa: BLE001 — persona seed is best-effort; never block startup
+        pass
+    try:
+        async with async_session_factory() as session:
             await apply_master_config_to_settings(session)
     except Exception:  # noqa: BLE001 — config overlay is best-effort; never block startup
         pass
 
     prewarm_task = asyncio.create_task(_prewarm_azure_credential())
+    persona_sync_task = asyncio.create_task(_sync_default_persona())
     try:
         yield
     finally:
-        # Don't leave a dangling task on shutdown; cancel if the pre-warm hasn't finished.
-        if not prewarm_task.done():
-            prewarm_task.cancel()
+        # Don't leave dangling tasks on shutdown; cancel any that haven't finished.
+        for task in (prewarm_task, persona_sync_task):
+            if not task.done():
+                task.cancel()
 
 
 async def _prewarm_azure_credential() -> None:
@@ -86,6 +98,23 @@ async def _prewarm_azure_credential() -> None:
         if credential is not None:
             await credential.get_token(COGNITIVE_SERVICES_SCOPE)
     except Exception:  # noqa: BLE001 — pre-warm is best-effort; never surface at startup
+        pass
+
+
+async def _sync_default_persona() -> None:
+    """Sync the seeded default persona to Foundry in the background (never blocks boot).
+
+    Voice's P5 gate needs ``agent_sync_status == "synced"``, so the seeded definition must be synced
+    for the digital human to speak. Best-effort: any failure (no Foundry creds, network) leaves the
+    persona ``failed`` — voice degrades to text — and is swallowed here. No-op when already synced.
+    """
+    try:
+        from app.db import async_session_factory
+        from app.services.persona_seed import sync_default_persona
+
+        async with async_session_factory() as session:
+            await sync_default_persona(session)
+    except Exception:  # noqa: BLE001 — background sync is best-effort; never surface at startup
         pass
 
 

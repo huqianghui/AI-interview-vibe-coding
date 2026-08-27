@@ -50,6 +50,11 @@ export function AgentEditorPage() {
   // Tracks the persona currently open so a slow background reconcile can't apply to a persona the
   // user has since switched away from.
   const openPersonaId = useRef<string | null>(null);
+  // Auto-select the default persona exactly once after the first list load, so entering the editor
+  // lands on the enabled default (the seeded interviewer) instead of the empty "select a persona"
+  // state. Guarded by a ref so a later background refreshList (e.g. after Save) never yanks the
+  // user off a persona they've since switched to or a "New persona" draft.
+  const autoSelected = useRef(false);
 
   const guard = useCallback(async (fn: () => Promise<void>) => {
     setError(null);
@@ -122,6 +127,19 @@ export function AgentEditorPage() {
         })
         .catch(() => {});
     });
+
+  // Once the list has loaded, auto-select the enabled default persona (fallback: the first row) so
+  // the editor opens on a persona rather than the empty state. Runs a single time — the ref guard
+  // means it won't override a manual switch or a "New persona" draft on a later list refresh.
+  useEffect(() => {
+    if (!authed || autoSelected.current) return;
+    if (selectedId !== null || list.length === 0) return;
+    autoSelected.current = true;
+    const target = list.find((p) => p.is_default && p.enabled) ?? list[0];
+    void selectPersona(target.id);
+    // selectPersona is stable enough for a one-shot guarded effect; deps kept minimal on purpose.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authed, list, selectedId]);
 
   const startNew = () => {
     setStatus(null);
