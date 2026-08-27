@@ -112,17 +112,71 @@ describe("AgentEditorPage", () => {
     mockDiscovery();
     mockKnowledge();
     const listSpy = vi.spyOn(personas, "listPersonas").mockResolvedValue([PERSONA]);
+    vi.spyOn(personas, "getPersona").mockResolvedValue(PERSONA);
 
     renderPage();
     expect(screen.getByTestId("agent-username-input")).toBeInTheDocument();
     await signIn(user);
 
-    // The persona list loaded into the top-bar switcher; its name shows once the dropdown opens.
+    // The persona list loaded into the top-bar switcher.
     await waitFor(() => expect(screen.getByTestId("persona-select")).toBeInTheDocument());
     expect(listSpy).toHaveBeenCalled();
-    await user.click(screen.getByTestId("persona-select"));
-    await waitFor(() => expect(screen.getByText("Demo Interviewer")).toBeInTheDocument());
-    expect(screen.getByTestId("editor-empty")).toBeInTheDocument(); // nothing selected yet
+    // The enabled default is auto-selected on entry (no manual pick needed).
+    await waitFor(() => expect(screen.getByTestId("persona-name")).toHaveValue("Demo Interviewer"));
+  });
+
+  it("auto-selects the enabled default persona on entry", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    mockDiscovery();
+    mockKnowledge();
+    // Two personas; only the second is the enabled default → it must be the one auto-selected.
+    const notDefault = { ...PERSONA, id: "p0", name: "Other", is_default: false };
+    const theDefault = { ...PERSONA, id: "p1", name: "The Default", is_default: true };
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([notDefault, theDefault]);
+    const getPersona = vi
+      .spyOn(personas, "getPersona")
+      .mockImplementation(async (id) => (id === "p1" ? theDefault : notDefault));
+
+    renderPage();
+    await signIn(user);
+
+    await waitFor(() => expect(screen.getByTestId("persona-name")).toHaveValue("The Default"));
+    expect(getPersona).toHaveBeenCalledWith("p1");
+    expect(screen.queryByTestId("editor-empty")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the first persona when none is the enabled default", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    mockDiscovery();
+    mockKnowledge();
+    const first = { ...PERSONA, id: "p0", name: "First", is_default: false };
+    const second = { ...PERSONA, id: "p1", name: "Second", is_default: false };
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([first, second]);
+    const getPersona = vi
+      .spyOn(personas, "getPersona")
+      .mockImplementation(async (id) => (id === "p0" ? first : second));
+
+    renderPage();
+    await signIn(user);
+
+    await waitFor(() => expect(screen.getByTestId("persona-name")).toHaveValue("First"));
+    expect(getPersona).toHaveBeenCalledWith("p0");
+  });
+
+  it("shows the empty state when there are no personas", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    mockDiscovery();
+    mockKnowledge();
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([]);
+
+    renderPage();
+    await signIn(user);
+
+    await waitFor(() => expect(screen.getByTestId("persona-select")).toBeInTheDocument());
+    expect(screen.getByTestId("editor-empty")).toBeInTheDocument();
   });
 
   it("rejects a non-admin user", async () => {

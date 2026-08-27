@@ -100,6 +100,16 @@ living specification is [`../../SPEC.md`](../../SPEC.md) at the repo root — st
   `infra/azure/scripts/grant-foundry-rbac.sh`). Single `public` env. Approved via plan mode;
   shipped v0.33.0.0.
 
+- [`spec-default-persona-boot-seed.md`](spec-default-persona-boot-seed.md) — boot-time seed of the
+  enabled default interviewer persona so the digital human works out of the box on the **ephemeral
+  SQLite** public demo (reseeded every boot, so an editor-created persona would vanish → voice
+  `VoiceUnavailable` + empty editor). Seeds with a **fixed persona id** = the operator's local id so
+  the boot sync is a create-or-update against the *same* `interviewer-<id>` Foundry agent (no orphan
+  per reboot); `model=None` defers to the deployment's `FOUNDRY_AGENT_MODEL`. Best-effort lifespan
+  seed (never blocks boot) + background Foundry sync (voice P5 gate needs `synced`; failure → text
+  degrade); the editor auto-selects the default on entry. Generic contract only — no client content.
+  Approved by the owner; shipped v0.34.0.0.
+
 ## What was intentionally NOT promoted
 
 The gstack project dir also holds machine-local, per-developer working state that does **not**

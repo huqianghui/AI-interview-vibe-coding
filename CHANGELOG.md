@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.34.0.0 (2026-08-27)
+
+### Added
+- **Boot-time seed of the default interviewer persona (voice works out of the box on the ephemeral
+  public demo).** New `backend/app/services/persona_seed.py` recreates the enabled default
+  "Interviewer" persona on every startup — the public deployment runs on ephemeral SQLite reseeded
+  each boot, so a persona created in the online editor would otherwise vanish on restart, leaving
+  voice unavailable (`VoiceUnavailable`) and the agent editor on its empty state. Wired into the
+  FastAPI lifespan (`main.py`) as a best-effort seed that never blocks startup. The seeded
+  `prompt_fragment` is the generic multilingual interviewer contract (no client wording, roles, SOP
+  sections, or KPI thresholds); voices are neutral Azure built-ins.
+- **Stable Foundry agent across reboots (no orphan accumulation).** The seed pins a **fixed persona
+  id** equal to the operator's local default persona id. Because the sync adapter derives the agent
+  name from the persona id (`interviewer-<id>`), reusing the id makes the boot sync a
+  create-or-update against the *same* Foundry agent every time, instead of minting a fresh orphan
+  agent on each ephemeral-DB boot. Seeding `model=None` lets `settings.foundry_agent_model` (the
+  deployment's `FOUNDRY_AGENT_MODEL`) govern, so no model is hardcoded that a given Foundry resource
+  may lack. Idempotent — a no-op when an enabled default already exists, so a restart never
+  duplicates it or fights the single-enabled-default invariant.
+- **Background Foundry sync on boot.** `main.py` launches `sync_default_persona` as a background task
+  (voice's P5 gate requires `agent_sync_status == "synced"`); a slow or absent Foundry never delays
+  boot, and a sync failure degrades the persona to text-only rather than crashing startup.
+- **Editor auto-selects the default persona on entry.** `AgentEditorPage.tsx` now auto-selects the
+  enabled default (fallback: first persona) once after the first list load, via a `useRef`-guarded
+  one-shot effect so a later background refresh (e.g. after Save) never yanks the operator off a
+  persona they've switched to or a "New persona" draft.
+
 ## 0.33.0.0 (2026-08-26)
 
 ### Added
