@@ -7,9 +7,9 @@ Create Date: 2026-08-12 12:00:00.000000
 
 from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision: str = "e3c4d5f6a7b8"
 down_revision: str | None = "d2b3c4e5f6a7"
@@ -29,9 +29,7 @@ def upgrade() -> None:
         sa.Column("is_enabled", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("created_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["persona_id"], ["interviewer_personas.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["persona_id"], ["interviewer_personas.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(
@@ -42,7 +40,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(
-        "ix_persona_knowledge_configs_persona_id", table_name="persona_knowledge_configs"
-    )
+    op.drop_index("ix_persona_knowledge_configs_persona_id", table_name="persona_knowledge_configs")
     op.drop_table("persona_knowledge_configs")
