@@ -1041,3 +1041,183 @@ describe("useInterviewVoice live transcript streaming", () => {
     vi.unstubAllGlobals();
   });
 });
+
+/**
+ * Question-read delivery watchdog (the "换题没读题" fix).
+ *
+ * The cancel/queue/flush machinery has routes that can silently drop a queued question — and the
+ * page latches "spoken" as soon as speakQuestion returns true, so one drop meant the question was
+ * NEVER read aloud (intermittent: whether the `response.done` flush fired decided it). The hook
+ * now owns delivery: a watch armed per speakQuestion is confirmed only when an assistant
+ * transcript actually matches the question text, and an unconfirmed watch retries the read.
+ */
+describe("useInterviewVoice question-read watchdog", () => {
+  class FakeWebSocket {
+    static last: FakeWebSocket | null = null;
+    static OPEN = 1;
+    readyState = 1;
+    onmessage: ((e: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+    sent: string[] = [];
+    constructor(public url: string) {
+      FakeWebSocket.last = this;
+    }
+    send(data: string) {
+      this.sent.push(data);
+    }
+    close() {
+      this.readyState = 3;
+      this.onclose?.();
+    }
+    receive(msg: unknown) {
+      this.onmessage?.({ data: JSON.stringify(msg) });
+    }
+  }
+
+  function questionReads(ws: FakeWebSocket): string[] {
+    return ws.sent
+      .map((s) => JSON.parse(s) as { type?: string; item?: { content?: { text?: string }[] } })
+      .filter((m) => m.type === "conversation.item.create")
+      .map((m) => m.item?.content?.[0]?.text ?? "");
+  }
+
+  async function connectHook() {
+    FakeWebSocket.last = null;
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    let hook!: ReturnType<typeof useInterviewVoice>;
+    function WatchHarness() {
+      hook = useInterviewVoice("iv-1", { locale: "zh-CN", tokenProvider: () => "tok" });
+      return null;
+    }
+    const { unmount } = render(<WatchHarness />);
+    let connectP!: Promise<void>;
+    act(() => {
+      connectP = hook.connect("zh-CN");
+    });
+    await act(async () => {
+      for (let i = 0; i < 20 && !FakeWebSocket.last; i++) await Promise.resolve();
+      FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
+      await connectP;
+    });
+    return { getHook: () => hook, ws: () => FakeWebSocket.last!, unmount };
+  }
+
+  it("retries an unconfirmed question read after the watchdog window", async () => {
+    vi.useFakeTimers();
+    const { getHook, ws, unmount } = await connectHook();
+
+    act(() => {
+      void getHook().speakQuestion("What is your greatest strength?");
+    });
+    expect(questionReads(ws())).toEqual(["What is your greatest strength?"]);
+
+    // No assistant transcript ever matches (the read was silently dropped) → watchdog re-emits.
+    await act(async () => {
+      vi.advanceTimersByTime(13_000);
+    });
+    expect(questionReads(ws())).toEqual([
+      "What is your greatest strength?",
+      "What is your greatest strength?",
+    ]);
+
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("does NOT retry once the assistant transcript confirms the read", async () => {
+    vi.useFakeTimers();
+    const { getHook, ws, unmount } = await connectHook();
+
+    act(() => {
+      void getHook().speakQuestion("Describe a difficult decision you made.");
+    });
+    // The verbatim read starts playing — its transcript delta matches the question prefix.
+    await act(async () => {
+      ws().receive({
+        type: "response.audio_transcript.delta",
+        response_id: "r1",
+        item_id: "i1",
+        delta: "Describe a difficult decision",
+      });
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(30_000);
+    });
+    expect(questionReads(ws())).toEqual(["Describe a difficult decision you made."]);
+
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("a server-VAD auto-response does NOT confirm the watch (prefix mismatch) and retry still fires", async () => {
+    vi.useFakeTimers();
+    const { getHook, ws, unmount } = await connectHook();
+
+    act(() => {
+      void getHook().speakQuestion("How do you manage regulatory differences?");
+    });
+    // An improvised agent reply plays instead of the question — must not count as confirmation.
+    await act(async () => {
+      ws().receive({
+        type: "response.audio_transcript.delta",
+        response_id: "r-auto",
+        item_id: "i-auto",
+        delta: "Thank you — that's a good example of",
+      });
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(13_000);
+    });
+    expect(questionReads(ws()).length).toBe(2);
+
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("stops retrying after SPEAK_MAX_ATTEMPTS", async () => {
+    vi.useFakeTimers();
+    const { getHook, ws, unmount } = await connectHook();
+
+    act(() => {
+      void getHook().speakQuestion("Question that never confirms.");
+    });
+    await act(async () => {
+      // Far beyond attempts × window — reads must cap at SPEAK_MAX_ATTEMPTS (4).
+      for (let i = 0; i < 10; i++) vi.advanceTimersByTime(13_000);
+    });
+    expect(questionReads(ws()).length).toBe(4);
+
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("a newer question supersedes the watch on an older one", async () => {
+    vi.useFakeTimers();
+    const { getHook, ws, unmount } = await connectHook();
+
+    act(() => {
+      void getHook().speakQuestion("Old question?");
+    });
+    act(() => {
+      void getHook().speakQuestion("New question?");
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(13_000);
+    });
+    const reads = questionReads(ws());
+    // The old question was read once (its initial emit, which optimistically marked a response
+    // active); the NEW question therefore QUEUED on its first attempt (0 emits) and is emitted by
+    // its watchdog retry. Crucially the superseded OLD watch never retries.
+    expect(reads.filter((r) => r === "Old question?").length).toBe(1);
+    expect(reads.filter((r) => r === "New question?").length).toBe(1);
+
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+});

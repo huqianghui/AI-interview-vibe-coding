@@ -78,6 +78,16 @@ const CONNECT_TIMEOUT_MS = 30_000;
 // fail closed to "" so the UI never hangs — the caller rejects an empty answer and lets the user
 // retry.
 const COMMIT_TRANSCRIPT_TIMEOUT_MS = 8_000;
+// Watchdog for the verbatim question read (speakQuestion): if the read hasn't actually STARTED
+// (no `response.created` for our injected item) within this window, re-attempt. The queue/cancel/
+// flush machinery has several routes that can silently drop a queued question (teardown clears the
+// queue, a flush colliding with a fresh server-VAD auto-response whose retry chain breaks, a
+// response.done that never arrives) — and the page latches "spoken" as soon as the request is
+// queued, so a single silent drop used to mean the question was NEVER read (the "换题没读题" bug).
+// 12s comfortably exceeds a normal cancel→done round-trip but still recovers mid-interview; capped
+// retries so a genuinely dead session can't loop forever.
+const SPEAK_CONFIRM_TIMEOUT_MS = 12_000;
+const SPEAK_MAX_ATTEMPTS = 4;
 
 /** Wire shape of one entry in `session.updated`'s `session.avatar.ice_servers` (matches the Azure
  * SDK's `IceServer.as_dict()`: each server carries its OWN username/credential). */
@@ -201,6 +211,24 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
   // Forward ref so handleMessage's `response.done` case can flush a queued question without
   // depending on speakQuestion (declared below). Set once speakQuestion is defined.
   const flushPendingSpeakRef = useRef<(() => void) | null>(null);
+  // Delivery watchdog for the CURRENT question read (see SPEAK_CONFIRM_TIMEOUT_MS). Confirmation
+  // = the assistant transcript of a response matches the watched text (the verbatim read literally
+  // speaks the injected text, so its `audio_transcript` IS the question — whereas `response.created`
+  // also fires for server-VAD auto-responses and would false-confirm). If the timer fires first,
+  // the question was silently dropped somewhere in the queue/cancel/flush machinery — retry from
+  // the top. Single latest-wins watch: the backend only moves forward, so a newer question always
+  // supersedes the watch on an older one.
+  const speakWatchRef = useRef<{
+    text: string;
+    attempts: number;
+    timer: ReturnType<typeof setTimeout>;
+  } | null>(null);
+  // Forward ref so the watchdog timer can re-enter speakQuestion (declared below).
+  const speakQuestionRef = useRef<((text: string) => boolean) | null>(null);
+  // A question read that was still UNCONFIRMED when the session tore down (reconnect): re-spoken
+  // once the next session reaches `session.updated`. Without this, a drop-during-reconnect is
+  // unrecoverable — the page latched "spoken" and never asks again.
+  const resumeSpeakTextRef = useRef<string | null>(null);
 
   // Settle any armed commit with whatever transcript has accumulated so far (usually ""). Called
   // from the transcription handler (with the just-arrived text already pushed) and from teardown
@@ -244,6 +272,14 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
     pendingSpeakTextRef.current = null;
     lastSpokenAttemptRef.current = null;
     spokenTextRef.current = null;
+    // Stop the question-read watchdog — its retry would hit a closed/next WS with stale state.
+    // Stash the unconfirmed text so the next session's `session.updated` re-speaks it (the page
+    // has already latched it as "spoken" and won't ask again).
+    if (speakWatchRef.current) {
+      clearTimeout(speakWatchRef.current.timer);
+      resumeSpeakTextRef.current = speakWatchRef.current.text;
+      speakWatchRef.current = null;
+    }
     // Drop any buffered user transcript — a new session starts a fresh turn; carrying stale
     // segments across a disconnect/reconnect would mis-attribute them to the next answer.
     userSegmentsSinceCommitRef.current = [];
@@ -273,6 +309,23 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
       const emit = (role: "user" | "assistant", content: string, isFinal: boolean, id: string) =>
         optionsRef.current.onTranscript?.({ id, role, content, isFinal, timestamp: Date.now() });
 
+      // Question-read delivery confirmation: the verbatim read speaks the injected text, so an
+      // assistant transcript whose start matches the watched question IS the question being read.
+      // Prefix match (normalized whitespace) so the first delta already confirms — no need to wait
+      // for the full read, and robust to trailing punctuation drift.
+      const confirmSpeakWatch = (assistantText: string) => {
+        const watch = speakWatchRef.current;
+        if (!watch || !assistantText) return;
+        const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+        const spoken = norm(assistantText);
+        const wanted = norm(watch.text);
+        const probe = spoken.slice(0, Math.min(24, wanted.length));
+        if (probe && wanted.startsWith(probe)) {
+          clearTimeout(watch.timer);
+          speakWatchRef.current = null;
+        }
+      };
+
       switch (msg.type as string | undefined) {
         case "proxy.connected":
           avatarEnabledRef.current = Boolean(msg.avatar_enabled);
@@ -293,6 +346,14 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
           setConn("connected");
           setAudioState("idle");
           onConnected();
+
+          // A question read left unconfirmed by the PREVIOUS session (dropped during a reconnect):
+          // re-speak it on this fresh session. The page latched it as "spoken", so nobody else will.
+          if (resumeSpeakTextRef.current) {
+            const resumeText = resumeSpeakTextRef.current;
+            resumeSpeakTextRef.current = null;
+            speakQuestionRef.current?.(resumeText);
+          }
 
           // Azure sends TWO session.updated frames: the first has `avatar: null`, the SECOND
           // carries the avatar block with ice_servers. Trigger the handshake on the ACTUAL presence
@@ -416,13 +477,17 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
             const running = (assistantLiveTranscriptRef.current.get(key) ?? "") + delta;
             assistantLiveTranscriptRef.current.set(key, running);
             emit("assistant", running, false, key);
+            confirmSpeakWatch(running);
           }
           break;
         }
         case "response.audio_transcript.done": {
           const key = `assistant-${msg.response_id}-${msg.item_id}`;
           assistantLiveTranscriptRef.current.delete(key);
-          if (msg.transcript) emit("assistant", msg.transcript as string, true, key);
+          if (msg.transcript) {
+            emit("assistant", msg.transcript as string, true, key);
+            confirmSpeakWatch(msg.transcript as string);
+          }
           break;
         }
         case "response.done":
@@ -736,7 +801,42 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
     (text: string): boolean => {
       const ws = wsRef.current;
       if (!text || ws?.readyState !== WebSocket.OPEN) return false;
-      if (activeResponseRef.current) {
+
+      // Arm (or re-arm) the delivery watchdog BEFORE attempting: the page latches "spoken" on a
+      // true return, so from here on WE own making the read actually happen. Confirmed by the
+      // assistant transcript matching (confirmSpeakWatch); on timeout, retry the whole attempt —
+      // clearing the per-text idempotency guard, which by then can only be blocking a read that
+      // never played (a REAL read would have confirmed and disarmed this watch within the window).
+      const prior = speakWatchRef.current;
+      if (prior) clearTimeout(prior.timer);
+      const attempts = prior?.text === text ? prior.attempts + 1 : 1;
+      if (attempts > SPEAK_MAX_ATTEMPTS) {
+        // Retries exhausted — stop; the question card remains the fallback.
+        speakWatchRef.current = null;
+        console.warn("[voice] question read retries exhausted; giving up on voice read");
+        return true;
+      }
+      speakWatchRef.current = {
+        text,
+        attempts,
+        timer: setTimeout(() => {
+          // Leave the watch in place — the re-entry below reads it as `prior` to carry the
+          // attempt count forward (its timer has already fired; re-clearing it is a no-op).
+          console.warn(
+            `[voice] question read unconfirmed after ${SPEAK_CONFIRM_TIMEOUT_MS}ms — retrying (attempt ${attempts + 1})`,
+          );
+          if (spokenTextRef.current === text) spokenTextRef.current = null;
+          if (pendingSpeakTextRef.current === text) pendingSpeakTextRef.current = null;
+          speakQuestionRef.current?.(text);
+        }, SPEAK_CONFIRM_TIMEOUT_MS),
+      };
+
+      // Watchdog retries (attempts > 1) EMIT DIRECTLY instead of queueing on the active-response
+      // flag: a silently-dropped read leaves that flag stale-true forever (its response.done never
+      // comes), so the queue path would deadlock — exactly the bug being fixed. If a response IS
+      // genuinely active, the direct emit collides and the existing collision handler re-queues it
+      // onto the flush path; either way the watch stays armed until a transcript confirms.
+      if (activeResponseRef.current && attempts === 1) {
         // A response (usually the server-VAD auto-response) is in flight — cancel it and queue this
         // question to be spoken when the resulting `response.done` lands. Latest-wins.
         pendingSpeakTextRef.current = text;
@@ -748,6 +848,7 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
     },
     [emitSpeak, send],
   );
+  speakQuestionRef.current = speakQuestion;
 
   // Flush a queued question once the conversation goes idle (`response.done`). Held in a ref so
   // handleMessage's `response.done` case can call it without a declaration-order cycle.
