@@ -1,0 +1,17 @@
+分类,资源,推荐SKU/规格,数量,计费方式,PoC必需,生产必需,备注
+应用层,Container Apps Environment,Consumption,1,按用量,是,是,应用托管环境
+应用层,Container App (backend),1 vCPU / 2 GiB 单副本,1,按vCPU秒+GiB秒,是,是,生产建议 min2/max5 副本
+应用层,Container App (frontend),0.5 vCPU / 1 GiB 单副本,1,按vCPU秒+GiB秒,是,是,
+应用层,Container Registry,Basic,1,固定月费,是,是,生产可升 Standard
+应用层,Storage Account,Standard_LRS StorageV2,1,按容量+事务,是,是,私有客户题库包 + 素材
+可观测,Log Analytics Workspace,PerGB2018,1,按摄入GB,是,是,
+可观测,Application Insights,基于 Log Analytics,1,计入上行,是,是,含智能告警
+身份,User-assigned Managed Identity,-,2,免费,是,是,后端运行 + GitHub OIDC 部署
+AI,Azure AI Foundry (AI Services),S0,1,按token/音频分钟,是,是,可复用已有资源；需 Voice Live 区域支持
+AI,模型部署 gpt-5.4-mini,GlobalStandard ≥100K TPM,1,按token,是,是,Agent 主模型 + Voice Live 对话
+AI,模型部署 text-embedding-3-small,GlobalStandard ≥50K TPM,1,按token,是,是,知识库向量化
+AI,Azure AI Search,Basic (生产 Standard S1),1,固定月费,是,是,Foundry IQ 知识库/SOP引用
+生产升级,PostgreSQL Flexible Server,B2s + 备份,1,固定月费+存储,否,是,替换临时 SQLite
+生产升级,Key Vault,Standard,1,按操作,否,是,受策略限制订阅需配私有端点
+生产升级,VNet + Private Endpoint,按端点数,3-4,固定月费+流量,否,是,Storage/KV/DB/Search 私有化
+生产升级,Azure Front Door + WAF,Standard,1,固定月费+流量,否,建议,自定义域名/防护
