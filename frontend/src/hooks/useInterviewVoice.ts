@@ -184,6 +184,18 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
   // `commitAnswer` drains this first; it's cleared on drain and on teardown so nothing leaks across
   // turns or sessions.
   const userSegmentsSinceCommitRef = useRef<string[]>([]);
+  // Live (partial) user-transcript accumulator, keyed by the Azure conversation item id. The
+  // `input_audio_transcription.delta` events carry INCREMENTAL text for the utterance the user is
+  // still speaking; we accumulate per item and emit the running text as a non-final segment under
+  // a stable id, so the panel shows the words as they're spoken instead of one bubble appearing
+  // only after the utterance ends. The `.completed` event finalizes the SAME id (replacing the live
+  // bubble in place) and remains the only text that feeds commitAnswer — partials are display-only.
+  const userLiveTranscriptRef = useRef<Map<string, string>>(new Map());
+  // Same accumulator for the ASSISTANT's `response.audio_transcript.delta`. Each delta frame
+  // carries only the incremental fragment, but every onTranscript consumer REPLACES the segment
+  // with the same id — so emitting the bare fragment made the interviewer's bubble show only the
+  // latest word until `.done` swapped in the full text. Accumulate here and emit the running text.
+  const assistantLiveTranscriptRef = useRef<Map<string, string>>(new Map());
   const optionsRef = useRef(options);
   optionsRef.current = options;
   // Forward ref so handleMessage's `response.done` case can flush a queued question without
@@ -235,6 +247,9 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
     // Drop any buffered user transcript — a new session starts a fresh turn; carrying stale
     // segments across a disconnect/reconnect would mis-attribute them to the next answer.
     userSegmentsSinceCommitRef.current = [];
+    // Drop live partial accumulators too — their item ids belong to the dead Azure session.
+    userLiveTranscriptRef.current.clear();
+    assistantLiveTranscriptRef.current.clear();
     // Settle a commit still waiting on a transcript that will never arrive now that the WS is
     // going away — otherwise `await commitAnswer()` hangs forever on disconnect/reconnect/unmount.
     settlePendingCommit();
@@ -330,12 +345,38 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
         case "input_audio_buffer.speech_stopped":
           setAudio("idle");
           break;
+        case "conversation.item.input_audio_transcription.delta": {
+          // Live partial of the utterance still being spoken (the "说了多少就展示多少" feature):
+          // accumulate per conversation item and re-emit the RUNNING text as a non-final segment
+          // under a stable per-item id, so the panel updates one growing bubble in place. Display
+          // only — commitAnswer never reads partials; the `.completed` event below finalizes the
+          // same bubble and remains the single source of the submitted answer text.
+          const itemId = msg.item_id as string | undefined;
+          const delta = (msg.delta as string | undefined) ?? "";
+          if (itemId && delta) {
+            const running = (userLiveTranscriptRef.current.get(itemId) ?? "") + delta;
+            userLiveTranscriptRef.current.set(itemId, running);
+            emit("user", running, false, `user-${itemId}`);
+          }
+          break;
+        }
         case "conversation.item.input_audio_transcription.completed": {
           const transcript = (msg.transcript as string | undefined) ?? "";
+          // Finalize under the SAME per-item id the deltas streamed into, so the live bubble is
+          // replaced in place (no duplicate). Items that never streamed a delta (delta events off
+          // or absent, e.g. plain azure-speech configs) fall back to the counter id as before.
+          const itemId = msg.item_id as string | undefined;
+          const hadLive = Boolean(itemId && userLiveTranscriptRef.current.has(itemId));
+          if (itemId) userLiveTranscriptRef.current.delete(itemId);
           // Always feed the transcript panel first, so by the time commitAnswer()'s promise
           // resolves the answer bubble is already on screen ("fully shown before submit").
           if (transcript)
-            emit("user", transcript, true, `user-${++transcriptIdCounter.current}`);
+            emit(
+              "user",
+              transcript,
+              true,
+              hadLive ? `user-${itemId}` : `user-${++transcriptIdCounter.current}`,
+            );
           const pending = pendingCommitRef.current;
           if (pending) {
             // "I'm done" was clicked and is waiting: this completed event is (part of) THIS turn's
@@ -365,19 +406,25 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
         case "response.audio.delta":
           if (msg.delta) audio.playAudio(msg.delta as string);
           break;
-        case "response.audio_transcript.delta":
-          if (msg.delta)
-            emit("assistant", msg.delta as string, false, `assistant-${msg.response_id}-${msg.item_id}`);
+        case "response.audio_transcript.delta": {
+          // Accumulate — consumers replace same-id segments, so a bare fragment would leave only
+          // the newest word on screen. Emit the RUNNING text so the bubble grows as the
+          // interviewer speaks.
+          const key = `assistant-${msg.response_id}-${msg.item_id}`;
+          const delta = (msg.delta as string | undefined) ?? "";
+          if (delta) {
+            const running = (assistantLiveTranscriptRef.current.get(key) ?? "") + delta;
+            assistantLiveTranscriptRef.current.set(key, running);
+            emit("assistant", running, false, key);
+          }
           break;
-        case "response.audio_transcript.done":
-          if (msg.transcript)
-            emit(
-              "assistant",
-              msg.transcript as string,
-              true,
-              `assistant-${msg.response_id}-${msg.item_id}`,
-            );
+        }
+        case "response.audio_transcript.done": {
+          const key = `assistant-${msg.response_id}-${msg.item_id}`;
+          assistantLiveTranscriptRef.current.delete(key);
+          if (msg.transcript) emit("assistant", msg.transcript as string, true, key);
           break;
+        }
         case "response.done":
           activeResponseRef.current = false;
           setAudio("idle");
