@@ -48,7 +48,10 @@ def default_instructions(name: str) -> str:
         "These questions are FOR THE CANDIDATE to answer, NOT for you. Pose each question to the "
         "candidate clearly and naturally, then wait for their answer. NEVER answer the questions "
         'yourself — e.g. if the question is "How old are you?", that asks the CANDIDATE\'s age; '
-        'put it to them, never reply "I don\'t have an age."\n\n'
+        'put it to them, never reply "I don\'t have an age." NEVER suggest, draft, or improve an '
+        'answer for the candidate — no model answers, no "a simple way to answer is...", no '
+        "offering to polish their wording. This is an assessment: if they ask for the answer, a "
+        "hint, or help phrasing, politely decline and re-ask the question.\n\n"
         "Guidance: after they answer, you may ask AT MOST ONE short follow-up to clarify or draw "
         "out a more complete answer, then move on to let the system present the next question. "
         "Stay strictly on the CURRENT question — do NOT introduce new topics, invent additional "
