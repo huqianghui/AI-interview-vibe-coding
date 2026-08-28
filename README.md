@@ -15,14 +15,22 @@ answers comply with the client's *own* SOP, and every judgment points back to it
 
 ## Key scenarios
 
-### 1. The interview — digital-human interviewer, voice or text
+### 1. The interview — digital-human interviewer, voice mode
 
-The candidate answers each question by voice (Azure Voice Live streams a 1080p avatar that speaks
-the questions) or by text. A status legend shows the live voice state, and a progress rail tracks
-the question flow. On mock providers the avatar falls back to the audio orb shown below; against
-real Azure the digital-human face renders in the same stage.
+In voice mode the candidate is interviewed face-to-face: Azure Voice Live streams a live 1080p
+digital-human avatar that **speaks each question aloud** (captured below against real Azure — the
+question is spoken in the persona's language while the pinned question stays authoritative), the
+candidate answers by speaking, and the conversation transcript builds on the right. A status
+legend shows the live voice state (ready / listening / speaking / muted).
 
-![Interview page — question, avatar stage, dual voice/text channel](docs/images/02-interview-question.png)
+![Voice mode — live digital-human avatar speaking the question, transcript streaming](docs/images/09-live-avatar-voice.png)
+
+### 1b. Text mode — same flow, no Azure needed
+
+Every question can also be answered by text; on mock providers the avatar stage falls back to the
+audio orb, so the whole flow runs with zero Azure:
+
+![Interview page in text mode — question, orb fallback, progress rail](docs/images/02-interview-question.png)
 
 ### 2. Session memory — the follow-up quotes the candidate
 
@@ -128,7 +136,11 @@ in CI.
 The README screenshots regenerate with:
 
 ```bash
+# Mock-stack scenarios (zero Azure; boots its own servers)
 cd frontend && SCREENSHOTS=1 npx playwright test e2e/readme-screenshots.spec.ts
+
+# Live avatar shot (real dev servers on :5173/:8000 with real Foundry credentials)
+cd frontend && LIVE_VOICE=1 SCREENSHOTS=1 npx playwright test readme-live-screenshots --config=e2e/live.config.ts
 ```
 
 ## Deployment

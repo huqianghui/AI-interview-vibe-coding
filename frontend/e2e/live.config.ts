@@ -14,7 +14,7 @@ const BASE = process.env.BASE || "http://localhost:5173";
 
 export default defineConfig({
   testDir: ".",
-  testMatch: /(voice-live-azure|avatar-diagnostic|avatar-stability-probe|audio-diagnostic|audio-turn2-diagnostic|anon-recovery)\.spec\.ts/,
+  testMatch: /(voice-live-azure|avatar-diagnostic|avatar-stability-probe|audio-diagnostic|audio-turn2-diagnostic|anon-recovery|readme-live-screenshots)\.spec\.ts/,
   timeout: 120_000,
   expect: { timeout: 15_000 },
   fullyParallel: false,
