@@ -21,6 +21,7 @@ import {
   Button,
   Card,
   CardHeader,
+  ProgressBar,
   Spinner,
   Text,
   Textarea,
@@ -31,6 +32,7 @@ import {
 } from "@fluentui/react-components";
 import {
   getReport,
+  getReportStream,
   getReview,
   resumeInterview,
   startInterview,
@@ -251,6 +253,11 @@ export function InterviewPage() {
   const [micDialogOpen, setMicDialogOpen] = useState(false);
   const [micRetried, setMicRetried] = useState(false);
   const [voiceUnavailable, setVoiceUnavailable] = useState(false);
+  // Real scoring progress streamed from /report/stream (null until the first progress line, and
+  // when the stream fell back to the batch endpoint — the copy then shows the latched fallback).
+  const [scoringProgress, setScoringProgress] = useState<{ done: number; total: number } | null>(
+    null,
+  );
 
   const interviewRef = useRef<Interview | null>(null);
   interviewRef.current = interview;
@@ -362,7 +369,19 @@ export function InterviewPage() {
       const iv = interviewRef.current;
       if (!iv) return;
       setPhase("scoring");
-      const r = await getReport(iv.interview_session_id, sopCoverageCheck);
+      setScoringProgress(null);
+      let r: Report;
+      try {
+        // Streaming first: one progress event per question as the backend grades it.
+        r = await getReportStream(iv.interview_session_id, sopCoverageCheck, (p) =>
+          setScoringProgress({ done: p.done, total: p.total }),
+        );
+      } catch {
+        // Stream unavailable (older backend, proxy hiccup) — the batch endpoint returns the same
+        // report; a scored interview re-scores idempotently so retrying after a mid-stream failure
+        // is safe. The screen shows the latched fallback numerator meanwhile.
+        r = await getReport(iv.interview_session_id, sopCoverageCheck);
+      }
       setReport(r);
       setPhase("scored");
     });
@@ -444,12 +463,16 @@ export function InterviewPage() {
   }, [channel, voice, currentPrompt]);
 
   const q = interview?.current_question ?? null;
-  // Denominator: the report's real per-question count once it's back, else the total we latched
-  // during the interview (current_question is null in the scoring phase, so q.total is gone).
-  // Scoring is one batch call (no per-answer streaming), so the numerator just reads 1 there.
-  const scoringTotal = report?.per_question.length || questionTotalRef.current || 1;
+  // REAL streamed progress when /report/stream delivered any (done = answers already graded, so
+  // the on-screen ordinal is done+1). Fallback (stream unavailable): the report's per-question
+  // count once it's back, else the total latched during the interview (current_question is null
+  // in the scoring phase, so q.total is gone) — with the old static numerator.
+  const scoringTotal =
+    scoringProgress?.total || report?.per_question.length || questionTotalRef.current || 1;
   const scoringNarr = t("transition.scoring", {
-    n: Math.min((q?.index ?? 0) + 1, scoringTotal),
+    n: scoringProgress
+      ? Math.min(scoringProgress.done + 1, scoringTotal)
+      : Math.min((q?.index ?? 0) + 1, scoringTotal),
     total: scoringTotal,
   });
 
@@ -700,13 +723,19 @@ export function InterviewPage() {
           <ReviewView answers={reviewAnswers} busy={busy} onSubmit={onSubmitForScoring} />
         )}
 
-        {/* Scoring-in-progress beat (P10) */}
+        {/* Scoring-in-progress beat (P10). With streamed progress the bar is determinate (real
+            per-question grading progress off /report/stream); without it, spinner-only. */}
         {phase === "scoring" && (
           <Card>
             <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 12 }}>
               <Spinner size="small" />
               <Text>{scoringNarr}</Text>
             </div>
+            {scoringProgress && (
+              <div style={{ padding: "0 12px 12px" }}>
+                <ProgressBar value={scoringProgress.done} max={scoringProgress.total} />
+              </div>
+            )}
           </Card>
         )}
 

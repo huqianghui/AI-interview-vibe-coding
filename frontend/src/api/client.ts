@@ -278,6 +278,73 @@ export async function getReport(
   });
 }
 
+/** One NDJSON progress line from the streaming report endpoint: `done` answers already graded
+ * out of `total`. Emitted before each grading call, so the last one is `done = total - 1`. */
+export interface ScoringProgress {
+  done: number;
+  total: number;
+  question_id: string;
+}
+
+/**
+ * Streaming variant of {@link getReport}: resolves with the same report, but invokes `onProgress`
+ * once per question as the backend grades it — REAL progress for the scoring screen instead of the
+ * faked numerator (each grading call is an LLM round-trip taking seconds).
+ *
+ * Reads NDJSON off a POST fetch (EventSource can't POST or carry X-Anon-Session). Any in-band
+ * `{"type":"error"}` line or a stream that ends without a report rejects, so callers can fall back
+ * to the batch endpoint.
+ */
+export async function getReportStream(
+  interviewId: string,
+  sopCoverageCheck = false,
+  onProgress?: (p: ScoringProgress) => void,
+): Promise<Report> {
+  const headers = new Headers({ "Content-Type": "application/json" });
+  const token = getToken();
+  if (token) headers.set("X-Anon-Session", token);
+
+  const resp = await fetch(`${BASE}/candidate/interview/${interviewId}/report/stream`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ sop_coverage_check: sopCoverageCheck }),
+  });
+  if (!resp.ok || !resp.body) {
+    const detail = await resp.text().catch(() => "");
+    throw new Error(`${resp.status} ${resp.statusText}: ${detail}`);
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let report: Report | null = null;
+
+  const handleLine = (line: string) => {
+    if (!line.trim()) return;
+    const event = JSON.parse(line);
+    if (event.type === "progress" && onProgress) {
+      onProgress(event as ScoringProgress);
+    } else if (event.type === "report") {
+      report = event.report as Report;
+    } else if (event.type === "error") {
+      throw new Error(String(event.detail ?? "scoring failed"));
+    }
+  };
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? ""; // keep the trailing partial line
+    for (const line of lines) handleLine(line);
+  }
+  handleLine(buffer); // a final line may lack the trailing newline
+
+  if (!report) throw new Error("scoring stream ended without a report");
+  return report;
+}
+
 /** Fetch every answered question + answer in bank order for the pre-scoring review screen
  * (requirement 4). Backend-sourced so it survives a reload and matches what gets scored. Only
  * valid once the interview is completed/scored (409 otherwise). */

@@ -87,13 +87,18 @@ from sqlalchemy.ext.asyncio import (  # noqa: E402
 )
 
 import app.models  # noqa: F401,E402 — registers all ORM classes on Base.metadata
-from app.db import Base, get_db  # noqa: E402
+from app.db import Base, get_db, get_session_factory  # noqa: E402
 from app.main import app  # noqa: E402
 
 
 @pytest_asyncio.fixture
 async def db_session():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    # StaticPool: every checkout reuses ONE sqlite connection, so the streaming endpoints' second
+    # session (opened via get_session_factory inside the response generator) sees the same
+    # :memory: database — a fresh connection would get a brand-new EMPTY one.
+    from sqlalchemy.pool import StaticPool
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
 
     # Mirror app.db: SQLite needs PRAGMA foreign_keys=ON per-connection for ON DELETE CASCADE to
     # fire. Without this the cascade tests would pass vacuously (FKs unenforced in the test DB).
@@ -107,6 +112,10 @@ async def db_session():
         await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with factory() as session:
+        # Streaming endpoints open their own session via the get_session_factory dependency (their
+        # generator outlives the request-scoped get_db session) — hang the factory off the session
+        # so the client fixture can override that dependency onto the SAME in-memory engine.
+        session._test_factory = factory
         yield session
     await engine.dispose()
 
@@ -117,6 +126,7 @@ async def client(db_session):
         yield db_session
 
     app.dependency_overrides[get_db] = _override_get_db
+    app.dependency_overrides[get_session_factory] = lambda: db_session._test_factory
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
