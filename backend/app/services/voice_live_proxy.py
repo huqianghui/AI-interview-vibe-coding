@@ -36,6 +36,48 @@ logger = logging.getLogger(__name__)
 PROXY_CONNECTED_TYPE = "proxy.connected"
 ERROR_TYPE = "error"
 
+# Human-readable names for the locales the UI offers (frontend/src/i18n.ts SUPPORTED_LANGUAGES).
+# Unknown locales fall back to the tag itself, which models read fine ("fr-FR").
+_LANGUAGE_NAMES = {
+    "zh-CN": "Chinese (中文)",
+    "en-US": "English",
+}
+
+
+def build_language_pin_item(locale: str | None) -> dict[str, Any]:
+    """A system conversation item that pins the WHOLE session to one language.
+
+    Why this exists (the "说着说着变中文" bug): the agent's instructions used to say "conduct the
+    interview in the candidate's language", so every server-VAD auto-response re-guessed the
+    candidate's language from the latest transcript — and an accented answer or a noisy STT result
+    flipped the interviewer into Chinese mid-interview. The language is the CANDIDATE's explicit UI
+    choice (the ``locale`` query param), not a per-turn model guess, so we state it once as a
+    session-scoped system message right after ``session.update``. Agent mode rejects overriding
+    ``instructions`` in ``response.create`` (live-verified), and re-syncing the Foundry agent per
+    session is wasteful — a system conversation item is the one per-session channel that works for
+    both agent and model modes.
+
+    Pure shaping (no network, no SDK imports) so it's unit-testable in the zero-Azure CI.
+    """
+    resolved = (locale or "").strip() or "en-US"
+    language = _LANGUAGE_NAMES.get(resolved, resolved)
+    text = (
+        f"SESSION LANGUAGE: {language}. Conduct this ENTIRE interview in {language} only — every "
+        "question, follow-up, acknowledgement, and closing remark. Do not translate or rephrase "
+        "the provided questions into any other language. Do not switch languages because of the "
+        "candidate's accent, wording, or the language they answer in. Switch ONLY if the candidate "
+        "explicitly asks you to use another language."
+    )
+    return {
+        "type": "conversation.item.create",
+        "item": {
+            "type": "message",
+            "role": "system",
+            "content": [{"type": "input_text", "text": text}],
+        },
+    }
+
+
 # The certifi-backed SSL context is identical for every connection, so build it once and reuse it
 # across connects instead of paying ssl.create_default_context (reads + parses the CA bundle) on
 # each run_proxy call. Cached lazily so importing this module never requires ssl/certifi.
@@ -200,6 +242,11 @@ async def run_proxy(
         async with connect(**connect_kwargs) as conn:
             session = build_avatar_session(persona, locale=locale)
             await conn.session.update(session=session)
+
+            # Pin the session language BEFORE any response can be generated (see
+            # build_language_pin_item) — the raw client-event send is the same path
+            # _forward_client_to_azure uses for browser frames.
+            await conn.send(build_language_pin_item(locale))
 
             await ws.send_text(
                 json.dumps(

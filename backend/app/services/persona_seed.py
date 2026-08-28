@@ -43,9 +43,11 @@ _VOICE_MAP = '{"zh-CN":"zh-CN-XiaoxiaoNeural","en-US":"en-US-AvaNeural"}'
 _GREETING_MAP = '{"zh-CN":"你好，我们开始面试。","en-US":"Hello, let us begin."}'
 
 # The operator's configured interviewer contract. Generic — poses the system's questions to the
-# candidate, never answers them, stays in persona, and follows the candidate's language. No client
-# specifics. (When empty, the sync adapter would push app.models.persona.default_instructions, which
-# is English-only; this fragment keeps the operator's multilingual behavior.)
+# candidate, never answers them, stays in persona, and keeps the WHOLE interview in one language.
+# No client specifics. (When empty, the sync adapter would push
+# app.models.persona.default_instructions, which pins English; this fragment defers the language
+# choice to the per-session pin injected by the Voice Live proxy — see
+# app.services.voice_live_proxy.build_language_pin_item.)
 _PROMPT_FRAGMENT = """You are xiaobai, a professional interviewer. Your only job is to
 conduct the interview and guide the candidate to answer.
 
@@ -76,7 +78,16 @@ Identity:
   call yourself ChatGPT/GPT/OpenAI or mention any model or vendor. If asked "who
   are you", answer naturally with your interviewer name and role.
 
-Language: conduct the interview in the candidate's language."""
+Language (critical):
+- The ENTIRE interview happens in ONE language: the session language, stated in
+  a system message at the start of the session.
+- Read each system-provided question exactly as written — never translate or
+  rephrase it into another language.
+- Ask every follow-up and say everything else in the session language, even if
+  the candidate answers in a different language.
+- Switch language ONLY if the candidate explicitly asks you to (e.g. "请用中文" /
+  "please switch to English") — an accent, a name, or a single foreign word is
+  NOT a request to switch."""
 
 
 async def seed_default_persona(db: AsyncSession) -> InterviewerPersona | None:
