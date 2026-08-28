@@ -842,3 +842,202 @@ describe("useInterviewVoice speakQuestion cancel-then-speak", () => {
     vi.unstubAllGlobals();
   });
 });
+
+/**
+ * Live transcript streaming (the "说了多少就展示多少" feature).
+ *
+ * User side: Azure emits `conversation.item.input_audio_transcription.delta` frames WHILE the user
+ * is still speaking. The hook must accumulate them per conversation item and emit the RUNNING text
+ * as a non-final segment under a stable per-item id — consumers replace same-id segments, so
+ * emitting bare fragments would show only the newest word. The `.completed` event finalizes the
+ * SAME id (one bubble, replaced in place, no duplicate) and remains the only source of
+ * commitAnswer's submitted text (partials are display-only).
+ *
+ * Assistant side: `response.audio_transcript.delta` had the same replace-vs-append mismatch — the
+ * hook now accumulates there too.
+ */
+describe("useInterviewVoice live transcript streaming", () => {
+  class FakeWebSocket {
+    static last: FakeWebSocket | null = null;
+    static OPEN = 1;
+    readyState = 1;
+    onmessage: ((e: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+    sent: string[] = [];
+    constructor(public url: string) {
+      FakeWebSocket.last = this;
+    }
+    send(data: string) {
+      this.sent.push(data);
+    }
+    close() {
+      this.readyState = 3;
+      this.onclose?.();
+    }
+    receive(msg: unknown) {
+      this.onmessage?.({ data: JSON.stringify(msg) });
+    }
+  }
+
+  type Seg = { id: string; role: string; content: string; isFinal: boolean };
+
+  async function connectHook() {
+    FakeWebSocket.last = null;
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    const segments: Seg[] = [];
+    let hook!: ReturnType<typeof useInterviewVoice>;
+    function StreamHarness() {
+      hook = useInterviewVoice("iv-1", {
+        locale: "zh-CN",
+        tokenProvider: () => "tok",
+        onTranscript: (seg) => segments.push(seg),
+      });
+      return null;
+    }
+    const { unmount } = render(<StreamHarness />);
+    let connectP!: Promise<void>;
+    act(() => {
+      connectP = hook.connect("zh-CN");
+    });
+    await act(async () => {
+      for (let i = 0; i < 20 && !FakeWebSocket.last; i++) await Promise.resolve();
+      FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
+      await connectP;
+    });
+    return { getHook: () => hook, ws: () => FakeWebSocket.last!, segments, unmount };
+  }
+
+  it("streams user partials as a growing non-final segment, finalized in place by completed", async () => {
+    const { ws, segments, unmount } = await connectHook();
+
+    await act(async () => {
+      ws().receive({
+        type: "conversation.item.input_audio_transcription.delta",
+        item_id: "item-1",
+        delta: "I follow ",
+      });
+      ws().receive({
+        type: "conversation.item.input_audio_transcription.delta",
+        item_id: "item-1",
+        delta: "the procedure",
+      });
+      ws().receive({
+        type: "conversation.item.input_audio_transcription.completed",
+        item_id: "item-1",
+        transcript: "I follow the procedure.",
+      });
+    });
+
+    const user = segments.filter((s) => s.role === "user");
+    // Two growing partials + one final, ALL under the same stable id (in-place replacement).
+    expect(user.map((s) => s.content)).toEqual([
+      "I follow ",
+      "I follow the procedure",
+      "I follow the procedure.",
+    ]);
+    expect(user.map((s) => s.isFinal)).toEqual([false, false, true]);
+    expect(new Set(user.map((s) => s.id)).size).toBe(1);
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps concurrent utterance items separate and falls back to counter ids without deltas", async () => {
+    const { ws, segments, unmount } = await connectHook();
+
+    await act(async () => {
+      // Item A streams deltas; item B (no deltas — e.g. delta events unavailable) only completes.
+      ws().receive({
+        type: "conversation.item.input_audio_transcription.delta",
+        item_id: "item-a",
+        delta: "First",
+      });
+      ws().receive({
+        type: "conversation.item.input_audio_transcription.completed",
+        item_id: "item-b",
+        transcript: "Second utterance.",
+      });
+      ws().receive({
+        type: "conversation.item.input_audio_transcription.completed",
+        item_id: "item-a",
+        transcript: "First utterance.",
+      });
+    });
+
+    const finals = segments.filter((s) => s.role === "user" && s.isFinal);
+    expect(finals.map((s) => s.content)).toEqual(["Second utterance.", "First utterance."]);
+    // item-a finalizes under its delta-stream id; item-b under a fallback id — and they differ.
+    expect(finals[1].id).toBe("user-item-a");
+    expect(finals[0].id).not.toBe(finals[1].id);
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("still resolves commitAnswer from completed transcripts only (partials never submit)", async () => {
+    const { getHook, ws, segments, unmount } = await connectHook();
+
+    await act(async () => {
+      ws().receive({
+        type: "conversation.item.input_audio_transcription.delta",
+        item_id: "item-1",
+        delta: "partial words",
+      });
+    });
+    let committed!: Promise<string>;
+    act(() => {
+      committed = getHook().commitAnswer();
+    });
+    await act(async () => {
+      ws().receive({
+        type: "conversation.item.input_audio_transcription.completed",
+        item_id: "item-1",
+        transcript: "The finalized answer.",
+      });
+    });
+    await expect(committed).resolves.toBe("The finalized answer.");
+    // The partial reached the panel (display) but never the commit path.
+    expect(segments.some((s) => !s.isFinal && s.content === "partial words")).toBe(true);
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("accumulates assistant audio_transcript deltas into a growing bubble", async () => {
+    const { ws, segments, unmount } = await connectHook();
+
+    await act(async () => {
+      ws().receive({
+        type: "response.audio_transcript.delta",
+        response_id: "r1",
+        item_id: "i1",
+        delta: "Please describe ",
+      });
+      ws().receive({
+        type: "response.audio_transcript.delta",
+        response_id: "r1",
+        item_id: "i1",
+        delta: "a situation.",
+      });
+      ws().receive({
+        type: "response.audio_transcript.done",
+        response_id: "r1",
+        item_id: "i1",
+        transcript: "Please describe a situation.",
+      });
+    });
+
+    const assistant = segments.filter((s) => s.role === "assistant");
+    expect(assistant.map((s) => s.content)).toEqual([
+      "Please describe ",
+      "Please describe a situation.",
+      "Please describe a situation.",
+    ]);
+    expect(assistant.map((s) => s.isFinal)).toEqual([false, false, true]);
+    expect(new Set(assistant.map((s) => s.id)).size).toBe(1);
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+});
