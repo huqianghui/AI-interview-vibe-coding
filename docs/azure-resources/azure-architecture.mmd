@@ -1,0 +1,32 @@
+graph LR
+  U["用户浏览器<br/>(候选人 / 管理员)"]
+
+  subgraph RG["资源组（应用层，Bicep 一键创建）"]
+    FE["Container App 前端<br/>nginx + React<br/>0.5 vCPU / 1 GiB"]
+    BE["Container App 后端<br/>FastAPI + SQLite<br/>1 vCPU / 2 GiB"]
+    ACR["Container Registry<br/>Basic"]
+    ST["Storage Account<br/>client-bundle / materials"]
+    MON["App Insights +<br/>Log Analytics"]
+  end
+
+  subgraph AIRES["Azure AI（可复用已有资源）"]
+    FD["AI Foundry S0<br/>Agent 服务<br/>gpt-5.4-mini"]
+    VL["Voice Live<br/>实时语音 + 数字人 Avatar"]
+    KB["Foundry IQ 知识库"]
+    AS["Azure AI Search<br/>SOP 文档索引"]
+  end
+
+  GH["GitHub Actions<br/>OIDC 免密 CI/CD"]
+
+  U -->|"HTTPS 静态页面"| FE
+  U -->|"REST + WebSocket"| BE
+  BE -->|"面试 Agent 对话"| FD
+  BE <-->|"WS 代理：音频/Avatar 视频流"| VL
+  VL --- FD
+  FD -->|"知识检索 / SOP 引用"| KB
+  KB --> AS
+  BE -->|"托管身份拉取客户题库包"| ST
+  BE -->|"日志 / 链路追踪"| MON
+  GH -->|"推送镜像"| ACR
+  GH -->|"更新两个 Container App"| BE
+  ACR -.->|"AcrPull 拉取镜像"| FE

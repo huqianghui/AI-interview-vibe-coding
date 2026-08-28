@@ -5,6 +5,12 @@
 > 所有价格仅为量级参考，请以 [Azure 定价计算器](https://azure.microsoft.com/pricing/calculator/)
 > 按目标区域和 EA/CSP 折扣核算为准。
 
+## 架构总览
+
+![Azure 架构与调用关系](azure-architecture.png)
+
+（源文件：[azure-architecture.mmd](azure-architecture.mmd)，可编辑版 [azure-architecture.excalidraw](azure-architecture.excalidraw) 可在 excalidraw.com 打开修改。）
+
 ## 一、区域选择
 
 推荐 **Sweden Central**（或其他同时提供以下能力的区域）。选区域的硬约束是
