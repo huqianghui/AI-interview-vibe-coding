@@ -34,3 +34,14 @@ class Base(DeclarativeBase):
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with async_session_factory() as session:
         yield session
+
+
+def get_session_factory() -> async_sessionmaker[AsyncSession]:
+    """The session FACTORY as a dependency, for handlers that outlive their request session.
+
+    FastAPI (≥0.106) tears down ``get_db``'s yielded session when the route function returns —
+    BEFORE a StreamingResponse generator body runs — so streaming handlers must open their own
+    session inside the generator. Injecting the factory (rather than importing it) keeps those
+    handlers pointed at the same database the tests override ``get_db`` with.
+    """
+    return async_session_factory

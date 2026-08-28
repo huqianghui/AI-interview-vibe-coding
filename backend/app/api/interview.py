@@ -8,16 +8,17 @@ Step 0 exposes just enough to prove ask → answer → placeholder report over t
 Voice sources (voice / verbal_cue) share the same answer_finalized event and are accepted here.
 """
 
+import json
 from dataclasses import asdict
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db
+from app.db import get_db, get_session_factory
 from app.dependencies import get_anonymous_session
 from app.interview import state_machine
 from app.interview.state_machine import ANSWER_SOURCES, InterviewStateError
@@ -263,6 +264,61 @@ async def report(
     except InterviewStateError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return ReportOut(**result)
+
+
+@router.post("/{interview_id}/report/stream")
+async def report_stream(
+    interview_id: str,
+    options: ReportOptionsIn | None = None,
+    candidate: AnonymousCandidateSession = Depends(get_anonymous_session),
+    db: AsyncSession = Depends(get_db),
+    session_factory=Depends(get_session_factory),
+) -> StreamingResponse:
+    """Streaming variant of ``/report``: NDJSON progress lines, then the full report.
+
+    Each LLM grading call takes seconds, so a 10-question interview sat behind one long batch
+    request while the scoring screen FAKED its progress numerator. This endpoint emits one
+    ``{"type":"progress","done":i,"total":n,...}`` line per question as grading proceeds and ends
+    with ``{"type":"report","report":{...}}`` — the same dict the batch endpoint returns.
+
+    NDJSON over a POST fetch (not SSE): EventSource can't POST or send the X-Anon-Session header,
+    and the frontend already talks fetch — the reader just splits on newlines. A scoring failure
+    mid-stream surfaces as a final ``{"type":"error","detail":...}`` line (the 200 status is
+    already on the wire; in-band error is the streaming contract, mirroring the WS proxy).
+    Pre-stream state errors (wrong status) still 409 like the batch endpoint.
+    """
+    session = await _owned_interview(db, interview_id, candidate)
+    if session.status not in ("completed", "scored"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot score in status {session.status!r}",
+        )
+    sop_coverage_check = options.sop_coverage_check if options else False
+
+    async def event_lines():
+        # FastAPI closes `Depends(get_db)`'s session when the route function RETURNS — before this
+        # generator body runs (yield-dependency teardown precedes response streaming since FastAPI
+        # 0.106). Scoring therefore opens its own session (from the injected factory, so tests that
+        # override it hit the test DB) and re-loads the interview row; ownership was already
+        # verified above with the request-scoped session.
+        try:
+            async with session_factory() as stream_db:
+                stream_session = await stream_db.get(InterviewSession, session.id)
+                if stream_session is None:  # deleted between the check and the stream
+                    raise InterviewStateError("Interview session no longer exists")
+                async for event in state_machine.score_and_finalize_events(
+                    stream_db, stream_session, sop_coverage_check=sop_coverage_check
+                ):
+                    yield json.dumps(event, ensure_ascii=False) + "\n"
+        except InterviewStateError as exc:
+            yield json.dumps({"type": "error", "detail": str(exc)}) + "\n"
+
+    return StreamingResponse(
+        event_lines(),
+        media_type="application/x-ndjson",
+        # Belt-and-braces for proxies that buffer despite chunked encoding (nginx honors this).
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/{interview_id}/review", response_model=ReviewOut)

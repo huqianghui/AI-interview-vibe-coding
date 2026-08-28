@@ -209,12 +209,39 @@ async def answer_finalized(
 async def score_and_finalize(
     db: AsyncSession, session: InterviewSession, *, sop_coverage_check: bool = False
 ) -> dict:
-    """Score a completed interview against each question's checklist and flip status to ``scored``.
+    """Score a completed interview and return the report dict (batch wrapper).
+
+    Thin non-streaming wrapper over :func:`score_and_finalize_events` — drains the event stream
+    and returns the final report. Kept as the stable entry point for the batch ``POST /report``
+    endpoint and every existing test; the streaming endpoint consumes the generator directly.
+    """
+    report: dict | None = None
+    async for event in score_and_finalize_events(
+        db, session, sop_coverage_check=sop_coverage_check
+    ):
+        if event["type"] == "report":
+            report = event["report"]
+    assert report is not None  # the generator always ends with a report event
+    return report
+
+
+async def score_and_finalize_events(
+    db: AsyncSession, session: InterviewSession, *, sop_coverage_check: bool = False
+):
+    """Score a completed interview, yielding per-question progress; flips status to ``scored``.
 
     F4: each answer is graded against its question's default checklist into a 4-state judgment per
     item with SOP + answer quotes (the traceable, weighted score the demo leads with). A question
     with no checklist authored yet falls back to the length-based stub row, so the report always
     covers every question. Only allowed once ``completed`` (F8 AC #4: report only when scored).
+
+    An async generator so the scoring-progress screen can show REAL progress (each LLM grading
+    call takes seconds; a 10-question interview used to sit behind one long batch request while
+    the UI faked its numerator). Yields, in order:
+
+    - ``{"type": "progress", "done": i, "total": n, "question_id": ...}`` — BEFORE grading each
+      answer (``done`` = answers already graded), so the UI can say "analyzing answer i+1 of n";
+    - ``{"type": "report", "report": <the full report dict>}`` — exactly once, last.
 
     ``sop_coverage_check`` (feature D, default off) is a reference-only audit: when on, each
     graded question is additionally checked for SOP points its checklist may not cover, and the
@@ -252,7 +279,13 @@ async def score_and_finalize(
     # the opt-in flag is on. Never touches any score below.
     coverage_findings: list[dict] = []
 
-    for question_id, answer_text in answers:
+    for done, (question_id, answer_text) in enumerate(answers):
+        yield {
+            "type": "progress",
+            "done": done,
+            "total": len(answers),
+            "question_id": question_id,
+        }
         result = await scoring_service.score_answer_against_checklist(
             db,
             question_id=question_id,
@@ -334,21 +367,26 @@ async def score_and_finalize(
     await db.commit()
     await db.refresh(session)
 
-    return {
-        "interview_session_id": session.id,
-        "status": session.status,
-        "coverage_pct": total_score,
-        "total_score": total_score,
-        "grade": grade_for_score(total_score) if any_graded else None,
-        "outcome": outcome if any_graded else None,
-        "capped": outcome_capped,
-        "narrative": build_narrative(graded_results) if any_graded else "",
-        "per_question": per_question,
-        "warnings": all_warnings,
-        "is_stub": not any_graded,
-        # Feature D: present only when the opt-in check ran and found something; None otherwise so
-        # the report renders the panel only when there are findings. Never affects the scores above.
-        "sop_coverage": coverage_findings if (sop_coverage_check and coverage_findings) else None,
+    yield {
+        "type": "report",
+        "report": {
+            "interview_session_id": session.id,
+            "status": session.status,
+            "coverage_pct": total_score,
+            "total_score": total_score,
+            "grade": grade_for_score(total_score) if any_graded else None,
+            "outcome": outcome if any_graded else None,
+            "capped": outcome_capped,
+            "narrative": build_narrative(graded_results) if any_graded else "",
+            "per_question": per_question,
+            "warnings": all_warnings,
+            "is_stub": not any_graded,
+            # Feature D: present only when the opt-in check ran and found something; None otherwise
+            # so the report renders the panel only when there are findings. Never affects scores.
+            "sop_coverage": coverage_findings
+            if (sop_coverage_check and coverage_findings)
+            else None,
+        },
     }
 
 

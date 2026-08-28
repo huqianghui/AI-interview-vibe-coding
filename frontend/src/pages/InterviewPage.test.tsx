@@ -85,7 +85,9 @@ describe("InterviewPage", () => {
         { question_id: "q1", prompt: "Question one?", index: 0, answer_text: "a sufficiently long answer" },
       ],
     });
-    const getReportSpy = vi.spyOn(client, "getReport").mockResolvedValue({
+    // The page scores via the streaming endpoint (getReportStream) and only falls back to the
+    // batch getReport on stream failure — mock the streaming one as the primary path.
+    const getReportSpy = vi.spyOn(client, "getReportStream").mockResolvedValue({
       interview_session_id: "iv1",
       status: "scored",
       coverage_pct: 100,
@@ -122,7 +124,7 @@ describe("InterviewPage", () => {
     await user.click(screen.getByTestId("submit-and-evaluate"));
     await waitFor(() => expect(screen.getByText(/100%/)).toBeInTheDocument());
     expect(getReportSpy).toHaveBeenCalledTimes(1);
-    expect(getReportSpy).toHaveBeenCalledWith("iv1", false);
+    expect(getReportSpy).toHaveBeenCalledWith("iv1", false, expect.any(Function));
     expect(screen.getByText(/met/)).toBeInTheDocument();
   });
 
@@ -146,7 +148,7 @@ describe("InterviewPage", () => {
         { question_id: "q1", prompt: "Question one?", index: 0, answer_text: "a sufficiently long answer" },
       ],
     });
-    const getReportSpy = vi.spyOn(client, "getReport").mockResolvedValue({
+    const getReportSpy = vi.spyOn(client, "getReportStream").mockResolvedValue({
       interview_session_id: "iv1",
       status: "scored",
       coverage_pct: 100,
@@ -190,7 +192,9 @@ describe("InterviewPage", () => {
     await user.click(toggle);
     expect(toggle).toBeChecked();
     await user.click(screen.getByTestId("submit-and-evaluate"));
-    await waitFor(() => expect(getReportSpy).toHaveBeenCalledWith("iv1", true));
+    await waitFor(() =>
+      expect(getReportSpy).toHaveBeenCalledWith("iv1", true, expect.any(Function)),
+    );
 
     // The advisory panel renders the uncovered point; it is reference-only, not a score change.
     const panel = await screen.findByTestId("report-sop-coverage");
