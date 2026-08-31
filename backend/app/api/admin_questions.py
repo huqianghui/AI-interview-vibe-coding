@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.dependencies import require_role
-from app.services import checklist_service
+from app.services import bank_bundle_service, checklist_service
 from app.services import question_service as svc
 from app.services.question_service import (
     QuestionBankConflict,
@@ -81,6 +81,17 @@ class ReorderIn(BaseModel):
     ordered_ids: list[str]
 
 
+class BundleImportOut(BaseModel):
+    """Result of a bank-bundle import — an auditable summary of what the sync wrote."""
+
+    bank_id: str
+    bank_name: str
+    replaced: bool
+    question_count: int
+    checklist_item_count: int
+    unresolved_sop_names: list[str]
+
+
 def _bank_out(bank) -> BankOut:
     return BankOut(
         bank_id=bank.id,
@@ -130,6 +141,44 @@ async def create_bank(body: BankIn, db: AsyncSession = Depends(get_db)) -> BankO
     except QuestionBankConflict as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return _bank_out(bank)
+
+
+@router.get("/{bank_id}/export")
+async def export_bundle(bank_id: str, db: AsyncSession = Depends(get_db)) -> dict:
+    """Serialize a bank + its questions + full checklists to a portable bundle (deploy-time sync).
+
+    The dual of :func:`import_bundle`: the returned JSON is exactly what that endpoint consumes, so
+    a bank can be exported from one deployment (e.g. local) and imported into another (the ephemeral
+    server) to make the two identical. Rubric SOP links travel as document *names*, not ids.
+    """
+    try:
+        return await bank_bundle_service.export_bank_bundle(db, bank_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.post("/import", response_model=BundleImportOut, status_code=status.HTTP_201_CREATED)
+async def import_bundle(bundle: dict, db: AsyncSession = Depends(get_db)) -> BundleImportOut:
+    """Create (or replace by name) a bank + questions + checklists from a bundle (deploy-time sync).
+
+    The server runs on ephemeral SQLite reseeded on every boot, and the private-blob seeding channel
+    is unavailable (storage public network access is disabled by policy), so this is how a deployed
+    bank is made to match a local one: export locally, POST the bundle here. Idempotent by bank name
+    (a same-named bank is replaced, not duplicated). Rubric items are written verbatim — including
+    ``advisory`` gates and SOP citations resolved by document name — so scoring behaves identically.
+    """
+    try:
+        result = await bank_bundle_service.import_bank_bundle(db, bundle)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return BundleImportOut(
+        bank_id=result.bank_id,
+        bank_name=result.bank_name,
+        replaced=result.replaced,
+        question_count=result.question_count,
+        checklist_item_count=result.checklist_item_count,
+        unresolved_sop_names=result.unresolved_sop_names,
+    )
 
 
 @router.post("/{bank_id}/default", response_model=BankOut)
