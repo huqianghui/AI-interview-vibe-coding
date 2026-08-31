@@ -17,6 +17,10 @@ import { render, act } from "@testing-library/react";
 const disconnectSpy = vi.fn();
 const cleanupMicSpy = vi.fn();
 
+// Mutable avatar-connectivity holder so the avatar-gate tests can flip `isConnected` between
+// renders (the default is false — matches every pre-existing test that never touches it).
+const avatarState = { isConnected: false };
+
 // Stub the two sub-hooks so the test doesn't need a real WebRTC/audio stack — we only care about
 // whether the hook's teardown effect fires `avatarStream.disconnect()` on re-render vs unmount.
 vi.mock("./useAvatarStream", () => ({
@@ -24,7 +28,9 @@ vi.mock("./useAvatarStream", () => ({
     connect: vi.fn(),
     disconnect: disconnectSpy,
     handleServerSdp: vi.fn(),
-    isConnected: false,
+    get isConnected() {
+      return avatarState.isConnected;
+    },
   }),
 }));
 vi.mock("./useVoiceAudio", () => ({
@@ -45,6 +51,7 @@ import { useInterviewVoice } from "./useInterviewVoice";
 afterEach(() => {
   disconnectSpy.mockClear();
   cleanupMicSpy.mockClear();
+  avatarState.isConnected = false;
 });
 
 function Harness({ tick }: { tick: number }) {
@@ -1218,6 +1225,278 @@ describe("useInterviewVoice question-read watchdog", () => {
 
     unmount();
     vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("confirms a PARAPHRASED read by response id (no retry) — the 读两遍 regression", async () => {
+    // The verbatim text is injected, but the agent often PARAPHRASES it ("Please introduce…" comes
+    // out as "Could you tell me about…"). A prefix/text match then never fires, so the pre-fix
+    // watchdog "retried" a read that had actually played and the question was spoken twice. The read
+    // response's id is claimed on `response.created`; any transcript under that id confirms delivery
+    // regardless of wording.
+    vi.useFakeTimers();
+    const { getHook, ws, unmount } = await connectHook();
+
+    act(() => {
+      void getHook().speakQuestion("Please introduce your relevant experience for this role.");
+    });
+    await act(async () => {
+      ws().receive({ type: "response.created", response: { id: "resp-read-1" } });
+      // A fully paraphrased transcript under the CLAIMED id — shares few surface words, but the id
+      // proves it's our read playing.
+      ws().receive({
+        type: "response.audio_transcript.delta",
+        response_id: "resp-read-1",
+        item_id: "i1",
+        delta: "Could you tell me a bit about what you've done that fits this position?",
+      });
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(30_000);
+    });
+    // Read exactly once — the id-claim confirmed it despite the paraphrase.
+    expect(questionReads(ws())).toEqual([
+      "Please introduce your relevant experience for this role.",
+    ]);
+
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("confirms a paraphrase by word-overlap when no response id is available (fuzzy fallback)", async () => {
+    // Some paths carry no response.created id claim (e.g. transcript arrives under a different id).
+    // A paraphrase still shares most of the question's CONTENT words, so ≥60% word overlap confirms
+    // delivery — without false-confirming on an unrelated auto-response (covered by the next test).
+    vi.useFakeTimers();
+    const { getHook, ws, unmount } = await connectHook();
+
+    act(() => {
+      void getHook().speakQuestion("Describe how you resolved a difficult customer complaint.");
+    });
+    // No `response.created` id claim; the transcript reorders/rewords but keeps the content words.
+    await act(async () => {
+      ws().receive({
+        type: "response.audio_transcript.done",
+        response_id: "r-unclaimed",
+        item_id: "i1",
+        transcript: "Please describe how you resolved a difficult complaint from a customer.",
+      });
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(30_000);
+    });
+    expect(questionReads(ws())).toEqual([
+      "Describe how you resolved a difficult customer complaint.",
+    ]);
+
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("does NOT confirm on an unrelated auto-response under a different id (retry still fires)", async () => {
+    // The guard against over-eager confirmation: an improvised auto-response under an id we did NOT
+    // claim, sharing few of the question's words, must not confirm — the watchdog still retries.
+    vi.useFakeTimers();
+    const { getHook, ws, unmount } = await connectHook();
+
+    act(() => {
+      void getHook().speakQuestion("How do you manage regulatory differences across markets?");
+    });
+    await act(async () => {
+      // Claimed id is resp-read; the transcript arrives under a DIFFERENT id with unrelated words.
+      ws().receive({ type: "response.created", response: { id: "resp-read" } });
+      ws().receive({
+        type: "response.audio_transcript.delta",
+        response_id: "r-auto-other",
+        item_id: "i-auto",
+        delta: "Thanks, that's helpful. Let's continue.",
+      });
+    });
+    // The delta above IS under a non-claimed id AND fails word-overlap → no confirmation. But note
+    // the claimed-id delta path would confirm; here the auto-response used its own id, so retry runs.
+    await act(async () => {
+      vi.advanceTimersByTime(13_000);
+    });
+    expect(questionReads(ws()).length).toBe(2);
+
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+});
+
+/**
+ * First-read avatar gate (the "第一句话前面的词被吃掉" fix).
+ *
+ * When the avatar is enabled, the assistant's spoken audio rides the avatar's OWN WebRTC track,
+ * live only once its handshake completes and frames paint. A question read fired the instant the WS
+ * reaches `connected` clips its opening words. The hook holds the FIRST read until the avatar is
+ * connected (released early on connect, or after a bounded timeout so silence never results); voice-
+ * only sessions (avatar disabled) never gate.
+ */
+describe("useInterviewVoice first-read avatar gate", () => {
+  class FakeWebSocket {
+    static last: FakeWebSocket | null = null;
+    static OPEN = 1;
+    readyState = 1;
+    onmessage: ((e: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+    sent: string[] = [];
+    constructor(public url: string) {
+      FakeWebSocket.last = this;
+    }
+    send(data: string) {
+      this.sent.push(data);
+    }
+    close() {
+      this.readyState = 3;
+      this.onclose?.();
+    }
+    receive(msg: unknown) {
+      this.onmessage?.({ data: JSON.stringify(msg) });
+    }
+  }
+
+  function questionReads(ws: FakeWebSocket): string[] {
+    return ws.sent
+      .map((s) => JSON.parse(s) as { type?: string; item?: { content?: { text?: string }[] } })
+      .filter((m) => m.type === "conversation.item.create")
+      .map((m) => m.item?.content?.[0]?.text ?? "");
+  }
+
+  // Connect with a controllable avatar. `avatarEnabled` decides whether proxy.connected advertises
+  // the avatar (arming the gate). Returns a rerender to re-run the isConnected-watching effect after
+  // flipping `avatarState.isConnected`.
+  async function connectHook(avatarEnabled: boolean) {
+    FakeWebSocket.last = null;
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    let hook!: ReturnType<typeof useInterviewVoice>;
+    function GateHarness({ tick }: { tick: number }) {
+      hook = useInterviewVoice("iv-1", { locale: "zh-CN", tokenProvider: () => "tok" });
+      return <div data-testid="tick">{tick}</div>;
+    }
+    const { unmount, rerender } = render(<GateHarness tick={0} />);
+    let connectP!: Promise<void>;
+    act(() => {
+      connectP = hook.connect("zh-CN");
+    });
+    await act(async () => {
+      for (let i = 0; i < 20 && !FakeWebSocket.last; i++) await Promise.resolve();
+      if (avatarEnabled) {
+        FakeWebSocket.last!.receive({ type: "proxy.connected", avatar_enabled: true });
+      }
+      FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
+      await connectP;
+    });
+    return {
+      getHook: () => hook,
+      ws: () => FakeWebSocket.last!,
+      rerender: (t: number) => rerender(<GateHarness tick={t} />),
+      unmount,
+    };
+  }
+
+  it("holds the first read until the avatar connects, then reads it once", async () => {
+    const { getHook, ws, rerender, unmount } = await connectHook(true);
+
+    // Avatar enabled but not yet painting frames — the first read is HELD (nothing on the wire).
+    act(() => {
+      expect(getHook().speakQuestion("First question, please introduce yourself.")).toBe(true);
+    });
+    expect(questionReads(ws())).toEqual([]);
+
+    // Avatar starts painting frames → the effect releases the held read.
+    avatarState.isConnected = true;
+    act(() => {
+      rerender(1);
+    });
+    expect(questionReads(ws())).toEqual(["First question, please introduce yourself."]);
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("releases the held first read after the timeout if the avatar never connects", async () => {
+    vi.useFakeTimers();
+    const { getHook, ws, unmount } = await connectHook(true);
+
+    act(() => {
+      getHook().speakQuestion("Gated question.");
+    });
+    expect(questionReads(ws())).toEqual([]);
+
+    // Avatar never connects — the bounded gate elapses and the question is read anyway (no silence).
+    await act(async () => {
+      vi.advanceTimersByTime(6_500);
+    });
+    expect(questionReads(ws())).toEqual(["Gated question."]);
+
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("does NOT gate when the avatar is disabled (voice-only reads immediately)", async () => {
+    const { getHook, ws, unmount } = await connectHook(false);
+
+    act(() => {
+      getHook().speakQuestion("Voice-only question.");
+    });
+    // No avatar → audio plays over the WS AudioContext, ready at session.updated: read immediately.
+    expect(questionReads(ws())).toEqual(["Voice-only question."]);
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("gates only the FIRST read — later questions read immediately even mid-handshake", async () => {
+    const { getHook, ws, rerender, unmount } = await connectHook(true);
+
+    // First read held, then released when the avatar connects.
+    act(() => {
+      getHook().speakQuestion("First question.");
+    });
+    avatarState.isConnected = true;
+    act(() => {
+      rerender(1);
+    });
+    expect(questionReads(ws())).toEqual(["First question."]);
+    // Complete the first read's response lifecycle so the conversation is idle again.
+    await act(async () => {
+      ws().receive({ type: "response.created", response: { id: "r1" } });
+      ws().receive({ type: "response.done" });
+    });
+
+    // A later question reads immediately (not gated) now that the conversation is idle.
+    act(() => {
+      getHook().speakQuestion("Second question.");
+    });
+    expect(questionReads(ws())).toEqual(["First question.", "Second question."]);
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("supersedes a held first read with a newer question (latest-wins)", async () => {
+    const { getHook, ws, rerender, unmount } = await connectHook(true);
+
+    act(() => {
+      getHook().speakQuestion("Stale first question.");
+      getHook().speakQuestion("Fresh first question.");
+    });
+    expect(questionReads(ws())).toEqual([]);
+
+    avatarState.isConnected = true;
+    act(() => {
+      rerender(1);
+    });
+    // Only the latest held text is read when the gate releases.
+    expect(questionReads(ws())).toEqual(["Fresh first question."]);
+
+    unmount();
     vi.unstubAllGlobals();
   });
 });
