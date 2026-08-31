@@ -24,8 +24,17 @@ param applicationInsightsConnectionString string
 param registryLoginServer string
 param backendIdentityId string
 param backendIdentityClientId string
-param backendImage string
-param frontendImage string
+
+// Image handling is IDEMPOTENT with the app-deploy pipeline. deploy-app.yml owns the running image
+// (it `az containerapp update --image <sha>` on every push). An empty image param here means
+// "PRESERVE whatever image is currently running" — so re-applying this infra template in steady
+// state does NOT clobber the pipeline-deployed image back to a placeholder. A non-empty param is
+// used verbatim; it is REQUIRED on first-create or on the env delete+recreate (the apps don't exist
+// yet, so there is nothing to preserve). See effective{Backend,Frontend}Image below.
+@description('Backend image. Empty → preserve the currently-running image (idempotent re-apply). REQUIRED (non-empty) on first-create / env recreate.')
+param backendImage string = ''
+@description('Frontend image. Empty → preserve the currently-running image (idempotent re-apply). REQUIRED (non-empty) on first-create / env recreate.')
+param frontendImage string = ''
 
 @description('Resource id of the VNet subnet delegated to Microsoft.App/environments (from network.bicep).')
 param infrastructureSubnetId string
@@ -67,9 +76,36 @@ var environmentResourceName = 'cae-${namePrefix}-${environmentName}'
 var backendAppName = 'ca-${namePrefix}-${environmentName}-backend'
 var frontendAppName = 'ca-${namePrefix}-${environmentName}-frontend'
 
+// Placeholder used ONLY when an image param is empty AND the app doesn't exist yet (first-create /
+// env recreate). It lets the very first infra apply succeed; deploy-app.yml immediately replaces it
+// with the real ACR image. Never lands on an existing app (that path preserves the running image).
+var placeholderImage = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
+
 resource workspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' existing = {
   name: logAnalyticsWorkspaceName
 }
+
+// Read the currently-running images so an idempotent re-apply (empty image params) preserves what
+// deploy-app.yml last deployed instead of clobbering it. `existing` + safe-dereference (.?) yields
+// null when the app is absent (first-create / recreate), which then falls back to the placeholder.
+resource backendAppCurrent 'Microsoft.App/containerApps@2023-05-01' existing = {
+  name: backendAppName
+}
+resource frontendAppCurrent 'Microsoft.App/containerApps@2023-05-01' existing = {
+  name: frontendAppName
+}
+
+var currentBackendImage = backendAppCurrent.?properties.?template.?containers[0].?image ?? ''
+var currentFrontendImage = frontendAppCurrent.?properties.?template.?containers[0].?image ?? ''
+
+// Precedence: explicit param → currently-running image → placeholder. So: pass an image to force it
+// (first-create/recreate should pass the real tag); pass empty to preserve the deployed image.
+var effectiveBackendImage = !empty(backendImage)
+  ? backendImage
+  : (!empty(currentBackendImage) ? currentBackendImage : placeholderImage)
+var effectiveFrontendImage = !empty(frontendImage)
+  ? frontendImage
+  : (!empty(currentFrontendImage) ? currentFrontendImage : placeholderImage)
 
 resource managedEnvironment 'Microsoft.App/managedEnvironments@2023-05-01' = {
   name: environmentResourceName
@@ -146,7 +182,7 @@ resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
       containers: [
         {
           name: 'backend'
-          image: backendImage
+          image: effectiveBackendImage
           env: [
             {
               name: 'DATABASE_URL'
@@ -287,7 +323,7 @@ resource frontendApp 'Microsoft.App/containerApps@2023-05-01' = {
       containers: [
         {
           name: 'frontend'
-          image: frontendImage
+          image: effectiveFrontendImage
           env: [
             {
               name: 'BACKEND_URL'

@@ -198,14 +198,23 @@ endpoint's private IP from inside the env. Result: the real rf-CSM bank + rubric
   private endpoint + DNS zone group). `container-apps.bicep` adds `vnetConfiguration`
   (`infrastructureSubnetId`, `internal: false` — external ingress preserved, private egress to
   storage). `storage.bicep` sets `networkAcls.defaultAction: Deny` + exports `storageAccountId`.
-- **Applying to an existing VNet-less env is a delete + recreate** (the env's `vnetConfiguration` is
-  immutable), which reassigns both apps' FQDNs — brief outage; no tracked file hard-codes the FQDN.
-  Infra is **not** applied by CI (`deploy-app.yml` only updates images); apply manually via
-  `az deployment sub create`. Full runbook (incl. the Cloud-Shell-in-VNet bundle upload):
-  [`../infra/azure/README.md`](../infra/azure/README.md) step 4.
-- **Validation state** — Bicep compiles clean (`az bicep build`, no warnings). ⏳ **Not yet applied
-  to live Azure** (requires the planned-downtime env recreation + an in-VNet bundle upload). Until
-  it is verified across a real restart, the admin-API sync below remains the fallback.
+- **Applying to an existing VNet-less env is a ONE-TIME delete + recreate** (the env's
+  `vnetConfiguration` is immutable), which reassigns both apps' FQDNs — brief outage; no tracked file
+  hard-codes the FQDN. Infra is **not** applied by CI (`deploy-app.yml` only updates images); apply
+  manually via `az deployment sub create`. Full runbook (incl. the Cloud-Shell-in-VNet bundle
+  upload): [`../infra/azure/README.md`](../infra/azure/README.md) step 4.
+- **Idempotent thereafter** — once the VNet-integrated env exists, every later infra apply is a
+  no-op on the network resources. The image params (`backendImage`/`frontendImage`) default to
+  **empty = preserve the running image**, so an infra re-apply never clobbers the tag that
+  `deploy-app.yml` deployed back to a placeholder (`container-apps.bicep` reads the live app via an
+  `existing` reference; placeholder is used only on first-create/recreate when no app exists). This
+  decouples the two pipelines: infra owns topology, `deploy-app.yml` owns images. `clientBundleBlob`
+  is likewise a template param that survives re-apply.
+- **Validation state** — Bicep compiles clean (`az bicep build`, no warnings); `--what-if` against
+  the live env confirms the network resources are net-new Creates and the image is a preserve no-op
+  (no placeholder flip). ⏳ **Not yet applied to live Azure** (requires the planned-downtime env
+  recreation + an in-VNet bundle upload). Until it is verified across a real restart, the admin-API
+  sync below remains the fallback.
 
 ### Bank + rubric sync to the deployed server (admin-API channel)
 

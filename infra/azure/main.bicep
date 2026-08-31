@@ -58,11 +58,17 @@ param seedAdminPassword string = ''
 @description('Admin bearer token for admin routes (backend ADMIN_API_TOKEN). Do not commit real values.')
 param adminApiToken string = ''
 
-@description('Backend container image. Pass a real ACR image after building/pushing; a placeholder lets the first infra deploy succeed.')
-param backendImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
+// Images are owned by the app-deploy pipeline (deploy-app.yml `az containerapp update --image`),
+// NOT by infra. Default EMPTY = "preserve the currently-running image" so a steady-state infra
+// re-apply is idempotent and never clobbers the pipeline-deployed image back to a placeholder
+// (container-apps.bicep falls back to a helloworld placeholder only when the app doesn't exist yet).
+// Pass a real ACR image tag ONLY on first-create or the env delete+recreate, when there is no
+// running app to preserve.
+@description('Backend container image. Empty (default) → preserve the running image (idempotent re-apply). Pass a real ACR tag on first-create / env recreate.')
+param backendImage string = ''
 
-@description('Frontend container image. Pass a real ACR image after building/pushing.')
-param frontendImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
+@description('Frontend container image. Empty (default) → preserve the running image (idempotent re-apply). Pass a real ACR tag on first-create / env recreate.')
+param frontendImage string = ''
 
 @description('Blob name of the uploaded private client bundle zip. Empty → public-demo mode (generic bank only).')
 param clientBundleBlob string = ''

@@ -147,27 +147,64 @@ environment in place. If the environment already exists without a VNet, the appl
 env-unique domain segment changes). No tracked file hard-codes the FQDN, so the fallout is limited
 to bookmarks and the Entra app's redirect URI.
 
+> **This is a ONE-TIME manual switch, not a CI step.** Infra is never applied by a workflow
+> (`infra-main.yml` only `az bicep build`-validates; `deploy-app.yml` only updates images). Once the
+> VNet-integrated env exists, every later `az deployment sub create` is **idempotent** — the VNet/PE/
+> DNS become no-ops and the image params **preserve the running image** (see idempotency note below),
+> so a re-apply never disturbs the deployed app.
+
 ```bash
 # 1. compile + dry-run: expect Create on the Network resources and Delete+Create on the env.
 az bicep build --file infra/azure/main.bicep --stdout >/dev/null
 az deployment sub create --name aiinterview-public --location swedencentral \
   --template-file infra/azure/main.bicep --parameters @infra/azure/main.parameters.json --what-if
 
+# 1a. capture the CURRENTLY-running image tags BEFORE deleting (so the recreate can start straight on
+#     the real images with no placeholder window). Skip if you're fine with a brief placeholder page.
+BE=$(az containerapp show -n ca-<prefix>-<env>-backend  -g <rg> --query "properties.template.containers[0].image" -o tsv)
+FE=$(az containerapp show -n ca-<prefix>-<env>-frontend -g <rg> --query "properties.template.containers[0].image" -o tsv)
+
 # 2. delete the existing env (cascades → both apps). THIS is the outage window.
 az containerapp env delete --name cae-<prefix>-<env> -g <rg> --yes
 az containerapp list -g <rg> -o table   # confirm empty before continuing
 
-# 3. apply for real — recreates network → VNet-integrated env → both apps.
+# 3. apply for real — recreates network → VNet-integrated env → both apps. Pass the captured image
+#    tags: on a fresh env the apps don't exist yet, so there is no running image to preserve and an
+#    empty image param would fall back to the helloworld PLACEHOLDER. Passing the real tags here
+#    avoids that window entirely.
 az deployment sub create --name aiinterview-public --location swedencentral \
-  --template-file infra/azure/main.bicep --parameters @infra/azure/main.parameters.json
+  --template-file infra/azure/main.bicep --parameters @infra/azure/main.parameters.json \
+  --parameters backendImage="$BE" frontendImage="$FE"
 
 # 4. read the NEW FQDNs from the deployment's backendUrl/frontendUrl outputs; update the Entra
 #    redirect URI + any shared links. environments/public.json needs no change (it holds resource
-#    NAMES, not FQDNs). Then re-run Deploy App (step 5) to push real images into the fresh apps.
+#    NAMES, not FQDNs). If you skipped 1a/the image params, re-run Deploy App (step 5) now to replace
+#    the placeholder with the real images.
 ```
 
 `backendIdentityPrincipalId` does not change (the identity resource is untouched), so
 `grant-foundry-rbac.sh` need not be re-run — confirm it matches the previous output first.
+
+#### Idempotency: who owns the image (infra vs. app-deploy)
+
+`deploy-app.yml` owns the running image — it `az containerapp update --image <git-sha>` on every
+push to `main`. So the infra template must **not** fight it: `backendImage`/`frontendImage` default
+to **empty**, which `container-apps.bicep` resolves as *"preserve whatever image is currently
+running"* (it reads the live app via an `existing` reference). Consequently:
+
+- **Steady-state re-apply** (`@main.parameters.json`, no image params) → image is a **no-op**; the
+  pipeline-deployed tag is kept. Re-applying infra to tweak, say, a Foundry model name will **not**
+  reset the app to a placeholder.
+- **First-create / env recreate** (no running app to read) → empty param falls back to the
+  `helloworld` **placeholder**, so pass the real tags (step 3) or let step 5 replace them.
+- Set image params **explicitly** only when you want infra to force a specific tag; normally leave
+  them unset and let `deploy-app.yml` drive images.
+
+Likewise `clientBundleBlob` is a template **param** (flows to `CLIENT_BUNDLE_BLOB`): set it in
+`main.parameters.json` once the bundle is uploaded, and it survives every re-apply — prefer that
+over a one-off `az containerapp update --set-env-vars`, which a later infra apply would not know
+about (though the preserve logic covers the image, env vars set out-of-band on the app are still
+reconciled to the template on the next apply).
 
 ### 5. Deploy the app
 
