@@ -10,12 +10,15 @@
 ## Why this exists
 
 The deployed backend runs on **ephemeral SQLite**: every boot/redeploy wipes the DB and reseeds it
-with only the generic, rubric-less **demo bank** (`question_seed.seed_default_bank`, 10 questions,
-**no checklists**). The private-blob channel that was meant to seed the real client bank at boot is
-**unavailable** — the storage account has `publicNetworkAccess: Disabled` under the MCAPS
-management-group policy, so the container cannot pull the bundle at start-up.
+with the generic, rubric-less **demo bank** (`question_seed.seed_default_bank`, 10 questions, **no
+checklists**). Since 2026-08-31 the private-blob channel that seeds the real client bank at boot is
+**live and durable** — the storage account's `publicNetworkAccess: Disabled` (MCAPS policy) is
+satisfied by a blob **private endpoint** reachable from the VNet-integrated Container Apps env, so the
+container pulls the bundle at start-up on every boot (see the header note). This runbook is the
+**recovery path** for when that boot fetch fails.
 
-Two symptoms follow directly from this, and both are fixed by running the sync below:
+If boot-seeding is not applied/verified, or a boot fetch fails, two symptoms follow directly, and both
+are fixed by running the sync below:
 
 1. **Server questions differ from local.** The server shows the demo bank; local shows the real
    default bank.
@@ -61,13 +64,15 @@ ADMIN_USERNAME=admin ADMIN_PASSWORD='<server-admin-password>' \
 The script logs in, uploads any referenced SOP documents the server is missing
 (`POST /admin/sop/documents`), then POSTs the bundle. It prints what was written.
 
-## ⚠️ Re-run after every deploy/restart
+## When to re-run
 
-The server DB is **ephemeral**. Any redeploy, scale-to-zero-and-back, or replica restart wipes it
-and reseeds the demo bank — so **you must re-run this sync after every deploy/restart** for the
-server to match local. `question_seed.seed_default_bank` is idempotent (no-op when an enabled
-default already exists), so once synced it will not overwrite the imported bank *within a single
-boot* — but the next restart starts from an empty DB again.
+With boot-time auto-seeding live (2026-08-31), the server self-seeds the real rf-CSM bank on **every**
+boot/restart/redeploy — you no longer need to re-run this sync routinely. Run it only as a **recovery
+step** when boot-seeding hasn't been applied to a given environment, or when the boot logs show a
+`client bundle fetch failed` WARNING (bundle-content or DNS issue). The server DB is **ephemeral**, so
+a sync you run by hand is itself wiped on the next restart — the durable seed comes from the boot
+channel, not this script. `question_seed.seed_default_bank` is idempotent (no-op when an enabled
+default already exists), so it never overwrites the imported bank *within a single boot*.
 
 There is no client content in `scripts/sync_bank_to_server.py`: bank/question/rubric text is read
 from the local DB at run time, and SOP files from the local `--sop-dir`. Nothing is hardcoded, so

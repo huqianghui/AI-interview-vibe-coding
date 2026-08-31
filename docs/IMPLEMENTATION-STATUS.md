@@ -212,20 +212,31 @@ endpoint's private IP from inside the env. Result: the real rf-CSM bank + rubric
   is likewise a template param that survives re-apply.
 - **Validation state** — Bicep compiles clean (`az bicep build`, no warnings); `--what-if` against
   the live env confirms the network resources are net-new Creates and the image is a preserve no-op
-  (no placeholder flip). ⏳ **Not yet applied to live Azure** (requires the planned-downtime env
-  recreation + an in-VNet bundle upload). Until it is verified across a real restart, the admin-API
-  sync below remains the fallback.
+  (no placeholder flip). ✅ **Applied + live-validated on Azure (Sweden Central, 2026-08-31):** the
+  VNet-integrated env + blob private endpoint + `privatelink.blob.core.windows.net` zone are live in
+  `rg-aiinterview-public-swedencentral`; the private DNS resolves `aiinterviewpublicst.blob.core.windows.net`
+  to the PE private IP (`10.10.2.4`, verified from inside the VNet). The client bundle
+  (`rfcsm-bundle.zip`) was uploaded once to the private `client-bundle` container **from inside the
+  VNet via a temporary jumpbox VM** (the only path past the policy-locked storage — an IP-allowlist
+  upload is overridden by the Modify policy; the jumpbox + all `jump-*` resources were torn down after
+  the upload), and `CLIENT_BUNDLE_BLOB=rfcsm-bundle.zip` set on the backend (persisted in
+  `main.parameters.json` so it survives re-apply). **Durability proven across a forced restart:** the
+  boot logs show `fetching private client interview bundle → extracted bundle → running rf-CSM bank
+  importer` with **no** `client bundle fetch failed` WARNING, and a fresh ephemeral DB (untouched by
+  the PR #66 manual sync) serves the rf-CSM default bank (9 questions, 108 rubric items) with non-zero
+  report coverage. Boot-time auto-seeding is now the norm; the admin-API sync below is the fallback.
 
 ### Bank + rubric sync to the deployed server (admin-API channel)
 
-Because the boot-time private-blob bundle fetch is blocked by the Storage public-access policy, a
-fresh/redeployed server reseeds only the generic **demo bank** (no checklists) — so its questions
-differ from local **and** the report shows **coverage 0 / no final result** (length-stub scoring
-with no rubric to score against). The fix is an **admin-API bank-bundle sync** that makes the server
-identical to local: `GET /admin/question-banks/{id}/export` + `POST /admin/question-banks/import`
+**Now the fallback** (superseded by boot-time auto-seeding above, live since 2026-08-31). Kept as a
+recovery path: if a boot-time bundle fetch ever fails (bundle-content or DNS issue) the server would
+reseed only the generic **demo bank** (no checklists) — so its questions would differ from local
+**and** the report would show **coverage 0 / no final result** (length-stub scoring with no rubric to
+score against). The fix is an **admin-API bank-bundle sync** that makes the server identical to
+local: `GET /admin/question-banks/{id}/export` + `POST /admin/question-banks/import`
 move a bank + its ordered questions + each question's **full rubric verbatim** (item weights,
 `advisory` gates, SOP citations resolved **by document name** — unlike `PUT .../checklists/{id}/items`,
 which drops `advisory` + source id). Local push script: `backend/scripts/sync_bank_to_server.py`
-(credentials via env, no client content — safe in the public repo). **Must be re-run after every
-deploy/restart** (ephemeral SQLite). Full procedure + rationale:
+(credentials via env, no client content — safe in the public repo). With boot-time auto-seeding live,
+this is a recovery tool rather than a per-restart chore. Full procedure + rationale:
 [`RUNBOOK-bank-sync.md`](RUNBOOK-bank-sync.md).
