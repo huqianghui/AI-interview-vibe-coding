@@ -1,5 +1,12 @@
 # Runbook: sync the question bank + rubric to the deployed server
 
+> **This is now the FALLBACK, not the norm.** The durable fix is boot-time seeding via the
+> VNet + Storage private endpoint (revives `entrypoint.sh`'s bundle fetch so the real bank seeds
+> automatically on every boot) — see [`../infra/azure/README.md`](../infra/azure/README.md) step 4
+> and `docs/IMPLEMENTATION-STATUS.md`. Use this manual sync when boot-seeding isn't yet applied/
+> verified, or as a recovery path if a boot fetch fails. Keep it until boot-seeding is proven across
+> a real restart.
+
 ## Why this exists
 
 The deployed backend runs on **ephemeral SQLite**: every boot/redeploy wipes the DB and reseeds it

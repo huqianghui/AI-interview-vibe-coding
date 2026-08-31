@@ -7,7 +7,11 @@ targetScope = 'subscription'
 // Deliberately NOT created here (reused / not needed): Azure AI Foundry / OpenAI / Voice Live
 // (an EXISTING resource in Sweden Central is reused — grant the backend MI access with
 // scripts/grant-foundry-rbac.sh), PostgreSQL (the app keeps ephemeral SQLite, no DB PaaS),
-// AI Search / Content Understanding / Speech-Avatar, VNet, and the prompt-optimizer sidecar.
+// AI Search / Content Understanding / Speech-Avatar, and the prompt-optimizer sidecar.
+//
+// A VNet IS created (modules/network.bicep): the Container Apps environment is VNet-integrated so
+// the backend can reach the storage account's blob private endpoint at boot (the policy-locked
+// account has no public access) — this is what revives client-bank seeding.
 
 @description('Short project/resource prefix (lowercase letters/numbers; several resources have strict naming rules).')
 @minLength(3)
@@ -54,11 +58,17 @@ param seedAdminPassword string = ''
 @description('Admin bearer token for admin routes (backend ADMIN_API_TOKEN). Do not commit real values.')
 param adminApiToken string = ''
 
-@description('Backend container image. Pass a real ACR image after building/pushing; a placeholder lets the first infra deploy succeed.')
-param backendImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
+// Images are owned by the app-deploy pipeline (deploy-app.yml `az containerapp update --image`),
+// NOT by infra. Default EMPTY = "preserve the currently-running image" so a steady-state infra
+// re-apply is idempotent and never clobbers the pipeline-deployed image back to a placeholder
+// (container-apps.bicep falls back to a helloworld placeholder only when the app doesn't exist yet).
+// Pass a real ACR image tag ONLY on first-create or the env delete+recreate, when there is no
+// running app to preserve.
+@description('Backend container image. Empty (default) → preserve the running image (idempotent re-apply). Pass a real ACR tag on first-create / env recreate.')
+param backendImage string = ''
 
-@description('Frontend container image. Pass a real ACR image after building/pushing.')
-param frontendImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
+@description('Frontend container image. Empty (default) → preserve the running image (idempotent re-apply). Pass a real ACR tag on first-create / env recreate.')
+param frontendImage string = ''
 
 @description('Blob name of the uploaded private client bundle zip. Empty → public-demo mode (generic bank only).')
 param clientBundleBlob string = ''
@@ -162,6 +172,19 @@ module storage './modules/storage.bicep' = {
   }
 }
 
+module network './modules/network.bicep' = {
+  name: '${deploymentName}-network'
+  scope: deploymentResourceGroup
+  params: {
+    namePrefix: namePrefix
+    environmentName: environmentName
+    location: location
+    tags: commonTags
+    storageAccountId: storage.outputs.storageAccountId
+    storageAccountName: storage.outputs.storageAccountName
+  }
+}
+
 // NOTE: No Key Vault. This subscription's Azure Policy force-disables Key Vault public network
 // access (reverts publicNetworkAccess→Disabled seconds after any write), which a VNet-less Container
 // App cannot reach — secretRefs fail at revision provisioning. The four runtime secrets are instead
@@ -216,6 +239,7 @@ module containerApps './modules/container-apps.bicep' = {
     backendIdentityClientId: managedIdentity.outputs.backendIdentityClientId
     backendImage: backendImage
     frontendImage: frontendImage
+    infrastructureSubnetId: network.outputs.infrastructureSubnetId
     secretKey: secretKey
     encryptionKey: encryptionKey
     seedAdminPassword: seedAdminPassword

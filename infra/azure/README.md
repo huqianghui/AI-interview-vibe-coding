@@ -12,8 +12,9 @@ A deliberately small footprint (subscription-scope `main.bicep` creates the reso
 | Log Analytics + App Insights | logs/traces for both apps |
 | User-assigned managed identity | backend auth to Foundry / Storage (keyless) |
 | Container Registry (Basic) | holds backend + frontend images |
-| Storage account | private `client-bundle` container (client interview material) + `materials` |
-| Container Apps (backend + frontend) | **single replica each** (ephemeral SQLite; WS affinity); the four runtime secrets are Container App **native secrets** (see note below) |
+| Storage account | private `client-bundle` container (client interview material) + `materials`; reached only via a blob **private endpoint** (no public access) |
+| VNet + private endpoint | `vnet-…` with a subnet delegated to the ACA env + a PE subnet; `privatelink.blob.core.windows.net` private DNS zone; blob private endpoint (`modules/network.bicep`) |
+| Container Apps (backend + frontend) | **single replica each** (ephemeral SQLite; WS affinity); **VNet-integrated** env (external ingress, private egress to storage); the four runtime secrets are Container App **native secrets** (see note below) |
 | GitHub OIDC identity | keyless deploy from GitHub Actions |
 | Role assignments | AcrPull / Storage Blob Data Reader (backend MI); Contributor / AcrPush (deploy MI) |
 
@@ -29,7 +30,12 @@ A deliberately small footprint (subscription-scope `main.bicep` creates the reso
   access separately by [`scripts/grant-foundry-rbac.sh`](scripts/grant-foundry-rbac.sh).
 - **No database PaaS** — the app runs on **ephemeral SQLite** on the replica's own disk, reseeded on
   every boot (see the backend `entrypoint.sh`). No Postgres.
-- AI Search / Content Understanding / Speech-Avatar, VNet, prompt-optimizer sidecar.
+- AI Search / Content Understanding / Speech-Avatar, prompt-optimizer sidecar.
+
+> **A VNet IS created** (`modules/network.bicep`). The storage account is policy-locked private (the
+> MCAPS policy force-disables its `publicNetworkAccess`), so the backend reaches the client bundle
+> only through a blob **private endpoint** from inside a **VNet-integrated** Container Apps
+> environment. This is what makes boot-time client-bank seeding work — see step 4.
 
 ## The boot-time data story (why there's no bootstrap Job)
 
@@ -43,8 +49,11 @@ seed it (its disk isn't the app's). Instead the backend container seeds itself o
 3. `uvicorn` starts — the FastAPI lifespan idempotently seeds the generic demo bank + admin.
 
 The client importer + its source docs are **gitignored** (absent from the public repo and the CI
-image). They reach the container only through the private blob you upload in step 5 below. With
-`CLIENT_BUNDLE_BLOB` unset, the app boots in public-demo mode (generic bank only).
+image). They reach the container only through the private blob you upload in step 4 below. With
+`CLIENT_BUNDLE_BLOB` unset, the app boots in public-demo mode (generic bank only). Because the
+storage account is private (blob private endpoint only), the container resolves
+`<account>.blob.core.windows.net` to the endpoint's private IP via the linked private DNS zone — the
+fetch needs no keys (the backend MI has Storage Blob Data Reader) and no public network path.
 
 ## One-time setup
 
@@ -90,18 +99,18 @@ infra/azure/scripts/grant-foundry-rbac.sh \
 
 RBAC propagation takes 5–10 minutes.
 
-### 4. (Optional) Upload the private client bundle
+### 4. (Optional) Upload the private client bundle — auto-seeds the real bank on every boot
 
-> **⚠️ Blocked on subscriptions that disable Storage public network access.** The same MCAPS Azure
-> Policy that disables Key Vault public access also force-disables the Storage account's
-> `publicNetworkAccess`. When that policy applies, **both** the `az storage blob upload` below (from
-> a laptop) **and** the backend's boot-time fetch (from a VNet-less Container App) are unreachable —
-> leave `CLIENT_BUNDLE_BLOB` unset and run in public-demo mode. Seeding the real client bank then
-> requires a **Storage private endpoint + a VNet-integrated Container Apps environment** (a separate
-> infra change). The steps below apply only where Storage public access is permitted.
+With the VNet + blob private endpoint in place (this infra), the backend's boot-time fetch reaches
+the private container, so seeding the real rf-CSM bank is **durable**: it re-runs on every
+boot/restart/redeploy with **no manual step**. You upload the bundle **once**.
 
-To auto-seed the client rf-CSM interview bank, zip the gitignored importer + source docs from a
-local checkout and upload to the private container, then point the backend at it:
+> **⚠️ The upload must originate inside the VNet.** The storage account is policy-locked private
+> (`publicNetworkAccess: Disabled`, forced by the MCAPS policy), so an `az storage blob upload` from
+> a laptop over the public internet **fails**. The temporary-IP-allowlist trick does **not** work
+> either — the Modify policy overrides `networkAcls.ipRules`. Run the upload from **Azure Cloud
+> Shell with VNet integration into `vnet-<prefix>-<env>`**, or from a jumpbox/VM in (or peered to)
+> that VNet.
 
 ```bash
 # from a local checkout that HAS the gitignored client material:
@@ -109,6 +118,7 @@ local checkout and upload to the private container, then point the backend at it
     scripts/import_rfcsm_bank.py \
     ../EU_avatar_inspector_interview )
 
+# then, from a shell INSIDE the VNet (Cloud Shell VNet-integrated, or a jumpbox in the VNet):
 az storage blob upload \
   --account-name <storageAccountName> \
   --container-name client-bundle \
@@ -116,13 +126,85 @@ az storage blob upload \
   --file /tmp/rfcsm-bundle.zip \
   --auth-mode login          # AAD/MI auth — the account has shared-key access disabled
 
-# Then set CLIENT_BUNDLE_BLOB on the backend Container App (or redeploy infra with the param):
+# Point the backend at it — set the param in main.parameters.json and re-apply (idempotent), or
+# for a quick change set the env var directly on the backend app:
 az containerapp update -g <rg> -n <backendAppName> \
   --set-env-vars CLIENT_BUNDLE_BLOB=rfcsm-bundle.zip
 ```
 
 The zip layout must be `import_rfcsm_bank.py` + `EU_avatar_inspector_interview/…` at the root (see
 `backend/scripts/fetch_client_bundle.py`).
+
+> **Fallback:** if boot-seeding ever fails (e.g. a bundle-content or DNS issue), the admin-API sync
+> in [`docs/RUNBOOK-bank-sync.md`](../../docs/RUNBOOK-bank-sync.md) reconciles the server to local
+> without touching infra. Keep it until boot-seeding is proven across a real restart.
+
+### ⚠️ Applying the VNet change to an existing (VNet-less) deployment
+
+A managed environment's `vnetConfiguration` is **immutable** — you cannot add a VNet to a running
+environment in place. If the environment already exists without a VNet, the apply requires a
+**delete + recreate**, which is a brief **outage** and **reassigns both apps' FQDNs** (the
+env-unique domain segment changes). No tracked file hard-codes the FQDN, so the fallout is limited
+to bookmarks and the Entra app's redirect URI.
+
+> **This is a ONE-TIME manual switch, not a CI step.** Infra is never applied by a workflow
+> (`infra-main.yml` only `az bicep build`-validates; `deploy-app.yml` only updates images). Once the
+> VNet-integrated env exists, every later `az deployment sub create` is **idempotent** — the VNet/PE/
+> DNS become no-ops and the image params **preserve the running image** (see idempotency note below),
+> so a re-apply never disturbs the deployed app.
+
+```bash
+# 1. compile + dry-run: expect Create on the Network resources and Delete+Create on the env.
+az bicep build --file infra/azure/main.bicep --stdout >/dev/null
+az deployment sub create --name aiinterview-public --location swedencentral \
+  --template-file infra/azure/main.bicep --parameters @infra/azure/main.parameters.json --what-if
+
+# 1a. capture the CURRENTLY-running image tags BEFORE deleting (so the recreate can start straight on
+#     the real images with no placeholder window). Skip if you're fine with a brief placeholder page.
+BE=$(az containerapp show -n ca-<prefix>-<env>-backend  -g <rg> --query "properties.template.containers[0].image" -o tsv)
+FE=$(az containerapp show -n ca-<prefix>-<env>-frontend -g <rg> --query "properties.template.containers[0].image" -o tsv)
+
+# 2. delete the existing env (cascades → both apps). THIS is the outage window.
+az containerapp env delete --name cae-<prefix>-<env> -g <rg> --yes
+az containerapp list -g <rg> -o table   # confirm empty before continuing
+
+# 3. apply for real — recreates network → VNet-integrated env → both apps. Pass the captured image
+#    tags: on a fresh env the apps don't exist yet, so there is no running image to preserve and an
+#    empty image param would fall back to the helloworld PLACEHOLDER. Passing the real tags here
+#    avoids that window entirely.
+az deployment sub create --name aiinterview-public --location swedencentral \
+  --template-file infra/azure/main.bicep --parameters @infra/azure/main.parameters.json \
+  --parameters backendImage="$BE" frontendImage="$FE"
+
+# 4. read the NEW FQDNs from the deployment's backendUrl/frontendUrl outputs; update the Entra
+#    redirect URI + any shared links. environments/public.json needs no change (it holds resource
+#    NAMES, not FQDNs). If you skipped 1a/the image params, re-run Deploy App (step 5) now to replace
+#    the placeholder with the real images.
+```
+
+`backendIdentityPrincipalId` does not change (the identity resource is untouched), so
+`grant-foundry-rbac.sh` need not be re-run — confirm it matches the previous output first.
+
+#### Idempotency: who owns the image (infra vs. app-deploy)
+
+`deploy-app.yml` owns the running image — it `az containerapp update --image <git-sha>` on every
+push to `main`. So the infra template must **not** fight it: `backendImage`/`frontendImage` default
+to **empty**, which `container-apps.bicep` resolves as *"preserve whatever image is currently
+running"* (it reads the live app via an `existing` reference). Consequently:
+
+- **Steady-state re-apply** (`@main.parameters.json`, no image params) → image is a **no-op**; the
+  pipeline-deployed tag is kept. Re-applying infra to tweak, say, a Foundry model name will **not**
+  reset the app to a placeholder.
+- **First-create / env recreate** (no running app to read) → empty param falls back to the
+  `helloworld` **placeholder**, so pass the real tags (step 3) or let step 5 replace them.
+- Set image params **explicitly** only when you want infra to force a specific tag; normally leave
+  them unset and let `deploy-app.yml` drive images.
+
+Likewise `clientBundleBlob` is a template **param** (flows to `CLIENT_BUNDLE_BLOB`): set it in
+`main.parameters.json` once the bundle is uploaded, and it survives every re-apply — prefer that
+over a one-off `az containerapp update --set-env-vars`, which a later infra apply would not know
+about (though the preserve logic covers the image, env vars set out-of-band on the app are still
+reconciled to the template on the next apply).
 
 ### 5. Deploy the app
 

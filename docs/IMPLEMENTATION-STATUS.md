@@ -179,9 +179,42 @@ one-time setup + IaC: [`../infra/azure/README.md`](../infra/azure/README.md).
   `bash -n`; `fetch_client_bundle.py` passes ruff check + format. **Live infra provisioned on Azure
   (Sweden Central, 2026-08-26):** `az deployment sub create` succeeded (RG
   `rg-aiinterview-public-swedencentral`); backend MI granted Foundry RBAC; deploy profile backfilled.
-  App images are built + rolled out by `deploy-app.yml`. Shipped in **public-demo mode** (real
-  rf-CSM bank deferred — Storage public-access policy blocks the boot-time bundle fetch; a follow-up
-  adds a Storage private endpoint + VNet-integrated Container Apps env).
+  App images are built + rolled out by `deploy-app.yml`. Originally shipped in **public-demo mode**
+  (real rf-CSM bank deferred — the Storage public-access policy blocked the boot-time bundle fetch);
+  the follow-up below adds the Storage private endpoint + VNet-integrated env that revives it.
+
+### Boot-time client-bank seeding via VNet + Storage private endpoint
+
+**The durable fix** for the ephemeral-SQLite reseed problem: put the Container Apps managed
+environment inside a **VNet** and give the storage account a **blob private endpoint** +
+`privatelink.blob.core.windows.net` private DNS zone, so the backend MI reaches the private
+`client-bundle` blob at boot. This **revives the existing `entrypoint.sh` fetch→import channel** with
+**zero app/Python change** — the same `<account>.blob.core.windows.net` hostname now resolves to the
+endpoint's private IP from inside the env. Result: the real rf-CSM bank + rubric + SOP docs seed
+**automatically on every boot/restart/redeploy**, no manual step.
+
+- **IaC** — new `infra/azure/modules/network.bicep` (VNet `10.10.0.0/16`; infra subnet `/23`
+  delegated to `Microsoft.App/environments`; PE subnet `/27`; private DNS zone + vnet link; blob
+  private endpoint + DNS zone group). `container-apps.bicep` adds `vnetConfiguration`
+  (`infrastructureSubnetId`, `internal: false` — external ingress preserved, private egress to
+  storage). `storage.bicep` sets `networkAcls.defaultAction: Deny` + exports `storageAccountId`.
+- **Applying to an existing VNet-less env is a ONE-TIME delete + recreate** (the env's
+  `vnetConfiguration` is immutable), which reassigns both apps' FQDNs — brief outage; no tracked file
+  hard-codes the FQDN. Infra is **not** applied by CI (`deploy-app.yml` only updates images); apply
+  manually via `az deployment sub create`. Full runbook (incl. the Cloud-Shell-in-VNet bundle
+  upload): [`../infra/azure/README.md`](../infra/azure/README.md) step 4.
+- **Idempotent thereafter** — once the VNet-integrated env exists, every later infra apply is a
+  no-op on the network resources. The image params (`backendImage`/`frontendImage`) default to
+  **empty = preserve the running image**, so an infra re-apply never clobbers the tag that
+  `deploy-app.yml` deployed back to a placeholder (`container-apps.bicep` reads the live app via an
+  `existing` reference; placeholder is used only on first-create/recreate when no app exists). This
+  decouples the two pipelines: infra owns topology, `deploy-app.yml` owns images. `clientBundleBlob`
+  is likewise a template param that survives re-apply.
+- **Validation state** — Bicep compiles clean (`az bicep build`, no warnings); `--what-if` against
+  the live env confirms the network resources are net-new Creates and the image is a preserve no-op
+  (no placeholder flip). ⏳ **Not yet applied to live Azure** (requires the planned-downtime env
+  recreation + an in-VNet bundle upload). Until it is verified across a real restart, the admin-API
+  sync below remains the fallback.
 
 ### Bank + rubric sync to the deployed server (admin-API channel)
 

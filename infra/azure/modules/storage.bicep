@@ -6,6 +6,12 @@ targetScope = 'resourceGroup'
 //   - materials     : optional durable store for SOP uploads if MATERIAL_STORAGE_PATH is pointed at
 //                     blob rather than the ephemeral local disk (kept for future use).
 // Public blob access is off; the backend MI reads via Storage Blob Data Reader (RBAC, keyless).
+//
+// Reachability: the account is fully private. The MCAPS management-group policy
+// StorageAccount_PublicNetwork_Modify force-disables publicNetworkAccess regardless of what this
+// template asks for, so what actually makes the blob reachable from the backend is the PRIVATE
+// ENDPOINT + private DNS zone created in network.bicep (targeting this account's `blob` sub-resource)
+// — NOT any field on this account. Flipping publicNetworkAccess here would have no effect.
 
 @minLength(3)
 param namePrefix string
@@ -36,10 +42,12 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
     allowSharedKeyAccess: false
     minimumTlsVersion: 'TLS1_2'
     supportsHttpsTrafficOnly: true
+    // Aspirational only — the Modify policy forces this to Disabled live (see the header note).
     publicNetworkAccess: 'Enabled'
     networkAcls: {
       bypass: 'AzureServices'
-      defaultAction: 'Allow'
+      // Deny by default: the account is reached only via the blob private endpoint (network.bicep).
+      defaultAction: 'Deny'
     }
   }
 }
@@ -90,5 +98,6 @@ output summary object = {
 }
 
 output storageAccountName string = storageAccount.name
+output storageAccountId string = storageAccount.id
 output blobEndpoint string = storageAccount.properties.primaryEndpoints.blob
 output clientBundleContainerName string = clientBundleContainer.name
