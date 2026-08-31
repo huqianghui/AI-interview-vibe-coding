@@ -6,6 +6,13 @@ targetScope = 'resourceGroup'
 // replica's own disk (reseeded every boot by entrypoint.sh), so a second replica would diverge and
 // break Voice Live WebSocket affinity. The frontend nginx reverse-proxies /api to the backend
 // (same-origin, no CORS); its BACKEND_URL env is templated into nginx.conf at start.
+//
+// The managed environment is VNet-INTEGRATED (vnetConfiguration.infrastructureSubnetId, from
+// network.bicep) so the backend can reach the storage account's blob private endpoint at boot —
+// this is what revives the client-bank seeding channel. Ingress stays EXTERNAL (internal: false):
+// public traffic still reaches both apps; only egress to storage routes through the VNet.
+// NOTE: vnetConfiguration is immutable — changing it requires deleting + recreating the environment
+// (which reassigns the env-unique FQDN segment on both apps). See infra/azure/README.md.
 
 param namePrefix string
 param environmentName string
@@ -19,6 +26,9 @@ param backendIdentityId string
 param backendIdentityClientId string
 param backendImage string
 param frontendImage string
+
+@description('Resource id of the VNet subnet delegated to Microsoft.App/environments (from network.bicep).')
+param infrastructureSubnetId string
 
 // Runtime secrets are delivered as Container App native secrets (encrypted at rest by the platform)
 // rather than Key Vault secretRefs: this subscription's Azure Policy force-disables Key Vault public
@@ -66,6 +76,13 @@ resource managedEnvironment 'Microsoft.App/managedEnvironments@2023-05-01' = {
   location: location
   tags: tags
   properties: {
+    // VNet integration: the infra subnet is delegated to Microsoft.App/environments. External
+    // ingress (internal: false) is preserved so users still reach the apps over the public FQDN,
+    // while egress to the storage private endpoint routes through the VNet.
+    vnetConfiguration: {
+      infrastructureSubnetId: infrastructureSubnetId
+      internal: false
+    }
     appLogsConfiguration: {
       destination: 'log-analytics'
       logAnalyticsConfiguration: {
