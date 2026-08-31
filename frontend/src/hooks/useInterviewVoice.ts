@@ -88,6 +88,15 @@ const COMMIT_TRANSCRIPT_TIMEOUT_MS = 8_000;
 // retries so a genuinely dead session can't loop forever.
 const SPEAK_CONFIRM_TIMEOUT_MS = 12_000;
 const SPEAK_MAX_ATTEMPTS = 4;
+// When the avatar is enabled, the assistant's spoken audio rides the avatar's OWN WebRTC track,
+// which only starts flowing once its SDP handshake completes and the first video frames paint.
+// A question read fired the instant the WS reaches `connected` plays its opening words into a media
+// pipeline that isn't up yet, so they're clipped — the "第一句话前面的词被吃掉" symptom (only on the
+// FIRST read, while the avatar is still loading). So we hold the FIRST read until the avatar reports
+// connected, or this bound elapses (handshake stalled / avatar disabled server-side despite the flag
+// — never leave the candidate in silence). Voice-only sessions don't gate (audio plays over the WS
+// AudioContext, ready at `session.updated`).
+const FIRST_READ_AVATAR_GATE_MS = 6_000;
 
 /** Wire shape of one entry in `session.updated`'s `session.avatar.ice_servers` (matches the Azure
  * SDK's `IceServer.as_dict()`: each server carries its OWN username/credential). */
@@ -225,10 +234,28 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
   } | null>(null);
   // Forward ref so the watchdog timer can re-enter speakQuestion (declared below).
   const speakQuestionRef = useRef<((text: string) => boolean) | null>(null);
+  // Tracks the response born from OUR read attempt: emitSpeak arms `awaiting`, the next
+  // `response.created` claims its id. Any transcript arriving under that id proves the attempt
+  // produced a PLAYING response — the strongest delivery confirmation, immune to the agent
+  // paraphrasing (or outright ignoring) the injected text. Without this, the text-match check
+  // below false-negatived on paraphrases and the watchdog re-read questions that had played
+  // (the "读两遍" regression, live-observed twice).
+  const awaitingReadResponseRef = useRef(false);
+  const readResponseIdRef = useRef<string | null>(null);
   // A question read that was still UNCONFIRMED when the session tore down (reconnect): re-spoken
   // once the next session reaches `session.updated`. Without this, a drop-during-reconnect is
   // unrecoverable — the page latched "spoken" and never asks again.
   const resumeSpeakTextRef = useRef<string | null>(null);
+  // First-read avatar gate (see FIRST_READ_AVATAR_GATE_MS). `firstReadDone` flips true once the
+  // opening question has actually been emitted; until then, when the avatar is enabled but not yet
+  // painting frames, the read is held in `firstReadGate` (text + a fallback timer) so its opening
+  // words aren't clipped by the still-loading avatar media pipeline. Latest-wins: a newer question
+  // supersedes a held one. `avatarConnected` mirrors avatarStream.isConnected for the callback.
+  const firstReadDoneRef = useRef(false);
+  const firstReadGateRef = useRef<{ text: string; timer: ReturnType<typeof setTimeout> } | null>(
+    null,
+  );
+  const avatarConnectedRef = useRef(false);
 
   // Settle any armed commit with whatever transcript has accumulated so far (usually ""). Called
   // from the transcription handler (with the just-arrived text already pushed) and from teardown
@@ -280,6 +307,18 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
       resumeSpeakTextRef.current = speakWatchRef.current.text;
       speakWatchRef.current = null;
     }
+    awaitingReadResponseRef.current = false;
+    readResponseIdRef.current = null;
+    // Cancel a held first-read gate — its timer would fire a read at a closed/next WS. Stash its
+    // text (unless the watchdog above already stashed a later one) so the next session re-speaks it,
+    // and reset firstReadDone so that next session re-gates the opening read behind its avatar.
+    if (firstReadGateRef.current) {
+      clearTimeout(firstReadGateRef.current.timer);
+      if (!resumeSpeakTextRef.current) resumeSpeakTextRef.current = firstReadGateRef.current.text;
+      firstReadGateRef.current = null;
+    }
+    firstReadDoneRef.current = false;
+    avatarConnectedRef.current = false;
     // Drop any buffered user transcript — a new session starts a fresh turn; carrying stale
     // segments across a disconnect/reconnect would mis-attribute them to the next answer.
     userSegmentsSinceCommitRef.current = [];
@@ -309,18 +348,34 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
       const emit = (role: "user" | "assistant", content: string, isFinal: boolean, id: string) =>
         optionsRef.current.onTranscript?.({ id, role, content, isFinal, timestamp: Date.now() });
 
-      // Question-read delivery confirmation: the verbatim read speaks the injected text, so an
-      // assistant transcript whose start matches the watched question IS the question being read.
-      // Prefix match (normalized whitespace) so the first delta already confirms — no need to wait
-      // for the full read, and robust to trailing punctuation drift.
+      // Question-read delivery confirmation. Fast path: transcript prefix matches the watched
+      // question (a true verbatim read). Fallback: word-overlap similarity — the agent OFTEN
+      // PARAPHRASES the injected text ("Please introduce your relevant experience…" came out as
+      // "Could you tell me about your relevant experience…", live-observed), and a prefix-only
+      // check then never confirms, so the watchdog "retried" a read that had actually played and
+      // the question was spoken twice (the "读两遍" regression). A paraphrase shares most of the
+      // question's content words; an unrelated server-VAD auto-response does not — so ≥60% of the
+      // question's words appearing in the spoken text confirms delivery without false-confirming
+      // on auto-responses.
       const confirmSpeakWatch = (assistantText: string) => {
         const watch = speakWatchRef.current;
         if (!watch || !assistantText) return;
-        const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+        const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
         const spoken = norm(assistantText);
         const wanted = norm(watch.text);
         const probe = spoken.slice(0, Math.min(24, wanted.length));
-        if (probe && wanted.startsWith(probe)) {
+        let delivered = Boolean(probe) && wanted.startsWith(probe);
+        if (!delivered) {
+          const words = (s: string) =>
+            s.replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((w) => w.length >= 3);
+          const wantedWords = [...new Set(words(wanted))];
+          if (wantedWords.length >= 3) {
+            const spokenWords = new Set(words(spoken));
+            const hit = wantedWords.filter((w) => spokenWords.has(w)).length;
+            delivered = hit / wantedWords.length >= 0.6;
+          }
+        }
+        if (delivered) {
           clearTimeout(watch.timer);
           speakWatchRef.current = null;
         }
@@ -462,6 +517,16 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
           // already-read question — that clear-then-retry cycle was a duplicate-read path feeding
           // the "读三遍" symptom. Only a collision `error` re-arms a retry.
           lastSpokenAttemptRef.current = null;
+          // Claim this response for the read attempt that is waiting for one — its transcripts
+          // then confirm delivery BY ID (immune to paraphrasing). If this `created` actually
+          // belongs to a colliding auto-response, the collision `error` that follows resets the
+          // claim and re-queues the read.
+          if (awaitingReadResponseRef.current) {
+            awaitingReadResponseRef.current = false;
+            readResponseIdRef.current =
+              ((msg.response as Record<string, unknown> | undefined)?.id as string | undefined) ??
+              null;
+          }
           setAudio("speaking");
           break;
         case "response.audio.delta":
@@ -477,7 +542,17 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
             const running = (assistantLiveTranscriptRef.current.get(key) ?? "") + delta;
             assistantLiveTranscriptRef.current.set(key, running);
             emit("assistant", running, false, key);
-            confirmSpeakWatch(running);
+            // A transcript under the response OUR read attempt created = delivery confirmed by
+            // id, regardless of wording. Text similarity is the fallback for id-less paths.
+            if (msg.response_id && msg.response_id === readResponseIdRef.current) {
+              const watch = speakWatchRef.current;
+              if (watch) {
+                clearTimeout(watch.timer);
+                speakWatchRef.current = null;
+              }
+            } else {
+              confirmSpeakWatch(running);
+            }
           }
           break;
         }
@@ -486,7 +561,15 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
           assistantLiveTranscriptRef.current.delete(key);
           if (msg.transcript) {
             emit("assistant", msg.transcript as string, true, key);
-            confirmSpeakWatch(msg.transcript as string);
+            if (msg.response_id && msg.response_id === readResponseIdRef.current) {
+              const watch = speakWatchRef.current;
+              if (watch) {
+                clearTimeout(watch.timer);
+                speakWatchRef.current = null;
+              }
+            } else {
+              confirmSpeakWatch(msg.transcript as string);
+            }
           }
           break;
         }
@@ -520,6 +603,10 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
             const code = errInfo?.code as string | undefined;
             if (code === "conversation_already_has_active_response") {
               activeResponseRef.current = true;
+              // Our response.create was REJECTED, so any response id claimed since emitSpeak
+              // belongs to the colliding auto-response, not our read — revoke the delivery proof.
+              awaitingReadResponseRef.current = false;
+              readResponseIdRef.current = null;
               if (lastSpokenAttemptRef.current) {
                 pendingSpeakTextRef.current = lastSpokenAttemptRef.current;
                 // This attempt was REJECTED — it was never actually read, so clear the per-text
@@ -768,6 +855,10 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
         type: "conversation.item.create",
         item: { type: "message", role: "assistant", content: [{ type: "text", text }] },
       });
+      // The next `response.created` belongs to THIS attempt — its id becomes the delivery proof
+      // for the watchdog (see readResponseIdRef).
+      awaitingReadResponseRef.current = true;
+      readResponseIdRef.current = null;
       // Optimistically mark active so a rapid second speakQuestion (or a commit nudge) defers
       // instead of colliding; the real `response.created` confirms it, `response.done` clears it.
       activeResponseRef.current = true;
@@ -801,6 +892,33 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
     (text: string): boolean => {
       const ws = wsRef.current;
       if (!text || ws?.readyState !== WebSocket.OPEN) return false;
+
+      // FIRST-READ AVATAR GATE (the "第一句话前面的词被吃掉" fix): the opening question's audio is
+      // clipped when it's read before the avatar's media pipeline is up (assistant TTS rides the
+      // avatar's WebRTC track, live only once frames paint). So hold the FIRST read until the avatar
+      // is connected — or a short bound elapses (handshake stalled / avatar off despite the flag),
+      // so we never leave the candidate in silence. Only gates the first read of a session, and only
+      // when the avatar is enabled but not yet painting; every later question reads immediately.
+      if (!firstReadDoneRef.current && avatarEnabledRef.current && !avatarConnectedRef.current) {
+        if (firstReadGateRef.current) clearTimeout(firstReadGateRef.current.timer);
+        console.info("[voice] holding first question read until avatar is ready");
+        firstReadGateRef.current = {
+          text,
+          timer: setTimeout(() => {
+            firstReadGateRef.current = null;
+            console.warn("[voice] avatar-ready gate elapsed; reading first question anyway");
+            firstReadDoneRef.current = true;
+            speakQuestionRef.current?.(text);
+          }, FIRST_READ_AVATAR_GATE_MS),
+        };
+        return true; // held — the page latches "spoken"; the gate guarantees it's read.
+      }
+      // Past the gate (or not gated): this read is (or supersedes) the first read.
+      firstReadDoneRef.current = true;
+      if (firstReadGateRef.current) {
+        clearTimeout(firstReadGateRef.current.timer);
+        firstReadGateRef.current = null;
+      }
 
       // Arm (or re-arm) the delivery watchdog BEFORE attempting: the page latches "spoken" on a
       // true return, so from here on WE own making the read actually happen. Confirmed by the
@@ -880,6 +998,20 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
   useEffect(() => {
     if (interviewId) console.debug("[voice] useInterviewVoice bound to interview", interviewId);
   }, [interviewId]);
+
+  // Mirror avatar connectivity into a ref (for speakQuestion's gate) and RELEASE a held first read
+  // the moment the avatar starts painting frames — so the opening question is read as soon as its
+  // audio can actually be heard, without waiting out the full gate timeout.
+  useEffect(() => {
+    avatarConnectedRef.current = avatarStream.isConnected;
+    if (avatarStream.isConnected && firstReadGateRef.current) {
+      const { text, timer } = firstReadGateRef.current;
+      clearTimeout(timer);
+      firstReadGateRef.current = null;
+      console.info("[voice] avatar ready → releasing held first question read");
+      speakQuestionRef.current?.(text);
+    }
+  }, [avatarStream.isConnected]);
 
   return {
     connect,
