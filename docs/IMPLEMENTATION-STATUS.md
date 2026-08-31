@@ -182,3 +182,17 @@ one-time setup + IaC: [`../infra/azure/README.md`](../infra/azure/README.md).
   App images are built + rolled out by `deploy-app.yml`. Shipped in **public-demo mode** (real
   rf-CSM bank deferred — Storage public-access policy blocks the boot-time bundle fetch; a follow-up
   adds a Storage private endpoint + VNet-integrated Container Apps env).
+
+### Bank + rubric sync to the deployed server (admin-API channel)
+
+Because the boot-time private-blob bundle fetch is blocked by the Storage public-access policy, a
+fresh/redeployed server reseeds only the generic **demo bank** (no checklists) — so its questions
+differ from local **and** the report shows **coverage 0 / no final result** (length-stub scoring
+with no rubric to score against). The fix is an **admin-API bank-bundle sync** that makes the server
+identical to local: `GET /admin/question-banks/{id}/export` + `POST /admin/question-banks/import`
+move a bank + its ordered questions + each question's **full rubric verbatim** (item weights,
+`advisory` gates, SOP citations resolved **by document name** — unlike `PUT .../checklists/{id}/items`,
+which drops `advisory` + source id). Local push script: `backend/scripts/sync_bank_to_server.py`
+(credentials via env, no client content — safe in the public repo). **Must be re-run after every
+deploy/restart** (ephemeral SQLite). Full procedure + rationale:
+[`RUNBOOK-bank-sync.md`](RUNBOOK-bank-sync.md).
