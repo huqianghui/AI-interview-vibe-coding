@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.36.0.4 (2026-09-01)
+
+### Added
+- **Boot-time import of client bank bundles delivered via the private-blob channel.** A new
+  `question_seed.seed_client_banks` imports every `*.json` bank bundle under `CLIENT_BANKS_DIR`
+  (default `/app/_client_bundle/extra_banks`) on each boot, alongside the committed generic bundles
+  and the rf-CSM client importer. This is how client-derived banks (e.g. the rf-CSM demo01 bank,
+  which carries SOP `source_quotes`) reach the ephemeral server **without ever being committed to
+  this public repo** — the private bundle zip extracts its `extra_banks/` into place and the seeder
+  picks it up. Each bundle is forced non-default (the rf-CSM importer keeps the enabled-default
+  slot) and imported idempotently-by-name, so re-running on every boot converges. No-op in
+  public-demo mode and CI, where the directory is absent.
+
+### Notes
+- Shared the default-slot-preserving import loop between `seed_bundled_banks` (committed generic
+  banks) and `seed_client_banks` (private client banks) via `_import_bank_bundles`.
+
 ## 0.36.0.3 (2026-09-01)
 
 ### Fixed

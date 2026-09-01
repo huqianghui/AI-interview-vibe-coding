@@ -47,7 +47,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from app.services.config_overlay import apply_master_config_to_settings
     from app.services.config_service import seed_master_config_from_env
     from app.services.persona_seed import seed_default_persona
-    from app.services.question_seed import seed_bundled_banks, seed_default_bank
+    from app.services.question_seed import (
+        seed_bundled_banks,
+        seed_client_banks,
+        seed_default_bank,
+    )
     from app.services.user_seed import seed_default_admin
 
     try:
@@ -63,6 +67,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         async with async_session_factory() as session:
             await seed_bundled_banks(session)
     except Exception:  # noqa: BLE001 — bundle seed is best-effort; never block startup
+        pass
+    try:
+        # Import client-derived bank bundles delivered via the private-blob channel (e.g. the rf-CSM
+        # demo01 bank), from CLIENT_BANKS_DIR (default /app/_client_bundle/extra_banks). No-op when
+        # absent (public-demo mode / CI). These carry client SOP source_quotes and are NEVER
+        # committed here. Separate try: a bad client bundle must not block the rest of startup.
+        async with async_session_factory() as session:
+            await seed_client_banks(session)
+    except Exception:  # noqa: BLE001 — client bank seed is best-effort; never block startup
         pass
     try:
         async with async_session_factory() as session:
