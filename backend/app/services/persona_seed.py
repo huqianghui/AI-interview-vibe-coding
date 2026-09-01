@@ -39,8 +39,8 @@ DEFAULT_PERSONA_ID = "62faa759-a05f-4c9e-99fe-a046b536c449"
 DEFAULT_PERSONA_NAME = "Interviewer"
 
 # Neutral Azure built-in voices + generic greetings (no client content).
-_VOICE_MAP = '{"zh-CN":"zh-CN-XiaoxiaoNeural","en-US":"en-US-AvaNeural"}'
-_GREETING_MAP = '{"zh-CN":"你好，我们开始面试。","en-US":"Hello, let us begin."}'
+_VOICE_MAP = '{"en-US":"en-US-AvaNeural","zh-CN":"zh-CN-XiaoxiaoNeural"}'
+_GREETING_MAP = '{"en-US":"Hello, let us begin.","zh-CN":"你好，我们开始面试。"}'
 
 # The operator's configured interviewer contract. Generic — poses the system's questions to the
 # candidate, never answers them, stays in persona, and keeps the WHOLE interview in one language.
@@ -125,6 +125,7 @@ async def seed_default_persona(db: AsyncSession) -> InterviewerPersona | None:
         prompt_fragment=_PROMPT_FRAGMENT,
         voice_map=_VOICE_MAP,
         greeting_map=_GREETING_MAP,
+        default_locale="en-US",
         enabled=True,
         is_default=True,
         turn_detection="azure_semantic_vad",

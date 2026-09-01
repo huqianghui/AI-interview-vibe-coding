@@ -44,13 +44,15 @@ def test_resolve_voice_prefers_requested_locale():
     assert resolve_voice(FakePersona().voice_map, "en-US") == ("en-US", "en-US-AvaNeural")
 
 
-def test_resolve_voice_falls_back_to_zh_cn():
-    assert resolve_voice(FakePersona().voice_map, "fr-FR") == ("zh-CN", "zh-CN-XiaoxiaoNeural")
+def test_resolve_voice_falls_back_to_en_us():
+    assert resolve_voice(FakePersona().voice_map, "fr-FR") == ("en-US", "en-US-AvaNeural")
 
 
-def test_resolve_voice_uses_first_entry_when_no_zh_cn():
-    _, voice = resolve_voice('{"en-US": "en-US-AvaNeural"}', "de-DE")
-    assert voice == "en-US-AvaNeural"
+def test_resolve_voice_uses_first_entry_when_no_fallback_locale():
+    # Neither the requested locale (de-DE) nor the fallback (en-US) is in the map, so the first
+    # entry is used as a last resort.
+    _, voice = resolve_voice('{"zh-CN": "zh-CN-XiaoxiaoNeural"}', "de-DE")
+    assert voice == "zh-CN-XiaoxiaoNeural"
 
 
 def test_resolve_voice_uses_builtin_default_for_empty_map():
@@ -59,12 +61,12 @@ def test_resolve_voice_uses_builtin_default_for_empty_map():
 
 def test_resolve_voice_survives_malformed_json():
     locale, voice = resolve_voice("not json", None)
-    assert (locale, voice) == ("zh-CN", "zh-CN-XiaoxiaoNeural")
+    assert (locale, voice) == ("en-US", "en-US-AvaNeural")
 
 
 def test_resolve_voice_survives_empty_voice_map():
     assert resolve_voice("", "en-US") == ("en-US", "en-US-AvaNeural")
-    assert resolve_voice(None, None) == ("zh-CN", "zh-CN-XiaoxiaoNeural")
+    assert resolve_voice(None, None) == ("en-US", "en-US-AvaNeural")
 
 
 # --- build_session shape (the snake_case guard) ----------------------------

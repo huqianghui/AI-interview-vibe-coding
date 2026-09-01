@@ -65,9 +65,9 @@ async def test_default_locale_round_trips(client):
     # A fresh GET (what a page reload does) returns the saved locale, not the hardcoded default.
     fetched = (await client.get(f"/admin/personas/{created['id']}", headers=AUTH)).json()
     assert fetched["default_locale"] == "en-US"
-    # Default when omitted is the historical zh-CN.
+    # Default when omitted is en-US (the app-wide default language).
     plain = (await client.post("/admin/personas", headers=AUTH, json={"name": "M"})).json()
-    assert plain["default_locale"] == "zh-CN"
+    assert plain["default_locale"] == "en-US"
     # Update persists a switched locale.
     updated = await client.put(
         f"/admin/personas/{plain['id']}", headers=AUTH, json={"default_locale": "en-US"}

@@ -94,7 +94,7 @@ class InterviewerPersona(TimestampMixin, Base):
     # default on every reload even after Save. Not the interview's runtime language (that's chosen
     # per session via the language-pin item); purely the persona's remembered editing locale.
     default_locale: Mapped[str] = mapped_column(
-        String(16), default="zh-CN", server_default="zh-CN", nullable=False
+        String(16), default="en-US", server_default="en-US", nullable=False
     )
 
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

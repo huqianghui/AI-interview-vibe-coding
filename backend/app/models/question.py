@@ -30,7 +30,7 @@ class QuestionBank(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
     # Bank-level default language; a question may override per-row (F2 AC #4).
-    language: Mapped[str] = mapped_column(String(16), default="zh-CN", nullable=False)
+    language: Mapped[str] = mapped_column(String(16), default="en-US", nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
@@ -60,7 +60,7 @@ class Question(TimestampMixin, Base):
     # unequally (e.g. a synthesis question worth more); the state machine aggregates
     # sum(score*weight)/sum(weight) over graded questions.
     weight: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
-    language: Mapped[str] = mapped_column(String(16), default="zh-CN", nullable=False)
+    language: Mapped[str] = mapped_column(String(16), default="en-US", nullable=False)
     # JSON list of expected answer points that F3 checklist items link to. NEVER candidate-facing
     # (P3) — stored here, projected out of candidate responses at the API layer.
     expected_points: Mapped[str] = mapped_column(Text, default="[]", nullable=False)

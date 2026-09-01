@@ -23,5 +23,5 @@ class User(TimestampMixin, Base):
     full_name: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     role: Mapped[str] = mapped_column(String(20), default="user", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    preferred_language: Mapped[str] = mapped_column(String(10), default="zh-CN", nullable=False)
+    preferred_language: Mapped[str] = mapped_column(String(10), default="en-US", nullable=False)
     business_unit: Mapped[str] = mapped_column(String(100), default="", nullable=False)

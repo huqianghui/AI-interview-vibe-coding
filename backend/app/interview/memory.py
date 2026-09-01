@@ -27,7 +27,7 @@ def _snippet(prior_answer: str) -> str:
     return f"{cut}…"
 
 
-def build_follow_up_prompt(base_prompt: str, prior_answer: str, *, locale: str = "zh-CN") -> str:
+def build_follow_up_prompt(base_prompt: str, prior_answer: str, *, locale: str = "en-US") -> str:
     """Compose a follow-up that cites the candidate's prior answer, then asks the base probe.
 
     Falls back to the bare ``base_prompt`` when there's no prior answer to reference (so an empty

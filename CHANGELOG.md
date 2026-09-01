@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.36.0.0 (2026-09-01)
+
+### Changed
+- **App-wide default interview language is now English (`en-US`) instead of Chinese (`zh-CN`), across
+  all four layers, including existing stored data.** Previously every "default language" fell back to
+  `zh-CN`: the agent editor's Language selector (B), the auto-seeded default persona (C), a new user's
+  `preferred_language` (D), and the question-bank / question / interview-session language (E). New
+  creations now default to `en-US`, and a data-backfill migration flips every existing row still on
+  the old `zh-CN` default. Layer by layer:
+  - **B — persona editor default locale.** `EDITOR_LOCALES` reordered to `["en-US", "zh-CN"]` so the
+    load-bearing index-0 (used by `normalizeLocale`'s fallback and `emptyPersonaForm`) is English;
+    `PersonaCreate.default_locale` and the `InterviewerPersona.default_locale` column
+    `default`/`server_default` are `en-US`.
+  - **C — seeded default persona.** `persona_seed` `_VOICE_MAP`/`_GREETING_MAP` now list `en-US`
+    first (fixing the `next(iter(...))` last-resort fallback), and the seeded persona sets
+    `default_locale="en-US"` explicitly.
+  - **D — new user language.** `User.preferred_language` default is `en-US`.
+  - **E — bank / question / session language.** `QuestionBank.language`, `Question.language`, the
+    `seed_default_bank` / `create_bank` / `add_question` service defaults, the admin `BankIn` /
+    `QuestionIn` schema defaults, and the bank-bundle import fallback all default to `en-US`. This
+    also **corrects a pre-existing content/tag mismatch**: the demo bank's 10 questions were already
+    English prose but were tagged `zh-CN`.
+  - Also flipped `voice_live_metadata.FALLBACK_LOCALE` (the `resolve_voice` fallback that had been
+    quietly pulling `en-US` requests back to a Chinese voice) and `build_follow_up_prompt`'s default
+    `locale` to `en-US`.
+  - **Existing-data migration** (`d4e5f6a7b8c9`): moves the `interviewer_personas.default_locale`
+    `server_default` to `en-US` (via SQLite batch mode) and backfills `interviewer_personas`,
+    `users`, `question_banks`, and `questions` rows still equal to the old `zh-CN` default → `en-US`.
+    Backfill is scoped to `= 'zh-CN'`, so an operator's deliberately-chosen non-Chinese locale is
+    preserved. The deployed server runs on ephemeral SQLite (reseeded per boot), so the migration
+    mainly protects local/persisted DBs and makes bare `INSERT`s default to English.
+  - UI chrome language (`i18n`), `voice_broker.DEFAULT_LOCALE`, the voice-live proxy locale pin, and
+    the frontend voice hook were already `en-US` and are unchanged. The `zh-CN` locale remains fully
+    supported — this changes only the *default*.
+
 ## 0.35.0.1 (2026-09-01)
 
 ### Fixed
