@@ -47,13 +47,22 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from app.services.config_overlay import apply_master_config_to_settings
     from app.services.config_service import seed_master_config_from_env
     from app.services.persona_seed import seed_default_persona
-    from app.services.question_seed import seed_default_bank
+    from app.services.question_seed import seed_bundled_banks, seed_default_bank
     from app.services.user_seed import seed_default_admin
 
     try:
         async with async_session_factory() as session:
             await seed_default_bank(session)
     except Exception:  # noqa: BLE001 — seeding is best-effort; never block startup
+        pass
+    try:
+        # Import the committed generic bank bundles (Demo / Deployment SOP / test) alongside the
+        # default, so the ephemeral server presents the same multi-bank catalogue as a local
+        # checkout. Idempotent-by-name; each bundle is non-default so it never fights the boot
+        # importer's rf-CSM default. Separate try: a bad bundle must not block the rest of startup.
+        async with async_session_factory() as session:
+            await seed_bundled_banks(session)
+    except Exception:  # noqa: BLE001 — bundle seed is best-effort; never block startup
         pass
     try:
         async with async_session_factory() as session:

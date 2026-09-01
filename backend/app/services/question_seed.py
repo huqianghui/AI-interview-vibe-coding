@@ -6,13 +6,24 @@ questions from this bank once it's seeded (otherwise it uses the built-in fallba
 
 PUBLIC repo: these are generic, role-agnostic placeholder questions. Real client SOP-derived
 questions and their ``expected_points`` are loaded at deploy time, never committed here.
+
+Beyond the single programmatic default, :func:`seed_bundled_banks` imports every committed bank
+bundle under ``app/seeds/banks/*.json`` (non-default, SOP-doc-free generic banks) so the ephemeral
+server presents the same multi-bank catalogue as a local checkout — the boot importer's rf-CSM
+bank stays the enabled default, these ride alongside it. Client-derived banks are NOT committed;
+they arrive via the private-blob channel (see ``entrypoint.sh``).
 """
 
 import json
+from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services import question_service
+from app.services import bank_bundle_service, question_service
+
+# Committed generic bank bundles, imported alongside the default on boot. Directory may be absent
+# in a bare test tree — treated as "no bundles" rather than an error.
+_SEED_BANKS_DIR = Path(__file__).resolve().parent.parent / "seeds" / "banks"
 
 # 10 generic behavioral/procedural questions. `expected_points` are neutral placeholders that F3
 # checklist items will later attach to; they are interviewer-internal (never candidate-facing, P3).
@@ -79,3 +90,49 @@ async def seed_default_bank(db: AsyncSession, *, language: str = "en-US") -> str
             max_follow_ups=int(q.get("max_follow_ups", 0)),
         )
     return bank.id
+
+
+async def seed_bundled_banks(db: AsyncSession) -> list[str]:
+    """Import every committed generic bank bundle (``app/seeds/banks/*.json``), idempotently.
+
+    So the ephemeral server matches a local checkout's multi-bank catalogue: on live the boot
+    importer seeds the client rf-CSM bank as the enabled default, and this adds the generic banks
+    (Demo / Deployment SOP / test) alongside it. :func:`bank_bundle_service.import_bank_bundle` is
+    idempotent by name (it replaces an existing same-named bank), so re-running on every boot
+    converges rather than duplicating.
+
+    Each committed bundle is non-default (``is_default: false``) so this never fights the boot
+    importer for the single-default slot. Returns the list of imported bank ids (empty when the
+    seeds directory is absent, e.g. in a bare test tree). Best-effort per file: a malformed bundle
+    is skipped with its name in the raised context rather than aborting the others.
+    """
+    if not _SEED_BANKS_DIR.is_dir():
+        return []
+
+    # Preserve whichever bank owns the enabled-default slot across the import. On live that's the
+    # boot importer's rf-CSM bank (no bundle shares its name, so it's untouched). In public-demo
+    # mode it's the programmatic "Demo interview bank" — and a committed bundle of the SAME name
+    # replaces it as non-default, which would otherwise leave NO default and drop the interview
+    # back to the built-in fallback pair. Capture the name up front and restore it after.
+    prior_default = await question_service.get_default_bank(db)
+    prior_default_name = prior_default.name if prior_default is not None else None
+
+    imported: list[str] = []
+    for path in sorted(_SEED_BANKS_DIR.glob("*.json")):
+        bundle = json.loads(path.read_text(encoding="utf-8"))
+        # Defensive: a committed generic seed must never claim the default slot.
+        bundle.setdefault("bank", {})["is_default"] = False
+        result = await bank_bundle_service.import_bank_bundle(db, bundle)
+        imported.append(result.bank_id)
+
+    # Restore the default if an import replaced the previously-default bank (same-name replace
+    # drops the flag). Match by name — the bundle re-created it under a fresh id.
+    if prior_default_name is not None and await question_service.get_default_bank(db) is None:
+        restored = next(
+            (b for b in await question_service.list_banks(db) if b.name == prior_default_name),
+            None,
+        )
+        if restored is not None:
+            await question_service.set_default_bank(db, restored.id)
+
+    return imported

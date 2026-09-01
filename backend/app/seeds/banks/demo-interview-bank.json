@@ -1,0 +1,216 @@
+{
+  "format_version": 1,
+  "bank": {
+    "name": "Demo interview bank",
+    "description": "Seeded generic interview questions for the demo.",
+    "language": "en-US",
+    "is_default": false
+  },
+  "questions": [
+    {
+      "text": "Please introduce your relevant experience for this role.",
+      "language": "en-US",
+      "weight": 1,
+      "expected_points": [],
+      "max_follow_ups": 0,
+      "follow_up_prompt": "Can you walk me through that in a bit more detail?",
+      "enabled": true,
+      "checklist": {
+        "prompt_version": "v1",
+        "items": [
+          {
+            "kind": "required",
+            "text": "Identifies the correct procedure",
+            "weight": 63,
+            "advisory": false,
+            "source_quote": "Follow the documented steps in order.",
+            "source_page": "p.1",
+            "source_document_name": null,
+            "order_index": 0
+          },
+          {
+            "kind": "recommended",
+            "text": "Explains the reasoning",
+            "weight": 37,
+            "advisory": false,
+            "source_quote": "",
+            "source_page": null,
+            "source_document_name": null,
+            "order_index": 1
+          },
+          {
+            "kind": "forbidden",
+            "text": "Skips the safety check",
+            "weight": 0,
+            "advisory": false,
+            "source_quote": "Never bypass the safety check.",
+            "source_page": "p.2",
+            "source_document_name": null,
+            "order_index": 2
+          }
+        ]
+      }
+    },
+    {
+      "text": "Describe a situation where you had to follow a strict procedure. What did you do?",
+      "language": "en-US",
+      "weight": 1,
+      "expected_points": [
+        "identifies the procedure",
+        "follows each step",
+        "verifies the outcome"
+      ],
+      "max_follow_ups": 1,
+      "follow_up_prompt": "Can you walk me through that in a bit more detail?",
+      "enabled": true,
+      "checklist": {
+        "prompt_version": "v1",
+        "items": [
+          {
+            "kind": "required",
+            "text": "Identifies the correct procedure",
+            "weight": 63,
+            "advisory": false,
+            "source_quote": "Follow the documented steps in order.",
+            "source_page": "p.1",
+            "source_document_name": null,
+            "order_index": 0
+          },
+          {
+            "kind": "recommended",
+            "text": "Explains the reasoning",
+            "weight": 37,
+            "advisory": false,
+            "source_quote": "",
+            "source_page": null,
+            "source_document_name": null,
+            "order_index": 1
+          },
+          {
+            "kind": "forbidden",
+            "text": "Skips the safety check",
+            "weight": 0,
+            "advisory": false,
+            "source_quote": "Never bypass the safety check.",
+            "source_page": "p.2",
+            "source_document_name": null,
+            "order_index": 2
+          }
+        ]
+      }
+    },
+    {
+      "text": "How do you make sure you understand a task before starting it?",
+      "language": "en-US",
+      "weight": 1,
+      "expected_points": [],
+      "max_follow_ups": 0,
+      "follow_up_prompt": "Can you walk me through that in a bit more detail?",
+      "enabled": true,
+      "checklist": {
+        "prompt_version": "imported_v1",
+        "items": []
+      }
+    },
+    {
+      "text": "Tell me about a time you caught a mistake before it caused a problem.",
+      "language": "en-US",
+      "weight": 1,
+      "expected_points": [
+        "notices the issue early",
+        "takes corrective action"
+      ],
+      "max_follow_ups": 0,
+      "follow_up_prompt": "Can you walk me through that in a bit more detail?",
+      "enabled": true,
+      "checklist": {
+        "prompt_version": "imported_v1",
+        "items": []
+      }
+    },
+    {
+      "text": "How do you prioritise when several tasks are urgent at once?",
+      "language": "en-US",
+      "weight": 1,
+      "expected_points": [],
+      "max_follow_ups": 0,
+      "follow_up_prompt": "Can you walk me through that in a bit more detail?",
+      "enabled": true,
+      "checklist": {
+        "prompt_version": "imported_v1",
+        "items": []
+      }
+    },
+    {
+      "text": "Describe how you handle a step you are unsure about during a procedure.",
+      "language": "en-US",
+      "weight": 1,
+      "expected_points": [
+        "pauses safely",
+        "seeks the right reference or person"
+      ],
+      "max_follow_ups": 0,
+      "follow_up_prompt": "Can you walk me through that in a bit more detail?",
+      "enabled": true,
+      "checklist": {
+        "prompt_version": "imported_v1",
+        "items": []
+      }
+    },
+    {
+      "text": "Give an example of following a safety or compliance rule under pressure.",
+      "language": "en-US",
+      "weight": 1,
+      "expected_points": [],
+      "max_follow_ups": 0,
+      "follow_up_prompt": "Can you walk me through that in a bit more detail?",
+      "enabled": true,
+      "checklist": {
+        "prompt_version": "imported_v1",
+        "items": []
+      }
+    },
+    {
+      "text": "How do you record and hand off work so someone else can continue it?",
+      "language": "en-US",
+      "weight": 1,
+      "expected_points": [],
+      "max_follow_ups": 0,
+      "follow_up_prompt": "Can you walk me through that in a bit more detail?",
+      "enabled": true,
+      "checklist": {
+        "prompt_version": "imported_v1",
+        "items": []
+      }
+    },
+    {
+      "text": "Tell me about a time you improved a process you were responsible for.",
+      "language": "en-US",
+      "weight": 1,
+      "expected_points": [
+        "identifies the inefficiency",
+        "proposes a concrete change"
+      ],
+      "max_follow_ups": 0,
+      "follow_up_prompt": "Can you walk me through that in a bit more detail?",
+      "enabled": true,
+      "checklist": {
+        "prompt_version": "imported_v1",
+        "items": []
+      }
+    },
+    {
+      "text": "Why are you interested in this role, and what do you hope to contribute?",
+      "language": "en-US",
+      "weight": 1,
+      "expected_points": [],
+      "max_follow_ups": 0,
+      "follow_up_prompt": "Can you walk me through that in a bit more detail?",
+      "enabled": true,
+      "checklist": {
+        "prompt_version": "imported_v1",
+        "items": []
+      }
+    }
+  ]
+}
