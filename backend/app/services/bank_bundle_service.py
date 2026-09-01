@@ -169,7 +169,7 @@ async def import_bank_bundle(db: AsyncSession, bundle: dict) -> ImportResult:
     bank = QuestionBank(
         name=name,
         description=str(bank_spec.get("description", "")),
-        language=str(bank_spec.get("language", "zh-CN")),
+        language=str(bank_spec.get("language", "en-US")),
         enabled=True,
         is_default=is_default,
     )

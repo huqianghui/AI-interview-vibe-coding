@@ -14,7 +14,7 @@ import {
 import { parseToolsConfig, stringifyToolsConfig, type ToolConfig } from "../data/agentTools";
 
 /** Locales this project supports (mirrors i18n SUPPORTED_LANGUAGES). */
-export const EDITOR_LOCALES = ["zh-CN", "en-US"] as const;
+export const EDITOR_LOCALES = ["en-US", "zh-CN"] as const;
 export type EditorLocale = (typeof EDITOR_LOCALES)[number];
 
 /** Coerce a stored locale string to a supported EditorLocale, falling back to the first. */

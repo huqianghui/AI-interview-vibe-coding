@@ -2,7 +2,7 @@
  * Form-mapper round-trip (regression for the "Language reset on refresh" bug): the editor's
  * "Language" selector is `default_locale`, a persisted persona field. personaToForm must read it
  * and formToPayload must send it, so a Save→reload cycle restores the selected locale instead of
- * snapping back to the hardcoded zh-CN default.
+ * snapping back to the hardcoded default locale.
  */
 import { describe, expect, it } from "vitest";
 import type { PersonaOut } from "../api/personas";
@@ -53,9 +53,9 @@ describe("agentEditorForm default_locale round-trip", () => {
     expect(personaToForm(saved).defaultLocale).toBe("en-US");
   });
 
-  it("falls back to zh-CN for an unknown or missing stored locale", () => {
-    expect(personaToForm(persona({ default_locale: "fr-FR" })).defaultLocale).toBe("zh-CN");
-    expect(normalizeLocale(undefined)).toBe("zh-CN");
-    expect(normalizeLocale("")).toBe("zh-CN");
+  it("falls back to en-US for an unknown or missing stored locale", () => {
+    expect(personaToForm(persona({ default_locale: "fr-FR" })).defaultLocale).toBe("en-US");
+    expect(normalizeLocale(undefined)).toBe("en-US");
+    expect(normalizeLocale("")).toBe("en-US");
   });
 });

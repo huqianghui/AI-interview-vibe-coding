@@ -49,7 +49,7 @@ class PersonaCreate(VoiceKnobs):
     greeting_map: str = "{}"
     # Editor's remembered "Language" selector locale (which voice_map/greeting_map locale it opens
     # on). Not the interview runtime language — that's chosen per session.
-    default_locale: str = "zh-CN"
+    default_locale: str = "en-US"
     enabled: bool = True
     is_default: bool = False
     tools_config: str = "[]"

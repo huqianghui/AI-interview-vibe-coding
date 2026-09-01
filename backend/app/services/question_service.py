@@ -41,7 +41,7 @@ async def create_bank(
     *,
     name: str,
     description: str = "",
-    language: str = "zh-CN",
+    language: str = "en-US",
     enabled: bool = True,
     is_default: bool = False,
 ) -> QuestionBank:
@@ -68,7 +68,7 @@ async def add_question(
     bank_id: str,
     text: str,
     order_index: int,
-    language: str = "zh-CN",
+    language: str = "en-US",
     expected_points: str = "[]",
     enabled: bool = True,
     weight: int = 1,

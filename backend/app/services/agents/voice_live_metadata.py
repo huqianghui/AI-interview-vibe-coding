@@ -41,7 +41,7 @@ DEFAULT_AVATAR_CHARACTER = "lisa"
 # Azure Voice Live expects the real style slug; the persona's style is passed through verbatim.
 DEFAULT_AVATAR_STYLE = "casual-sitting"
 DEFAULT_VOICE_BY_LOCALE = {"zh-CN": "zh-CN-XiaoxiaoNeural", "en-US": "en-US-AvaNeural"}
-FALLBACK_LOCALE = "zh-CN"
+FALLBACK_LOCALE = "en-US"
 
 METADATA_CHUNK_SIZE = 512
 

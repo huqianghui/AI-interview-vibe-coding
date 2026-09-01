@@ -51,7 +51,7 @@ DEMO_QUESTIONS: tuple[dict, ...] = (
 DEFAULT_BANK_NAME = "Demo interview bank"
 
 
-async def seed_default_bank(db: AsyncSession, *, language: str = "zh-CN") -> str | None:
+async def seed_default_bank(db: AsyncSession, *, language: str = "en-US") -> str | None:
     """Create the demo default bank + questions if none is set. Returns the bank id, or None.
 
     Idempotent: returns None (and writes nothing) when an enabled default bank already exists.

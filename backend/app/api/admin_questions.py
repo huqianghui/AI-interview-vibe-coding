@@ -34,7 +34,7 @@ router = APIRouter(
 class BankIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     description: str = ""
-    language: str = "zh-CN"
+    language: str = "en-US"
     is_default: bool = False
 
 
@@ -49,7 +49,7 @@ class BankOut(BaseModel):
 
 class QuestionIn(BaseModel):
     text: str = Field(min_length=1)
-    language: str = "zh-CN"
+    language: str = "en-US"
     expected_points: list[str] = []
     max_follow_ups: int = 0
     follow_up_prompt: str = "Can you walk me through that in a bit more detail?"
