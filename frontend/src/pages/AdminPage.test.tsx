@@ -4,6 +4,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
+import "../i18n"; // AdminPage uses useTranslation — ensure the i18n singleton is initialized (en-US default)
 import { AdminPage } from "./AdminPage";
 import * as admin from "../api/admin";
 import * as auth from "../api/auth";
@@ -117,7 +118,7 @@ describe("AdminPage", () => {
     renderPage();
     await signIn(user);
 
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/管理员/));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/Administrator/));
     expect(screen.getByTestId("admin-username-input")).toBeInTheDocument();
     expect(auth.getToken()).toBe(""); // token cleared on role rejection
   });

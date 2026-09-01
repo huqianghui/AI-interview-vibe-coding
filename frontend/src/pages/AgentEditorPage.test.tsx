@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
+import "../i18n"; // AgentEditorPage uses useTranslation — ensure the i18n singleton is initialized
 import { AgentEditorPage } from "./AgentEditorPage";
 import * as personas from "../api/personas";
 import * as admin from "../api/admin";
@@ -190,7 +191,7 @@ describe("AgentEditorPage", () => {
 
     renderPage();
     await signIn(user);
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/管理员/));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/Administrator/));
     expect(auth.getToken()).toBe("");
   });
 

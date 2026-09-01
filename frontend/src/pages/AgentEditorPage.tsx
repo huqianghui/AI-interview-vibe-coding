@@ -8,6 +8,7 @@
  * clobbering in-progress edits.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Body1, Button, Input, Title2 } from "@fluentui/react-components";
 import * as auth from "../api/auth";
 import * as personas from "../api/personas";
@@ -27,6 +28,7 @@ import {
 const NEW = "__new__";
 
 export function AgentEditorPage() {
+  const { t } = useTranslation();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [authed, setAuthed] = useState(false);
@@ -97,7 +99,7 @@ export function AgentEditorPage() {
       const user = await auth.me();
       if (!user || user.role !== "admin") {
         auth.clearToken();
-        throw new Error("需要管理员权限");
+        throw new Error(t("admin.errAdminRequired"));
       }
       setAuthed(true);
     });
@@ -197,7 +199,7 @@ export function AgentEditorPage() {
   if (authChecking) {
     return (
       <div style={{ maxWidth: 420, margin: "0 auto", padding: 24 }}>
-        <Body1>正在验证登录状态…</Body1>
+        <Body1>{t("admin.checkingAuth")}</Body1>
       </div>
     );
   }
@@ -205,11 +207,11 @@ export function AgentEditorPage() {
   if (!authed) {
     return (
       <div style={{ maxWidth: 420, margin: "0 auto", padding: 24 }}>
-        <Title2 as="h1">Agent editor 登录</Title2>
-        <Body1 style={{ display: "block", margin: "12px 0" }}>用管理员账号登录以编辑面试官 agent。</Body1>
+        <Title2 as="h1">{t("admin.agentLoginTitle")}</Title2>
+        <Body1 style={{ display: "block", margin: "12px 0" }}>{t("admin.agentLoginBody")}</Body1>
         <Input
           value={username}
-          placeholder="用户名"
+          placeholder={t("admin.username")}
           onChange={(_, d) => setUsername(d.value)}
           style={{ width: "100%", marginBottom: 8 }}
           data-testid="agent-username-input"
@@ -217,7 +219,7 @@ export function AgentEditorPage() {
         <Input
           type="password"
           value={password}
-          placeholder="密码"
+          placeholder={t("admin.password")}
           onChange={(_, d) => setPassword(d.value)}
           onKeyDown={(e) => e.key === "Enter" && onLogin()}
           style={{ width: "100%" }}
@@ -225,7 +227,7 @@ export function AgentEditorPage() {
         />
         <div style={{ marginTop: 12 }}>
           <Button appearance="primary" onClick={onLogin} data-testid="agent-login">
-            登录
+            {t("admin.login")}
           </Button>
         </div>
         {error && (

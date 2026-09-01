@@ -19,10 +19,12 @@ test("admin authors a bank + checklist, candidate gets a scored report", async (
   await page.getByTestId("admin-username-input").fill(ADMIN_USER);
   await page.getByTestId("admin-password-input").fill(ADMIN_PW);
   await page.getByTestId("admin-login").click();
-  // Logged in → the admin editor's page heading renders. (The two-tab refactor made this the
-  // "Admin — 题库与评分标准" h1; the "题库与评分标准 / Content" tab has role=tab, not heading, so this
-  // resolves to the single page title.)
-  await expect(page.getByRole("heading", { name: /题库与评分标准/ })).toBeVisible();
+  // Logged in → the admin editor's page heading renders. Admin copy is i18n-driven now (the header
+  // language selector controls it), so match either locale's page title — the Content/Connection
+  // tabs are role=tab, not heading, so this resolves to the single page-title h1.
+  await expect(
+    page.getByRole("heading", { name: /题库与评分标准|Question banks & rubrics/ }),
+  ).toBeVisible();
 
   // --- Admin: create a default bank ---
   const bankName = `E2E SOP Bank ${Date.now()}`;
@@ -39,7 +41,7 @@ test("admin authors a bank + checklist, candidate gets a scored report", async (
   // Open the question's inline rubric editor and (re)draft its checklist from the question/SOP.
   // Design B auto-drafts a non-empty checklist at create time; "重新生成 / Generate" re-drafts it
   // via the mock LLM (weights re-normalized to 100).
-  await page.getByRole("button", { name: /评分标准 \/ Rubric/ }).click();
+  await page.getByRole("button", { name: /评分标准|Rubric/ }).click();
   await page.getByTestId("checklist-generate").click();
   await expect(page.getByText(/Weights total: 100/)).toBeVisible();
 

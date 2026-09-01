@@ -107,7 +107,9 @@ test("capture admin: content workspace + rubric editor", async ({ page }) => {
   await page.getByTestId("admin-username-input").fill(ADMIN_USER);
   await page.getByTestId("admin-password-input").fill(ADMIN_PW);
   await page.getByTestId("admin-login").click();
-  await expect(page.getByRole("heading", { name: /题库与评分标准/ })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: /题库与评分标准|Question banks & rubrics/ }),
+  ).toBeVisible();
 
   const bankName = `README Admin Bank ${Date.now()}`;
   await page.getByPlaceholder("New bank name").fill(bankName);
@@ -117,7 +119,7 @@ test("capture admin: content workspace + rubric editor", async ({ page }) => {
   await page.getByPlaceholder("New question text").fill("Walk me through your pre-deploy checks.");
   await page.getByRole("button", { name: "Add question" }).click();
 
-  await page.getByRole("button", { name: /评分标准 \/ Rubric/ }).click();
+  await page.getByRole("button", { name: /评分标准|Rubric/ }).click();
   await page.getByTestId("checklist-generate").click();
   await expect(page.getByText(/Weights total: 100/)).toBeVisible();
   await page.screenshot({ path: `${OUT}/07-admin-rubric-editor.png`, fullPage: true });

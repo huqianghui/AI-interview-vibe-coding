@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.36.0.3 (2026-09-01)
+
+### Fixed
+- **Admin surfaces (`/admin`, `/admin/agent`) now follow the header language selector instead of
+  always showing hardcoded bilingual `中文 / English` labels.** Every user-facing string on the
+  admin/content editor and the agent-editor login gate was a concatenated `"已保存 / Saved"`-style
+  literal, so the selector (which drives i18n everywhere else) had no effect there. These are now
+  `t()` keys under a new `admin` namespace in `i18n.ts` (en-US + zh-CN), so choosing English shows
+  only English and choosing Chinese shows only Chinese — a single language, matching the rest of the
+  app. Login gates, tab labels, bank/question/rubric controls, placeholders, and status messages are
+  all covered. The Azure connection tab was already English-only and is unchanged.
+
+### Notes
+- No behavior change beyond copy: the same `data-testid`s and control flow are preserved. The
+  role-rejection error message now renders in the selected language (English by default).
+
 ## 0.36.0.2 (2026-09-01)
 
 ### Fixed
