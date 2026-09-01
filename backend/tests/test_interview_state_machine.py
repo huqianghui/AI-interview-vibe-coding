@@ -154,11 +154,21 @@ async def test_follow_up_stays_on_question_then_advances(db_session):
     fu_question = question_at(QUESTIONS, _FOLLOW_UP_Q_INDEX)
     assert fu_question is not None
 
+    # The base question is NOT a follow-up: voice must verbatim-read it.
+    base_cq = await state_machine.get_current_question(db_session, interview)
+    assert base_cq is not None and base_cq["is_follow_up"] is False
+
     # First (main) answer to it must NOT advance — a follow-up is owed.
     interview = await state_machine.answer_finalized(
         db_session, interview, "my main answer, sufficiently long"
     )
     assert interview.current_question_index == _FOLLOW_UP_Q_INDEX
+
+    # With a follow-up pending, the current question flips is_follow_up True so voice suppresses its
+    # verbatim read (the agent's own auto-response voices the clarification — see InterviewPage).
+    fu_cq = await state_machine.get_current_question(db_session, interview)
+    assert fu_cq is not None and fu_cq["is_follow_up"] is True
+    assert fu_question.follow_up_prompt in fu_cq["prompt"]
 
     # A follow-up interviewer turn was recorded for this question. F7: the follow-up references
     # the candidate's prior answer AND still carries the base probe.

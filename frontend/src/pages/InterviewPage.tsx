@@ -447,20 +447,28 @@ export function InterviewPage() {
   // Voice mode: speak the backend-authoritative question text (Phase 4 voice→turn sub-design).
   // When a new prompt is current and voice is connected, have Voice Live read it verbatim rather
   // than let the agent autonomously generate — the backend keeps the question pointer. Keyed on the
-  // prompt TEXT, not question_id, so a follow-up (same question_id, new prompt) is spoken too.
+  // prompt TEXT, not question_id, so a NEW main question is spoken even if same id.
+  //
+  // Follow-ups are DELIBERATELY not verbatim-read: server-VAD (`create_response=True`) has the
+  // agent voice its own clarification the moment the candidate stops speaking, so reading the
+  // backend `build_follow_up_prompt` text on top of it spoke the follow-up twice AND rendered two
+  // identical Interviewer bubbles (each a distinct Azure response_id). The backend follow-up text
+  // stays authoritative for the text channel + CI; in voice the agent owns follow-ups.
   const currentPrompt = interview?.current_question?.prompt ?? "";
+  const currentIsFollowUp = interview?.current_question?.is_follow_up ?? false;
   useEffect(() => {
     if (
       channel === "voice" &&
       voice.connectionState === "connected" &&
       currentPrompt &&
+      !currentIsFollowUp &&
       spokenQuestionId.current !== currentPrompt
     ) {
       if (voice.speakQuestion(currentPrompt)) {
         spokenQuestionId.current = currentPrompt;
       }
     }
-  }, [channel, voice, currentPrompt]);
+  }, [channel, voice, currentPrompt, currentIsFollowUp]);
 
   const q = interview?.current_question ?? null;
   // REAL streamed progress when /report/stream delivered any (done = answers already graded, so

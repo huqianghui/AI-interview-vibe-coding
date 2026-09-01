@@ -14,6 +14,10 @@ export interface Question {
   prompt: string;
   index: number;
   total: number;
+  // True when `prompt` is a pending follow-up (cites the prior answer), not the base question.
+  // Voice suppresses its verbatim read for follow-ups — the agent's own auto-response already
+  // voices a clarification, so reading it too speaks it twice + duplicates the transcript bubble.
+  is_follow_up?: boolean;
 }
 
 export interface Interview {
