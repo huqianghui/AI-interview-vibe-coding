@@ -3,11 +3,11 @@
  *
  * Gated by the shared admin bearer token (entered here, kept in sessionStorage). After sign-in the
  * page is a two-tab workspace:
- *   • "题库与评分标准 / Content" — banks (create / set-default), the selected bank's questions
+ *   • "Content" tab — banks (create / set-default), the selected bank's questions
  *     (add / delete / move), and, inline under the selected question, its scoring rubric
  *     (draft / edit item kind + text + weight / regenerate). The rubric hangs off the selected
  *     question, so it lives as an inline panel here rather than its own tab.
- *   • "Azure 连接 / Connection" — the AI Foundry runtime config (endpoint / key / model / KB),
+ *   • "Connection" tab — the AI Foundry runtime config (endpoint / key / model / KB),
  *     which is low-frequency setup, kept out of the daily content-editing path.
  * A top bar links across to the digital-human persona editor (/admin/agent).
  *
@@ -15,6 +15,7 @@
  * than ad-hoc inline styles, so spacing / radius / color / elevation stay consistent.
  */
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import {
   Badge,
@@ -160,6 +161,7 @@ const KIND_COLOR: Record<string, "danger" | "success" | "warning" | "informative
 
 export function AdminPage() {
   const styles = useStyles();
+  const { t } = useTranslation();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [authed, setAuthed] = useState(false);
@@ -269,7 +271,7 @@ export function AdminPage() {
       const user = await auth.me();
       if (!user || user.role !== "admin") {
         auth.clearToken();
-        throw new Error("需要管理员权限");
+        throw new Error(t("admin.errAdminRequired"));
       }
       setAuthed(true);
     });
@@ -334,7 +336,7 @@ export function AdminPage() {
         source_page,
       }));
       adoptChecklist(await admin.editChecklistItems(checklist.checklist_id, payload));
-      setChecklistStatus("已保存 / Saved");
+      setChecklistStatus(t("admin.saved"));
     });
 
   // (Re)generate a checklist from the question via AI, then refresh the question list so the
@@ -343,7 +345,7 @@ export function AdminPage() {
     guard(async () => {
       if (!selectedQuestion) return;
       adoptChecklist(await admin.draftChecklist(selectedQuestion));
-      setChecklistStatus("已生成 / Generated");
+      setChecklistStatus(t("admin.generated"));
       if (selectedBank) setQuestions(await admin.listBankQuestions(selectedBank));
     });
 
@@ -354,7 +356,7 @@ export function AdminPage() {
   if (authChecking) {
     return (
       <div className={styles.loginPage}>
-        <Body1>正在验证登录状态…</Body1>
+        <Body1>{t("admin.checkingAuth")}</Body1>
       </div>
     );
   }
@@ -362,13 +364,11 @@ export function AdminPage() {
   if (!authed) {
     return (
       <div className={styles.loginPage}>
-        <Title2 as="h1">Admin 登录</Title2>
-        <Body1 style={{ display: "block", margin: "12px 0" }}>
-          用管理员账号登录以编辑题库、清单与配置。
-        </Body1>
+        <Title2 as="h1">{t("admin.loginTitle")}</Title2>
+        <Body1 style={{ display: "block", margin: "12px 0" }}>{t("admin.loginBody")}</Body1>
         <Input
           value={username}
-          placeholder="用户名"
+          placeholder={t("admin.username")}
           onChange={(_, d) => setUsername(d.value)}
           style={{ width: "100%", marginBottom: 8 }}
           data-testid="admin-username-input"
@@ -376,7 +376,7 @@ export function AdminPage() {
         <Input
           type="password"
           value={password}
-          placeholder="密码"
+          placeholder={t("admin.password")}
           onChange={(_, d) => setPassword(d.value)}
           onKeyDown={(e) => e.key === "Enter" && onLogin()}
           style={{ width: "100%" }}
@@ -384,7 +384,7 @@ export function AdminPage() {
         />
         <div style={{ marginTop: 12 }}>
           <Button appearance="primary" onClick={onLogin} data-testid="admin-login">
-            登录
+            {t("admin.login")}
           </Button>
         </div>
         {error && (
@@ -403,9 +403,9 @@ export function AdminPage() {
   return (
     <div className={styles.page}>
       <div className={styles.topBar}>
-        <Title2 as="h1">Admin — 题库与评分标准</Title2>
+        <Title2 as="h1">{t("admin.pageTitle")}</Title2>
         <Link to="/admin/agent" className={styles.navLink} data-testid="admin-nav-agent">
-          <Button appearance="secondary">数字人编辑 / Agent editor →</Button>
+          <Button appearance="secondary">{t("admin.navAgent")}</Button>
         </Link>
       </div>
 
@@ -414,10 +414,10 @@ export function AdminPage() {
         onTabSelect={(_, d) => setTab(d.value as "content" | "connection")}
       >
         <Tab value="content" data-testid="admin-tab-content">
-          题库与评分标准 / Content
+          {t("admin.tabContent")}
         </Tab>
         <Tab value="connection" data-testid="admin-tab-connection">
-          Azure 连接 / Connection
+          {t("admin.tabConnection")}
         </Tab>
       </TabList>
 
@@ -425,7 +425,7 @@ export function AdminPage() {
         <>
           {/* Banks */}
           <Card className={styles.card}>
-            <CardHeader header={<Title3>题库 / Question banks</Title3>} />
+            <CardHeader header={<Title3>{t("admin.banksTitle")}</Title3>} />
             <ul className={styles.list} data-testid="bank-list">
               {banks.map((b) => (
                 <li key={b.bank_id} className={styles.row}>
@@ -440,7 +440,7 @@ export function AdminPage() {
                   <div className={styles.actions}>
                     {b.is_default ? (
                       <Badge appearance="tint" color="brand">
-                        默认 / default
+                        {t("admin.defaultBadge")}
                       </Badge>
                     ) : (
                       <Button
@@ -452,7 +452,7 @@ export function AdminPage() {
                           })
                         }
                       >
-                        设为默认 / Make default
+                        {t("admin.makeDefault")}
                       </Button>
                     )}
                   </div>
@@ -462,7 +462,7 @@ export function AdminPage() {
             <div className={styles.addRow}>
               <Input
                 value={newBankName}
-                placeholder="新题库名称 / New bank name"
+                placeholder={t("admin.newBankPlaceholder")}
                 onChange={(_, d) => setNewBankName(d.value)}
               />
               <Button
@@ -475,7 +475,7 @@ export function AdminPage() {
                   })
                 }
               >
-                添加题库 / Add bank
+                {t("admin.addBank")}
               </Button>
             </div>
           </Card>
@@ -483,7 +483,7 @@ export function AdminPage() {
           {/* Questions in the selected bank */}
           {selectedBank ? (
             <Card className={styles.card}>
-              <CardHeader header={<Title3>题目 / Questions</Title3>} />
+              <CardHeader header={<Title3>{t("admin.questionsTitle")}</Title3>} />
               <ul className={styles.list} data-testid="question-list">
                 {questions.map((q, i) => (
                   <li key={q.question_id} className={styles.row}>
@@ -496,8 +496,8 @@ export function AdminPage() {
                         className={q.checklist_item_count > 0 ? styles.hintOk : styles.hintWarn}
                       >
                         {q.checklist_item_count > 0
-                          ? `✓ ${q.checklist_item_count} 项 / items`
-                          : "⚙ 未配评分 / not configured"}
+                          ? t("admin.rubricItems", { count: q.checklist_item_count })
+                          : t("admin.rubricNotConfigured")}
                       </Text>
                     </div>
                     <div className={styles.actions}>
@@ -507,12 +507,12 @@ export function AdminPage() {
                         onClick={() => loadChecklist(q.question_id)}
                         data-testid={`rubric-btn-${q.question_id}`}
                       >
-                        评分标准 / Rubric
+                        {t("admin.rubricBtn")}
                       </Button>
                       <Button
                         size="small"
                         disabled={i === 0}
-                        aria-label="上移 / Move up"
+                        aria-label={t("admin.moveUp")}
                         onClick={() =>
                           guard(async () => {
                             const ids = questions.map((x) => x.question_id);
@@ -533,7 +533,7 @@ export function AdminPage() {
                           })
                         }
                       >
-                        删除 / Delete
+                        {t("admin.delete")}
                       </Button>
                     </div>
                   </li>
@@ -542,7 +542,7 @@ export function AdminPage() {
               <div className={styles.addRow}>
                 <Input
                   value={newQuestionText}
-                  placeholder="新题目 / New question text"
+                  placeholder={t("admin.newQuestionPlaceholder")}
                   onChange={(_, d) => setNewQuestionText(d.value)}
                   style={{ flex: 1 }}
                 />
@@ -556,31 +556,31 @@ export function AdminPage() {
                     })
                   }
                 >
-                  添加题目 / Add question
+                  {t("admin.addQuestion")}
                 </Button>
               </div>
             </Card>
           ) : (
             <Card className={styles.card}>
-              <Body1 className={styles.emptyState}>
-                选择一个题库以查看题目。 / Select a bank to view its questions.
-              </Body1>
+              <Body1 className={styles.emptyState}>{t("admin.selectBankHint")}</Body1>
             </Card>
           )}
 
           {/* Checklist (scoring rubric) for the selected question — editable inline panel (F3b) */}
           {selectedQuestion && (
             <Card className={styles.card}>
-              <CardHeader header={<Title3>评分标准 / Scoring rubric</Title3>} />
+              <CardHeader header={<Title3>{t("admin.rubricTitle")}</Title3>} />
               {checklist ? (
                 <>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     <Body1>
-                      权重合计 / Weights total: {editWeightsSum} — {editItems.length} 项 / items
+                      {t("admin.weightsTotal", {
+                        sum: editWeightsSum,
+                        count: editItems.length,
+                      })}
                       {editWeightsSum !== 100 && (
                         <Text data-testid="checklist-weights-hint" className={styles.hintWarn}>
-                          {" "}
-                          （保存后按 100 归一 / re-normalized to 100 on save）
+                          {t("admin.weightsHint")}
                         </Text>
                       )}
                     </Body1>
@@ -620,7 +620,7 @@ export function AdminPage() {
                           </Dropdown>
                           <Input
                             value={it.text}
-                            placeholder="评分要点 / rubric item text"
+                            placeholder={t("admin.rubricItemPlaceholder")}
                             data-testid={`checklist-text-${i}`}
                             onChange={(_, d) => setItem(i, { text: d.value })}
                             style={{ flex: 1, minWidth: 200 }}
@@ -637,7 +637,7 @@ export function AdminPage() {
                             data-testid={`checklist-remove-${i}`}
                             onClick={() => removeItem(i)}
                           >
-                            删除 / Delete
+                            {t("admin.delete")}
                           </Button>
                         </div>
                         {it.source_quote && (
@@ -651,24 +651,19 @@ export function AdminPage() {
                   </ul>
                 </>
               ) : (
-                <Body1 className={styles.emptyState}>
-                  这道题还没有评分标准。点“重新生成 / Generate (AI)”从题目自动起草，或手动添加条目。
-                  <br />
-                  No rubric for this question yet — generate one from the question, or add items
-                  manually.
-                </Body1>
+                <Body1 className={styles.emptyState}>{t("admin.noRubric")}</Body1>
               )}
               <div className={styles.addRow} style={{ marginTop: 4 }}>
                 <Button data-testid="checklist-add-item" onClick={addItem}>
-                  添加一条 / Add item
+                  {t("admin.addItem")}
                 </Button>
                 {checklist && (
                   <Button appearance="primary" data-testid="checklist-save" onClick={saveChecklist}>
-                    保存 / Save
+                    {t("admin.save")}
                   </Button>
                 )}
                 <Button data-testid="checklist-generate" onClick={generateChecklist}>
-                  重新生成 / Generate (AI)
+                  {t("admin.generateAi")}
                 </Button>
                 {checklistStatus && (
                   <Text data-testid="checklist-status" className={styles.hintOk}>
