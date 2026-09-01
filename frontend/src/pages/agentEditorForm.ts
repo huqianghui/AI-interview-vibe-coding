@@ -17,6 +17,13 @@ import { parseToolsConfig, stringifyToolsConfig, type ToolConfig } from "../data
 export const EDITOR_LOCALES = ["zh-CN", "en-US"] as const;
 export type EditorLocale = (typeof EDITOR_LOCALES)[number];
 
+/** Coerce a stored locale string to a supported EditorLocale, falling back to the first. */
+export function normalizeLocale(value: string | null | undefined): EditorLocale {
+  return (EDITOR_LOCALES as readonly string[]).includes(value ?? "")
+    ? (value as EditorLocale)
+    : EDITOR_LOCALES[0];
+}
+
 /** The mutable slice the editor edits (no server-owned id / agent-sync bookkeeping). */
 export interface PersonaFormState {
   name: string;
@@ -25,6 +32,7 @@ export interface PersonaFormState {
   prompt_fragment: string;
   voiceMap: Record<string, string>;
   greetingMap: Record<string, string>;
+  defaultLocale: EditorLocale; // remembered "Language" selector locale (persisted, round-trips)
   enabled: boolean;
   is_default: boolean;
   turn_detection: string;
@@ -48,6 +56,7 @@ export function emptyPersonaForm(): PersonaFormState {
     prompt_fragment: "",
     voiceMap: {},
     greetingMap: {},
+    defaultLocale: EDITOR_LOCALES[0],
     enabled: true,
     is_default: false,
     turn_detection: "azure_semantic_vad",
@@ -72,6 +81,7 @@ export function personaToForm(p: PersonaOut): PersonaFormState {
     prompt_fragment: p.prompt_fragment,
     voiceMap: parseLocaleMap(p.voice_map),
     greetingMap: parseLocaleMap(p.greeting_map),
+    defaultLocale: normalizeLocale(p.default_locale),
     enabled: p.enabled,
     is_default: p.is_default,
     turn_detection: p.turn_detection,
@@ -96,6 +106,7 @@ export function formToPayload(form: PersonaFormState): PersonaCreate {
     prompt_fragment: form.prompt_fragment,
     voice_map: stringifyLocaleMap(form.voiceMap),
     greeting_map: stringifyLocaleMap(form.greetingMap),
+    default_locale: form.defaultLocale,
     enabled: form.enabled,
     is_default: form.is_default,
     turn_detection: form.turn_detection,

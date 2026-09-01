@@ -53,6 +53,28 @@ async def test_tools_config_round_trips(client):
     assert updated.json()["tools_config"] == '[{"type":"web_search"}]'
 
 
+async def test_default_locale_round_trips(client):
+    # The editor's "Language" selector persists as default_locale so it survives a reload (the bug:
+    # it used to be ephemeral client state that reset to zh-CN on refresh even after Save).
+    created = (
+        await client.post(
+            "/admin/personas", headers=AUTH, json={"name": "L", "default_locale": "en-US"}
+        )
+    ).json()
+    assert created["default_locale"] == "en-US"
+    # A fresh GET (what a page reload does) returns the saved locale, not the hardcoded default.
+    fetched = (await client.get(f"/admin/personas/{created['id']}", headers=AUTH)).json()
+    assert fetched["default_locale"] == "en-US"
+    # Default when omitted is the historical zh-CN.
+    plain = (await client.post("/admin/personas", headers=AUTH, json={"name": "M"})).json()
+    assert plain["default_locale"] == "zh-CN"
+    # Update persists a switched locale.
+    updated = await client.put(
+        f"/admin/personas/{plain['id']}", headers=AUTH, json={"default_locale": "en-US"}
+    )
+    assert updated.json()["default_locale"] == "en-US"
+
+
 async def test_list_and_get(client):
     created = (await client.post("/admin/personas", headers=AUTH, json={"name": "P"})).json()
     listing = (await client.get("/admin/personas", headers=AUTH)).json()

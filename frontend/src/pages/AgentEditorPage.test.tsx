@@ -35,6 +35,7 @@ const PERSONA: personas.PersonaOut = {
   prompt_fragment: "You are an interviewer.",
   voice_map: '{"zh-CN":"zh-CN-XiaoxiaoNeural"}',
   greeting_map: '{"zh-CN":"你好"}',
+  default_locale: "zh-CN",
   enabled: true,
   is_default: true,
   tools_config: "[]",

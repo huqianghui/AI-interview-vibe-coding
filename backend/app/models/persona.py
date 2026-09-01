@@ -88,6 +88,15 @@ class InterviewerPersona(TimestampMixin, Base):
     voice_map: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
     greeting_map: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
 
+    # The locale the editor opens on and the one whose voice/greeting the editor last edited.
+    # Unlike voice_map/greeting_map (which carry BOTH locales at once), this is a single scalar so
+    # the editor's "Language" selector round-trips — without it the dropdown reset to a hardcoded
+    # default on every reload even after Save. Not the interview's runtime language (that's chosen
+    # per session via the language-pin item); purely the persona's remembered editing locale.
+    default_locale: Mapped[str] = mapped_column(
+        String(16), default="zh-CN", server_default="zh-CN", nullable=False
+    )
+
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 

@@ -21,6 +21,7 @@ export interface PersonaOut {
   prompt_fragment: string;
   voice_map: string; // JSON string: {"zh-CN": "voiceName", ...}
   greeting_map: string; // JSON string: {"zh-CN": "greeting", ...}
+  default_locale: string; // editor's remembered "Language" selector locale (view state, persisted)
   enabled: boolean;
   is_default: boolean;
   tools_config: string; // JSON string: array of tool config dicts synced to the Foundry agent
