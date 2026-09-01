@@ -119,6 +119,62 @@ async def test_seed_bundled_bank_preserves_hand_authored_rubric(db_session):
     assert total_items > 0  # rubric survived the export→commit→import round-trip
 
 
+# --- client bank bundles via the private-blob channel (task #42) ------------------------------
+
+
+def _client_bundle(name: str, *, is_default: bool = True) -> dict:
+    """A minimal bank bundle as export_bank_bundle would emit it, for a private client bank."""
+    return {
+        "format_version": 1,
+        "bank": {"name": name, "language": "en-US", "is_default": is_default},
+        "questions": [
+            {
+                "text": "How do you oversee safety reporting across EMEA?",
+                "order_index": 0,
+                "weight": 1,
+                "max_follow_ups": 0,
+                "checklist": {
+                    "items": [
+                        {"kind": "criterion", "text": "Regional governance model", "weight": 100},
+                    ]
+                },
+            }
+        ],
+    }
+
+
+async def test_seed_client_banks_imports_from_external_dir(db_session, tmp_path):
+    # Client-derived banks arrive via the private-blob channel (never committed): a directory of
+    # *.json bundles is imported alongside the default, all non-default regardless of the bundle.
+    (tmp_path / "demo01.bank.json").write_text(
+        json.dumps(_client_bundle("rf-CSM demo01", is_default=True)), encoding="utf-8"
+    )
+    ids = await question_seed.seed_client_banks(db_session, directory=tmp_path)
+    assert len(ids) == 1
+    bank = next(b for b in await svc.list_banks(db_session) if b.name == "rf-CSM demo01")
+    assert bank.is_default is False  # forced non-default even though the bundle asked for default
+    assert bank.language == "en-US"
+
+
+async def test_seed_client_banks_absent_dir_is_noop(db_session):
+    # Public-demo mode / CI: no client bundle extracted → the configured dir is absent → no-op.
+    ids = await question_seed.seed_client_banks(db_session, directory="/nonexistent/extra_banks")
+    assert ids == []
+
+
+async def test_seed_client_banks_preserves_default(db_session, tmp_path):
+    # The boot importer's rf-CSM bank keeps the enabled-default slot across a client bank import.
+    rf = await svc.create_bank(db_session, name="rf-CSM (client default)", is_default=True)
+    (tmp_path / "demo01.bank.json").write_text(
+        json.dumps(_client_bundle("rf-CSM demo01")), encoding="utf-8"
+    )
+    await question_seed.seed_client_banks(db_session, directory=tmp_path)
+    await question_seed.seed_client_banks(db_session, directory=tmp_path)  # idempotent by name
+    banks = await svc.list_banks(db_session)
+    assert [b.name for b in banks].count("rf-CSM demo01") == 1  # no dupes across boots
+    assert (await svc.get_default_bank(db_session)).id == rf.id  # default untouched
+
+
 # --- state machine resolves from the seeded bank ---------------------------
 
 

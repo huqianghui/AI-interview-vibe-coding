@@ -10,7 +10,10 @@
 #                                    identity, no keys), then run the importer to seed the rf-CSM
 #                                    bank + its SOP docs into the local DB and local SOP store.
 #   3. exec uvicorn                — the FastAPI lifespan then idempotently seeds the generic demo
-#                                    bank + admin and overlays the saved master config.
+#                                    bank + admin and overlays the saved master config. It also
+#                                    imports any client bank bundles the bundle carried under
+#                                    ``_client_bundle/extra_banks/*.json`` (CLIENT_BANKS_DIR) — e.g.
+#                                    the rf-CSM demo01 bank — alongside the rf-CSM default.
 #
 # Steps 1 and 3 always run. Step 2 is best-effort: a missing/failed bundle logs a warning and boot
 # continues with the generic demo bank only (public-demo mode). This keeps the security model

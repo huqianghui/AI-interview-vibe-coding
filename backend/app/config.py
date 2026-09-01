@@ -58,6 +58,13 @@ class Settings(BaseSettings):
     # NOT a CognitiveSearch/ApiKey connection (those 403). Empty → adapter resolves/creates it.
     foundry_kb_mcp_connection: str = ""
 
+    # Client-derived bank bundles, delivered out-of-band through the private-blob channel (see
+    # entrypoint.sh) and imported on boot alongside the committed generic bundles. Points at a
+    # directory of ``*.bank.json`` files — the client bundle extracts to ``/app/_client_bundle`` and
+    # its ``extra_banks/`` subdir is the default. Empty/absent → no extra banks (public-demo mode).
+    # These banks carry client SOP source_quotes, so they are NEVER committed to this public repo.
+    client_banks_dir: str = "/app/_client_bundle/extra_banks"
+
     # SOP blob storage (F1). Raw uploads live here, never in the DB and never handed to candidates
     # directly (P4). Local filesystem in dev/CI; a blob backend can be swapped in prod.
     default_storage_provider: str = "local"
