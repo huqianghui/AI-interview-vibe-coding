@@ -47,6 +47,9 @@ class PersonaCreate(VoiceKnobs):
     prompt_fragment: str = ""
     voice_map: str = "{}"
     greeting_map: str = "{}"
+    # Editor's remembered "Language" selector locale (which voice_map/greeting_map locale it opens
+    # on). Not the interview runtime language — that's chosen per session.
+    default_locale: str = "zh-CN"
     enabled: bool = True
     is_default: bool = False
     tools_config: str = "[]"
@@ -61,6 +64,7 @@ class PersonaUpdate(BaseModel):
     prompt_fragment: str | None = None
     voice_map: str | None = None
     greeting_map: str | None = None
+    default_locale: str | None = None
     enabled: bool | None = None
     is_default: bool | None = None
     tools_config: str | None = None
@@ -83,6 +87,7 @@ class PersonaOut(BaseModel):
     prompt_fragment: str
     voice_map: str
     greeting_map: str
+    default_locale: str
     enabled: bool
     is_default: bool
     tools_config: str

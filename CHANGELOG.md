@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.35.0.1 (2026-09-01)
+
+### Fixed
+- **Agent editor "Language" selection now persists across a page refresh.** In `/admin/agent`,
+  changing the Language dropdown (and its per-locale Speech voice / Greeting view) then saving
+  showed "Saved." and correctly bumped the persona version — but a refresh reverted the dropdown to
+  `zh-CN`. Root cause: the editor's active locale was **ephemeral React state** (`activeLocale`,
+  initialized to the first locale on every mount), never part of the persona payload — so it was
+  neither saved nor restored, while the underlying `voice_map`/`greeting_map` (both locales) were in
+  fact persisted correctly. Added a real persisted `default_locale` field on `InterviewerPersona`
+  (Alembic migration, `server_default="zh-CN"` backfills existing rows), wired through
+  `PersonaCreate`/`PersonaUpdate`/`PersonaOut` and the frontend form mappers, and made
+  `form.defaultLocale` the single source of truth for the selector (removing the ephemeral state).
+  The selected language now round-trips with the persona version. The reconcile-from-Foundry path
+  was verified not to touch `default_locale` (or `voice_map`/`greeting_map`/voice knobs), so a saved
+  locale survives editor re-open. A full four-layer audit confirmed no other persona config field
+  had this save→load defect.
+
 ## 0.35.0.0 (2026-09-01)
 
 ### Added

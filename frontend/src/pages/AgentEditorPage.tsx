@@ -18,11 +18,9 @@ import { PlaygroundPanel } from "../components/agent-editor/PlaygroundPanel";
 import { ConfigurationRail } from "../components/agent-editor/ConfigurationRail";
 import { DEFAULT_AVATAR_CHARACTER, DEFAULT_AVATAR_STYLE } from "../data/avatarCharacters";
 import {
-  EDITOR_LOCALES,
   emptyPersonaForm,
   formToPayload,
   personaToForm,
-  type EditorLocale,
   type PersonaFormState,
 } from "./agentEditorForm";
 
@@ -43,7 +41,9 @@ export function AgentEditorPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [current, setCurrent] = useState<personas.PersonaOut | null>(null);
   const [form, setForm] = useState<PersonaFormState>(emptyPersonaForm());
-  const [activeLocale, setActiveLocale] = useState<EditorLocale>(EDITOR_LOCALES[0]);
+  // The editor's active locale is `form.defaultLocale` — a persisted persona field, not separate
+  // ephemeral state. Keeping it in the form is what makes the "Language" selector round-trip: it
+  // loads with the persona and is included in the Save payload, so a refresh restores it.
   const [status, setStatus] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const formInitialized = useRef(false);
@@ -299,7 +299,7 @@ export function AgentEditorPage() {
             personaId={isNew ? null : current?.id ?? null}
             character={form.character}
             style={form.style}
-            locale={activeLocale}
+            locale={form.defaultLocale}
           />
         )
       }
@@ -310,8 +310,8 @@ export function AgentEditorPage() {
           <ConfigurationRail
             form={form}
             onChange={patchForm}
-            activeLocale={activeLocale}
-            onLocaleChange={setActiveLocale}
+            activeLocale={form.defaultLocale}
+            onLocaleChange={(locale) => patchForm({ defaultLocale: locale })}
           />
         )
       }
