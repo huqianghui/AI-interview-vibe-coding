@@ -134,3 +134,51 @@ async def test_empty_api_key_preserves_existing_secret(db_session):
 async def test_get_master_config_none_when_unconfigured(db_session):
     assert await config_service.get_master_config(db_session) is None
     assert await config_service.get_decrypted_key(db_session) == ""
+
+
+async def test_seed_from_env_creates_row_when_absent(db_session, monkeypatch):
+    """Ephemeral-SQLite boot: no row + Foundry env present → seed a key-less active master row."""
+    s = get_settings()
+    monkeypatch.setattr(s, "azure_foundry_endpoint", "https://seed.services.ai.azure.com")
+    monkeypatch.setattr(s, "azure_foundry_default_project", "proj-boot")
+    monkeypatch.setattr(s, "foundry_agent_model", "gpt-5.4-mini")
+
+    master = await config_service.seed_master_config_from_env(db_session)
+    assert master is not None
+    assert master.endpoint == "https://seed.services.ai.azure.com"
+    assert master.default_project == "proj-boot"
+    assert master.model_or_deployment == "gpt-5.4-mini"
+    assert master.is_active is True
+    assert master.updated_by == "boot-seed"
+    # Seeded key-less — the deployment authenticates to Foundry via managed identity.
+    assert await config_service.get_decrypted_key(db_session) == ""
+
+
+async def test_seed_from_env_is_noop_when_row_exists(db_session, monkeypatch):
+    """Never clobber an operator's saved config (or a prior boot's seed)."""
+    await config_service.upsert_master_config(
+        db_session,
+        endpoint="https://saved.services.ai.azure.com",
+        api_key="operator-key",
+        default_project="operator-proj",
+        model_or_deployment="gpt-4o-mini",
+        updated_by="admin",
+    )
+    s = get_settings()
+    monkeypatch.setattr(s, "azure_foundry_endpoint", "https://seed.services.ai.azure.com")
+
+    result = await config_service.seed_master_config_from_env(db_session)
+    # Returns the existing row untouched — endpoint + key preserved.
+    assert result is not None
+    assert result.endpoint == "https://saved.services.ai.azure.com"
+    assert await config_service.get_decrypted_key(db_session) == "operator-key"
+
+
+async def test_seed_from_env_noop_without_foundry_endpoint(db_session, monkeypatch):
+    """Mock / public-demo deploy (no Foundry env) stays unconfigured — no phantom row."""
+    s = get_settings()
+    monkeypatch.setattr(s, "azure_foundry_endpoint", "")
+    monkeypatch.setattr(s, "foundry_project_endpoint", "")
+
+    assert await config_service.seed_master_config_from_env(db_session) is None
+    assert await config_service.get_master_config(db_session) is None

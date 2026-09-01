@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.35.0.0 (2026-09-01)
+
+### Added
+- **Boot-time seed of the AI Foundry master config from env (admin config panel reflects the live
+  runtime after a restart).** New `seed_master_config_from_env` in
+  `backend/app/services/config_service.py`, wired into the FastAPI lifespan (`main.py`) as a
+  best-effort boot step. The `service_configs` table lives in the deployment's **ephemeral SQLite**,
+  so a saved master config is wiped on every restart even though the connection env vars
+  (`AZURE_FOUNDRY_ENDPOINT` / `FOUNDRY_AGENT_MODEL` / …) persist on the Container App. Runtime calls
+  already fall back to env, so the connection *worked* — but the `/admin/config` panel reads only
+  the DB row and would show "not configured" after every boot. Seeding the row from env on boot
+  makes the panel reflect the live runtime config. Idempotent and non-destructive: a **no-op when a
+  master row already exists** (never clobbers an operator's saved config) and a no-op when env
+  carries no Foundry endpoint (mock / public-demo deploys stay unconfigured). Seeded **key-less** —
+  the deployment authenticates to Foundry via managed identity, and `resolve`/overlay supply creds
+  Entra-first.
+
 ## 0.34.0.0 (2026-08-27)
 
 ### Added

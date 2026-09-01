@@ -45,6 +45,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
     from app.db import async_session_factory
     from app.services.config_overlay import apply_master_config_to_settings
+    from app.services.config_service import seed_master_config_from_env
     from app.services.persona_seed import seed_default_persona
     from app.services.question_seed import seed_default_bank
     from app.services.user_seed import seed_default_admin
@@ -63,6 +64,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         async with async_session_factory() as session:
             await seed_default_persona(session)
     except Exception:  # noqa: BLE001 — persona seed is best-effort; never block startup
+        pass
+    try:
+        async with async_session_factory() as session:
+            # Seed the master AI Foundry row from env when absent (ephemeral SQLite wiped it), so
+            # the /admin/config panel reflects the live runtime config after a restart. No-op when
+            # a row already exists (operator's saved config) or when env has no Foundry endpoint.
+            await seed_master_config_from_env(session)
+            await session.commit()
+    except Exception:  # noqa: BLE001 — config seed is best-effort; never block startup
         pass
     try:
         async with async_session_factory() as session:
