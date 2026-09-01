@@ -293,6 +293,63 @@ describe("InterviewPage", () => {
     );
   });
 
+  it("verbatim-reads a main question but NOT a follow-up (duplicate-read regression, issue 1)", async () => {
+    // Root cause of the "spoken/rendered twice" bug: the backend follow-up prompt was verbatim-read
+    // on top of the agent's own server-VAD auto-response follow-up. The page must speak main
+    // questions and let the agent own follow-ups (current_question.is_follow_up === true).
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "in_progress",
+      current_question: { question_id: "q1", prompt: "Main question?", index: 0, total: 2 },
+    });
+    // Answering the main question returns the SAME question with a follow-up prompt + is_follow_up.
+    vi.spyOn(client, "submitAnswer").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "in_progress",
+      current_question: {
+        question_id: "q1",
+        prompt: "You mentioned X — can you clarify?",
+        index: 0,
+        total: 2,
+        is_follow_up: true,
+      },
+    });
+    const spoken: string[] = [];
+    const voiceMock = {
+      connect: () => Promise.resolve(),
+      disconnect: () => Promise.resolve(),
+      toggleMute: () => undefined,
+      commitAnswer: () => Promise.resolve("my main answer, long enough"),
+      speakQuestion: (text: string) => {
+        spoken.push(text);
+        return true;
+      },
+      isMuted: false,
+      connectionState: "connected" as const,
+      audioState: "idle" as const,
+      isAvatarConnected: false,
+    };
+    const voiceModule = await import("../hooks/useInterviewVoice");
+    vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(voiceMock);
+
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+    await screen.findByText("Main question?");
+
+    // Switch to voice → the main question is read verbatim.
+    await user.click(screen.getByRole("button", { name: /answer by voice/i }));
+    await waitFor(() => expect(spoken).toContain("Main question?"));
+
+    // Answer it → a follow-up becomes current. It must NOT be verbatim-read (agent voices it).
+    await user.click(await screen.findByRole("button", { name: /i'm done answering/i }));
+    await screen.findByText("You mentioned X — can you clarify?");
+    expect(spoken).not.toContain("You mentioned X — can you clarify?");
+    expect(spoken).toEqual(["Main question?"]);
+  });
+
   it("resumes an in-progress interview on mount (edge b)", async () => {
     await i18n.changeLanguage("en-US");
     vi.spyOn(client, "resumeInterview").mockResolvedValue({

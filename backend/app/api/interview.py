@@ -37,6 +37,11 @@ class QuestionOut(BaseModel):
     prompt: str
     index: int
     total: int
+    # True when ``prompt`` is a pending follow-up (cites the prior answer), not the base question.
+    # Voice uses this to NOT verbatim-read follow-ups: the agent's own server-VAD auto-response
+    # already voices a clarification, so reading the backend follow-up too speaks it twice (and
+    # renders two transcript bubbles). Text channel ignores it and shows the authoritative prompt.
+    is_follow_up: bool = False
 
 
 class BankQuestionOut(BaseModel):

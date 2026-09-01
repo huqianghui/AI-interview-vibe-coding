@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.36.0.1 (2026-09-01)
+
+### Fixed
+- **Voice interview: a follow-up was spoken and rendered twice.** In a voice session a clarifying
+  follow-up (e.g. "Could you clarify what you mean by 'First'?") appeared as two identical
+  Interviewer bubbles and was read aloud twice. Root cause: two independent Azure responses voiced
+  the same follow-up — the agent's own server-VAD auto-response (`create_response=True`, driven by
+  the persona's "ask AT MOST ONE short follow-up" instruction) AND the frontend verbatim-reading the
+  backend `build_follow_up_prompt` text. Each was a distinct `response_id`, so transcript upsert
+  (keyed by `assistant-${response_id}-${item_id}`) appended two bubbles. The backend now marks the
+  current question with `is_follow_up`, and the frontend suppresses its verbatim read for
+  follow-ups — in voice the agent owns follow-ups (as `memory.py`'s design already intended); the
+  backend follow-up text stays authoritative for the text channel + CI.
+
 ## 0.36.0.0 (2026-09-01)
 
 ### Changed

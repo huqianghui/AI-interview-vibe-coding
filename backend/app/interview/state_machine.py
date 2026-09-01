@@ -402,12 +402,15 @@ async def get_current_question(db: AsyncSession, session: InterviewSession) -> d
         return None
     # F7: when a follow-up is pending for this question, show ITS prompt (which cites the
     # candidate's prior answer) instead of the base question — that's the visible memory moment.
-    prompt = await _pending_follow_up_prompt(db, session.id, q.id) or q.prompt
+    follow_up = await _pending_follow_up_prompt(db, session.id, q.id)
     return {
         "question_id": q.id,
-        "prompt": prompt,
+        "prompt": follow_up or q.prompt,
         "index": session.current_question_index,
         "total": len(questions),
+        # Voice must NOT verbatim-read a follow-up: the agent's own server-VAD auto-response already
+        # voices a clarification, so reading this too would speak it twice + duplicate the bubble.
+        "is_follow_up": follow_up is not None,
     }
 
 
