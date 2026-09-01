@@ -152,3 +152,48 @@ async def upsert_master_config(
 
     await db.flush()
     return master
+
+
+async def seed_master_config_from_env(db: AsyncSession) -> ServiceConfig | None:
+    """Create the master config row from ``.env``/deployment env when none exists yet.
+
+    The ``service_configs`` table lives in the deployment's **ephemeral SQLite**, so a saved config
+    is wiped on every restart even though the real connection env vars (``AZURE_FOUNDRY_ENDPOINT`` /
+    ``FOUNDRY_AGENT_MODEL`` / …) persist on the Container App. Runtime calls already fall back to
+    env (see ``resolve_foundry_connection`` / the settings overlay), so the connection *works* — but
+    the admin ``/admin/config`` panel reads only this row and would show "not configured" after
+    every boot. Seeding the row from env on boot makes the panel reflect the live runtime config.
+
+    Idempotent and non-destructive: a **no-op when a master row already exists** (never clobbers an
+    operator's saved config), and a no-op when env carries no Foundry endpoint (public-demo / mock
+    deploys stay unconfigured, exactly as before). Best-effort — callers wrap it so a failure never
+    blocks startup. Does not set an API key: the deployment authenticates to Foundry via managed
+    identity (keyless), so the row is seeded key-less and ``resolve``/overlay supply creds
+    Entra-first.
+    """
+    from app.config import get_settings
+
+    master = await get_master_config(db)
+    if master is not None:
+        # Operator (or a prior boot) already seeded it — leave it untouched.
+        return master
+
+    settings = get_settings()
+    endpoint = settings.azure_foundry_endpoint or settings.foundry_project_endpoint
+    if not endpoint:
+        # No real Foundry configured (mock/public-demo) — nothing to seed.
+        return None
+
+    master = ServiceConfig(
+        service_name=MASTER_SERVICE_NAME,
+        display_name=MASTER_DISPLAY_NAME,
+        is_master=True,
+        endpoint=endpoint,
+        default_project=settings.azure_foundry_default_project,
+        model_or_deployment=settings.foundry_agent_model,
+        is_active=True,
+        updated_by="boot-seed",
+    )
+    db.add(master)
+    await db.flush()
+    return master
