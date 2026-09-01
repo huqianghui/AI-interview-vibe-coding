@@ -63,6 +63,62 @@ async def test_seed_is_idempotent(db_session):
     assert len(await svc.list_banks(db_session)) == 1
 
 
+# --- committed generic bank bundles (issue 2: match local's multi-bank catalogue) -----------
+
+
+async def test_seed_bundled_banks_imports_committed_generic_banks(db_session):
+    # The three committed generic bundles (Demo / Deployment SOP / test) are imported alongside
+    # whatever default already exists, all en-US, and none claims the enabled-default slot.
+    ids = await question_seed.seed_bundled_banks(db_session)
+    assert len(ids) == 3
+    banks = {b.name: b for b in await svc.list_banks(db_session)}
+    assert {"Demo interview bank", "Deployment SOP Interview", "test-demo01"} <= set(banks)
+    for name in ("Demo interview bank", "Deployment SOP Interview", "test-demo01"):
+        assert banks[name].language == "en-US"
+        assert banks[name].is_default is False
+
+
+async def test_seed_bundled_banks_is_idempotent_and_preserves_default(db_session):
+    # A committed generic bundle must never steal the default slot from the boot importer's bank,
+    # and re-running (every boot) converges by name rather than duplicating.
+    rf = await svc.create_bank(db_session, name="rf-CSM (client)", is_default=True)
+    await question_seed.seed_bundled_banks(db_session)
+    await question_seed.seed_bundled_banks(db_session)  # second boot: replace-by-name, no dupes
+    banks = await svc.list_banks(db_session)
+    names = [b.name for b in banks]
+    assert names.count("Demo interview bank") == 1  # not duplicated across the two runs
+    assert len(banks) == 4  # rf-CSM default + 3 generic
+    assert (await svc.get_default_bank(db_session)).id == rf.id  # default untouched
+
+
+async def test_seed_bundled_banks_public_demo_keeps_a_default(db_session):
+    # Public-demo boot order (main.py): seed_default_bank creates "Demo interview bank" as the
+    # default, THEN seed_bundled_banks imports a same-named non-default bundle that replaces it.
+    # The seeder must restore the default so the interview doesn't drop to the built-in fallback.
+    await question_seed.seed_default_bank(db_session)  # "Demo interview bank" is now default
+    await question_seed.seed_bundled_banks(db_session)
+    default = await svc.get_default_bank(db_session)
+    assert default is not None
+    assert default.name == "Demo interview bank"
+
+
+async def test_seed_bundled_bank_preserves_hand_authored_rubric(db_session):
+    # The bundle importer writes the rubric verbatim (unlike add_question's LLM auto-draft), so a
+    # seeded generic bank keeps its checklist items — proving the multi-bank seed is scoreable.
+    await question_seed.seed_bundled_banks(db_session)
+    banks = {b.name: b for b in await svc.list_banks(db_session)}
+    from app.services import checklist_service
+
+    dep = banks["Deployment SOP Interview"]
+    rows = await svc.list_questions_for_bank(db_session, dep.id)
+    total_items = 0
+    for q in rows:
+        cl = await checklist_service.get_default_checklist(db_session, q.id)
+        if cl is not None:
+            total_items += len(await checklist_service.list_items(db_session, cl.id))
+    assert total_items > 0  # rubric survived the export→commit→import round-trip
+
+
 # --- state machine resolves from the seeded bank ---------------------------
 
 

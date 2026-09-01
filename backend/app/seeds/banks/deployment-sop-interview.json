@@ -1,0 +1,152 @@
+{
+  "format_version": 1,
+  "bank": {
+    "name": "Deployment SOP Interview",
+    "description": "",
+    "language": "en-US",
+    "is_default": false
+  },
+  "questions": [
+    {
+      "text": "Walk me through your pre-deployment checks.",
+      "language": "en-US",
+      "weight": 1,
+      "expected_points": [
+        "verifies the runbook",
+        "confirms the change ticket"
+      ],
+      "max_follow_ups": 1,
+      "follow_up_prompt": "Can you walk me through that in a bit more detail?",
+      "enabled": true,
+      "checklist": {
+        "prompt_version": "v1",
+        "items": [
+          {
+            "kind": "required",
+            "text": "Identifies the correct procedure",
+            "weight": 63,
+            "advisory": false,
+            "source_quote": "Follow the documented steps in order.",
+            "source_page": "p.1",
+            "source_document_name": null,
+            "order_index": 0
+          },
+          {
+            "kind": "recommended",
+            "text": "Explains the reasoning",
+            "weight": 37,
+            "advisory": false,
+            "source_quote": "",
+            "source_page": null,
+            "source_document_name": null,
+            "order_index": 1
+          },
+          {
+            "kind": "forbidden",
+            "text": "Skips the safety check",
+            "weight": 0,
+            "advisory": false,
+            "source_quote": "Never bypass the safety check.",
+            "source_page": "p.2",
+            "source_document_name": null,
+            "order_index": 2
+          }
+        ]
+      }
+    },
+    {
+      "text": "A deploy step is unclear under time pressure. What do you do?",
+      "language": "en-US",
+      "weight": 1,
+      "expected_points": [
+        "pauses and escalates",
+        "never bypasses the safety check"
+      ],
+      "max_follow_ups": 0,
+      "follow_up_prompt": "Can you walk me through that in a bit more detail?",
+      "enabled": true,
+      "checklist": {
+        "prompt_version": "v1",
+        "items": [
+          {
+            "kind": "required",
+            "text": "Identifies the correct procedure",
+            "weight": 63,
+            "advisory": false,
+            "source_quote": "Follow the documented steps in order.",
+            "source_page": "p.1",
+            "source_document_name": null,
+            "order_index": 0
+          },
+          {
+            "kind": "recommended",
+            "text": "Explains the reasoning",
+            "weight": 37,
+            "advisory": false,
+            "source_quote": "",
+            "source_page": null,
+            "source_document_name": null,
+            "order_index": 1
+          },
+          {
+            "kind": "forbidden",
+            "text": "Skips the safety check",
+            "weight": 0,
+            "advisory": false,
+            "source_quote": "Never bypass the safety check.",
+            "source_page": "p.2",
+            "source_document_name": null,
+            "order_index": 2
+          }
+        ]
+      }
+    },
+    {
+      "text": "A checkpoint fails mid-deploy. Walk me through your response.",
+      "language": "en-US",
+      "weight": 1,
+      "expected_points": [
+        "initiates rollback",
+        "logs and notifies the team"
+      ],
+      "max_follow_ups": 0,
+      "follow_up_prompt": "Can you walk me through that in a bit more detail?",
+      "enabled": true,
+      "checklist": {
+        "prompt_version": "v1",
+        "items": [
+          {
+            "kind": "required",
+            "text": "Identifies the correct procedure",
+            "weight": 63,
+            "advisory": false,
+            "source_quote": "Follow the documented steps in order.",
+            "source_page": "p.1",
+            "source_document_name": null,
+            "order_index": 0
+          },
+          {
+            "kind": "recommended",
+            "text": "Explains the reasoning",
+            "weight": 37,
+            "advisory": false,
+            "source_quote": "",
+            "source_page": null,
+            "source_document_name": null,
+            "order_index": 1
+          },
+          {
+            "kind": "forbidden",
+            "text": "Skips the safety check",
+            "weight": 0,
+            "advisory": false,
+            "source_quote": "Never bypass the safety check.",
+            "source_page": "p.2",
+            "source_document_name": null,
+            "order_index": 2
+          }
+        ]
+      }
+    }
+  ]
+}

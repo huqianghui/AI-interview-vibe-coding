@@ -1,0 +1,173 @@
+{
+  "format_version": 1,
+  "bank": {
+    "name": "test-demo01",
+    "description": "",
+    "language": "en-US",
+    "is_default": false
+  },
+  "questions": [
+    {
+      "text": "hello,how are you",
+      "language": "en-US",
+      "weight": 1,
+      "expected_points": [],
+      "max_follow_ups": 0,
+      "follow_up_prompt": "Can you walk me through that in a bit more detail?",
+      "enabled": true,
+      "checklist": {
+        "prompt_version": "v1",
+        "items": [
+          {
+            "kind": "required",
+            "text": "Greets the interviewer politely and responds appropriately to a casual greeting.",
+            "weight": 40,
+            "advisory": false,
+            "source_quote": "",
+            "source_page": null,
+            "source_document_name": null,
+            "order_index": 0
+          },
+          {
+            "kind": "required",
+            "text": "Uses a friendly, professional tone appropriate for an interview context.",
+            "weight": 35,
+            "advisory": false,
+            "source_quote": "",
+            "source_page": null,
+            "source_document_name": null,
+            "order_index": 1
+          },
+          {
+            "kind": "recommended",
+            "text": "Keeps the response concise and conversational rather than overly formal or lengthy.",
+            "weight": 15,
+            "advisory": false,
+            "source_quote": "",
+            "source_page": null,
+            "source_document_name": null,
+            "order_index": 2
+          },
+          {
+            "kind": "recommended",
+            "text": "Optionally reciprocates the greeting or asks a brief follow-up question in a natural way.",
+            "weight": 10,
+            "advisory": false,
+            "source_quote": "",
+            "source_page": null,
+            "source_document_name": null,
+            "order_index": 3
+          }
+        ]
+      }
+    },
+    {
+      "text": "what's your name?",
+      "language": "en-US",
+      "weight": 1,
+      "expected_points": [],
+      "max_follow_ups": 0,
+      "follow_up_prompt": "Can you walk me through that in a bit more detail?",
+      "enabled": true,
+      "checklist": {
+        "prompt_version": "v1",
+        "items": [
+          {
+            "kind": "required",
+            "text": "The response clearly states the interviewee’s name or preferred name in direct answer to the question.",
+            "weight": 70,
+            "advisory": false,
+            "source_quote": "",
+            "source_page": null,
+            "source_document_name": null,
+            "order_index": 0
+          },
+          {
+            "kind": "required",
+            "text": "The response is concise and appropriate for an introductory question.",
+            "weight": 20,
+            "advisory": false,
+            "source_quote": "",
+            "source_page": null,
+            "source_document_name": null,
+            "order_index": 1
+          },
+          {
+            "kind": "recommended",
+            "text": "The response is polite and conversational, optionally including a brief greeting or acknowledgement.",
+            "weight": 10,
+            "advisory": false,
+            "source_quote": "",
+            "source_page": null,
+            "source_document_name": null,
+            "order_index": 2
+          },
+          {
+            "kind": "forbidden",
+            "text": "The response refuses to answer or gives irrelevant information instead of a name.",
+            "weight": 0,
+            "advisory": false,
+            "source_quote": "",
+            "source_page": null,
+            "source_document_name": null,
+            "order_index": 3
+          }
+        ]
+      }
+    },
+    {
+      "text": "how old are you?",
+      "language": "en-US",
+      "weight": 1,
+      "expected_points": [],
+      "max_follow_ups": 0,
+      "follow_up_prompt": "Can you walk me through that in a bit more detail?",
+      "enabled": true,
+      "checklist": {
+        "prompt_version": "v1",
+        "items": [
+          {
+            "kind": "required",
+            "text": "Directly addresses the question by stating the applicant’s age or age range clearly and succinctly.",
+            "weight": 50,
+            "advisory": false,
+            "source_quote": "",
+            "source_page": null,
+            "source_document_name": null,
+            "order_index": 0
+          },
+          {
+            "kind": "recommended",
+            "text": "Provides the answer in a polite, professional manner without unnecessary detail.",
+            "weight": 20,
+            "advisory": false,
+            "source_quote": "",
+            "source_page": null,
+            "source_document_name": null,
+            "order_index": 1
+          },
+          {
+            "kind": "recommended",
+            "text": "Avoids evasiveness or ambiguity that would leave the interviewer unable to determine the age.",
+            "weight": 30,
+            "advisory": false,
+            "source_quote": "",
+            "source_page": null,
+            "source_document_name": null,
+            "order_index": 2
+          },
+          {
+            "kind": "forbidden",
+            "text": "Refuses to answer or responds with irrelevant information instead of stating age.",
+            "weight": 0,
+            "advisory": false,
+            "source_quote": "",
+            "source_page": null,
+            "source_document_name": null,
+            "order_index": 3
+          }
+        ]
+      }
+    }
+  ]
+}

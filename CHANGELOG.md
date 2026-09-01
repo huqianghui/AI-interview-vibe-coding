@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.36.0.2 (2026-09-01)
+
+### Fixed
+- **The deployed server now presents the full generic bank catalogue, not just one bank.** The
+  boot-time client importer seeds the rf-CSM bank as the enabled default, and the FastAPI lifespan's
+  `seed_default_bank` is a no-op once any default exists — so on live the other generic banks never
+  seeded and admin showed a single bank (local had several). Fix: the three generic, SOP-document-free
+  banks (Demo interview bank, Deployment SOP Interview, test-demo01) are now committed as bank bundles
+  under `backend/app/seeds/banks/*.json` and imported on every boot by a new
+  `question_seed.seed_bundled_banks`, alongside whatever default the client importer set. The bundle
+  importer writes each bank's hand-authored rubric verbatim (unlike the per-question LLM auto-draft),
+  so the seeded banks are fully scoreable. All bundle content is normalized to `en-US`.
+
+### Notes
+- The seeder preserves the enabled-default slot across the import: on live the client rf-CSM bank
+  stays default; in public-demo mode (no client bundle) the same-named "Demo interview bank" bundle
+  replaces the programmatic default as non-default, and the seeder restores it so the interview never
+  drops to the built-in fallback pair. Idempotent-by-name, so re-running on each boot converges.
+- Client-derived banks are **not** committed to this public repo; they continue to arrive via the
+  private-blob channel (`entrypoint.sh` → `fetch_client_bundle.py` → `import_rfcsm_bank.py`).
+
 ## 0.36.0.1 (2026-09-01)
 
 ### Fixed
