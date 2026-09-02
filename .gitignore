@@ -38,3 +38,7 @@ frontend/playwright-report/
 frontend/test-results/
 frontend/.playwright/
 backend/e2e.db
+# Client delivery package — NEVER commit. Contains client-confidential SOP banks,
+# prebuilt image tars, filled-in secrets (deploy.env / main.parameters.json), the
+# generated .docx, and the built zip. Entire directory stays out of the (public) repo.
+delivery/
