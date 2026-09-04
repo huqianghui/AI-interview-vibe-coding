@@ -32,6 +32,21 @@ export const resources = {
         title: "No questions available",
         body: "This interview has no questions configured yet. Please check back once a question bank is set up.",
       },
+      // External-brain interview phases (Phase 2). Vendor-neutral copy — never names a product.
+      // "thinking" is the awaiting overlay while the external interviewer produces the next turn;
+      // "recovery" clears a stalled turn; "complete" replaces the local report with an
+      // acknowledgement (external sessions are scored by the organizer, not shown here — SPEC P12).
+      external: {
+        thinking: "Interviewer is thinking…",
+        recoveryTitle: "This turn was interrupted",
+        recoveryBody:
+          "The connection to the interviewer stalled. Your last answer was saved — resume to continue where you left off.",
+        recover: "Resume",
+        recovering: "Resuming…",
+        completeTitle: "Interview complete",
+        completeBody:
+          "This interview has ended. The organizer will follow up with you separately about the results.",
+      },
       voice: {
         idle: "Ready",
         listening: "Listening…",
@@ -184,6 +199,18 @@ export const resources = {
       noQuestions: {
         title: "暂无可用题目",
         body: "本次面试尚未配置题目。请在题库配置完成后再来。",
+      },
+      // 外部大脑面试的各阶段（Phase 2）。文案保持中立 —— 不出现任何产品名。
+      // thinking = 等待外部面试官产出下一轮时的遮罩；recovery = 清除中断的一轮；
+      // complete = 用致谢替代本地报告（外部场次由主办方评分，此处不展示 —— SPEC P12）。
+      external: {
+        thinking: "面试官思考中…",
+        recoveryTitle: "本轮对话被中断",
+        recoveryBody: "与面试官的连接暂时中断，你上一次的回答已保存 —— 点击「恢复」即可继续。",
+        recover: "恢复",
+        recovering: "正在恢复…",
+        completeTitle: "面试已结束",
+        completeBody: "本场面试已结束，结果将由主办方另行联系。",
       },
       voice: {
         idle: "就绪",

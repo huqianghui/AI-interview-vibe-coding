@@ -10,6 +10,8 @@ import {
   Divider,
   Field,
   Input,
+  Radio,
+  RadioGroup,
   Switch,
   Text,
   Textarea,
@@ -127,6 +129,32 @@ export function AgentDefinitionPanel({
           {voiceModeOn
             ? "The interviewer speaks with a digital-human avatar (pick the character under Configure)."
             : "Voice-only presence (no avatar face)."}
+        </Text>
+      </div>
+
+      <Divider />
+
+      {/* Interview brain — which engine drives the interview. "Built-in question bank" runs the
+          local bank + rubric scoring; "External interview API" hands each turn to the client's
+          external interview server (vendor-neutral). */}
+      <div className={styles.section}>
+        <Title3>Interview brain</Title3>
+        <RadioGroup
+          value={form.interviewBrain}
+          onChange={(_, d) => onChange({ interviewBrain: d.value })}
+          data-testid="persona-interview-brain"
+        >
+          <Radio value="bank" label="Built-in question bank" data-testid="brain-bank" />
+          <Radio
+            value="external"
+            label="External interview API"
+            data-testid="brain-external"
+          />
+        </RadioGroup>
+        <Text size={200} className={styles.hint}>
+          {form.interviewBrain === "external"
+            ? "Each turn is driven by the external interview server configured under Admin › Connection. Rubric scoring is owned by that server."
+            : "Runs the built-in question bank with local rubric scoring."}
         </Text>
       </div>
 

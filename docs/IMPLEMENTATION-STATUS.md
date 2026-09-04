@@ -44,6 +44,22 @@ a fused text/voice interview flow, in phases (branch-per-phase, independently re
 | **F2b** Question-bank admin editor | ✅ Done | v0.12.0.0 | CRUD + reorder + set-default; admin API + `/admin` UI. |
 | **F3b** Checklist admin editor | ✅ Done | v0.12.0.0 | Edit items, re-normalize weights to 100; `/admin` UI. **Mandatory-checklist invariant (v0.29.0.0, [`planning/design-B-checklist-mandatory-20260818.md`](planning/design-B-checklist-mandatory-20260818.md)):** every question is auto-drafted a **non-empty** checklist at create time — SOP-optional draft (rubric drafted from the question text when no SOP passage is retrieved) with a generic-required-item fallback so scoring never degrades to a length-based stub; auto-draft is non-blocking on AI failure. The `/admin` editor now surfaces a per-question **评分标准 / Rubric** button + status marker (✓ N items / ⚙ not configured — count only, P3-safe) and a wired editable form (add/edit/delete items, change kind/weight, save → re-normalized to 100, regenerate on demand). **Admin UI refactor (v0.29.1.0):** `/admin` moved from a single vertical stack of inline-styled cards to a **two-tab workspace** (`题库与评分标准 / Content` + `Azure 连接 / Connection`) with the scoring rubric kept as an inline panel under the selected question; migrated to the project's Fluent `makeStyles`+`tokens` baseline (matching `InterviewPage`); rubric editor gains a weight-total bar (green at 100 / amber otherwise), kind-color Badges, read-only `source_quote` display (admin-only, P3-safe), and save/generate status feedback; a top-bar link cross-navigates to the `/admin/agent` persona editor. No backend or API-contract change. |
 
+## External interview brain (Phase 2, [`planning/design-external-interview-brain-integration.md`](planning/design-external-interview-brain-integration.md))
+
+A second, per-persona interview mode that hands every turn to the client's **external interview
+API/server** instead of the built-in bank — vendor-neutral (`interview_brain = "bank" | "external"`,
+never a product name). Approach B: a parallel `external_runner` + `external_interview_client`
+beside the untouched bank `state_machine`; the backend acts as the API client, snapshotting
+`brain_mode` onto the session at start. The external state blob never reaches the browser or any
+LLM (SPEC P3/P12), and external scoring is owned by that server — the candidate sees a completion
+acknowledgement, never a local report.
+
+| Slice | Status | Shipped | Notes |
+|---|---|---|---|
+| **Backend runner + client + config** | ✅ Built (branch `feat/external-interview-brain-backend`, pending `/ship`) | — | `external_runner` (synchronous `answer` → next-Q `idle` / resumable `recovery_required` / `completed`; `recover` re-drives the committed state idempotently), `external_interview_client` (http + deterministic in-process mock providers; empty endpoint → mock), and `external_config_service` (separate `service_configs` row; Fernet-encrypted key; https + SSRF-guarded endpoint; DB-over-`.env` live resolution). Admin config router (`/admin/external-interviewer`: save / masked-GET / explicit reveal / no-row-creating test-probe). `interview_brain` threaded through persona ORM/schemas/API. Config + runner + privacy invariants under pytest. |
+| **Frontend UI + i18n** | ✅ Built (same branch) | — | Persona editor **Interview brain** selector (`bank` / `external`); admin **External interview API** config card (endpoint / user-tag / write-only key + reveal + test-connection) on the Connection tab; `InterviewPage` external phases — awaiting ("interviewer thinking") overlay driven by the in-flight turn, resumable-recovery affordance, mic auto-pause during awaiting/stalled, `speech_text` TTS wiring, hidden question-progress (external exposes no count), and a dedicated completion acknowledgement card (no local report — P12). Candidate-facing copy bilingual (zh-CN + en-US `external` block); operator surfaces stay English. |
+| **Playwright E2E** | ✅ Built (same branch) | — | `external-config.spec.ts` (admin saves/reveals/probes the external-API config, then resets the endpoint) + `external-interview.spec.ts` (external-brain default persona → mock-driven 3-question run → completion acknowledgement; asserts P12 no-local-report + P3 no-rubric-leak). Both green on mock providers. |
+
 ## Digital-human avatar (F5/F9)
 
 | Capability | Status | Shipped |

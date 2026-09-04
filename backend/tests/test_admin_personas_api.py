@@ -53,6 +53,40 @@ async def test_tools_config_round_trips(client):
     assert updated.json()["tools_config"] == '[{"type":"web_search"}]'
 
 
+async def test_interview_brain_round_trips_and_validates(client):
+    # Phase 2: the persona editor's "interview brain" selector round-trips through the API.
+    # Default when omitted is the built-in bank.
+    plain = (await client.post("/admin/personas", headers=AUTH, json={"name": "B0"})).json()
+    assert plain["interview_brain"] == "bank"
+    # Create with the external engine.
+    created = (
+        await client.post(
+            "/admin/personas",
+            headers=AUTH,
+            json={"name": "B1", "interview_brain": "external"},
+        )
+    ).json()
+    assert created["interview_brain"] == "external"
+    # Update flips it back to bank.
+    updated = await client.put(
+        f"/admin/personas/{created['id']}",
+        headers=AUTH,
+        json={"interview_brain": "bank"},
+    )
+    assert updated.json()["interview_brain"] == "bank"
+    # An unknown engine token is rejected (422) on both create and update — never persisted.
+    bad_create = await client.post(
+        "/admin/personas", headers=AUTH, json={"name": "B2", "interview_brain": "dify"}
+    )
+    assert bad_create.status_code == 422
+    bad_update = await client.put(
+        f"/admin/personas/{created['id']}",
+        headers=AUTH,
+        json={"interview_brain": "nonsense"},
+    )
+    assert bad_update.status_code == 422
+
+
 async def test_default_locale_round_trips(client):
     # The editor's "Language" selector persists as default_locale so it survives a reload (the bug:
     # it used to be ephemeral client state that reset to zh-CN on refresh even after Save).

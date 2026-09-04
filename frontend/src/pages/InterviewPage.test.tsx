@@ -216,6 +216,7 @@ describe("InterviewPage", () => {
       connect: () => Promise.resolve(),
       disconnect: () => Promise.resolve(),
       toggleMute: () => undefined,
+      setMuted: () => undefined,
       commitAnswer: () => Promise.resolve("   "), // whitespace-only → still empty after trim
       speakQuestion: () => true,
       isMuted: false,
@@ -262,6 +263,7 @@ describe("InterviewPage", () => {
       connect: () => Promise.resolve(),
       disconnect: () => Promise.resolve(),
       toggleMute: () => undefined,
+      setMuted: () => undefined,
       commitAnswer: () => new Promise<string>((res) => { resolveCommit = res; }),
       speakQuestion: () => true,
       isMuted: false,
@@ -321,6 +323,7 @@ describe("InterviewPage", () => {
       connect: () => Promise.resolve(),
       disconnect: () => Promise.resolve(),
       toggleMute: () => undefined,
+      setMuted: () => undefined,
       commitAnswer: () => Promise.resolve("my main answer, long enough"),
       speakQuestion: (text: string) => {
         spoken.push(text);
@@ -398,6 +401,7 @@ describe("InterviewPage", () => {
       connect: () => Promise.resolve(),
       disconnect: () => Promise.resolve(),
       toggleMute: () => undefined,
+      setMuted: () => undefined,
       commitAnswer: () => Promise.resolve(""),
       speakQuestion: () => true,
       isMuted: false,

@@ -184,3 +184,38 @@ export const listModelDeployments = () =>
 
 export const listKnowledgeBases = () =>
   adminRequest<ConfigOption[]>("/admin/config/ai-foundry/knowledge-bases");
+
+// ── External interview API/server config (Phase 2, vendor-neutral) ─────
+// Connection to the client's external interview brain. Resolved live from the DB on every turn
+// (DB > .env), so a save takes effect on the next interview with no restart. The API key is
+// write-only on the main GET (masked only); a SEPARATE reveal call returns the plaintext for a
+// deliberate click-to-reveal. Nothing here names a product — only "external interview API".
+
+export interface ExternalConfig {
+  endpoint: string;
+  masked_key: string;
+  user_tag: string;
+  is_active: boolean;
+}
+
+export interface ExternalConfigInput {
+  endpoint: string;
+  api_key: string; // empty preserves the existing stored key
+  user_tag: string;
+}
+
+export const getExternalConfig = () =>
+  adminRequest<ExternalConfig>("/admin/external-interviewer");
+
+export const updateExternalConfig = (input: ExternalConfigInput) =>
+  adminRequest<ExternalConfig>("/admin/external-interviewer", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+
+export const testExternalConfig = () =>
+  adminRequest<ConnectionTestResult>("/admin/external-interviewer/test", { method: "POST" });
+
+/** Return the PLAINTEXT external API key for a deliberate admin click-to-reveal. Never cached. */
+export const revealExternalKey = () =>
+  adminRequest<{ api_key: string }>("/admin/external-interviewer/reveal");

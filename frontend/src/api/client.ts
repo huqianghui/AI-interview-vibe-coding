@@ -24,6 +24,13 @@ export interface Interview {
   interview_session_id: string;
   status: string;
   current_question: Question | null;
+  // Phase 2 external-brain sub-state ("idle" | "awaiting" | "recovery_required"); null/absent for
+  // built-in bank sessions. Drives the "面试官思考中…" (awaiting) and "恢复" (recovery_required)
+  // affordances. Vendor-neutral: never names a product.
+  external_phase?: string | null;
+  // The current external question's speech text (candidate-safe, for the digital human to read).
+  // Display text still rides in current_question.prompt. null for bank sessions / no pending Q.
+  speech_text?: string | null;
 }
 
 /** One rubric item's graded result (F4). Present on scored (non-stub) question entries. */
@@ -245,7 +252,11 @@ export async function resumeInterview(): Promise<Interview | null> {
   if (!token) return null;
   try {
     const iv = await request<Interview>(`/candidate/interview/${id}`);
-    if (iv.status !== "in_progress" || !iv.current_question) {
+    // An external session can be legitimately in_progress with NO current_question — it's mid-turn
+    // (awaiting) or stalled (recovery_required). Resume those on the phase alone; only a bank
+    // session (or a completed one) requires a current_question to be worth resuming.
+    const externalResumable = iv.external_phase != null && iv.status === "in_progress";
+    if (!externalResumable && (iv.status !== "in_progress" || !iv.current_question)) {
       clearSavedInterviewId();
       return null;
     }
@@ -265,6 +276,25 @@ export async function submitAnswer(
     method: "POST",
     body: JSON.stringify({ text, source }),
   });
+}
+
+/**
+ * Re-drive a stalled external-brain turn — the candidate's "恢复" (recover) action. Only meaningful
+ * when external_phase is "recovery_required" (or an "awaiting" turn stranded by a crash). Safe to
+ * call repeatedly: the backend re-sends the same committed state + pending answer, never
+ * double-advancing. A bank session (or nothing to recover) 409s. No-op for built-in bank mode.
+ */
+export async function recoverInterview(interviewId: string): Promise<Interview> {
+  return request<Interview>(`/candidate/interview/${interviewId}/recover`, { method: "POST" });
+}
+
+/**
+ * Signal an external-brain interview to finalize early (candidate chose to stop). Bank sessions
+ * return their current state unchanged. External sessions send an "end" turn and complete locally
+ * even on transport failure.
+ */
+export async function endInterview(interviewId: string): Promise<Interview> {
+  return request<Interview>(`/candidate/interview/${interviewId}/end`, { method: "POST" });
 }
 
 /**
