@@ -102,6 +102,16 @@ class Settings(BaseSettings):
     # 2026-07-15 value only works for model mode / migrated new-type agents.
     voice_live_api_version: str = "2026-01-01-preview"
 
+    # External interview API/server (SPEC Phase 2, vendor-neutral). The backend drives the client's
+    # interview brain turn-by-turn as an API client (never a Foundry-agent tool). Empty in CI/dev →
+    # the mock external provider answers, so the flow is exercisable without a live gateway. Real
+    # values live only in the gitignored backend/.env or the admin config UI (key Fernet-encrypted).
+    # `user_tag` is a static per-deployment string prepended to the anonymized session id to form
+    # the gateway `user` field, so the client can attribute traffic per environment.
+    external_interviewer_endpoint: str = ""
+    external_interviewer_api_key: str = ""
+    external_interviewer_user_tag: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

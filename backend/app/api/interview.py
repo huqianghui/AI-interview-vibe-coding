@@ -20,12 +20,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db, get_session_factory
 from app.dependencies import get_anonymous_session
-from app.interview import state_machine
+from app.interview import external_runner, state_machine
+from app.interview.external_runner import ExternalTurnConflict
 from app.interview.state_machine import ANSWER_SOURCES, InterviewStateError
 from app.models.anonymous_session import AnonymousCandidateSession
 from app.models.interview import InterviewSession
 from app.models.sop import SopDocument
-from app.services import question_service, voice_broker
+from app.services import persona_service, question_service, voice_broker
 from app.services.storage import get_storage
 from app.services.voice_broker import DEFAULT_LOCALE, VoiceAgentNotSynced, VoiceUnavailable
 
@@ -63,6 +64,13 @@ class InterviewOut(BaseModel):
     interview_session_id: str
     status: str
     current_question: QuestionOut | None
+    # --- Phase 2 external-brain fields (None for bank sessions) --------------------------------
+    # The external sub-state ("idle" | "awaiting" | "recovery_required"), so the UI can show the
+    # "面试官思考中…" (awaiting) or "恢复" (recovery_required) affordance. None ⇒ bank session.
+    external_phase: str | None = None
+    # The current external question's speech text (for TTS/voice reading), candidate-safe. The
+    # display text rides in ``current_question.prompt``. None for bank sessions / no pending Q.
+    speech_text: str | None = None
 
 
 class AnswerIn(BaseModel):
@@ -155,10 +163,44 @@ class VoiceSessionOut(BaseModel):
 
 
 def _to_interview_out(session: InterviewSession, question: dict | None) -> InterviewOut:
+    is_external = session.brain_mode == "external"
     return InterviewOut(
         interview_session_id=session.id,
         status=session.status,
         current_question=QuestionOut(**question) if question else None,
+        external_phase=session.external_phase if is_external else None,
+        speech_text=external_runner.speech_text_for(session) if is_external else None,
+    )
+
+
+async def _current_question(db: AsyncSession, session: InterviewSession) -> dict | None:
+    """Dispatch the candidate-safe current-question projection to the right engine (Phase 2)."""
+    if session.brain_mode == "external":
+        return await external_runner.current_question(db, session)
+    return await state_machine.get_current_question(db, session)
+
+
+def _external_report_stub(session: InterviewSession) -> ReportOut:
+    """The candidate report for an external-brain session.
+
+    The external provider owns scoring — the per-question scores/rubric live only in the opaque
+    state blob, which is backend-only and MUST NOT reach the browser (SPEC P3/P12). So the candidate
+    report is a completion acknowledgement, never the numbers. Vendor-neutral wording by owner
+    directive (no product name).
+    """
+    return ReportOut(
+        interview_session_id=session.id,
+        status=session.status,
+        coverage_pct=0.0,
+        per_question=[],
+        is_stub=True,
+        total_score=None,
+        grade=None,
+        outcome=None,
+        narrative=(
+            "This interview was conducted by the external interview provider. "
+            "Results are managed by that provider and are not shown here."
+        ),
     )
 
 
@@ -208,8 +250,20 @@ async def start(
     candidate: AnonymousCandidateSession = Depends(get_anonymous_session),
     db: AsyncSession = Depends(get_db),
 ) -> InterviewOut:
-    session = await state_machine.start_interview(db, candidate.id)
-    question = await state_machine.get_current_question(db, session)
+    # Resume takes precedence and PRESERVES the session's original engine: a persona flipped to a
+    # different brain after an interview started must not re-interpret that live session (that's why
+    # brain_mode is a per-session snapshot). Only a fresh start reads the default persona's engine.
+    existing = await state_machine.find_resumable_interview(db, candidate.id)
+    if existing is not None:
+        session = existing
+    else:
+        persona = await persona_service.get_default_persona(db)
+        brain = persona.interview_brain if persona else "bank"
+        if brain == "external":
+            session = await external_runner.start_interview(db, candidate.id)
+        else:
+            session = await state_machine.start_interview(db, candidate.id)
+    question = await _current_question(db, session)
     return _to_interview_out(session, question)
 
 
@@ -226,7 +280,7 @@ async def get_interview(
     starting a brand-new session. ``current_question`` is None once completed/scored.
     """
     session = await _owned_interview(db, interview_id, candidate)
-    question = await state_machine.get_current_question(db, session)
+    question = await _current_question(db, session)
     return _to_interview_out(session, question)
 
 
@@ -245,11 +299,73 @@ async def answer(
             detail=f"source must be one of {ANSWER_SOURCES}",
         )
     session = await _owned_interview(db, interview_id, candidate)
+    if session.brain_mode == "external":
+        # External engine: CAS-reserved turn + call the brain (with bounded retry). A lost race /
+        # submit-while-busy is a 409; retry exhaustion is NOT an error — it returns the session in
+        # recovery_required so the UI shows 恢复 (see external_runner.answer).
+        try:
+            session = await external_runner.answer(db, session, body.text, body.source)
+        except ExternalTurnConflict as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        question = await external_runner.current_question(db, session)
+        return _to_interview_out(session, question)
+
     try:
         session = await state_machine.answer_finalized(db, session, body.text, body.source)
     except InterviewStateError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     question = await state_machine.get_current_question(db, session)
+    return _to_interview_out(session, question)
+
+
+@router.post("/{interview_id}/recover", response_model=InterviewOut)
+async def recover(
+    interview_id: str,
+    candidate: AnonymousCandidateSession = Depends(get_anonymous_session),
+    db: AsyncSession = Depends(get_db),
+) -> InterviewOut:
+    """Clear a stalled external-brain turn (the candidate's 恢复 action) by re-driving it.
+
+    Only meaningful for an external session whose ``external_phase`` is ``recovery_required`` (or an
+    ``awaiting`` one stranded by a crash mid-turn); re-sends the same committed state + pending
+    answer, so it can never double-advance (see external_runner.recover). A bank session, or an
+    external session with nothing to recover, is a 409. Retry exhaustion again returns
+    recovery_required (the candidate may 恢复 again) rather than erroring.
+    """
+    session = await _owned_interview(db, interview_id, candidate)
+    if session.brain_mode != "external":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Not an external-brain interview"
+        )
+    try:
+        session = await external_runner.recover(db, session)
+    except ExternalTurnConflict as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    question = await external_runner.current_question(db, session)
+    return _to_interview_out(session, question)
+
+
+@router.post("/{interview_id}/end", response_model=InterviewOut)
+async def end(
+    interview_id: str,
+    candidate: AnonymousCandidateSession = Depends(get_anonymous_session),
+    db: AsyncSession = Depends(get_db),
+) -> InterviewOut:
+    """Signal an external-brain interview to finalize early and mark it completed (SPEC Phase 2).
+
+    Bank sessions complete implicitly when their questions run out, so this is a no-op that simply
+    returns the current state for them. External sessions send the brain an ``end`` turn; a
+    transport failure still completes the session locally (the candidate asked to stop).
+    """
+    session = await _owned_interview(db, interview_id, candidate)
+    if session.brain_mode != "external":
+        question = await _current_question(db, session)
+        return _to_interview_out(session, question)
+    try:
+        session = await external_runner.end(db, session)
+    except ExternalTurnConflict as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    question = await external_runner.current_question(db, session)
     return _to_interview_out(session, question)
 
 
@@ -261,6 +377,15 @@ async def report(
     db: AsyncSession = Depends(get_db),
 ) -> ReportOut:
     session = await _owned_interview(db, interview_id, candidate)
+    if session.brain_mode == "external":
+        # No local scoring: the external provider owns results, and the scores live only in the
+        # backend-only state blob (never surfaced to the candidate). Return the completion notice.
+        if session.status not in ("completed", "scored"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Cannot report in status {session.status!r}",
+            )
+        return _external_report_stub(session)
     sop_coverage_check = options.sop_coverage_check if options else False
     try:
         result = await state_machine.score_and_finalize(
@@ -297,6 +422,21 @@ async def report_stream(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Cannot score in status {session.status!r}",
+        )
+    if session.brain_mode == "external":
+        # No local scoring for external sessions: emit the completion stub as a single report line
+        # (the streaming contract's terminal frame) with no progress events. The scores live only in
+        # the backend-only state blob and are never surfaced (SPEC P3/P12).
+        stub = _external_report_stub(session)
+
+        async def stub_line():
+            line = json.dumps({"type": "report", "report": stub.model_dump()}, ensure_ascii=False)
+            yield line + "\n"
+
+        return StreamingResponse(
+            stub_line(),
+            media_type="application/x-ndjson",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
     sop_coverage_check = options.sop_coverage_check if options else False
 
@@ -346,7 +486,10 @@ async def review(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Cannot review in status {session.status!r}",
         )
-    answers = await state_machine.review_answers(db, session)
+    if session.brain_mode == "external":
+        answers = await external_runner.review_answers(db, session)
+    else:
+        answers = await state_machine.review_answers(db, session)
     return ReviewOut(
         interview_session_id=session.id,
         status=session.status,
