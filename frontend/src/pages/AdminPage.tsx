@@ -42,6 +42,7 @@ import type {
   Checklist,
   ChecklistItem,
   ConfigOption,
+  ExternalConfig,
 } from "../api/admin";
 import * as auth from "../api/auth";
 
@@ -199,6 +200,17 @@ export function AdminPage() {
   const [modelOptions, setModelOptions] = useState<ConfigOption[]>([]);
   const [kbOptions, setKbOptions] = useState<ConfigOption[]>([]);
 
+  // External interview API/server config (Phase 2, vendor-neutral). Resolved live from the DB on
+  // every turn (DB > .env), so a save takes effect on the next interview — no restart. The key is
+  // write-only on load (masked); a separate reveal call fetches the plaintext on a deliberate click.
+  const [extCfg, setExtCfg] = useState<ExternalConfig | null>(null);
+  const [extEndpoint, setExtEndpoint] = useState("");
+  const [extUserTag, setExtUserTag] = useState("");
+  const [extKey, setExtKey] = useState("");
+  const [extStatus, setExtStatus] = useState<string | null>(null);
+  // null = hidden; a string = the revealed plaintext key (shown read-only, never in the edit field).
+  const [extRevealed, setExtRevealed] = useState<string | null>(null);
+
   const guard = useCallback(async (fn: () => Promise<void>) => {
     setError(null);
     try {
@@ -224,6 +236,19 @@ export function AdminPage() {
         setCfgKb(c.knowledge_base);
         setCfgKs(c.knowledge_source);
         setCfgKey(""); // never prefill the (masked) key; empty = keep existing
+      }),
+    [guard],
+  );
+
+  const refreshExternalConfig = useCallback(
+    () =>
+      guard(async () => {
+        const c = await admin.getExternalConfig();
+        setExtCfg(c);
+        setExtEndpoint(c.endpoint);
+        setExtUserTag(c.user_tag);
+        setExtKey(""); // never prefill the (masked) key; empty = keep existing
+        setExtRevealed(null);
       }),
     [guard],
   );
@@ -262,8 +287,9 @@ export function AdminPage() {
     if (authed) {
       void refreshBanks();
       void refreshConfig();
+      void refreshExternalConfig();
     }
-  }, [authed, refreshBanks, refreshConfig]);
+  }, [authed, refreshBanks, refreshConfig, refreshExternalConfig]);
 
   const onLogin = () =>
     guard(async () => {
@@ -677,7 +703,8 @@ export function AdminPage() {
       )}
 
       {tab === "connection" && (
-        /* Azure AI Foundry config — the runtime source of truth (DB > .env > default) */
+        <>
+        {/* Azure AI Foundry config — the runtime source of truth (DB > .env > default) */}
         <Card className={styles.card}>
           <CardHeader header={<Title3>Azure AI Foundry connection</Title3>} />
           <Body1>
@@ -799,6 +826,92 @@ export function AdminPage() {
             </div>
           </div>
         </Card>
+
+        {/* External interview API/server — Phase 2, vendor-neutral. Resolved live from the DB on
+            every turn (DB > .env); a save takes effect on the next interview, no restart. */}
+        <Card className={styles.card}>
+          <CardHeader header={<Title3>External interview API</Title3>} />
+          <Body1>
+            The external interview server that drives personas set to the "External interview API"
+            brain. Resolved at runtime — overrides <code>.env</code>. Must be an HTTPS endpoint. The
+            API key is write-only; leave it blank to keep the existing key.
+          </Body1>
+          <div className={styles.fieldGrid}>
+            <Input
+              value={extEndpoint}
+              placeholder="Endpoint (https://…)"
+              onChange={(_, d) => setExtEndpoint(d.value)}
+              data-testid="ext-endpoint"
+            />
+            <Input
+              value={extUserTag}
+              placeholder="User tag (per-deployment label, no PII) — optional"
+              onChange={(_, d) => setExtUserTag(d.value)}
+              data-testid="ext-user-tag"
+            />
+            <Input
+              type="password"
+              value={extKey}
+              placeholder={extCfg?.masked_key ? `API key (saved: ${extCfg.masked_key})` : "API key"}
+              onChange={(_, d) => setExtKey(d.value)}
+              data-testid="ext-key"
+            />
+
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <Button
+                appearance="primary"
+                data-testid="ext-save"
+                onClick={() =>
+                  guard(async () => {
+                    setExtStatus(null);
+                    await admin.updateExternalConfig({
+                      endpoint: extEndpoint.trim(),
+                      api_key: extKey,
+                      user_tag: extUserTag.trim(),
+                    });
+                    setExtStatus("Saved.");
+                    await refreshExternalConfig();
+                  })
+                }
+              >
+                Save
+              </Button>
+              <Button
+                data-testid="ext-test"
+                onClick={() =>
+                  guard(async () => {
+                    const r = await admin.testExternalConfig();
+                    setExtStatus(r.message);
+                  })
+                }
+              >
+                Test connection
+              </Button>
+              <Button
+                data-testid="ext-reveal"
+                onClick={() =>
+                  guard(async () => {
+                    if (extRevealed !== null) {
+                      setExtRevealed(null);
+                      return;
+                    }
+                    const r = await admin.revealExternalKey();
+                    setExtRevealed(r.api_key || "(no key configured)");
+                  })
+                }
+              >
+                {extRevealed !== null ? "Hide key" : "Reveal key"}
+              </Button>
+              {extStatus && <Text data-testid="ext-status">{extStatus}</Text>}
+            </div>
+            {extRevealed !== null && (
+              <Text data-testid="ext-revealed" style={{ fontFamily: "monospace", wordBreak: "break-all" }}>
+                {extRevealed}
+              </Text>
+            )}
+          </div>
+        </Card>
+        </>
       )}
 
       {error && (

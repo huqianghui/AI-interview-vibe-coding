@@ -34,6 +34,7 @@ import {
   getReport,
   getReportStream,
   getReview,
+  recoverInterview,
   resumeInterview,
   startInterview,
   submitAnswer,
@@ -52,7 +53,16 @@ import { ReviewView } from "../components/ReviewView";
 
 // "review" (requirement 4): once all questions are answered the interview is `completed` but NOT
 // scored — the candidate reviews every answer and must explicitly submit before scoring starts.
-type Phase = "idle" | "orientation" | "interviewing" | "review" | "scoring" | "scored";
+// "external_complete" (Phase 2): an external-brain session ends with an acknowledgement, NOT a
+// local report — that engine owns scoring and the result is never shown to the candidate (P12).
+type Phase =
+  | "idle"
+  | "orientation"
+  | "interviewing"
+  | "review"
+  | "scoring"
+  | "scored"
+  | "external_complete";
 type Channel = "text" | "voice";
 
 const useStyles = makeStyles({
@@ -223,6 +233,27 @@ const useStyles = makeStyles({
   },
   voiceControls: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalS },
   voiceButtons: { display: "flex", gap: tokens.spacingHorizontalS },
+  // External-brain (Phase 2) awaiting overlay: a quiet "interviewer is thinking" row shown in place
+  // of the answer inputs while the next turn is produced, so the candidate waits instead of typing.
+  externalThinking: {
+    display: "flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalM,
+    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
+    borderRadius: tokens.borderRadiusMedium,
+    background: tokens.colorNeutralBackground3,
+    color: tokens.colorNeutralForeground2,
+  },
+  // Recovery block: a stalled external turn the candidate clears with an explicit 恢复.
+  recoveryBlock: {
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalS,
+    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
+    borderRadius: tokens.borderRadiusMedium,
+    border: `1px solid ${tokens.colorPaletteYellowBorderActive}`,
+    background: tokens.colorNeutralBackground2,
+  },
 });
 
 /** Dot color per state for the status legend, matching each state's semantic hue. */
@@ -323,10 +354,16 @@ export function InterviewPage() {
       setInterview(iv);
       setAnswer("");
       if (iv.status === "completed") {
-        // Requirement 4: all questions answered → do NOT auto-score. Drop into the review phase so
-        // the candidate can read every answer back and explicitly submit. Release the mic eagerly —
-        // there is no more voice interaction until (and unless) a new interview starts.
+        // Release the mic eagerly — there is no more voice interaction until a new interview starts.
         await voice.disconnect().catch(() => undefined);
+        if (iv.external_phase != null) {
+          // Phase 2: an external session finishes with an acknowledgement, NOT the local
+          // review→score flow. That engine grades it and the organizer follows up — nothing here.
+          setPhase("external_complete");
+          return;
+        }
+        // Requirement 4: all questions answered → do NOT auto-score. Drop into the review phase so
+        // the candidate can read every answer back and explicitly submit.
         const review = await getReview(iv.interview_session_id);
         setReviewAnswers(review.answers);
         setPhase("review");
@@ -334,6 +371,17 @@ export function InterviewPage() {
     },
     [voice],
   );
+
+  // Phase 2: clear a stalled external turn (external_phase "recovery_required"/"awaiting" seen on
+  // load) by re-driving it. Idempotent on the backend — the same committed state + pending answer
+  // are re-sent, so 恢复 can never double-advance. On success the next turn (or completion) lands.
+  const onRecover = () =>
+    guard(async () => {
+      const iv = interviewRef.current;
+      if (!iv) return;
+      const updated = await recoverInterview(iv.interview_session_id);
+      await advanceOrComplete(updated);
+    });
 
   const onSubmitText = () =>
     guard(async () => {
@@ -456,19 +504,40 @@ export function InterviewPage() {
   // stays authoritative for the text channel + CI; in voice the agent owns follow-ups.
   const currentPrompt = interview?.current_question?.prompt ?? "";
   const currentIsFollowUp = interview?.current_question?.is_follow_up ?? false;
+  // Phase 2 external-brain derived state. `external_phase` is non-null ONLY for external sessions
+  // (bank sessions leave it null), so it doubles as the "is this external?" flag. A stalled turn
+  // (recovery_required, or awaiting seen on resume of an interrupted request) needs an explicit 恢复.
+  const isExternal = interview?.external_phase != null;
+  const externalStalled =
+    isExternal &&
+    (interview?.external_phase === "recovery_required" ||
+      interview?.external_phase === "awaiting");
+  // What voice reads aloud. For external mode the TTS text is the backend `speech_text` (the
+  // display `prompt` is a scrubbed, possibly-different string); bank mode reads the prompt verbatim.
+  const speakText = isExternal ? interview?.speech_text ?? currentPrompt : currentPrompt;
+  // Follow-ups are agent-owned in voice (see below); external turns are never bank "follow-ups".
+  const suppressVerbatimRead = !isExternal && currentIsFollowUp;
   useEffect(() => {
     if (
       channel === "voice" &&
       voice.connectionState === "connected" &&
-      currentPrompt &&
-      !currentIsFollowUp &&
-      spokenQuestionId.current !== currentPrompt
+      speakText &&
+      !suppressVerbatimRead &&
+      spokenQuestionId.current !== speakText
     ) {
-      if (voice.speakQuestion(currentPrompt)) {
-        spokenQuestionId.current = currentPrompt;
+      if (voice.speakQuestion(speakText)) {
+        spokenQuestionId.current = speakText;
       }
     }
-  }, [channel, voice, currentPrompt, currentIsFollowUp]);
+  }, [channel, voice, speakText, suppressVerbatimRead]);
+
+  // External awaiting/recovery: pause the mic so the candidate can't speak into a turn that isn't
+  // open (the backend is producing the next question, or a stalled turn awaits 恢复). Unpause when
+  // the turn reopens. Bank mode is untouched (the candidate drives their own end-of-answer there).
+  useEffect(() => {
+    if (!isExternal || channel !== "voice" || voice.connectionState !== "connected") return;
+    voice.setMuted(busy || Boolean(externalStalled));
+  }, [isExternal, channel, voice, busy, externalStalled]);
 
   const q = interview?.current_question ?? null;
   // REAL streamed progress when /report/stream delivered any (done = answers already graded, so
@@ -529,12 +598,16 @@ export function InterviewPage() {
 
   // The answer controls (question card + text/voice answer). The question card fills its own space;
   // the transcript below it flex-grows. Progress + status + channel switch now live in the top bar.
+  // External turns carry no question count (total = 0), so show the prompt without an "of N"
+  // denominator; bank questions keep the "Question X of N" progress eyebrow.
   const answerControls = q && (
     <Card className={styles.questionCard}>
       <CardHeader
         header={
           <Text size={200} weight="semibold" className={styles.questionEyebrow}>
-            {t("questionProgress", { index: q.index + 1, total: q.total })}
+            {isExternal
+              ? t("voice.roleInterviewer")
+              : t("questionProgress", { index: q.index + 1, total: q.total })}
           </Text>
         }
       />
@@ -548,7 +621,31 @@ export function InterviewPage() {
         </Text>
       )}
 
-      {channel === "text" && (
+      {/* Phase 2: while the external interviewer produces the next turn, replace the answer inputs
+          with a quiet "thinking" row so the candidate waits instead of answering a closed turn. */}
+      {isExternal && busy && (
+        <div className={styles.externalThinking} data-testid="external-thinking">
+          <Spinner size="tiny" />
+          <Text>{t("external.thinking")}</Text>
+        </div>
+      )}
+
+      {/* Phase 2: a stalled external turn (recovery_required / awaiting on resume) — the candidate
+          clears it with an explicit 恢复, which re-drives the same committed state (idempotent). */}
+      {externalStalled && !busy && (
+        <div className={styles.recoveryBlock} data-testid="external-recovery">
+          <Text weight="semibold">{t("external.recoveryTitle")}</Text>
+          <Text size={200}>{t("external.recoveryBody")}</Text>
+          <div>
+            <Button appearance="primary" disabled={busy} onClick={onRecover}>
+              {busy ? t("external.recovering") : t("external.recover")}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Answer inputs — hidden while an external turn is thinking or stalled (nothing to answer). */}
+      {!(isExternal && (busy || externalStalled)) && channel === "text" && (
         <>
           <Textarea
             value={answer}
@@ -564,7 +661,7 @@ export function InterviewPage() {
         </>
       )}
 
-      {channel === "voice" && (
+      {!(isExternal && (busy || externalStalled)) && channel === "voice" && (
         <div className={styles.voiceControls}>
           {voice.connectionState === "connecting" && <Text>{t("voice.connecting")}</Text>}
           {voice.connectionState === "reconnecting" && (
@@ -649,7 +746,9 @@ export function InterviewPage() {
               as the question count grows. */}
           <div className={styles.topBar} data-testid="interview-topbar">
             <div className={mergeClasses(styles.topBarSlot, styles.topBarGrow)}>
-              <QuestionProgress current={q.index} total={q.total} />
+              {/* External turns have no question count (total = 0) — the dot rail would read
+                  "0 of 0", so it's shown for bank interviews only. */}
+              {!isExternal && <QuestionProgress current={q.index} total={q.total} />}
             </div>
             <div className={mergeClasses(styles.topBarSlot, styles.topBarRight)}>{channelSwitch}</div>
           </div>
@@ -717,12 +816,39 @@ export function InterviewPage() {
           </Card>
         )}
 
+        {/* Phase 2: an external turn that stalled before any question is on screen (e.g. a `start`
+            that never posed one) — offer 恢复 rather than the dead-end "no questions" card. */}
+        {phase === "interviewing" && !q && isExternal && externalStalled && (
+          <Card>
+            <div className={styles.recoveryBlock} data-testid="external-recovery">
+              <Text weight="semibold">{t("external.recoveryTitle")}</Text>
+              <Text size={200}>{t("external.recoveryBody")}</Text>
+              <div>
+                <Button appearance="primary" disabled={busy} onClick={onRecover}>
+                  {busy ? t("external.recovering") : t("external.recover")}
+                </Button>
+              </div>
+            </div>
+          </Card>
+        )}
+
         {/* Edge (a): an interview with no question to show (empty bank / defensive backend null).
             A defined end state, not a blank page — never leave the candidate on a broken screen. */}
-        {(phase === "orientation" || phase === "interviewing") && !q && (
-          <Card>
-            <CardHeader header={<Text weight="semibold">{t("noQuestions.title")}</Text>} />
-            <Body1 style={{ display: "block" }}>{t("noQuestions.body")}</Body1>
+        {(phase === "orientation" || phase === "interviewing") &&
+          !q &&
+          !(isExternal && externalStalled) && (
+            <Card>
+              <CardHeader header={<Text weight="semibold">{t("noQuestions.title")}</Text>} />
+              <Body1 style={{ display: "block" }}>{t("noQuestions.body")}</Body1>
+            </Card>
+          )}
+
+        {/* Phase 2 completion: external sessions are scored by that engine and the result is never
+            shown to the candidate (P12) — end with an acknowledgement, not the local report. */}
+        {phase === "external_complete" && (
+          <Card data-testid="external-complete">
+            <CardHeader header={<Text weight="semibold">{t("external.completeTitle")}</Text>} />
+            <Body1 style={{ display: "block" }}>{t("external.completeBody")}</Body1>
           </Card>
         )}
 

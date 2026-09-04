@@ -4,6 +4,12 @@
 # absolute-path symlinks).
 .claude/skills/
 .omc/
+# Per-developer agent-tooling scaffolding (Codex/other harnesses + a vendored
+# gstack framework copy). Same rationale as .claude/skills — local to each dev,
+# never version-controlled.
+.agents/
+.codex/
+AGENTS.md
 .DS_Store
 .gstack/
 # Local SOP blob storage (F1) — uploaded SOP bytes live here in dev; never commit them.

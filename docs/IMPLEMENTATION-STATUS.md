@@ -44,6 +44,22 @@ a fused text/voice interview flow, in phases (branch-per-phase, independently re
 | **F2b** Question-bank admin editor | ✅ Done | v0.12.0.0 | CRUD + reorder + set-default; admin API + `/admin` UI. |
 | **F3b** Checklist admin editor | ✅ Done | v0.12.0.0 | Edit items, re-normalize weights to 100; `/admin` UI. **Mandatory-checklist invariant (v0.29.0.0, [`planning/design-B-checklist-mandatory-20260818.md`](planning/design-B-checklist-mandatory-20260818.md)):** every question is auto-drafted a **non-empty** checklist at create time — SOP-optional draft (rubric drafted from the question text when no SOP passage is retrieved) with a generic-required-item fallback so scoring never degrades to a length-based stub; auto-draft is non-blocking on AI failure. The `/admin` editor now surfaces a per-question **评分标准 / Rubric** button + status marker (✓ N items / ⚙ not configured — count only, P3-safe) and a wired editable form (add/edit/delete items, change kind/weight, save → re-normalized to 100, regenerate on demand). **Admin UI refactor (v0.29.1.0):** `/admin` moved from a single vertical stack of inline-styled cards to a **two-tab workspace** (`题库与评分标准 / Content` + `Azure 连接 / Connection`) with the scoring rubric kept as an inline panel under the selected question; migrated to the project's Fluent `makeStyles`+`tokens` baseline (matching `InterviewPage`); rubric editor gains a weight-total bar (green at 100 / amber otherwise), kind-color Badges, read-only `source_quote` display (admin-only, P3-safe), and save/generate status feedback; a top-bar link cross-navigates to the `/admin/agent` persona editor. No backend or API-contract change. |
 
+## External interview brain (Phase 2, [`planning/design-external-interview-brain-integration.md`](planning/design-external-interview-brain-integration.md))
+
+A second, per-persona interview mode that hands every turn to the client's **external interview
+API/server** instead of the built-in bank — vendor-neutral (`interview_brain = "bank" | "external"`,
+never a product name). Approach B: a parallel `external_runner` + `external_interview_client`
+beside the untouched bank `state_machine`; the backend acts as the API client, snapshotting
+`brain_mode` onto the session at start. The external state blob never reaches the browser or any
+LLM (SPEC P3/P12), and external scoring is owned by that server — the candidate sees a completion
+acknowledgement, never a local report.
+
+| Slice | Status | Shipped | Notes |
+|---|---|---|---|
+| **Backend runner + client + config** | ✅ Built (branch `feat/external-interview-brain-backend`, pending `/ship`) | — | `external_runner` (synchronous `answer` → next-Q `idle` / resumable `recovery_required` / `completed`; `recover` re-drives the committed state idempotently), `external_interview_client` (http + deterministic in-process mock providers; empty endpoint → mock), and `external_config_service` (separate `service_configs` row; Fernet-encrypted key; https + SSRF-guarded endpoint; DB-over-`.env` live resolution). Admin config router (`/admin/external-interviewer`: save / masked-GET / explicit reveal / no-row-creating test-probe). `interview_brain` threaded through persona ORM/schemas/API. Config + runner + privacy invariants under pytest. |
+| **Frontend UI + i18n** | ✅ Built (same branch) | — | Persona editor **Interview brain** selector (`bank` / `external`); admin **External interview API** config card (endpoint / user-tag / write-only key + reveal + test-connection) on the Connection tab; `InterviewPage` external phases — awaiting ("interviewer thinking") overlay driven by the in-flight turn, resumable-recovery affordance, mic auto-pause during awaiting/stalled, `speech_text` TTS wiring, hidden question-progress (external exposes no count), and a dedicated completion acknowledgement card (no local report — P12). Candidate-facing copy bilingual (zh-CN + en-US `external` block); operator surfaces stay English. |
+| **Playwright E2E** | ✅ Built (same branch) | — | `external-config.spec.ts` (admin saves/reveals/probes the external-API config, then resets the endpoint) + `external-interview.spec.ts` (external-brain default persona → mock-driven 3-question run → completion acknowledgement; asserts P12 no-local-report + P3 no-rubric-leak). Both green on mock providers. |
+
 ## Digital-human avatar (F5/F9)
 
 | Capability | Status | Shipped |
@@ -165,11 +181,9 @@ one-time setup + IaC: [`../infra/azure/README.md`](../infra/azure/README.md).
   public-demo mode (generic bank only). Secrets (`SECRET_KEY`/`ENCRYPTION_KEY`/`SEED_ADMIN_PASSWORD`/
   `ADMIN_API_TOKEN`) are **Container App native secrets** (encrypted at rest by the platform),
   passed as `@secure()` Bicep params from the gitignored `main.parameters.json`, never in the repo.
-  Key Vault was dropped: the target MCAPS subscription's Azure Policy force-disables KV public
-  network access, unreachable from a VNet-less Container App.
 - **IaC** — subscription-scope `infra/azure/main.bicep` creates the RG + Log Analytics/App Insights,
   MI, Basic ACR, keyless Storage (private `client-bundle` + `materials`), Container
-  Apps env + both apps, GitHub OIDC identity, and role assignments (no Key Vault — see above).
+  Apps env + both apps, GitHub OIDC identity, and role assignments.
   **No AI-resource creation** (Foundry/Voice Live reused). Workflows:
   [`.github/workflows/infra-main.yml`](../.github/workflows/infra-main.yml)
   (`az bicep build` + `bash -n`) and [`.github/workflows/deploy-app.yml`](../.github/workflows/deploy-app.yml)
@@ -250,3 +264,52 @@ which drops `advisory` + source id). Local push script: `backend/scripts/sync_ba
 (credentials via env, no client content — safe in the public repo). With boot-time auto-seeding live,
 this is a recovery tool rather than a per-restart chore. Full procedure + rationale:
 [`RUNBOOK-bank-sync.md`](RUNBOOK-bank-sync.md).
+
+### Client delivery package (`delivery/`, 2026-09-01)
+
+**Hand-off form** of the tested build so a client can deploy it in **their own Azure tenant with
+their own AAD**, without the vendor's GitHub repo or source code. Plan + as-built:
+[`planning/plan-client-delivery-package.md`](planning/plan-client-delivery-package.md).
+
+- **Version** — the exact tested live build: git `8b7eed1…` = VERSION `0.36.0.4`, retagged to the
+  stable image tag `v0.36.0.4` (git sha not exposed).
+- **No source code** — prebuilt **linux/amd64** image tars exported from the vendor ACR with
+  **skopeo** (docker-archive; built server-side by `az acr build`, so platform-correct). The client
+  re-pushes them into its own ACR with `skopeo copy` — no docker daemon either side.
+- **Trimmed bicep** (`delivery/infra/`) derived from `infra/azure/main.bicep`, differing by
+  `enableGithubOidc=false` **and a simplified bank-delivery topology** (below). The shared
+  `modules/role-assignments.bicep` gained an `enableGithubOidc` param **defaulting `true`** so the
+  live CI path is unchanged; when off it skips the two GitHub OIDC role assignments (the backend MI's
+  **AcrPull** is always created; the delivery package removed the Storage Blob Data Reader grant — the
+  Files SMB mount uses the account key, not blob RBAC). The conditional `githubOidc` module's
+  `.outputs` access is guarded with documented `#disable-next-line BCP318`; `main.bicep` compiles
+  with **0 warnings**.
+- **One-click** `delivery/scripts/deploy-client.sh`: `az login` → `az deployment sub create` (first
+  create passes the real image tags) → read outputs → skopeo push to the client ACR (with
+  `oauth2/exchange` token fallback) → `containerapp update` (frontend gets `BACKEND_URL`) →
+  `grant-foundry-rbac.sh` (client's **own** Foundry) → `/health` poll. Idempotent; `--infra-only` /
+  `--skip-infra` for partial reruns. **No `az acr build`** (images arrive prebuilt).
+- **All 5 question banks reproduced (simplified 2026-09-01 — plain Azure Files share, no VNet)** —
+  3 generic banks bake into the backend image and auto-seed. The 2 rf-CSM banks (real SOP citations,
+  client-confidential) ship as **plain JSON files** (`delivery/banks/*.json`, gitignored, out-of-band);
+  the client uploads them to a **public Azure Files (SMB) share** (`client-banks`, RBAC + account-key
+  protected — **no VNet, no private endpoint**) with `upload-banks.sh`. The bicep registers the share
+  as a `managedEnvironments/storages` (`azureFile`, account key via `listKeys()`, `ReadOnly`) and
+  mounts it read-only at `CLIENT_BANKS_DIR` (`/app/_client_bundle/extra_banks`); the existing
+  `seed_client_banks()` imports every `*.json` on each boot — **application code unchanged**. The
+  vendor assembles all 5 JSONs with `export-banks.sh` (the export bundle carries the full rubric
+  verbatim, so no importer / SOP corpus is needed). *(This replaced the earlier VNet + private-blob +
+  `build-bundle.sh`/`upload-bundle.sh` design per owner request; the vendor's own live production
+  infra above still uses VNet + private blob.)*
+- **Chinese `.docx` operator manual** (`delivery/docs/手册.md` → pandoc → `客户发布操作手册.docx`):
+  概述与架构 / 前置条件清单 / 一步步发布 / (可选) rf-CSM 题库 / 验证 / 故障排查.
+- **Security boundary** — only trimmed bicep, scripts, manual source, and `*.example` templates enter
+  the public repo. Image tars, the rf-CSM bank JSONs (real SOP text — `banks/`), filled `deploy.env` /
+  `main.parameters.json`, the generated `.docx`, and the packaged dist zip are gitignored
+  (`delivery/.gitignore`) and delivered out-of-band. Verified with a `git add -n delivery/` dry-run
+  (only 18 safe files staged; secret scan found only public Azure built-in role GUIDs).
+- **Validation state** — templates/scripts authored + statically verified (`az bicep build` 0
+  warnings; `network.bicep` removed; Files mount wiring confirmed; `bash -n` on all 5 scripts;
+  `export-banks.sh` stages the banks; pandoc `.docx` opens with CJK intact). The delivery rework is
+  **not committed** — shipped as a standalone zip (`make-delivery-zip.sh`). **Not yet deployed into a
+  client tenant**; the package is prepared for hand-off.

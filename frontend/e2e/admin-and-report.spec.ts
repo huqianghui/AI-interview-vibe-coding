@@ -76,7 +76,12 @@ test("admin authors a bank + checklist, candidate gets a scored report", async (
   }
 
   // Executive report view: grade gauge + SOP-source-vs-answer evidence (the P14 proof).
-  await expect(page.getByTestId("report-exec")).toBeVisible();
+  // Scoring is one LLM round-trip per answer. Under CI's mock provider that's instant, but on a dev
+  // machine whose .env carries a real Foundry endpoint the boot-seed/config-overlay flips scoring to
+  // the live provider (~8-10s/answer, ~24s for the interview) — well past the 10s default expect
+  // timeout. Give this one wait room for real-provider latency; every later assertion resolves
+  // instantly once the report is up. CI (mock) still finishes far inside this budget.
+  await expect(page.getByTestId("report-exec")).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId("score-gauge")).toBeVisible();
   await expect(page.getByTestId("gauge-grade")).toHaveText(/[A-F]/);
   await expect(page.getByTestId("report-evidence")).toBeVisible();

@@ -88,3 +88,22 @@ Do NOT copy machine-local working state into the repo: review logs (`*-reviews.j
 The gstack project artifact dir for reference (source to promote FROM, never the home for
 project docs): `~/.gstack/projects/<slug>/` (this project's slug is
 `huqianghui-AI-interview-vibe-coding`).
+
+## Skill routing
+
+When the user's request matches an available skill, invoke it via the Skill tool. When in doubt, invoke the skill. Route by semantic intent in ANY language (中文 included), not English keywords.
+
+Key routing rules:
+- Product ideas/brainstorming (头脑风暴/设计需求) → invoke /office-hours
+- Strategy/scope → invoke /plan-ceo-review
+- Architecture → invoke /plan-eng-review
+- Design system/plan review → invoke /design-consultation or /plan-design-review
+- Full review pipeline → invoke /autoplan
+- Bugs/errors (排查/报错) → invoke /investigate
+- QA/testing site behavior (测试/验证) → invoke /qa or /qa-only
+- Code review/diff check → invoke /review
+- Visual polish → invoke /design-review
+- Ship/deploy/PR (发布/上线) → invoke /ship or /land-and-deploy
+- Save progress → invoke /context-save
+- Resume context → invoke /context-restore
+- Author a backlog-ready spec/issue (写需求/规格) → invoke /spec

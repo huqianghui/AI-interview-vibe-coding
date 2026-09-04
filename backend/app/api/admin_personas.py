@@ -11,11 +11,12 @@ in the persona payload — it never 500s the create/update (F5 AC #4).
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.dependencies import require_role
+from app.models.interview import BRAIN_MODES
 from app.models.persona import InterviewerPersona
 from app.models.persona_knowledge import PersonaKnowledgeConfig
 from app.services import config_service
@@ -55,6 +56,17 @@ class PersonaCreate(VoiceKnobs):
     tools_config: str = "[]"
     # Per-persona model deployment ("" → fall back to the global foundry_agent_model).
     model: str = ""
+    # Which interview engine drives this persona — "bank" (built-in question bank) or "external"
+    # (the client's external interview API/server). Vendor-neutral: the token is never a product
+    # name. Snapshotted onto the session at start (see app.models.interview.BRAIN_MODES).
+    interview_brain: str = "bank"
+
+    @field_validator("interview_brain")
+    @classmethod
+    def _validate_brain(cls, v: str) -> str:
+        if v not in BRAIN_MODES:
+            raise ValueError(f"interview_brain must be one of {BRAIN_MODES}")
+        return v
 
 
 class PersonaUpdate(BaseModel):
@@ -77,6 +89,14 @@ class PersonaUpdate(BaseModel):
     voice_temperature: float | None = None
     playback_speed: float | None = None
     model: str | None = None
+    interview_brain: str | None = None
+
+    @field_validator("interview_brain")
+    @classmethod
+    def _validate_brain(cls, v: str | None) -> str | None:
+        if v is not None and v not in BRAIN_MODES:
+            raise ValueError(f"interview_brain must be one of {BRAIN_MODES}")
+        return v
 
 
 class PersonaOut(BaseModel):
@@ -100,6 +120,7 @@ class PersonaOut(BaseModel):
     voice_temperature: float
     playback_speed: float
     model: str | None
+    interview_brain: str
     agent_id: str | None
     agent_version: str | None
     agent_sync_status: str

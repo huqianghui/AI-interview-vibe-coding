@@ -18,12 +18,10 @@ A deliberately small footprint (subscription-scope `main.bicep` creates the reso
 | GitHub OIDC identity | keyless deploy from GitHub Actions |
 | Role assignments | AcrPull / Storage Blob Data Reader (backend MI); Contributor / AcrPush (deploy MI) |
 
-> **No Key Vault.** The target MCAPS subscription's Azure Policy force-disables Key Vault public
-> network access (reverts `publicNetworkAccess`→`Disabled` within seconds of any write), which a
-> VNet-less Container App cannot reach. The four secrets (`secret-key`, `encryption-key`,
-> `seed-admin-password`, `admin-api-token`) are therefore delivered as Container App **native
-> secrets** (encrypted at rest by the platform), passed as `@secure()` Bicep params from the
-> gitignored `main.parameters.json`. They still never enter the repo.
+> **Runtime secrets.** The four secrets (`secret-key`, `encryption-key`, `seed-admin-password`,
+> `admin-api-token`) are delivered as Container App **native secrets** (encrypted at rest by the
+> platform), passed as `@secure()` Bicep params from the gitignored `main.parameters.json`. They
+> never enter the repo.
 
 **Not created here (by design):**
 - **Azure AI Foundry / Voice Live** — an *existing* resource is reused. The backend MI is granted

@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from app.api import (
     admin_checklist,
     admin_config,
+    admin_external_config,
     admin_personas,
     admin_questions,
     admin_sop,
@@ -101,6 +102,19 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             await apply_master_config_to_settings(session)
     except Exception:  # noqa: BLE001 — config overlay is best-effort; never block startup
         pass
+    try:
+        async with async_session_factory() as session:
+            # Seed the external-interview-brain row from env when absent (Phase 2). Mirrors the
+            # master-config seed: ephemeral SQLite loses it each boot, so re-seeding from env keeps
+            # the /admin/external-interviewer panel reflecting the live runtime config after a
+            # restart. No-op when a row already exists (operator's saved config) or env has no
+            # external endpoint. Unlike Foundry, this DOES seed the bearer key from env.
+            from app.services.external_config_service import seed_external_config_from_env
+
+            await seed_external_config_from_env(session)
+            await session.commit()
+    except Exception:  # noqa: BLE001 — external config seed is best-effort; never block startup
+        pass
 
     prewarm_task = asyncio.create_task(_prewarm_azure_credential())
     persona_sync_task = asyncio.create_task(_sync_default_persona())
@@ -162,4 +176,5 @@ app.include_router(admin_questions.router)
 app.include_router(auth.router)
 app.include_router(admin_users.router)
 app.include_router(admin_config.router)
+app.include_router(admin_external_config.router)
 app.include_router(voice_live_ws.router)

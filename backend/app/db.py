@@ -24,6 +24,13 @@ if engine.url.get_backend_name() == "sqlite":
     def _sqlite_enable_foreign_keys(dbapi_connection, _connection_record):  # noqa: ANN001
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
+        # The external-brain turn lock (app.interview.external_runner) issues a guarded UPDATE that
+        # can contend with a concurrent writer on the same session. SQLite serializes writers with a
+        # single lock; without a busy_timeout a second writer that arrives mid-write fails instantly
+        # with "database is locked" instead of waiting its turn. 5s lets the brief holder commit
+        # so the loser blocks-then-proceeds (and is then caught by the version guard, not a raw
+        # OperationalError). Scoped to SQLite; a real prod DB has its own row-level locking.
+        cursor.execute("PRAGMA busy_timeout=5000")
         cursor.close()
 
 

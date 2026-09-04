@@ -70,10 +70,10 @@ Reuse the reference module *shapes* but drop everything not needed. `infra/azure
 | `container-registry` | Basic ACR | copy as-is |
 | `monitoring` | Log Analytics + App Insights | copy as-is |
 | `storage` | one private `client-bundle` blob container (+ `materials` optional) | trim reference |
-| `key-vault` | secrets: `secret-key`, `encryption-key`, `seed-admin-password`, `admin-api-token` | trim reference |
+| (secrets) | `secret-key`, `encryption-key`, `seed-admin-password`, `admin-api-token` delivered as Container App native secrets | no separate module |
 | `container-apps` | backend + frontend only (no PO/PG) | heavily trim reference |
 | `github-oidc` | federated deploy identity | copy as-is |
-| `role-assignments` | ACR pull (both), Storage Blob Data Reader (backend MI), Key Vault Secrets User (backend MI), + GitHub deploy Contributor/ACR push | trim reference |
+| `role-assignments` | ACR pull (both), Storage Blob Data Reader (backend MI), + GitHub deploy Contributor/ACR push | trim reference |
 
 **Dropped modules:** postgresql, postgresql-entra-admin, ai-foundry, ai-openai, ai-search,
 content-understanding, speech-avatar, network/VNet, prompt-optimizer.
@@ -86,7 +86,7 @@ content-understanding, speech-avatar, network/VNet, prompt-optimizer.
   `FOUNDRY_AGENT_MODEL`, `VOICE_LIVE_DEFAULT_MODEL`, `VOICE_LIVE_API_VERSION`,
   `AZURE_CLIENT_ID` (= backend MI client id, so DefaultAzureCredential picks the right identity),
   `AZURE_STORAGE_ACCOUNT_URL`, `CLIENT_BUNDLE_BLOB`, `APPLICATIONINSIGHTS_CONNECTION_STRING`.
-- Key Vault secretRefs: `SECRET_KEY`, `ENCRYPTION_KEY`, `SEED_ADMIN_PASSWORD`, `ADMIN_API_TOKEN`.
+- Container App native secrets: `SECRET_KEY`, `ENCRYPTION_KEY`, `SEED_ADMIN_PASSWORD`, `ADMIN_API_TOKEN`.
 - **Single replica** `min=max=1` (ephemeral + per-replica DB divergence; also keeps Voice Live WS
   affinity trivial).
 
@@ -111,7 +111,7 @@ used) on the existing Foundry account — same pattern as the reference
 1. `az deployment sub create` with `main.bicep` → provisions RG + all resources in Sweden Central,
    outputs the GitHub OIDC values.
 2. Add outputs to `infra/azure/environments/public.json`.
-3. Set Key Vault secrets (or pass as Bicep secure params): jwt/encryption/seed-admin/admin-token.
+3. Pass the runtime secrets as Bicep secure params: jwt/encryption/seed-admin/admin-token.
 4. Run the Foundry RBAC grant script (MI → existing Foundry account).
 5. Upload the client bundle once: zip importer + `EU_avatar_inspector_interview/`, `az storage blob
    upload` to the private `client-bundle` container (MI/AAD auth).

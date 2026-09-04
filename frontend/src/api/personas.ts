@@ -34,6 +34,10 @@ export interface PersonaOut {
   voice_temperature: number;
   playback_speed: number;
   model: string | null; // per-persona Foundry model deployment ("" / null → global default)
+  // Phase 2: which interview engine drives this persona — "bank" (built-in question bank) or
+  // "external" (the client's external interview API/server). Vendor-neutral token, never a product
+  // name. Snapshotted onto the session at start.
+  interview_brain: string;
   agent_id: string | null;
   agent_version: string | null;
   agent_sync_status: AgentSyncStatus;

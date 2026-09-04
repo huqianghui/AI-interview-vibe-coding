@@ -1,8 +1,8 @@
 targetScope = 'resourceGroup'
 
 // User-assigned managed identity shared by the backend + frontend Container Apps. The backend uses
-// it (via AZURE_CLIENT_ID + DefaultAzureCredential) to reach Azure AI Foundry / Voice Live, read
-// Key Vault secrets, and pull the private client bundle from blob storage — all keyless.
+// it (via AZURE_CLIENT_ID + DefaultAzureCredential) to reach Azure AI Foundry / Voice Live and
+// pull the private client bundle from blob storage — all keyless.
 
 param namePrefix string
 param environmentName string

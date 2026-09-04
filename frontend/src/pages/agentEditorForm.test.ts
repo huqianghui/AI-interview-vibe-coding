@@ -29,6 +29,7 @@ const persona = (over: Partial<PersonaOut> = {}): PersonaOut => ({
   voice_temperature: 0.8,
   playback_speed: 1.0,
   model: null,
+  interview_brain: "bank",
   agent_id: null,
   agent_version: null,
   agent_sync_status: "synced",

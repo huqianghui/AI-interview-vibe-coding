@@ -12,6 +12,5 @@ AI,模型部署 gpt-5.4-mini,GlobalStandard ≥100K TPM,1,按token,是,是,Agent
 AI,模型部署 text-embedding-3-small,GlobalStandard ≥50K TPM,1,按token,是,是,知识库向量化
 AI,Azure AI Search,Basic (生产 Standard S1),1,固定月费,是,是,Foundry IQ 知识库/SOP引用
 生产升级,PostgreSQL Flexible Server,B2s + 备份,1,固定月费+存储,否,是,替换临时 SQLite
-生产升级,Key Vault,Standard,1,按操作,否,是,受策略限制订阅需配私有端点
-生产升级,VNet + Private Endpoint,按端点数,3-4,固定月费+流量,否,是,Storage/KV/DB/Search 私有化
+生产升级,VNet + Private Endpoint,按端点数,3-4,固定月费+流量,否,是,Storage/DB/Search 私有化
 生产升级,Azure Front Door + WAF,Standard,1,固定月费+流量,否,建议,自定义域名/防护

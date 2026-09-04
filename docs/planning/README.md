@@ -88,6 +88,32 @@ living specification is [`../../SPEC.md`](../../SPEC.md) at the repo root — st
   [`spec-external-mcp-interviewer-integration.zh-CN.md`](spec-external-mcp-interviewer-integration.zh-CN.md)
   (content-aligned, plus a client-ready 10-question confirmation checklist in §附).
 
+- [`design-external-interview-brain-integration.md`](design-external-interview-brain-integration.md) —
+  **APPROVED 2026-09-04 (Phase 2), realizes + amends the analysis spec above.** The client shipped
+  their own interview brain behind a public gateway (`.../difyAgent/runWorkflow/streaming`,
+  SSE + hex-encoded `inputs`), live-tested E2E on 2026-09-04. This `/office-hours` design integrates
+  it as a **second, per-persona interview mode** beside the untouched built-in bank (Approach B: a
+  parallel `external_runner` + `external_interview_client`, never a Foundry-agent tool). Key
+  amendment to §14.4: the delivered API is **stateless** (proven by a reset control experiment), so
+  we persist and round-trip the opaque `session_state_json` blob ourselves — backend-only, never to
+  the browser (rubric-leak boundary). Carries the Codex hardening list: commit-before-speech, a
+  submit-time CAS turn reservation (409s a second distinct answer before it can call the brain),
+  pending-answer dedup, silent replay-on-resume, `external_phase` recovery sub-state (stays
+  `in_progress` so existing resume works), and a fake-server chaos suite. **Vendor-neutral by owner
+  directive** — code/config/UI say "external interview API/server", never the product name. v1 does
+  no local scoring (results stay client-side); ships the connection config as the seeded default
+  with a masked/click-to-reveal key. Converged after 2 adversarial review rounds (8/10). The four
+  once-open client questions were **resolved internally** (owner, 2026-09-04): prod key entered by
+  admin (test key never promoted); bounded auto-retry on the idempotent assumption (stateless API +
+  retry-from-committed-state can't fork); generous default timeout tuned from first live run; only
+  next-question/`session_complete`/`error` consumed. No client message owed. **Passed
+  `/plan-eng-review` and LOCKED 2026-09-04** (grounded in the real repo; see the `## GSTACK REVIEW
+  REPORT` appended to the design doc): full scope confirmed; owner accepted the ephemeral-SQLite
+  durability boundary (crash-recovery holds within one container lifetime only) and kept
+  click-to-reveal as a bounded exception (external key only, admin-JWT + plaintext-never-logged;
+  audit/rate-limit are net-new SHOULDs). Impl notes folded: async httpx + add `httpx-sse`, hand-rolled
+  atomic-UPDATE CAS (`version_id_col` withdrawn) + aiosqlite `busy_timeout`. Next: build Slice 1.
+
 - [`spec-azure-cicd-deploy.md`](spec-azure-cicd-deploy.md) — the CI/CD + Azure deployment plan
   (Container Apps, **Sweden Central**, co-located with the reused Foundry resource). Mirrors the
   sibling AI-Coach infra but simpler: **managed-identity** auth throughout, **ephemeral SQLite**
@@ -109,6 +135,20 @@ living specification is [`../../SPEC.md`](../../SPEC.md) at the repo root — st
   seed (never blocks boot) + background Foundry sync (voice P5 gate needs `synced`; failure → text
   degrade); the editor auto-selects the default on entry. Generic contract only — no client content.
   Approved by the owner; shipped v0.34.0.0.
+
+- [`plan-client-delivery-package.md`](plan-client-delivery-package.md) — the **client hand-off**
+  plan + as-built record (2026-09-01). Packages the tested build (`v0.36.0.4`) so a client deploys
+  it in **their own Azure tenant with their own AAD**, no source code and no GitHub: trimmed bicep
+  (`delivery/infra/`, GitHub OIDC gated off by a new `enableGithubOidc` param that defaults **true**
+  in the main repo so the live CI path is unchanged), prebuilt linux/amd64 image tars exported via
+  **skopeo** (no docker), a one-click `deploy-client.sh` (login → infra → skopeo push → deploy →
+  Foundry RBAC → health), and a Chinese `.docx` operator manual. Reproduces **all 5 question banks**
+  (3 generic baked into the image; 2 rf-CSM shipped out-of-band as **plain JSON** uploaded to a
+  public **Azure Files share** — RBAC + account-key, **no VNet** — mounted read-only and auto-imported
+  on boot by `seed_client_banks()`; never committed). *(Simplified 2026-09-01 from the earlier
+  VNet + private-blob bundle channel per owner request.)* Security boundary enforced by
+  `delivery/.gitignore` + a `git add -n` dry-run. Delivered as a standalone zip, **not committed**;
+  not deployed to a client tenant as of promotion.
 
 ## What was intentionally NOT promoted
 

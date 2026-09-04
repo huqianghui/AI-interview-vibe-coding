@@ -153,7 +153,7 @@ All against a **real Foundry project** (`avarda-demo-prj` on the user's resource
 
 ## Out of Scope (Phase 1 — locked with user,防漂移)
 - **Multi-resource / per-service multi-row config** (AI-Coach's per-service toggle rows). One master row.
-- **Azure Key Vault** secret backend. Fernet-in-DB only.
+- **External secret-store backend.** Fernet-in-DB only.
 - **Region auto-detect / region capabilities.**
 - **Full voice WebRTC live audio round-trip** (mic-in / avatar-out in a real browser) — needs hardware;
   Voice Live provider flip can ride along but the live audio validation is deferred.

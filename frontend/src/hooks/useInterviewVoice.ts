@@ -791,6 +791,22 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
     });
   }, [audio, setAudio]);
 
+  // Deterministically set the mute state (idempotent), as opposed to toggleMute's flip. Used by the
+  // external-brain flow to pause the mic while the interviewer is thinking (awaiting) and unpause
+  // when the next turn is ready — the candidate must not "answer" into a turn that isn't open yet.
+  const setMuted = useCallback(
+    (muted: boolean) => {
+      setIsMuted((prev) => {
+        if (prev === muted) return prev;
+        isMutedRef.current = muted;
+        audio.setMicEnabled(!muted);
+        setAudio(muted ? "muted" : "idle");
+        return muted;
+      });
+    },
+    [audio, setAudio],
+  );
+
   /** Signal end-of-answer to Voice Live and RESOLVE with THIS turn's final user transcript (P13).
    *
    * Paired with the manual "I'm done" control. Because STT is asynchronous — the user transcript
@@ -1017,6 +1033,7 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
     connect,
     disconnect,
     toggleMute,
+    setMuted,
     commitAnswer,
     speakQuestion,
     isMuted,

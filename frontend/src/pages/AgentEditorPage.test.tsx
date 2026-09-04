@@ -49,6 +49,7 @@ const PERSONA: personas.PersonaOut = {
   voice_temperature: 0.8,
   playback_speed: 1.0,
   model: null,
+  interview_brain: "bank",
   agent_id: "interviewer-p1",
   agent_version: "3",
   agent_sync_status: "synced",

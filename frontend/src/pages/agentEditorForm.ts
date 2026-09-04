@@ -44,6 +44,7 @@ export interface PersonaFormState {
   voice_temperature: number;
   playback_speed: number;
   model: string; // per-persona Foundry model deployment ("" → global default)
+  interviewBrain: string; // "bank" (built-in question bank) | "external" (external interview API)
   tools: ToolConfig[];
 }
 
@@ -68,6 +69,7 @@ export function emptyPersonaForm(): PersonaFormState {
     voice_temperature: 0.8,
     playback_speed: 1.0,
     model: "",
+    interviewBrain: "bank",
     tools: [],
   };
 }
@@ -93,6 +95,7 @@ export function personaToForm(p: PersonaOut): PersonaFormState {
     voice_temperature: p.voice_temperature,
     playback_speed: p.playback_speed,
     model: p.model ?? "",
+    interviewBrain: p.interview_brain ?? "bank",
     tools: parseToolsConfig(p.tools_config),
   };
 }
@@ -118,6 +121,7 @@ export function formToPayload(form: PersonaFormState): PersonaCreate {
     voice_temperature: form.voice_temperature,
     playback_speed: form.playback_speed,
     model: form.model,
+    interview_brain: form.interviewBrain,
     tools_config: stringifyToolsConfig(form.tools),
   };
 }

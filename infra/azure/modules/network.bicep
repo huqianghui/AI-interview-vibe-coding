@@ -14,6 +14,11 @@ targetScope = 'resourceGroup'
 //      environment — no app/code change; the same public-looking hostname now routes privately.
 //
 // Consumed by container-apps.bicep (infrastructureSubnetId) and storage.bicep (storageAccountId in).
+//
+// It also pins OUTBOUND traffic: a NAT gateway with one static public IP is attached to the infra
+// subnet, so all egress from the environment leaves from a single fixed address (natEgressIp
+// output) that partners can allowlist. Requires a workload-profiles environment (ours is; a
+// legacy Consumption-only env would bypass subnet NAT).
 
 param namePrefix string
 param environmentName string
@@ -31,6 +36,43 @@ var infraSubnetName = 'snet-${namePrefix}-${environmentName}-infra'
 var peSubnetName = 'snet-${namePrefix}-${environmentName}-pe'
 var blobDnsZoneName = 'privatelink.blob.${environment().suffixes.storage}'
 var blobPeName = 'pe-${namePrefix}-${environmentName}-blob'
+var natGatewayName = 'nat-${namePrefix}-${environmentName}'
+var natPublicIpName = 'pip-${namePrefix}-${environmentName}-nat'
+
+// Single static egress IP for everything outbound from the Container Apps environment.
+// Without this, a workload-profiles ACA env sends egress through a platform pool of 100+
+// mutable IPs (properties.outboundIpAddresses) — impossible to hand to a partner as an
+// allowlist. The NAT gateway collapses all egress onto this one PIP; partners allowlist
+// exactly one address, and it never changes unless these resources are deleted.
+resource natPublicIp 'Microsoft.Network/publicIPAddresses@2024-05-01' = {
+  name: natPublicIpName
+  location: location
+  tags: tags
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIPAllocationMethod: 'Static'
+    publicIPAddressVersion: 'IPv4'
+  }
+}
+
+resource natGateway 'Microsoft.Network/natGateways@2024-05-01' = {
+  name: natGatewayName
+  location: location
+  tags: tags
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    idleTimeoutInMinutes: 10
+    publicIpAddresses: [
+      {
+        id: natPublicIp.id
+      }
+    ]
+  }
+}
 
 resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' = {
   name: vnetName
@@ -49,6 +91,9 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' = {
         name: infraSubnetName
         properties: {
           addressPrefix: '10.10.0.0/23'
+          natGateway: {
+            id: natGateway.id
+          }
           delegations: [
             {
               name: 'Microsoft.App.environments'
@@ -140,3 +185,4 @@ resource blobPeDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGr
 output vnetId string = vnet.id
 output infrastructureSubnetId string = infraSubnet.id
 output peSubnetId string = peSubnet.id
+output natEgressIp string = natPublicIp.properties.ipAddress

@@ -100,6 +100,13 @@ class InterviewerPersona(TimestampMixin, Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # Phase 2: which interview engine this persona uses — "bank" (built-in question bank, default)
+    # or "external" (the client's external interview API/server). Snapshotted onto the session's
+    # ``brain_mode`` at start; the persona is the source of truth, the session the frozen copy.
+    # Vendor-neutral by owner directive: the value is the neutral token "external", never a product
+    # name. See app.models.interview.BRAIN_MODES.
+    interview_brain: Mapped[str] = mapped_column(String(16), default="bank", nullable=False)
+
     # Voice Live knobs (serialized into voice-live.configuration metadata) -----
     # `turn_detection` is the VAD type string; the fixed EOU model + interim vocab are owned by
     # the pure metadata builder (they're API constants, not per-persona config). `eou_detection`

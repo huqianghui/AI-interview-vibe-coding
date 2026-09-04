@@ -1,5 +1,60 @@
 # Changelog
 
+## 0.37.0.0 (2026-09-05)
+
+### Added
+- **External interview brain — a vendor-neutral "external" interview mode (SPEC Phase 2).** A
+  persona can now be backed by an external interview API/server instead of the built-in question
+  bank: the backend drives that endpoint turn-by-turn as a plain API client (never a Foundry-agent
+  tool), vendor-neutral throughout — no product name appears anywhere in code, config, or UI; the
+  mode enum is simply `external`.
+  - **Data layer.** `InterviewSession` gains `external_*` columns (brain-mode snapshot, opaque
+    state blob, last public response, `external_phase` sub-state, `turn_version` CAS counter) and
+    `InterviewerPersona.interview_brain` (Alembic `e5f6a7b8c9d0`). `external_phase` is a sub-state
+    of `in_progress`, so resume works unchanged for external sessions.
+  - **Transport + orchestration.** A hex-encoded POST client with a defensive SSE parser
+    (chunk-split tolerant, content-type checked, 1 MiB cap, display scrub) and a commit-before-speech
+    runner with a CAS turn lock and bounded auto-retry (stateless ⇒ safe) that degrades to
+    `recovery_required`. **The opaque external-state blob lives ONLY in `InterviewSession.external_state`
+    — never in a turn row, the public response, the browser, or any LLM (SPEC P3/P12).**
+  - **Config.** `external_interviewer_{endpoint,api_key,user_tag}` settings (blank in CI/dev ⇒ mock
+    provider) with a Fernet-encrypted key, an https/SSRF endpoint guard, env-fallback resolve, and a
+    boot seed. The production key is entered by an admin in the admin UI (write-only + reveal +
+    test-connection on the Connection tab); the env value is a test-only fallback.
+  - **Frontend.** Persona-editor "Interview brain" selector (bank/external), the admin "External
+    interview API" config card, and `InterviewPage` external phases — an awaiting overlay driven by
+    the in-flight turn, a resumable recovery affordance, mic auto-pause while awaiting/stalled,
+    `speech_text` TTS wiring, hidden question-progress (external exposes no count), and a completion
+    card with **no local report (P12)**. Candidate copy is bilingual (zh-CN + en-US); operator
+    surfaces stay English.
+
+### Fixed
+- **Keyless managed-identity deployments now get a live Voice Live credential.** The Azure voice
+  provider was registered only when BOTH a Foundry endpoint AND an API key were configured, so a
+  keyless client hand-off deployment (backend MI granted Cognitive Services User, no api-key env)
+  silently fell back to the mock provider and the digital human never received a real credential.
+  Registration now guards on the endpoint alone — `AzureVoiceProvider` is Entra-first
+  (`DefaultAzureCredential` → Managed Identity), issuing a real bearer with no key; the key remains
+  an optional STS fallback for key-auth-enabled resources.
+
+### Infrastructure
+- **Single static egress IP for the Container Apps environment.** A NAT gateway with one Standard
+  static public IP is attached to the infra subnet, collapsing all outbound traffic onto one fixed
+  address (`natEgressIp` output) that a partner API can allowlist — instead of the workload-profiles
+  platform pool of 100+ mutable egress IPs.
+- **`enableGithubOidc` toggle for client hand-off deployments.** The GitHub-deploy MI role grants
+  (Contributor + AcrPush) are now created only when the GitHub OIDC auto-deploy path is enabled;
+  a client deploying in its own tenant with no GitHub identity sets `enableGithubOidc=false` and the
+  backend MI grants are still created. Dropped the now-stale MCAPS Key Vault policy notes across the
+  Bicep + docs (runtime secrets are Container App native secrets).
+
+### Tests
+- **Scored-report E2E tolerates real-provider latency.** `admin-and-report.spec.ts` timed out at the
+  `report-exec` assertion on any dev machine whose `.env` carries a real Foundry endpoint (boot-seed
+  + config-overlay flip scoring from the harness mock to the live provider, ~24s total, past the 10s
+  default expect timeout). That one wait now has a 60s budget so the real-connection run completes;
+  CI's mock provider still finishes far inside it. No product code touched, no provider forced.
+
 ## 0.36.0.4 (2026-09-01)
 
 ### Added
@@ -178,17 +233,15 @@
 - **Managed-identity, keyless auth end to end.** Both apps run as a user-assigned MI
   (`AZURE_CLIENT_ID` selects it for `DefaultAzureCredential`); GitHub Actions deploys via OIDC with
   no stored cloud credentials. The four runtime secrets are delivered as **Container App native
-  secrets** (encrypted at rest by the platform) rather than Key Vault `secretRef`s: the target
-  MCAPS subscription's Azure Policy force-disables Key Vault public network access (reverts within
-  seconds of any write), which a VNet-less Container App cannot reach. The secrets still never enter
-  the repo — they are passed as `@secure()` Bicep params from the gitignored `main.parameters.json`.
+  secrets** (encrypted at rest by the platform). The secrets never enter the repo — they are passed
+  as `@secure()` Bicep params from the gitignored `main.parameters.json`.
 - **Boot-time self-seeding for ephemeral SQLite (no DB PaaS).** New `backend/entrypoint.sh` runs
   `alembic upgrade head` → optional private-blob client-bundle fetch + import
   (`backend/scripts/fetch_client_bundle.py`, MI auth) → `exec uvicorn` (lifespan seeds the generic
   demo bank + admin). Replaces the reference's separate bootstrap Job, which can't seed a per-replica
   ephemeral DB. `CLIENT_BUNDLE_BLOB` unset → public-demo mode (generic bank only). **This first
-  deploy ships in public-demo mode:** the same subscription policy that disables Key Vault also
-  force-disables the Storage account's public network access, so the "private blob pulled at boot"
+  deploy ships in public-demo mode:** the subscription policy force-disables the Storage account's
+  public network access, so the "private blob pulled at boot"
   client-bundle channel is unreachable from a VNet-less Container App. Seeding the real rf-CSM client
   bank is deferred to a follow-up that adds a Storage private endpoint + VNet-integrated Container
   Apps environment.
