@@ -75,8 +75,10 @@ question flow through our digital human — the phase-2 deliverable does not exi
 6. **Voice transport unchanged:** `useInterviewVoice.ts` `speakQuestion(text)` /
    `commitAnswer()` remain the only voice seam. Orchestration (page-level awaiting/failure/resume
    states) is where new frontend work lands.
-7. **Secrets:** the delivered app-key circulated in plaintext (chat/docs) — treated as leaked;
-   client must rotate before production. Keys live only in Fernet-encrypted config
+7. **Secrets:** the delivered app-key circulated in plaintext (chat/docs) and is a **test key
+   only** — it must never be used in production. The production key is entered by the admin in the
+   admin config UI (owner decision 2026-09-04); no rotation handoff from the client is required.
+   Keys live only in Fernet-encrypted config
    (existing `ServiceConfig` pattern), masked in admin UI with click-to-reveal (owner-requested),
    boot-seedable from env (v0.35.0.0 pattern). Masking reuses the existing `mask_key()` convention
    (`config_service.py:59`): star the prefix, show the **last 4** chars (e.g. `****g4IL`).
@@ -123,8 +125,10 @@ question flow through our digital human — the phase-2 deliverable does not exi
   Premise amended accordingly (Constraint 6).
 - **Hardening list adopted into Approach B:** commit-before-speech; per-session turn
   serialization (optimistic lock / CAS); pending-answer dedup; replay-last-committed-response on
-  reconnect (never re-call the API for a replay); no auto-retry of ambiguous mid-stream timeouts;
-  `external_recovery_required` session status with a fixed local avatar failure line + Resume/Retry;
+  reconnect (never re-call the API for a replay); bounded auto-retry of ambiguous timeouts (safe here
+  because the API is stateless and a retry re-sends the last committed state — see Failure protocol,
+  amended from Codex's original "never auto-retry" per owner's idempotent-assumption decision);
+  `recovery_required` sub-state with a fixed local avatar failure line + 恢复 only after retries exhaust;
   SSE robustness (chunk boundaries, keepalives, size limits, deadlines, only `workflow_finished`
   is authoritative); fake external server test suite.
 
@@ -180,13 +184,17 @@ Backend:
   the in-flight/last response rather than a 409.) The later commit is a second guarded UPDATE
   keyed on the reserved version, so a stale commit also cannot land. **Commit-before-speech**:
   atomically persist new state blob + last committed public response, then release `speech_text`
-  to the client. Failure protocol: retry only
-  pre-acceptance failures (connect errors, 5xx before any SSE frame); an ambiguous mid-stream
-  timeout sets the recovery flag (below), the avatar speaks one fixed local failure line, and the
-  candidate sees a single **恢复 (Recover)** action — one action, one semantic: re-send the same
-  pending answer with the previous committed state under the lock; if no answer is pending, it
-  merely re-renders the last committed response (no API call). `display_text` scrub: strip the
-  internal id prefix (`RFCMS-Qxx —`) → ordinal "Question N" form.
+  to the client. Failure protocol (owner decision 2026-09-04 — proceed on the idempotent
+  assumption): a turn auto-retries, **bounded (2 attempts)**, by re-sending the **same pending
+  answer + the previous committed state** under the lock. This is safe precisely because the API
+  is stateless and we own the state — each call is a pure function `f(state, answer)`, so a retry
+  cannot fork or double-advance; a non-deterministic LLM at worst returns a different-but-valid
+  single next question. Pre-acceptance failures (connect errors, 5xx before any SSE frame) retry
+  the same way. **Only after retries exhaust** does the session enter `recovery_required`: the
+  avatar speaks one fixed local failure line and the candidate sees a single **恢复 (Recover)**
+  action — re-send under the lock; if no answer is pending, it silently re-renders the last
+  committed response (no API call). `display_text` scrub: strip the internal id prefix
+  (`RFCMS-Qxx —`) → ordinal "Question N" form.
 - Lifecycle/status: the top-level `InterviewSession.status` stays within its existing values
   (`in_progress` throughout, `completed` on `session_complete`) so
   `find_resumable_interview` (`state_machine.py:46`, filters `status == "in_progress"`) resumes
@@ -262,29 +270,32 @@ Testing (two slices — hardening is gated on facts, not built ahead of them):
   concurrent answers (CAS 409). Commit-before-speech verified by a fault-injection hook in the
   runner (an injectable raise between state-commit and response-delivery — no real process kill),
   asserting the committed state survives and resume replays it.
-- **Slice 2 (gated on Open Questions 2-4 answers):** delayed-stream/timeout matrix tuned to the
-  real workflow's p95 latency; retry semantics widened if the gateway confirms idempotent
-  resubmit; event-enumeration cases beyond `main_question`/`session_complete`.
+- **Slice 2 (tuning, after a first live run against the real workflow):** delayed-stream/timeout
+  matrix tuned to the observed p95 latency (a generous default timeout — e.g. 60s — holds until
+  measured); the auto-retry bound validated against the real workflow; defensive handling of any
+  event beyond `main_question`/`session_complete` (incl. an `error` payload) exercised.
 - Regression: full existing bank-mode test suite must stay green untouched; assert no browser
   payload ever contains `final_session_state_json` (response-shape test on every candidate
   endpoint).
 
-## Open Questions (to the client — none block the build start)
+## Decisions (owner, 2026-09-04 — resolved internally; no client message required)
 
-1. **Key rotation:** current app-key circulated in plaintext; please regenerate before production
-   and hand over through a private channel. (Constraint 7.)
-2. **Idempotency:** does the gateway support an idempotency key / safe re-submit for a turn whose
-   response was lost mid-stream? Without it we surface Resume/Retry to the operator instead of
-   auto-retrying. (Codex failure protocol.)
-3. **Real-workflow latency:** the tested workflow (`mode:"mock"`) answers in ~0.1s from a code
-   node; will the production workflow call an LLM per turn, and what is its p95 latency? Drives
-   the awaiting-UX and timeout budget.
-4. **Follow-up events:** does the workflow emit events beyond
-   `main_question`/`session_complete` (e.g. `follow_up`, `error`)? We handle unknown events
-   defensively but want the enumeration.
-5. **v2 option (product):** the API returns analysis/scores/radar through us; do you want them
-   rendered in our report page as a phase-3 item, or keep results exclusively on your side?
-   (v1 = your side only, per §14.)
+The four questions once owed to the client were all settled by the owner without needing to ask:
+
+1. **Key rotation → not a client ask.** The circulated app-key is a **test** key; the production
+   key is entered by the admin in the admin config UI. Standing constraint: never promote the test
+   key to prod. (Constraint 7.)
+2. **Idempotency → proceed on the idempotent assumption.** Bounded auto-retry is safe because the
+   API is stateless and we retry from the last committed state (see Failure protocol) — no
+   dependency on a gateway idempotency key.
+3. **Real-workflow latency → don't block on it.** Set a generous default timeout (e.g. 60s) and
+   tune from the first live run's observed p95 (Slice 2). Not a client question.
+4. **Event enumeration → not needed.** We consume only "next question" + `session_complete`, plus a
+   defensive check for an `error` payload; every other event is ignored by design.
+
+Deferred (product, phase-3 — not now): the API also returns analysis/scores/radar through us;
+whether to render them in our report page later, or keep results exclusively client-side, is a
+phase-3 decision. v1 = client-side only, per §14.
 
 ## Success Criteria
 
@@ -305,14 +316,16 @@ Testing (two slices — hardening is gated on facts, not built ahead of them):
 
 - Client gateway reachable from Azure egress (verified 2026-09-04 from dev machine; the fixed
   egress IP 20.91.231.206 exists if the client later enforces allowlisting).
-- Key rotation (Open Question 1) before production cutover — not before dev (current key works).
+- Production external-API key entered by the admin before production cutover (the test key works
+  for dev; never promote it to prod).
 - No infra changes required; no new Azure resources.
 
-## The Assignment
+## Next Step
 
-Send the client ONE message today with Open Questions 1-4 (key rotation, idempotency, real-workflow
-p95 latency, event enumeration) — four bullet points, answerable in five minutes. Every one of them
-is a fact only the client knows, and #3 directly shapes the awaiting-UX you'll demo to them.
+No client message is required — the four open questions were resolved internally (see Decisions
+above). Proceed to **`/plan-eng-review`** on this design, then build Slice 1. The only remaining
+external touchpoint is operational, not a question: whoever deploys enters the production
+external-API key in the admin config UI before the production cutover.
 
 ## What I noticed about how you think
 

@@ -102,9 +102,12 @@ living specification is [`../../SPEC.md`](../../SPEC.md) at the repo root — st
   `in_progress` so existing resume works), and a fake-server chaos suite. **Vendor-neutral by owner
   directive** — code/config/UI say "external interview API/server", never the product name. v1 does
   no local scoring (results stay client-side); ships the connection config as the seeded default
-  with a masked/click-to-reveal key. Converged after 2 adversarial review rounds (8/10). Four open
-  questions to the client (key rotation, idempotency, real-workflow p95 latency, event enumeration)
-  gate the latency/retry hardening slice but not the build start. Next gate: `/plan-eng-review`.
+  with a masked/click-to-reveal key. Converged after 2 adversarial review rounds (8/10). The four
+  once-open client questions were **resolved internally** (owner, 2026-09-04): prod key entered by
+  admin (test key never promoted); bounded auto-retry on the idempotent assumption (stateless API +
+  retry-from-committed-state can't fork); generous default timeout tuned from first live run; only
+  next-question/`session_complete`/`error` consumed. No client message owed. Next gate:
+  `/plan-eng-review`.
 
 - [`spec-azure-cicd-deploy.md`](spec-azure-cicd-deploy.md) — the CI/CD + Azure deployment plan
   (Container Apps, **Sweden Central**, co-located with the reused Foundry resource). Mirrors the
