@@ -106,8 +106,13 @@ living specification is [`../../SPEC.md`](../../SPEC.md) at the repo root — st
   once-open client questions were **resolved internally** (owner, 2026-09-04): prod key entered by
   admin (test key never promoted); bounded auto-retry on the idempotent assumption (stateless API +
   retry-from-committed-state can't fork); generous default timeout tuned from first live run; only
-  next-question/`session_complete`/`error` consumed. No client message owed. Next gate:
-  `/plan-eng-review`.
+  next-question/`session_complete`/`error` consumed. No client message owed. **Passed
+  `/plan-eng-review` and LOCKED 2026-09-04** (grounded in the real repo; see the `## GSTACK REVIEW
+  REPORT` appended to the design doc): full scope confirmed; owner accepted the ephemeral-SQLite
+  durability boundary (crash-recovery holds within one container lifetime only) and kept
+  click-to-reveal as a bounded exception (external key only, admin-JWT + plaintext-never-logged;
+  audit/rate-limit are net-new SHOULDs). Impl notes folded: async httpx + add `httpx-sse`, hand-rolled
+  atomic-UPDATE CAS (`version_id_col` withdrawn) + aiosqlite `busy_timeout`. Next: build Slice 1.
 
 - [`spec-azure-cicd-deploy.md`](spec-azure-cicd-deploy.md) — the CI/CD + Azure deployment plan
   (Container Apps, **Sweden Central**, co-located with the reused Foundry resource). Mirrors the
