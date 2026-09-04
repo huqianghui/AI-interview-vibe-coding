@@ -190,7 +190,7 @@ the pending question; (c) agent-sync/voice-session failure at start → text-onl
 
 ## Out of scope (locked)
 Voice-instance concept; conference; AI-Coach training skill/meta-skill/document→skill; multi-resource
-config / Key Vault / region auto-detect; scoring/report to real Foundry (Phase 5). NOT rebuilding any
+config / external secret store / region auto-detect; scoring/report to real Foundry (Phase 5). NOT rebuilding any
 Foundry-native capability the base provides (Tools/Toolbox and Knowledge are kept, ported not rebuilt).
 
 ## Rollback

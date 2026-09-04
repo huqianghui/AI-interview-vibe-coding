@@ -38,8 +38,8 @@
 **刻意不部署的组件**（演示环境的成本取舍，生产化建议见第五节）：
 
 - **数据库 PaaS**：应用运行在副本本地的**临时 SQLite** 上，每次启动重建并自动播种。
-- **Key Vault**：4 个运行时密钥用 Container App 原生 secrets（平台静态加密）。
-  注：部分受管订阅（如 MCAPS）的 Azure Policy 会强制关闭 Key Vault/Storage 的公网访问，
+- **独立密钥服务**：4 个运行时密钥用 Container App 原生 secrets（平台静态加密），无需额外密钥服务。
+  注：部分受管订阅（如 MCAPS）的 Azure Policy 会强制关闭 Storage 的公网访问，
   无 VNet 的 Container App 无法访问 —— 申请订阅时需确认策略约束。
 - **VNet / Private Endpoint**：全公网 ingress。
 
@@ -87,8 +87,7 @@ Avatar 视频是其中最大的可变项，纯语音（orb 模式）可显著降
 |--------|---------|------------|-----------|
 | Azure Database for PostgreSQL Flexible Server | B2s 起步（2 vCPU/4 GiB）+ 备份 | ~$60+ | 替换临时 SQLite，数据持久化、可多副本 |
 | Container Apps 多副本 + 弹性伸缩 | min 2 / max 5，需先完成 DB 外置 | 按副本线性 | 高可用；注意 Voice Live WS 需要会话亲和 |
-| VNet + Private Endpoint（Storage/KV/DB/Search） | — | ~$10/端点 + 流量 | 满足企业安全基线；解锁受策略限制订阅的私有 blob 通道 |
-| Key Vault | Standard | <$5 | 密钥集中管理与轮转 |
+| VNet + Private Endpoint（Storage/DB/Search） | — | ~$10/端点 + 流量 | 满足企业安全基线；解锁受策略限制订阅的私有 blob 通道 |
 | ACR Standard | — | ~$20 | 更大镜像配额 + geo 复制选项 |
 | 区域冗余 / 多区域 | 按 SLA 要求评估 | — | 容灾 |
 | Azure Front Door / 自定义域名 + WAF | Standard 档 | ~$35+ | 对客域名、防护、就近接入 |
@@ -98,7 +97,7 @@ Avatar 视频是其中最大的可变项，纯语音（orb 模式）可显著降
 | 场景 | 月成本量级* |
 |------|------------|
 | PoC / 演示（本仓库当前配置 + Search Basic） | **~$160–200 + AI 用量（$100–300）** |
-| 生产基线（+Postgres、双副本、KV、VNet、Front Door） | **~$450–600 + AI 用量（随并发增长）** |
+| 生产基线（+Postgres、双副本、VNet、Front Door） | **~$450–600 + AI 用量（随并发增长）** |
 
 *均为 pay-as-you-go 挂牌价量级（美元），未含协议折扣；AI 用量与面试场次、时长、是否启用 Avatar 视频强相关。
 
@@ -106,7 +105,7 @@ Avatar 视频是其中最大的可变项，纯语音（orb 模式）可显著降
 
 - [ ] 订阅具备（或可申请）目标区域的 **Azure OpenAI / AI Foundry 访问资格** 与模型配额（主模型 ≥100K TPM）
 - [ ] 确认目标区域支持 **Voice Live**（含 Avatar，如需数字人视频）
-- [ ] 订阅无阻断性 Azure Policy（重点：Storage/Key Vault 公网访问是否被强制关闭；若关闭需同时申请 VNet + Private Endpoint）
+- [ ] 订阅无阻断性 Azure Policy（重点：Storage 公网访问是否被强制关闭；若关闭需同时申请 VNet + Private Endpoint）
 - [ ] 一次性部署账号的 **Owner/UAA** 权限（部署完成后可回收）
 - [ ] GitHub 组织允许配置 **OIDC federated credential**（免密 CI/CD）
 - [ ] AI Search 服务配额（Basic 起）

@@ -7,8 +7,9 @@ Cognitive Services STS ``issueToken`` endpoint — so it is isolated behind a pr
 
 - :class:`MockVoiceProvider` — the CI/dev default. Returns a deterministic placeholder credential
   with no network, so the whole broker + frontend flow runs with zero Azure.
-- :class:`AzureVoiceProvider` — the real STS key→bearer exchange. Coverage-omitted (needs a live
-  endpoint), registered only when ``default_voice_provider="azure"``.
+- :class:`AzureVoiceProvider` — the real credential issuer (Entra-first, STS key→bearer fallback).
+  Coverage-omitted (needs a live endpoint); registered whenever a Foundry endpoint is configured
+  (keyless MI included), and selected when ``default_voice_provider="azure"``.
 
 Selection mirrors the agent registry: :func:`get_voice_provider` resolves by name, defaulting to
 ``settings.default_voice_provider``.
@@ -143,9 +144,17 @@ _PROVIDERS: dict[str, VoiceProvider] = {"mock": MockVoiceProvider()}
 
 
 def _register_azure() -> None:
-    """Register the Azure provider iff a Foundry endpoint + key are configured."""
+    """Register the Azure provider when a Foundry endpoint is configured.
+
+    Guard on the endpoint ONLY, never on the API key: :class:`AzureVoiceProvider` is Entra-first
+    (``DefaultAzureCredential`` → Managed Identity on Azure), so it issues a real bearer with NO key
+    — which is exactly the keyless client-hand-off deployment (backend MI granted Cognitive Services
+    User, no api-key env). Requiring a key here silently dropped those deployments back to the mock
+    provider, so the digital human never got a live Voice Live credential. The key remains an
+    optional STS fallback inside ``issue_credential`` for key-auth-enabled resources.
+    """
     settings = get_settings()
-    if settings.azure_foundry_endpoint and settings.azure_foundry_api_key:
+    if settings.azure_foundry_endpoint:
         _PROVIDERS["azure"] = AzureVoiceProvider()  # pragma: no cover
 
 

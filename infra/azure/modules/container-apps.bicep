@@ -39,10 +39,8 @@ param frontendImage string = ''
 @description('Resource id of the VNet subnet delegated to Microsoft.App/environments (from network.bicep).')
 param infrastructureSubnetId string
 
-// Runtime secrets are delivered as Container App native secrets (encrypted at rest by the platform)
-// rather than Key Vault secretRefs: this subscription's Azure Policy force-disables Key Vault public
-// network access, which a VNet-less Container App cannot reach. Passed as @secure() params → never
-// logged, never in the repo.
+// Runtime secrets are delivered as Container App native secrets (encrypted at rest by the platform),
+// passed as @secure() params → never logged, never in the repo.
 @secure()
 param secretKey string
 @secure()

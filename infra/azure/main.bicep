@@ -1,7 +1,7 @@
 targetScope = 'subscription'
 
 // AI-interview infrastructure — a deliberately small footprint (vs. the AI-Coach reference):
-//   monitoring, managed-identity, container-registry, storage, key-vault, container-apps (backend +
+//   monitoring, managed-identity, container-registry, storage, container-apps (backend +
 //   frontend only), github-oidc, role-assignments.
 //
 // Deliberately NOT created here (reused / not needed): Azure AI Foundry / OpenAI / Voice Live
@@ -185,11 +185,9 @@ module network './modules/network.bicep' = {
   }
 }
 
-// NOTE: No Key Vault. This subscription's Azure Policy force-disables Key Vault public network
-// access (reverts publicNetworkAccess→Disabled seconds after any write), which a VNet-less Container
-// App cannot reach — secretRefs fail at revision provisioning. The four runtime secrets are instead
-// delivered as Container App NATIVE secrets (encrypted at rest by the platform), passed straight
-// through as @secure() params below. They still never touch the repo (gitignored main.parameters).
+// The four runtime secrets are delivered as Container App NATIVE secrets (encrypted at rest by the
+// platform), passed straight through as @secure() params below. They still never touch the repo
+// (gitignored main.parameters).
 
 module githubOidc './modules/github-oidc.bicep' = {
   name: '${deploymentName}-github-oidc'
@@ -268,6 +266,7 @@ output backendContainerAppName string = containerApps.outputs.backendAppName
 output frontendContainerAppName string = containerApps.outputs.frontendAppName
 output backendUrl string = containerApps.outputs.backendUrl
 output frontendUrl string = containerApps.outputs.frontendUrl
+output natEgressIp string = network.outputs.natEgressIp
 output backendIdentityName string = managedIdentity.outputs.backendIdentityName
 output backendIdentityPrincipalId string = managedIdentity.outputs.backendIdentityPrincipalId
 output githubDeploymentClientId string = githubOidc.outputs.githubDeploymentClientId
