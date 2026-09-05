@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.37.0.1 (2026-09-05)
+
+### Tests
+- **E2E harness: supply a throwaway `ENCRYPTION_KEY` to the mock-provider backend.** The new
+  external-config E2E (`external-config.spec.ts`, shipped in 0.37.0.0) is the first e2e to exercise
+  the Fernet API-key encryption path on save. The Playwright `webServer` backend command booted on
+  mock providers with no `ENCRYPTION_KEY` and debug off, so the encrypt-on-save raised
+  `EncryptionKeyMissing`, the save 500'd, and the spec's "Saved." assertion timed out — reddening
+  CI while production stayed unaffected (it supplies `ENCRYPTION_KEY` as a Container App secret).
+  Added a test-only Fernet key to the harness env alongside the mock-provider vars. Harness-only;
+  no product code changed.
+
 ## 0.37.0.0 (2026-09-05)
 
 ### Added
