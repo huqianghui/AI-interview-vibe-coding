@@ -39,6 +39,12 @@ export default defineConfig({
         "DATABASE_URL=sqlite+aiosqlite:///./e2e.db " +
         "SEED_ADMIN_USERNAME=admin SEED_ADMIN_PASSWORD=e2e-admin-pw " +
         "DEFAULT_LLM_PROVIDER=mock DEFAULT_RETRIEVAL_PROVIDER=mock DEFAULT_VOICE_PROVIDER=mock " +
+        // Throwaway Fernet key so the external-config E2E can exercise the API-key
+        // encryption path. Production supplies ENCRYPTION_KEY as a Container App
+        // secret (main.bicep @secure param); the mock-provider CI harness has none,
+        // and debug is off, so without this the encrypt-on-save would raise
+        // EncryptionKeyMissing and the save would 500. Test-only value, never a real key.
+        "ENCRYPTION_KEY=darq45pUcAWiIW1AAxBNoaeqR21cWgauYwJM5ecwBJI= " +
         `"\${PY_BIN:-.venv/bin/python}" -m uvicorn app.main:app --host 127.0.0.1 --port ${BACKEND_PORT}`,
       port: BACKEND_PORT,
       reuseExistingServer: !process.env.CI,
