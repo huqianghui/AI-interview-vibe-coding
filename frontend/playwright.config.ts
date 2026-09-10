@@ -19,6 +19,12 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   fullyParallel: false,
   workers: 1,
+  // CI-only retries: since 2026-09-10 runners intermittently hang one candidate-flow request
+  // mid-journey (same code green minutes apart). A retry re-runs the test on the same, already
+  // warm servers and — via `trace: "on-first-retry"` below — captures a full trace that the CI
+  // workflow uploads on failure, so the next occurrence is diagnosable instead of a dead end.
+  // Local runs keep 0 retries: a dev-machine hang should fail loudly, not be papered over.
+  retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? "line" : "list",
   use: {
     baseURL: `http://localhost:${FRONTEND_PORT}`,
