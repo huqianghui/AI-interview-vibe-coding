@@ -252,7 +252,12 @@ class HttpExternalInterviewProvider:
             session_state_json=session_state_json,
         )
         body = {"inputs": inputs_hex, "user": user}
-        headers = {"Accept": "text/event-stream"}
+        # No explicit Accept header: the live gateway's auth layer 401s ("Access token is
+        # invalid", code 4001) any request carrying `Accept: text/event-stream`, while the
+        # identical request with the default `Accept: */*` returns 200 + a normal SSE stream
+        # (isolated 2026-09-10 with back-to-back A/B pairs on the same key). The content-type
+        # check below still guards the response shape.
+        headers: dict[str, str] = {}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
         timeout = httpx.Timeout(TOTAL_TIMEOUT, connect=CONNECT_TIMEOUT, read=READ_TIMEOUT)
