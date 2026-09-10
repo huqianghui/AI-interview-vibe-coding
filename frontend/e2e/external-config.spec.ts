@@ -70,7 +70,12 @@ test("admin saves, reveals, and probes the external interview API config", async
   // The probe never throws — it reports a structured pass/fail; against .invalid it fails fast, so
   // we only assert a non-empty status message surfaced (not a specific pass/fail).
   await page.getByTestId("ext-test").click();
-  await expect(page.getByTestId("ext-status")).toBeVisible({ timeout: 15_000 });
+  // Wait for the probe RESULT itself, not merely a visible non-empty status — the "Saved." text
+  // from the earlier save already satisfies that, letting the probe stay in flight. If we move on
+  // while it's airborne, its failure text lands AFTER the reset-save below and overwrites that
+  // save's "Saved." (seen on CI runners with slow NXDOMAIN resolution). The one stable signal that
+  // the probe landed is the status leaving "Saved.".
+  await expect(page.getByTestId("ext-status")).not.toHaveText(/Saved\./, { timeout: 30_000 });
   await expect(page.getByTestId("ext-status")).not.toHaveText("");
 
   // --- Reset endpoint to empty so the sibling external-interview spec gets the mock provider ---

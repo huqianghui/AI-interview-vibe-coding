@@ -3,12 +3,17 @@
 ## 0.37.1.3 (2026-09-10)
 
 ### Tests
-- **Scored-report E2E: real headroom for the longest journey (180s test budget).** The
-  admin-authors-a-bank → full interview → scoring → report test legitimately runs close to the 60s
-  default per-test budget even on the mock provider, so a congested CI runner tipped it into
-  timeout — main went red twice on a pure runner-speed lottery while the identical code was green
-  on the PR run minutes earlier. Raised that one test's budget to 180s; all assertions unchanged,
-  so real regressions still fail — just not on slow hardware. Harness-only.
+- **Two CI-only E2E stabilizations (harness-only, no assertions weakened, no product code).**
+  - *Scored-report journey: real timeout headroom (180s).* The admin-authors-a-bank → full
+    interview → scoring → report test legitimately runs close to the 60s default per-test budget
+    even on the mock provider, so a congested CI runner tipped it into timeout — main went red
+    twice on a pure runner-speed lottery while the identical code was green on the PR run minutes
+    earlier.
+  - *External-config spec: close a probe/save status race.* After clicking test-connection the
+    spec only asserted a visible non-empty status — which the earlier save's "Saved." already
+    satisfies — so on runners with slow NXDOMAIN resolution the probe's failure text landed AFTER
+    the closing reset-save and overwrote its "Saved.", failing the final assertion. The spec now
+    waits for the probe result itself (status leaving "Saved.") before moving on.
 
 ## 0.37.1.2 (2026-09-10)
 
