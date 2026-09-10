@@ -78,3 +78,16 @@ jobs:
           PY_BIN: python
           ALEMBIC_BIN: alembic
         run: npm run e2e
+      # Failure forensics: keep the Playwright traces (recorded on first retry), error contexts and
+      # report so an intermittent CI-only hang leaves a diagnosable crime scene instead of a dead
+      # end — the 2026-09-10 candidate-flow hangs were unactionable without this.
+      - name: Upload E2E failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure-artifacts
+          path: |
+            frontend/test-results/
+            frontend/playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore
