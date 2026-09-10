@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.37.1.2 (2026-09-10)
+
+### Tests
+- **Opt-in LIVE voice + external-brain E2E (`external-voice-live.spec.ts`) — the exact demo
+  combination.** The default VOICE persona (digital human) is temporarily pointed at the external
+  brain (original brain restored afterwards) and a full interview runs on the real dev servers:
+  the external question's `speech_text` is asserted SPOKEN via real Azure voice (`response.done`),
+  Chromium's fake mic (`FAKE_AUDIO` WAV) answers each question, server-VAD transcripts are
+  committed through the real "I'm done answering" flow (≥3 turns), and the session ends on the
+  external completion acknowledgement — with the P12 no-local-report and P3 no-leak assertions.
+  Run: `LIVE_VOICE_EXTERNAL=1 LIVE_ADMIN_PW=... FAKE_AUDIO=/tmp/answer-raw.wav npx playwright test
+  --config=e2e/live.config.ts external-voice-live`. Live-verified (1 passed, 2.6m, 2026-09-10).
+
 ## 0.37.1.1 (2026-09-10)
 
 ### Tests
