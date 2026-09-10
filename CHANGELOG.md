@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.37.1.0 (2026-09-10)
+
+### Fixed
+- **External interview transport: drop the explicit `Accept: text/event-stream` request header —
+  it 401'd against the live gateway.** The first live run of the external HTTP channel (the 0.37.0.0
+  E2E used the mock provider) surfaced a gateway quirk: its auth layer rejects any request carrying
+  `Accept: text/event-stream` with 401 "Access token is invalid" (code 4001), while the identical
+  request under the default `Accept: */*` returns 200 and streams SSE normally — confirmed with
+  back-to-back A/B pairs on the same key after ruling out key rotation, IP allowlisting, the `user`
+  tag, and the hex payload. The client now sends no explicit Accept header; the response
+  content-type check still guards the stream shape. Live-verified end-to-end: admin test-connection
+  OK plus a full real interview (9 questions, opaque state round-tripped every turn,
+  `session_complete` on turn 10).
+
 ## 0.37.0.1 (2026-09-05)
 
 ### Tests
