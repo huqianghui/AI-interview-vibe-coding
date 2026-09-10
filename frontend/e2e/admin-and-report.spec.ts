@@ -14,6 +14,13 @@ const ADMIN_USER = "admin";
 const ADMIN_PW = "e2e-admin-pw";
 
 test("admin authors a bank + checklist, candidate gets a scored report", async ({ page }) => {
+  // This is the longest journey in the suite (bank authoring + full interview + scoring + report):
+  // it legitimately runs close to the 60s default test budget even on the mock provider, and on a
+  // congested CI runner it tips over — main went red twice on a pure runner-speed lottery
+  // (identical code green on the PR run minutes earlier). Give the journey real headroom; every
+  // assertion below is unchanged, so regressions still fail — just not on slow hardware.
+  test.setTimeout(180_000);
+
   // --- Admin: sign in with the real login ---
   await page.goto("/admin");
   await page.getByTestId("admin-username-input").fill(ADMIN_USER);

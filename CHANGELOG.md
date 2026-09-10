@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.37.1.3 (2026-09-10)
+
+### Tests
+- **Scored-report E2E: real headroom for the longest journey (180s test budget).** The
+  admin-authors-a-bank → full interview → scoring → report test legitimately runs close to the 60s
+  default per-test budget even on the mock provider, so a congested CI runner tipped it into
+  timeout — main went red twice on a pure runner-speed lottery while the identical code was green
+  on the PR run minutes earlier. Raised that one test's budget to 180s; all assertions unchanged,
+  so real regressions still fail — just not on slow hardware. Harness-only.
+
 ## 0.37.1.2 (2026-09-10)
 
 ### Tests
