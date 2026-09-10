@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.37.1.1 (2026-09-10)
+
+### Tests
+- **Opt-in LIVE external-brain E2E (`external-interview-live.spec.ts`).** Drives the real running
+  dev servers and the REAL external interview server using the endpoint/API key an admin saved in
+  the Connection tab — nothing hardcoded, proving the stored config is what the backend uses.
+  Health-probes via the admin test-connection path, points the default persona at the external
+  brain (restored afterwards), then completes a full candidate interview in the browser until the
+  external server declares the session done; asserts hidden question count, the completion
+  acknowledgement instead of a local report (P12), and no rubric/score leakage (P3). Run:
+  `LIVE_EXTERNAL=1 LIVE_ADMIN_PW=... npx playwright test --config=e2e/live.config.ts
+  external-interview-live`. Live-verified end-to-end (59s, 2026-09-10).
+
 ## 0.37.1.0 (2026-09-10)
 
 ### Fixed
