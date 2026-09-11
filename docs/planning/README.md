@@ -126,7 +126,10 @@ living specification is [`../../SPEC.md`](../../SPEC.md) at the repo root — st
   `voice_live_proxy.run_proxy` after the language pin when `is_external`, since external = MODEL
   mode with no agent (v0.37.1.9) and Azure rejects `instructions` overrides in `response.create`.
   Six locked decisions: NULL = "use generated default" (`default_external_reader_prompt(name)`,
-  always injected); **proxy-only** (WebRTC broker/admin-Playground deferred); `reconcile_persona`
+  always injected); **proxy-only** (WebRTC broker/admin-Playground permanently out of scope —
+  owner's post-ship ruling 2026-09-11: the Playground broker is a connectivity smoke check only,
+  not a functional test point, so it needs no reader-prompt/language-pin injection and no follow-up
+  is owed); `reconcile_persona`
   never touches the new column; additive/dormant column, no backfill; editor shows only the active
   mode's field. New migration `f6a7b8c9d0e1` (`down_revision = "e5f6a7b8c9d0"`, confirmed head).
   Five implementation threads (model+migration / service CRUD / connect-time injection / frontend

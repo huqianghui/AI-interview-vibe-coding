@@ -92,13 +92,16 @@ against). It is a pure connect-time injection.
   instructions) — unchanged.
 
 `backend/app/services/voice_broker.py` (WebRTC broker path)
-- **LOCKED (Decision 3 — proxy-only, broker deferred)**: the live candidate interview path is the
-  WS proxy (`useInterviewVoice.ts` → `/api/voice-live/ws` → `run_proxy`), which is where external
-  personas actually run (they carry avatars → proxy). The WebRTC broker is the **admin Playground**
-  path only, and it does **not** inject the language-pin system item today either — so the
-  reader-prompt injection matches existing parity by living only in the proxy. **No `voice_broker.py`
-  / `VoiceSession` change in this PR.** If admin-Playground preview of an external persona later
-  needs shaping, that is a separate follow-up that also closes the pre-existing language-pin gap.
+- **LOCKED (Decision 3 — proxy-only; broker permanently out of scope)**: the live candidate
+  interview path is the WS proxy (`useInterviewVoice.ts` → `/api/voice-live/ws` → `run_proxy`),
+  which is where external personas actually run (they carry avatars → proxy). The WebRTC broker is
+  the **admin Playground** path only, and it does **not** inject the language-pin system item today
+  either — so the reader-prompt injection matches existing parity by living only in the proxy.
+  **No `voice_broker.py` / `VoiceSession` change — ever, per owner's ruling.**
+  > **Owner's ruling (2026-09-11, post-ship)**: the Playground broker path exists **only to smoke-test
+  > agent connectivity** — it is NOT a functional test point for interview behavior. It therefore
+  > needs **no** reader-prompt (nor language-pin) injection, and no follow-up is owed. This closes
+  > the item that was previously worded as "a separate follow-up".
 
 ### Thread 4 — Frontend editor (active-mode-aware)
 
@@ -168,10 +171,13 @@ Frontend:
    `NULL`/blank, inject the generated default (verbatim-read framing: "read exactly — never add,
    summarize, translate, or improvise"). `NULL` = "use default", surfaced as the editor placeholder.
    Guarantees every external session has consistent, shaped read behavior.
-3. **Transport coverage → proxy-only; broker/Playground deferred.** The live external-interview path
-   is the WS proxy (server-side injection covers it fully). The WebRTC broker is admin-Playground
-   only and doesn't inject the language pin today either — no `voice_broker.py`/`VoiceSession`
-   change here; a future follow-up can add both together. (See Thread 3.)
+3. **Transport coverage → proxy-only; broker/Playground permanently out of scope.** The live
+   external-interview path is the WS proxy (server-side injection covers it fully). The WebRTC
+   broker is admin-Playground only and doesn't inject the language pin today either — no
+   `voice_broker.py`/`VoiceSession` change. **Owner's ruling (2026-09-11, post-ship): the Playground
+   broker is a connectivity smoke check only, not a functional test point — it needs no injection
+   and no follow-up is owed** (supersedes the earlier "a future follow-up can add both together"
+   wording). (See Thread 3.)
 4. **`reconcile_persona` → never touches `external_reader_prompt`.** External mode has no agent to
    reconcile against; reconcile pulls Portal `instructions` into `prompt_fragment` only. This is
    already how the code behaves (persona_service.py:213-231) — add a one-line comment so no future
