@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.37.1.9 (2026-09-11)
+
+### Fixed
+- **External voice: question header and interviewer transcript now match (root cause: two competing
+  brains).** In external-brain voice interviews the INTERVIEWER header card ("Question 2: …") and the
+  latest spoken interviewer bubble in the transcript below it ("Question 4 of 9: …") showed *different
+  questions* — plus leaked meta-instructions ("Please answer the question:") and improvised follow-ups
+  ("Could you clarify…"). Root cause was architectural, not a display race: the default `Interviewer`
+  persona has `interview_brain=external` **and** still carries a hosted Foundry `agent_id`. The
+  Voice Live connection layer chose agent-vs-model mode purely from `bool(persona.agent_id)`, so an
+  external session connected in **agent mode** — attaching a hosted Foundry interviewer agent that
+  became a **second, independent brain**. Two brains ran at once: the external workflow's `display_text`
+  populated the header while the hosted agent spoke its own pool of questions (the transcript is the
+  avatar's actual spoken audio), so the two diverged. The v0.37.1.6/1.7 fixes only closed *model-mode*
+  improvisation paths and had no effect on a hosted agent's own orchestration. Fix: enforce the correct
+  invariant at the connection layer — when `interview_brain == "external"`, force **MODEL mode** (ignore
+  `agent_id`, connect with the plain `voice_live_default_model`) so the Azure side is a pure "mouth"
+  reading the backend-injected `speech_text`, never a second brain. Applied in **both** voice paths
+  (`voice_live_proxy.run_proxy` — the live avatar WS proxy; and `voice_broker.create_voice_session` —
+  the WebRTC broker), and the P5 `agent_sync_status` gate is now skipped for external personas in both
+  (`voice_live_ws` + `voice_broker`), since a persona that deliberately ignores its agent shouldn't be
+  gated on that agent being synced. The avatar is unaffected (its config is independent of the
+  agent/model choice). Covered by a new `test_voice_broker` regression asserting an external persona
+  with an un-synced `agent_id` still yields a MODEL-mode session (no `agent-name=` in the signaling URL).
+
 ## 0.37.1.8 (2026-09-11)
 
 ### Added

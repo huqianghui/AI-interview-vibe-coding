@@ -121,10 +121,32 @@ UI 形式**。
 | 题目编号 | "Question 5:" 前缀 | **外部 workflow** | ⏳ 待客户确认是否去除 / 排查起始计数 |
 | 题目措辞质量 | 问题不够好 | **外部 workflow** | ⏳ 待客户收集样例 + 调 prompt/知识 |
 | 重复气泡 | 同一题读两遍 | **我方** | ✅ 已修（v0.37.1.6，external persona `create_response=False`）|
-| 表头/口播不同步 | 上下题不一致 + 元指令泄漏 | **我方** | ✅ 同一 fix 修复（v0.37.1.6）|
+| 表头/口播不同步 | 上下题不一致 + 元指令泄漏 | **我方**（架构 bug）| ✅ 已修（v0.37.1.9，见下方根因说明）|
 | 本地即兴追问 | agent 自己引用候选人回答追问 | **我方**（bug）| ✅ 已修（v0.37.1.7，external 模式 `commitAnswer` 不再发裸 `response.create`）|
 | 追问行为（想要的） | 围绕主题追问 1–2 次 | **外部 workflow**（方案 A）| ⏳ 待客户写进 workflow prompt |
 | 回合边界 / 推进 | 答完自动进入下一轮 | **我方 UX** | ✅ 方案定：静音自动提交（~3s）+ 保留"我说完了"按钮 |
+
+### 根因更正（v0.37.1.9）——"表头/口播不同步"不是 display 投影 bug，是**两个大脑**
+
+> 早前把这条并进 v0.37.1.6 的 `create_response=False` 是**错的归因**（该 fix 只关掉了 model 模式下的
+> server-VAD 自动回话，对托管 agent 的自主编排毫无作用），所以问题一直复现。真正根因如下：
+
+默认 `Interviewer` persona 同时有 `interview_brain=external`（外部 workflow 出题）**和**一个残留的托管
+Foundry `agent_id`。而语音连接层（`voice_live_proxy.run_proxy` + `voice_broker.create_voice_session`）**只**
+按 `bool(persona.agent_id)` 决定连 **agent 模式**还是 **model 模式**。于是 external 会话连成了 agent 模式 →
+**挂上了一个托管面试官 agent，成了第二个独立大脑**：
+
+- 表头走的是外部 workflow 的 `display_text`（"Question 2: …"）；
+- 口播/转录气泡是数字人**实际说出的音频**，来自那个托管 agent 自己题库里的问题（"Question 4 of 9: …"）。
+
+两个大脑各说各的 → 表头与转录对不上，并顺带产生"Please answer the question:"元指令泄漏、"Could you
+clarify…"即兴追问。**这也修正了议题 3 里"两条即兴路径都堵上后 external agent 只当嘴"的旧说法**——只要 agent
+还被挂上，它就有自己的大脑；正确做法不是继续堵它的即兴路径，而是**根本不挂 agent**。
+
+**修复（正确不变量）**：`interview_brain == "external"` 时，连接层强制 **model 模式**（忽略 `agent_id`，用
+plain `voice_live_default_model`），Azure 侧变成一张纯"嘴"，只读后端注入的 `speech_text`，永不成为第二个大脑。
+两条语音路径都改了，两处 P5 `agent_sync_status` gate 对 external 跳过（既然不用 agent，就不该要求它 synced）。
+数字人头像不受影响（其配置与 agent/model 选择无关）。
 
 ## 讨论要带走的四个问题
 

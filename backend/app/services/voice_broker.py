@@ -174,7 +174,10 @@ async def create_voice_session(
 
     # P5: reject, never silently degrade. A persona without a synced Foundry agent cannot drive
     # voice mode — the reference fell back to model mode here and lost persona grounding.
-    if persona.agent_sync_status != "synced":
+    # EXCEPTION: external-brain personas deliberately ignore the hosted agent (see is_agent below),
+    # so requiring the agent to be synced is nonsensical — skip the gate for them. (v0.37.1.9)
+    _is_external_persona = (getattr(persona, "interview_brain", "bank") or "bank") == "external"
+    if not _is_external_persona and persona.agent_sync_status != "synced":
         raise VoiceAgentNotSynced(
             f"Interviewer agent not ready (sync status: {persona.agent_sync_status})"
         )
@@ -211,7 +214,11 @@ async def create_voice_session(
     # Agent mode authorizes against the AI Agent service (needs an ai.azure.com/Foundry-scoped
     # token); model mode accepts the cognitiveservices scope. Live-verified 2026-08-12: a
     # cognitiveservices token on an agent session is rejected "Unauthorized to AI Agent service".
-    is_agent = bool((persona.agent_id or "").strip())
+    # External-brain personas run as a pure "mouth" (the external workflow is the interviewer
+    # brain); a hosted agent would be a second, improvising brain whose speech diverges from the
+    # external display_text. Force MODEL mode for external even when an agent_id is set. (v0.37.1.9)
+    is_external = (getattr(persona, "interview_brain", "bank") or "bank") == "external"
+    is_agent = bool((persona.agent_id or "").strip()) and not is_external
     token_scope = FOUNDRY_SCOPE if is_agent else COGNITIVE_SERVICES_SCOPE
     # The SDK returns the created agent id as "name:version"; Voice Live's `agent_id` query wants
     # the bare name (version rides in the separate `agent_version` param). Strip any ":ver" suffix.

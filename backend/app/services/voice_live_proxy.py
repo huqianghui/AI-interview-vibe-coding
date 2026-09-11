@@ -229,7 +229,14 @@ async def run_proxy(
 
     credential, _is_entra = await _resolve_voice_live_credential(api_key)
 
-    is_agent = bool((persona.agent_id or "").strip())
+    # External-brain personas are a pure "mouth": the EXTERNAL workflow is the interviewer brain and
+    # the backend injects each turn's speech_text for a verbatim read. Attaching a hosted Foundry
+    # agent here would be a SECOND brain — it improvises its own questions/follow-ups (and leaks
+    # re-prompt meta-instructions), whose spoken audio diverges from the external-workflow
+    # display_text that drives the header. So even when an external persona still carries an
+    # agent_id, connect in MODEL mode (dumb mouth), never agent mode. (v0.37.1.9)
+    is_external = (getattr(persona, "interview_brain", "bank") or "bank") == "external"
+    is_agent = bool((persona.agent_id or "").strip()) and not is_external
     agent_name = (persona.agent_id or "").split(":", 1)[0] if is_agent else None
 
     # certifi CA-bundle SSL context (see _certifi_ssl_context) handed to the SDK's vendor_options
