@@ -121,7 +121,10 @@ async def voice_live_websocket(ws: WebSocket) -> None:
                 return
 
         # P5 gate: reject, never silently degrade (same invariant as voice_broker).
-        if persona.agent_sync_status != "synced":
+        # EXCEPTION: external-brain personas ignore the hosted agent (run_proxy forces MODEL mode
+        # for them), so requiring the agent to be synced is nonsensical — skip the gate. (v0.37.1.9)
+        _is_external_persona = (getattr(persona, "interview_brain", "bank") or "bank") == "external"
+        if not _is_external_persona and persona.agent_sync_status != "synced":
             await _send_error_and_close(
                 ws,
                 f"Interviewer agent not ready (sync status: {persona.agent_sync_status})",

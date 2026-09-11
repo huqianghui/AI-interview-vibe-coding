@@ -7,6 +7,7 @@ degraded to model mode.
 
 import pytest
 
+from app.config import get_settings
 from app.services import persona_service as psvc
 from app.services import voice_broker
 from app.services.voice_broker import VoiceAgentNotSynced, VoiceUnavailable
@@ -138,6 +139,38 @@ async def test_create_voice_session_succeeds_for_synced_persona(db_session):
     assert "voice" not in vs.session_config
     assert "proactive_engagement" not in vs.session_config
     assert "interim_response" not in vs.session_config
+
+
+@pytest.mark.asyncio
+async def test_external_brain_persona_forces_model_mode_ignoring_agent(db_session):
+    # Regression (v0.37.1.9): an external-brain persona is a pure "mouth" — the EXTERNAL workflow is
+    # the interviewer brain and the backend injects each turn's speech_text. A hosted Foundry agent
+    # attached to it would be a SECOND, improvising brain whose spoken audio diverges from the
+    # external-workflow display_text driving the header (the header-vs-transcript mismatch). So
+    # even when the persona still carries an agent_id, the session MUST connect in MODEL mode — and
+    # the P5 sync gate must be skipped, since the agent is deliberately ignored.
+    persona = await psvc.create_persona(
+        db_session,
+        name="Interviewer",
+        character="lisa",
+        voice_map='{"zh-CN": "zh-CN-XiaoxiaoNeural"}',
+        greeting_map='{"zh-CN": "你好"}',
+        is_default=True,
+        interview_brain="external",
+    )
+    # Deliberately leave an agent_id set AND an un-synced status: the fix must ignore both.
+    persona.agent_id = "interviewer-abc:80"
+    persona.agent_version = "80"
+    persona.agent_sync_status = "none"
+    await db_session.flush()
+
+    vs = await voice_broker.create_voice_session(db_session, locale="zh-CN")
+
+    default_model = get_settings().voice_live_default_model
+    assert vs.mode == "model"  # external → dumb mouth, never agent mode
+    assert vs.model == default_model  # falls back to the plain model, not the hosted agent
+    assert "agent-name=" not in vs.signaling_url
+    assert f"model={default_model}" in vs.signaling_url
 
 
 @pytest.mark.asyncio
