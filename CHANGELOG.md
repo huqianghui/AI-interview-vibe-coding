@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.37.3.0 (2026-09-11)
+
+### Added
+- **Boot seed can now pin the default persona's interview brain (`SEED_PERSONA_BRAIN`).** The
+  ephemeral-SQLite deployment reseeds the default persona on every boot with
+  `interview_brain="bank"`, so an external-brain deployment silently reverted to bank mode on each
+  restart and an operator had to re-toggle it in the editor — the brain setting was the one piece of
+  external-mode config that did NOT survive a release/restart (endpoint/key already env-seed via
+  `seed_external_config_from_env`, and the reader-prompt default lives in code). Now
+  `SEED_PERSONA_BRAIN=external` makes `persona_seed.seed_default_persona` seed the default persona
+  external-ready (values outside `BRAIN_MODES` fall back to `bank` with a boot log warning, never a
+  crash), and the optional `SEED_PERSONA_READER_PROMPT` seeds a custom reading contract (empty =
+  `NULL` = use the generated `default_external_reader_prompt`). Default behavior unchanged
+  (`bank`) — the public demo deploy is unaffected unless the env var is set.
+
 ## 0.37.2.0 (2026-09-11)
 
 ### Added

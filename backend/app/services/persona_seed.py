@@ -26,6 +26,8 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
+from app.models.interview import BRAIN_MODES
 from app.models.persona import InterviewerPersona
 from app.services import persona_service as svc
 
@@ -114,6 +116,20 @@ async def seed_default_persona(db: AsyncSession) -> InterviewerPersona | None:
         # Some other enabled default is already configured — respect it, don't fight the invariant.
         return None
 
+    # The deployment picks the seeded persona's brain via SEED_PERSONA_BRAIN (default "bank").
+    # Ephemeral SQLite reseeds every boot, so WITHOUT this an external-brain deployment reverts to
+    # bank mode on each restart and an operator must re-toggle it in the editor — the env var makes
+    # a restart come back external-ready, mirroring seed_external_config_from_env for the endpoint.
+    settings = get_settings()
+    brain = settings.seed_persona_brain
+    if brain not in BRAIN_MODES:
+        logger.warning(
+            "SEED_PERSONA_BRAIN=%r is not one of %s; seeding 'bank'", brain, sorted(BRAIN_MODES)
+        )
+        brain = "bank"
+    # Optional seeded reader contract; empty = NULL = "use default_external_reader_prompt(name)".
+    reader_prompt = settings.seed_persona_reader_prompt or None
+
     # Construct directly (not via create_persona) to pin the fixed id; model=None → the runtime
     # falls back to settings.foundry_agent_model (the deployment's FOUNDRY_AGENT_MODEL), so we don't
     # hardcode a model that may not exist on a given Foundry resource.
@@ -123,6 +139,8 @@ async def seed_default_persona(db: AsyncSession) -> InterviewerPersona | None:
         character="lisa",
         style="casual-sitting",
         prompt_fragment=_PROMPT_FRAGMENT,
+        interview_brain=brain,
+        external_reader_prompt=reader_prompt,
         voice_map=_VOICE_MAP,
         greeting_map=_GREETING_MAP,
         default_locale="en-US",

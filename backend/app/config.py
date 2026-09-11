@@ -112,6 +112,16 @@ class Settings(BaseSettings):
     external_interviewer_api_key: str = ""
     external_interviewer_user_tag: str = ""
 
+    # Boot-seeded default persona's interview brain. The ephemeral-SQLite deploy reseeds the
+    # default persona on every boot, so a deployment whose normal operation is the EXTERNAL brain
+    # sets SEED_PERSONA_BRAIN=external to come back up external-ready after a restart — otherwise
+    # the seeded persona reverts to "bank" and an operator must re-toggle it in the editor. Values
+    # outside app.models.interview.BRAIN_MODES fall back to "bank" (logged). The optional reader
+    # prompt overrides the generated default reading contract for the seeded persona (empty = NULL
+    # = use default_external_reader_prompt) — same env-seeding pattern as the external endpoint row.
+    seed_persona_brain: str = "bank"
+    seed_persona_reader_prompt: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:
