@@ -42,6 +42,7 @@ import {
   type Interview,
   type Report,
 } from "../api/client";
+import { useExternalMicAutoPause } from "../hooks/useExternalMicAutoPause";
 import { MicAccessError, useInterviewVoice } from "../hooks/useInterviewVoice";
 import type { AudioState, TranscriptSegment } from "../types/voice";
 import { AvatarView } from "../components/AvatarView";
@@ -531,13 +532,13 @@ export function InterviewPage() {
     }
   }, [channel, voice, speakText, suppressVerbatimRead]);
 
-  // External awaiting/recovery: pause the mic so the candidate can't speak into a turn that isn't
-  // open (the backend is producing the next question, or a stalled turn awaits 恢复). Unpause when
-  // the turn reopens. Bank mode is untouched (the candidate drives their own end-of-answer there).
-  useEffect(() => {
-    if (!isExternal || channel !== "voice" || voice.connectionState !== "connected") return;
-    voice.setMuted(busy || Boolean(externalStalled));
-  }, [isExternal, channel, voice, busy, externalStalled]);
+  // External awaiting/recovery: pause the mic while the turn isn't open, unpause when it reopens.
+  // Transition-only (see the hook) so an unrelated re-render never clobbers a manual Mute — issue2.
+  useExternalMicAutoPause(voice.setMuted, {
+    active:
+      isExternal && channel === "voice" && voice.connectionState === "connected",
+    shouldPause: busy || Boolean(externalStalled),
+  });
 
   const q = interview?.current_question ?? null;
   // REAL streamed progress when /report/stream delivered any (done = answers already graded, so
