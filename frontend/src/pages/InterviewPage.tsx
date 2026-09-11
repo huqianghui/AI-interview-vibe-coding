@@ -99,7 +99,8 @@ const useStyles = makeStyles({
     background: tokens.colorNeutralBackground2,
     // Inactive states recede; the active one is restored to full presence below.
     opacity: 0.55,
-    transition: "opacity 200ms ease, border-color 200ms ease, box-shadow 200ms ease",
+    transition:
+      "opacity 200ms ease, border-color 200ms ease, box-shadow 200ms ease",
   },
   statusItemActive: {
     opacity: 1,
@@ -114,9 +115,20 @@ const useStyles = makeStyles({
     borderRadius: tokens.borderRadiusCircular,
     marginTop: "5px",
   },
-  statusTextCol: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 },
-  statusItemLabel: { fontWeight: tokens.fontWeightSemibold, color: tokens.colorNeutralForeground1 },
-  statusItemTip: { color: tokens.colorNeutralForeground3, lineHeight: tokens.lineHeightBase200 },
+  statusTextCol: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "2px",
+    minWidth: 0,
+  },
+  statusItemLabel: {
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+  },
+  statusItemTip: {
+    color: tokens.colorNeutralForeground3,
+    lineHeight: tokens.lineHeightBase200,
+  },
   // Full-width stage for the live Q&A: a title, a global top bar, then a two-column body.
   stageWrap: {
     padding: `${tokens.spacingVerticalL} ${tokens.spacingHorizontalXXL}`,
@@ -145,12 +157,18 @@ const useStyles = makeStyles({
     padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalXL}`,
     boxSizing: "border-box",
     borderRadius: tokens.borderRadiusXLarge,
-    background: "linear-gradient(135deg, rgba(124,58,237,0.10) 0%, rgba(168,85,247,0.05) 100%)",
+    background:
+      "linear-gradient(135deg, rgba(124,58,237,0.10) 0%, rgba(168,85,247,0.05) 100%)",
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     backdropFilter: "blur(10px)",
     boxShadow: tokens.shadow4,
   },
-  topBarSlot: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalM, minWidth: 0 },
+  topBarSlot: {
+    display: "flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalM,
+    minWidth: 0,
+  },
   // The progress slot grows to fill the bar so the rail spreads across the whole row; the channel
   // switch on the right keeps its natural width.
   topBarGrow: { flex: 1, minWidth: "240px" },
@@ -198,12 +216,19 @@ const useStyles = makeStyles({
     background:
       "radial-gradient(120% 90% at 50% 18%, rgba(124,58,237,0.28) 0%, rgba(124,58,237,0) 55%), " +
       "linear-gradient(160deg, #121327 0%, #1c1d3a 55%, #291a44 100%)",
-    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05), 0 18px 48px -24px rgba(41,26,68,0.8)",
+    boxShadow:
+      "inset 0 1px 0 rgba(255,255,255,0.05), 0 18px 48px -24px rgba(41,26,68,0.8)",
     overflow: "hidden",
     padding: tokens.spacingVerticalXL,
     "@media (max-width: 900px)": { minHeight: "360px" },
   },
-  stageAvatar: { width: "100%", flex: 1, display: "flex", alignItems: "center", justifyContent: "center" },
+  stageAvatar: {
+    width: "100%",
+    flex: 1,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   // Right: the control column — a flex column so the transcript can grow to fill leftover height.
   controls: {
     display: "flex",
@@ -212,7 +237,11 @@ const useStyles = makeStyles({
     minWidth: 0,
     minHeight: 0,
   },
-  questionCard: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalM },
+  questionCard: {
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalM,
+  },
   questionEyebrow: {
     color: tokens.colorBrandForeground1,
     textTransform: "uppercase",
@@ -224,7 +253,12 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
   },
   // Wrapper that lets the transcript flex-grow and scroll internally (auto-fit, no fixed height).
-  transcriptFill: { flex: 1, minHeight: "120px", display: "flex", flexDirection: "column" },
+  transcriptFill: {
+    flex: 1,
+    minHeight: "120px",
+    display: "flex",
+    flexDirection: "column",
+  },
   fallbackNote: {
     display: "block",
     padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}`,
@@ -232,7 +266,11 @@ const useStyles = makeStyles({
     background: tokens.colorNeutralBackground3,
     color: tokens.colorNeutralForeground2,
   },
-  voiceControls: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalS },
+  voiceControls: {
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalS,
+  },
   voiceButtons: { display: "flex", gap: tokens.spacingHorizontalS },
   // External-brain (Phase 2) awaiting overlay: a quiet "interviewer is thinking" row shown in place
   // of the answer inputs while the next turn is produced, so the candidate waits instead of typing.
@@ -287,9 +325,10 @@ export function InterviewPage() {
   const [voiceUnavailable, setVoiceUnavailable] = useState(false);
   // Real scoring progress streamed from /report/stream (null until the first progress line, and
   // when the stream fell back to the batch endpoint — the copy then shows the latched fallback).
-  const [scoringProgress, setScoringProgress] = useState<{ done: number; total: number } | null>(
-    null,
-  );
+  const [scoringProgress, setScoringProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
 
   const interviewRef = useRef<Interview | null>(null);
   interviewRef.current = interview;
@@ -323,6 +362,13 @@ export function InterviewPage() {
     // bare response.create). `external_phase` is non-null ONLY for external sessions, so it doubles
     // as the flag — read live here; the hook re-syncs options every render.
     externalMode: interview?.external_phase != null,
+    // External voice mode: after the candidate stops speaking and stays silent ~3s, auto-submit the
+    // buffered answer via the SAME commit-and-advance path the "I'm done" button uses, so the
+    // interview flows hands-free (the button stays as an immediate override). `onVoiceDone` is
+    // declared below; the hook re-syncs options every render so this closure always sees the latest.
+    onSilenceAutoCommit: () => {
+      void onVoiceDone();
+    },
     onTranscript,
     onError: (err) => {
       // A mic failure opens the permission dialog; anything else falls the page back to text.
@@ -392,7 +438,11 @@ export function InterviewPage() {
     guard(async () => {
       const iv = interviewRef.current;
       if (!iv) return;
-      const updated = await submitAnswer(iv.interview_session_id, answer, "text");
+      const updated = await submitAnswer(
+        iv.interview_session_id,
+        answer,
+        "text",
+      );
       await advanceOrComplete(updated);
     });
 
@@ -410,7 +460,11 @@ export function InterviewPage() {
         setError(t("voice.emptyAnswer"));
         return;
       }
-      const updated = await submitAnswer(iv.interview_session_id, spoken, "voice");
+      const updated = await submitAnswer(
+        iv.interview_session_id,
+        spoken,
+        "voice",
+      );
       await advanceOrComplete(updated);
     });
 
@@ -426,8 +480,10 @@ export function InterviewPage() {
       let r: Report;
       try {
         // Streaming first: one progress event per question as the backend grades it.
-        r = await getReportStream(iv.interview_session_id, sopCoverageCheck, (p) =>
-          setScoringProgress({ done: p.done, total: p.total }),
+        r = await getReportStream(
+          iv.interview_session_id,
+          sopCoverageCheck,
+          (p) => setScoringProgress({ done: p.done, total: p.total }),
         );
       } catch {
         // Stream unavailable (older backend, proxy hiccup) — the batch endpoint returns the same
@@ -519,7 +575,9 @@ export function InterviewPage() {
       interview?.external_phase === "awaiting");
   // What voice reads aloud. For external mode the TTS text is the backend `speech_text` (the
   // display `prompt` is a scrubbed, possibly-different string); bank mode reads the prompt verbatim.
-  const speakText = isExternal ? interview?.speech_text ?? currentPrompt : currentPrompt;
+  const speakText = isExternal
+    ? (interview?.speech_text ?? currentPrompt)
+    : currentPrompt;
   // Follow-ups are agent-owned in voice (see below); external turns are never bank "follow-ups".
   const suppressVerbatimRead = !isExternal && currentIsFollowUp;
   useEffect(() => {
@@ -540,7 +598,9 @@ export function InterviewPage() {
   // Transition-only (see the hook) so an unrelated re-render never clobbers a manual Mute — issue2.
   useExternalMicAutoPause(voice.setMuted, {
     active:
-      isExternal && channel === "voice" && voice.connectionState === "connected",
+      isExternal &&
+      channel === "voice" &&
+      voice.connectionState === "connected",
     shouldPause: busy || Boolean(externalStalled),
   });
 
@@ -550,7 +610,10 @@ export function InterviewPage() {
   // count once it's back, else the total latched during the interview (current_question is null
   // in the scoring phase, so q.total is gone) — with the old static numerator.
   const scoringTotal =
-    scoringProgress?.total || report?.per_question.length || questionTotalRef.current || 1;
+    scoringProgress?.total ||
+    report?.per_question.length ||
+    questionTotalRef.current ||
+    1;
   const scoringNarr = t("transition.scoring", {
     n: scoringProgress
       ? Math.min(scoringProgress.done + 1, scoringTotal)
@@ -559,7 +622,10 @@ export function InterviewPage() {
   });
 
   const errorBanner = error && (
-    <Body1 role="alert" style={{ display: "block", marginTop: 16, color: "#b00" }}>
+    <Body1
+      role="alert"
+      style={{ display: "block", marginTop: 16, color: "#b00" }}
+    >
       {error}
     </Body1>
   );
@@ -579,7 +645,11 @@ export function InterviewPage() {
 
   // The channel switch (text/voice) — a segmented pill that lives in the global top bar.
   const channelSwitch = (
-    <div className={styles.segmented} role="tablist" aria-label={t("voice.useVoice")}>
+    <div
+      className={styles.segmented}
+      role="tablist"
+      aria-label={t("voice.useVoice")}
+    >
       <Button
         className={styles.segBtn}
         size="small"
@@ -629,7 +699,10 @@ export function InterviewPage() {
       {/* Phase 2: while the external interviewer produces the next turn, replace the answer inputs
           with a quiet "thinking" row so the candidate waits instead of answering a closed turn. */}
       {isExternal && busy && (
-        <div className={styles.externalThinking} data-testid="external-thinking">
+        <div
+          className={styles.externalThinking}
+          data-testid="external-thinking"
+        >
           <Spinner size="tiny" />
           <Text>{t("external.thinking")}</Text>
         </div>
@@ -659,7 +732,11 @@ export function InterviewPage() {
             resize="vertical"
           />
           <div>
-            <Button appearance="primary" disabled={busy || !answer.trim()} onClick={onSubmitText}>
+            <Button
+              appearance="primary"
+              disabled={busy || !answer.trim()}
+              onClick={onSubmitText}
+            >
               {busy ? t("submitting") : t("submit")}
             </Button>
           </div>
@@ -668,7 +745,9 @@ export function InterviewPage() {
 
       {!(isExternal && (busy || externalStalled)) && channel === "voice" && (
         <div className={styles.voiceControls}>
-          {voice.connectionState === "connecting" && <Text>{t("voice.connecting")}</Text>}
+          {voice.connectionState === "connecting" && (
+            <Text>{t("voice.connecting")}</Text>
+          )}
           {voice.connectionState === "reconnecting" && (
             <Text style={{ opacity: 0.7 }}>{t("voice.reconnecting")}</Text>
           )}
@@ -722,7 +801,10 @@ export function InterviewPage() {
               return (
                 <div
                   key={state}
-                  className={mergeClasses(styles.statusItem, active && styles.statusItemActive)}
+                  className={mergeClasses(
+                    styles.statusItem,
+                    active && styles.statusItemActive,
+                  )}
                   data-state={state}
                   data-active={active}
                   aria-current={active ? "true" : undefined}
@@ -753,9 +835,15 @@ export function InterviewPage() {
             <div className={mergeClasses(styles.topBarSlot, styles.topBarGrow)}>
               {/* External turns have no question count (total = 0) — the dot rail would read
                   "0 of 0", so it's shown for bank interviews only. */}
-              {!isExternal && <QuestionProgress current={q.index} total={q.total} />}
+              {!isExternal && (
+                <QuestionProgress current={q.index} total={q.total} />
+              )}
             </div>
-            <div className={mergeClasses(styles.topBarSlot, styles.topBarRight)}>{channelSwitch}</div>
+            <div
+              className={mergeClasses(styles.topBarSlot, styles.topBarRight)}
+            >
+              {channelSwitch}
+            </div>
           </div>
 
           <div className={styles.grid}>
@@ -799,7 +887,9 @@ export function InterviewPage() {
       <div className={styles.page}>
         <div className={styles.header}>
           <Title2 as="h1">{t("appTitle")}</Title2>
-          <Body1 style={{ display: "block", opacity: 0.7 }}>{t("tagline")}</Body1>
+          <Body1 style={{ display: "block", opacity: 0.7 }}>
+            {t("tagline")}
+          </Body1>
         </div>
 
         {phase === "idle" && (
@@ -811,13 +901,18 @@ export function InterviewPage() {
         {/* Orientation beat (P13): set expectations before Q1. */}
         {phase === "orientation" && q && (
           <Card>
-            <CardHeader header={<Text weight="semibold">{t("orientation.title")}</Text>} />
+            <CardHeader
+              header={<Text weight="semibold">{t("orientation.title")}</Text>}
+            />
             <Body1 style={{ display: "block", marginBottom: 16 }}>
               {isExternal
                 ? t("orientation.bodyExternal")
                 : t("orientation.body", { total: q.total })}
             </Body1>
-            <Button appearance="primary" onClick={() => setPhase("interviewing")}>
+            <Button
+              appearance="primary"
+              onClick={() => setPhase("interviewing")}
+            >
               {t("orientation.begin")}
             </Button>
           </Card>
@@ -827,11 +922,18 @@ export function InterviewPage() {
             that never posed one) — offer 恢复 rather than the dead-end "no questions" card. */}
         {phase === "interviewing" && !q && isExternal && externalStalled && (
           <Card>
-            <div className={styles.recoveryBlock} data-testid="external-recovery">
+            <div
+              className={styles.recoveryBlock}
+              data-testid="external-recovery"
+            >
               <Text weight="semibold">{t("external.recoveryTitle")}</Text>
               <Text size={200}>{t("external.recoveryBody")}</Text>
               <div>
-                <Button appearance="primary" disabled={busy} onClick={onRecover}>
+                <Button
+                  appearance="primary"
+                  disabled={busy}
+                  onClick={onRecover}
+                >
                   {busy ? t("external.recovering") : t("external.recover")}
                 </Button>
               </div>
@@ -845,8 +947,12 @@ export function InterviewPage() {
           !q &&
           !(isExternal && externalStalled) && (
             <Card>
-              <CardHeader header={<Text weight="semibold">{t("noQuestions.title")}</Text>} />
-              <Body1 style={{ display: "block" }}>{t("noQuestions.body")}</Body1>
+              <CardHeader
+                header={<Text weight="semibold">{t("noQuestions.title")}</Text>}
+              />
+              <Body1 style={{ display: "block" }}>
+                {t("noQuestions.body")}
+              </Body1>
             </Card>
           )}
 
@@ -854,27 +960,47 @@ export function InterviewPage() {
             shown to the candidate (P12) — end with an acknowledgement, not the local report. */}
         {phase === "external_complete" && (
           <Card data-testid="external-complete">
-            <CardHeader header={<Text weight="semibold">{t("external.completeTitle")}</Text>} />
-            <Body1 style={{ display: "block" }}>{t("external.completeBody")}</Body1>
+            <CardHeader
+              header={
+                <Text weight="semibold">{t("external.completeTitle")}</Text>
+              }
+            />
+            <Body1 style={{ display: "block" }}>
+              {t("external.completeBody")}
+            </Body1>
           </Card>
         )}
 
         {/* Pre-scoring review (requirement 4): read every answer back, then explicitly submit. */}
         {phase === "review" && (
-          <ReviewView answers={reviewAnswers} busy={busy} onSubmit={onSubmitForScoring} />
+          <ReviewView
+            answers={reviewAnswers}
+            busy={busy}
+            onSubmit={onSubmitForScoring}
+          />
         )}
 
         {/* Scoring-in-progress beat (P10). With streamed progress the bar is determinate (real
             per-question grading progress off /report/stream); without it, spinner-only. */}
         {phase === "scoring" && (
           <Card>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 12 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                padding: 12,
+              }}
+            >
               <Spinner size="small" />
               <Text>{scoringNarr}</Text>
             </div>
             {scoringProgress && (
               <div style={{ padding: "0 12px 12px" }}>
-                <ProgressBar value={scoringProgress.done} max={scoringProgress.total} />
+                <ProgressBar
+                  value={scoringProgress.done}
+                  max={scoringProgress.total}
+                />
               </div>
             )}
           </Card>

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.37.1.8 (2026-09-11)
+
+### Added
+- **Hands-free turn advance in external voice mode: silence auto-commit (~3s) + kept "I'm done"
+  button.** In external-brain voice interviews every finished answer triggers one external API call
+  to fetch the next turn, so "when is this turn done" is a client-side boundary decision (the
+  external API is request/response and never hears live audio). Previously the candidate had to click
+  "我说完了 / I'm done answering" after every answer — clunky for a back-and-forth conversation. Now,
+  after the candidate stops speaking and stays silent for `EXTERNAL_SILENCE_AUTOCOMMIT_MS` (3s), the
+  buffered answer auto-commits and advances — any new speech within the window resets the timer, so a
+  mid-answer pause to think won't submit early. The "I'm done" button stays as an immediate manual
+  override (P13). Server-VAD splits one answer into several transcript segments on pauses, so segments
+  are buffered and joined before commit (this is why we wait 3s of silence, not fire on every
+  `transcription.completed`). No double-fire: after auto-commit the turn goes busy → `useExternalMicAutoPause`
+  mutes the mic → no new speech re-arms the timer, and the timer nulls itself and is cleared in
+  `commitAnswer` / cleanup / on `speech_started`. Bank mode never arms the timer (gated on
+  `externalMode`). Implemented via a new `onSilenceAutoCommit` option on `useInterviewVoice`, wired in
+  `InterviewPage` to the same commit-and-advance path the button uses. The 3s threshold is a hardcoded
+  constant for now; whether to make it configurable (per persona / role / pace) is flagged as a client
+  discussion item (see `docs/planning/discuss-external-question-presentation-20260911.md` 议题 4).
+  Covered by 3 new hook tests (auto-commit after ~3s; speech resets the timer; bank mode never arms).
+
 ## 0.37.1.7 (2026-09-11)
 
 ### Fixed
