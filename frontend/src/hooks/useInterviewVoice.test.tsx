@@ -142,7 +142,8 @@ describe("useInterviewVoice in-band error events", () => {
       connectP = hook.connect("zh-CN");
     });
     await act(async () => {
-      for (let i = 0; i < 20 && !FakeWebSocket.last; i++) await Promise.resolve();
+      for (let i = 0; i < 20 && !FakeWebSocket.last; i++)
+        await Promise.resolve();
       FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
       await connectP;
     });
@@ -184,8 +185,12 @@ describe("useInterviewVoice in-band error events", () => {
       connectP.catch(() => undefined);
     });
     await act(async () => {
-      for (let i = 0; i < 20 && !FakeWebSocket.last; i++) await Promise.resolve();
-      FakeWebSocket.last!.receive({ type: "error", error: { message: "agent not found" } });
+      for (let i = 0; i < 20 && !FakeWebSocket.last; i++)
+        await Promise.resolve();
+      FakeWebSocket.last!.receive({
+        type: "error",
+        error: { message: "agent not found" },
+      });
       await expect(connectP).rejects.toThrow("agent not found");
     });
     expect(onError).toHaveBeenCalled();
@@ -220,7 +225,8 @@ describe("useInterviewVoice in-band error events", () => {
       connectP = hook.connect("zh-CN");
     });
     await act(async () => {
-      for (let i = 0; i < 20 && !FakeWebSocket.last; i++) await Promise.resolve();
+      for (let i = 0; i < 20 && !FakeWebSocket.last; i++)
+        await Promise.resolve();
       FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
       await connectP;
     });
@@ -241,7 +247,10 @@ describe("useInterviewVoice in-band error events", () => {
 
     // The reconnect attempt hits a PRE-connect error event — transient, must NOT reach the page.
     await act(async () => {
-      secondWs.receive({ type: "error", error: { message: "temporarily unavailable" } });
+      secondWs.receive({
+        type: "error",
+        error: { message: "temporarily unavailable" },
+      });
     });
     expect(onError).not.toHaveBeenCalled();
 
@@ -286,7 +295,9 @@ describe("useInterviewVoice commitAnswer", () => {
 
   // Connect the hook over a FakeWebSocket and return the live handle + the socket. Mirrors the
   // connect dance used by the in-band-error tests above.
-  async function connectHook(extraOptions: Partial<Parameters<typeof useInterviewVoice>[1]> = {}) {
+  async function connectHook(
+    extraOptions: Partial<Parameters<typeof useInterviewVoice>[1]> = {},
+  ) {
     FakeWebSocket.last = null;
     vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
     let hook!: ReturnType<typeof useInterviewVoice>;
@@ -304,7 +315,8 @@ describe("useInterviewVoice commitAnswer", () => {
       connectP = hook.connect("zh-CN");
     });
     await act(async () => {
-      for (let i = 0; i < 20 && !FakeWebSocket.last; i++) await Promise.resolve();
+      for (let i = 0; i < 20 && !FakeWebSocket.last; i++)
+        await Promise.resolve();
       FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
       await connectP;
     });
@@ -350,7 +362,9 @@ describe("useInterviewVoice commitAnswer", () => {
     act(() => {
       committed = getHook().commitAnswer();
     });
-    await expect(committed).resolves.toBe("Organize them as the organization chart.");
+    await expect(committed).resolves.toBe(
+      "Organize them as the organization chart.",
+    );
     // The transcript still resolves, but NO response.create was ever sent (no agent turn).
     expect(ws().sent.some((s) => s.includes('"response.create"'))).toBe(false);
 
@@ -358,7 +372,7 @@ describe("useInterviewVoice commitAnswer", () => {
     vi.unstubAllGlobals();
   });
 
-  it("resolves \"\" when no transcript arrives before the timeout (fail-closed, never hangs)", async () => {
+  it('resolves "" when no transcript arrives before the timeout (fail-closed, never hangs)', async () => {
     vi.useFakeTimers();
     const { getHook, unmount } = await connectHook();
 
@@ -415,7 +429,9 @@ describe("useInterviewVoice commitAnswer", () => {
     act(() => {
       committed = getHook().commitAnswer();
     });
-    await expect(committed).resolves.toBe("The answer I spoke before clicking.");
+    await expect(committed).resolves.toBe(
+      "The answer I spoke before clicking.",
+    );
 
     unmount();
     vi.unstubAllGlobals();
@@ -512,6 +528,104 @@ describe("useInterviewVoice commitAnswer", () => {
     unmount();
     vi.unstubAllGlobals();
   });
+
+  // Silence-auto-commit (external voice mode): after the candidate stops speaking and stays silent
+  // ~3s, the hook auto-submits via onSilenceAutoCommit — the same commit-and-advance path the "I'm
+  // done" button uses — so the external-brain interview flows hands-free. New speech resets the
+  // timer; bank mode never arms it.
+  it("external mode: auto-commits after ~3s of silence following an utterance", async () => {
+    vi.useFakeTimers();
+    const onSilenceAutoCommit = vi.fn();
+    const { ws, unmount } = await connectHook({
+      externalMode: true,
+      onSilenceAutoCommit,
+    });
+
+    // Candidate finishes an utterance (server-VAD emits the completed transcript). No commit armed
+    // → buffered, and the silence timer arms.
+    await act(async () => {
+      ws().receive({
+        type: "conversation.item.input_audio_transcription.completed",
+        transcript: "That's my answer.",
+      });
+    });
+    // Not yet — still within the grace window.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_500);
+    });
+    expect(onSilenceAutoCommit).not.toHaveBeenCalled();
+
+    // Cross the 3s threshold → auto-commit fires exactly once.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(onSilenceAutoCommit).toHaveBeenCalledTimes(1);
+
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("external mode: resuming speech resets the silence timer (no premature auto-commit)", async () => {
+    vi.useFakeTimers();
+    const onSilenceAutoCommit = vi.fn();
+    const { ws, unmount } = await connectHook({
+      externalMode: true,
+      onSilenceAutoCommit,
+    });
+
+    await act(async () => {
+      ws().receive({
+        type: "conversation.item.input_audio_transcription.completed",
+        transcript: "First part of my answer.",
+      });
+    });
+    // Wait almost the full window, then the candidate speaks again — the timer must reset.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_500);
+      ws().receive({ type: "input_audio_buffer.speech_started" });
+    });
+    // Another 2.5s (5s total since the first segment) — but only 2.5s since re-speaking started,
+    // and speech_started cleared the timer, so no auto-commit yet.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_500);
+    });
+    expect(onSilenceAutoCommit).not.toHaveBeenCalled();
+
+    // The new utterance completes and re-arms the timer; 3s later it finally fires.
+    await act(async () => {
+      ws().receive({
+        type: "conversation.item.input_audio_transcription.completed",
+        transcript: "Second part of my answer.",
+      });
+      await vi.advanceTimersByTimeAsync(3_100);
+    });
+    expect(onSilenceAutoCommit).toHaveBeenCalledTimes(1);
+
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("bank mode: never arms the silence timer (turn advances only on the button)", async () => {
+    vi.useFakeTimers();
+    const onSilenceAutoCommit = vi.fn();
+    // No externalMode → bank session. A completed transcript buffers but must NOT arm the timer.
+    const { ws, unmount } = await connectHook({ onSilenceAutoCommit });
+
+    await act(async () => {
+      ws().receive({
+        type: "conversation.item.input_audio_transcription.completed",
+        transcript: "A bank-mode answer.",
+      });
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(onSilenceAutoCommit).not.toHaveBeenCalled();
+
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 });
 
 /**
@@ -554,7 +668,10 @@ describe("useInterviewVoice speakQuestion cancel-then-speak", () => {
     vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
     let hook!: ReturnType<typeof useInterviewVoice>;
     function SpeakHarness() {
-      hook = useInterviewVoice("iv-1", { locale: "zh-CN", tokenProvider: () => "tok" });
+      hook = useInterviewVoice("iv-1", {
+        locale: "zh-CN",
+        tokenProvider: () => "tok",
+      });
       return null;
     }
     const { unmount } = render(<SpeakHarness />);
@@ -563,7 +680,8 @@ describe("useInterviewVoice speakQuestion cancel-then-speak", () => {
       connectP = hook.connect("zh-CN");
     });
     await act(async () => {
-      for (let i = 0; i < 20 && !FakeWebSocket.last; i++) await Promise.resolve();
+      for (let i = 0; i < 20 && !FakeWebSocket.last; i++)
+        await Promise.resolve();
       FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
       await connectP;
     });
@@ -586,8 +704,14 @@ describe("useInterviewVoice speakQuestion cancel-then-speak", () => {
     expect(types).toContain("response.create");
     expect(types).not.toContain("response.cancel");
     // The verbatim text rides on the assistant item.
-    const item = ws().sent
-      .map((s) => JSON.parse(s) as { type?: string; item?: { content?: { text?: string }[] } })
+    const item = ws()
+      .sent.map(
+        (s) =>
+          JSON.parse(s) as {
+            type?: string;
+            item?: { content?: { text?: string }[] };
+          },
+      )
       .find((m) => m.type === "conversation.item.create");
     expect(item?.item?.content?.[0]?.text).toBe("Question one.");
 
@@ -619,8 +743,14 @@ describe("useInterviewVoice speakQuestion cancel-then-speak", () => {
     types = sentTypes(ws());
     expect(types).toContain("conversation.item.create");
     expect(types.filter((t) => t === "response.create").length).toBe(1);
-    const item = ws().sent
-      .map((s) => JSON.parse(s) as { type?: string; item?: { content?: { text?: string }[] } })
+    const item = ws()
+      .sent.map(
+        (s) =>
+          JSON.parse(s) as {
+            type?: string;
+            item?: { content?: { text?: string }[] };
+          },
+      )
       .find((m) => m.type === "conversation.item.create");
     expect(item?.item?.content?.[0]?.text).toBe("The next question.");
 
@@ -642,8 +772,14 @@ describe("useInterviewVoice speakQuestion cancel-then-speak", () => {
     await act(async () => {
       ws().receive({ type: "response.done" });
     });
-    const spoken = ws().sent
-      .map((s) => JSON.parse(s) as { type?: string; item?: { content?: { text?: string }[] } })
+    const spoken = ws()
+      .sent.map(
+        (s) =>
+          JSON.parse(s) as {
+            type?: string;
+            item?: { content?: { text?: string }[] };
+          },
+      )
       .filter((m) => m.type === "conversation.item.create")
       .map((m) => m.item?.content?.[0]?.text);
     expect(spoken).toEqual(["fresh question"]);
@@ -678,8 +814,14 @@ describe("useInterviewVoice speakQuestion cancel-then-speak", () => {
     await act(async () => {
       ws().receive({ type: "response.done" });
     });
-    const spoken = ws().sent
-      .map((s) => JSON.parse(s) as { type?: string; item?: { content?: { text?: string }[] } })
+    const spoken = ws()
+      .sent.map(
+        (s) =>
+          JSON.parse(s) as {
+            type?: string;
+            item?: { content?: { text?: string }[] };
+          },
+      )
       .filter((m) => m.type === "conversation.item.create")
       .map((m) => m.item?.content?.[0]?.text);
     // The rejected first attempt is re-queued and read after response.done. (Its response.create
@@ -690,7 +832,9 @@ describe("useInterviewVoice speakQuestion cancel-then-speak", () => {
     // question is never voiced — the masked-regression this count guards against.
     expect(spoken.filter((t) => t === "Colliding question.").length).toBe(2);
     // And exactly two response.create attempts: the rejected one and the surviving retry.
-    expect(sentTypes(ws()).filter((t) => t === "response.create").length).toBe(2);
+    expect(sentTypes(ws()).filter((t) => t === "response.create").length).toBe(
+      2,
+    );
 
     unmount();
     vi.unstubAllGlobals();
@@ -716,7 +860,13 @@ describe("useInterviewVoice speakQuestion cancel-then-speak", () => {
     });
 
     const reads = ws()
-      .sent.map((s) => JSON.parse(s) as { type?: string; item?: { content?: { text?: string }[] } })
+      .sent.map(
+        (s) =>
+          JSON.parse(s) as {
+            type?: string;
+            item?: { content?: { text?: string }[] };
+          },
+      )
       .filter((m) => m.type === "conversation.item.create")
       .map((m) => m.item?.content?.[0]?.text);
     expect(reads).toEqual(["How do you know your trials are under control?"]);
@@ -743,7 +893,13 @@ describe("useInterviewVoice speakQuestion cancel-then-speak", () => {
     });
 
     const reads = ws()
-      .sent.map((s) => JSON.parse(s) as { type?: string; item?: { content?: { text?: string }[] } })
+      .sent.map(
+        (s) =>
+          JSON.parse(s) as {
+            type?: string;
+            item?: { content?: { text?: string }[] };
+          },
+      )
       .filter((m) => m.type === "conversation.item.create")
       .map((m) => m.item?.content?.[0]?.text);
     expect(reads).toEqual(["Same question."]);
@@ -780,7 +936,13 @@ describe("useInterviewVoice speakQuestion cancel-then-speak", () => {
     });
 
     const reads = ws()
-      .sent.map((s) => JSON.parse(s) as { type?: string; item?: { content?: { text?: string }[] } })
+      .sent.map(
+        (s) =>
+          JSON.parse(s) as {
+            type?: string;
+            item?: { content?: { text?: string }[] };
+          },
+      )
       .filter((m) => m.type === "conversation.item.create")
       .map((m) => m.item?.content?.[0]?.text);
     expect(reads).toEqual(["Accepted question."]);
@@ -822,7 +984,13 @@ describe("useInterviewVoice speakQuestion cancel-then-speak", () => {
       getHook().speakQuestion("Resumed question.");
     });
     const reads = ws()
-      .sent.map((s) => JSON.parse(s) as { type?: string; item?: { content?: { text?: string }[] } })
+      .sent.map(
+        (s) =>
+          JSON.parse(s) as {
+            type?: string;
+            item?: { content?: { text?: string }[] };
+          },
+      )
       .filter((m) => m.type === "conversation.item.create")
       .map((m) => m.item?.content?.[0]?.text);
     expect(reads).toEqual(["Resumed question."]);
@@ -852,7 +1020,9 @@ describe("useInterviewVoice speakQuestion cancel-then-speak", () => {
     await act(async () => {
       ws().receive({ type: "response.created" });
     });
-    const before = sentTypes(ws()).filter((t) => t === "response.create").length;
+    const before = sentTypes(ws()).filter(
+      (t) => t === "response.create",
+    ).length;
 
     // "I'm done" with no buffered transcript arms a pending commit — but must NOT fire a colliding
     // response.create while a response is already active.
@@ -937,11 +1107,17 @@ describe("useInterviewVoice live transcript streaming", () => {
       connectP = hook.connect("zh-CN");
     });
     await act(async () => {
-      for (let i = 0; i < 20 && !FakeWebSocket.last; i++) await Promise.resolve();
+      for (let i = 0; i < 20 && !FakeWebSocket.last; i++)
+        await Promise.resolve();
       FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
       await connectP;
     });
-    return { getHook: () => hook, ws: () => FakeWebSocket.last!, segments, unmount };
+    return {
+      getHook: () => hook,
+      ws: () => FakeWebSocket.last!,
+      segments,
+      unmount,
+    };
   }
 
   it("streams user partials as a growing non-final segment, finalized in place by completed", async () => {
@@ -1002,7 +1178,10 @@ describe("useInterviewVoice live transcript streaming", () => {
     });
 
     const finals = segments.filter((s) => s.role === "user" && s.isFinal);
-    expect(finals.map((s) => s.content)).toEqual(["Second utterance.", "First utterance."]);
+    expect(finals.map((s) => s.content)).toEqual([
+      "Second utterance.",
+      "First utterance.",
+    ]);
     // item-a finalizes under its delta-stream id; item-b under a fallback id — and they differ.
     expect(finals[1].id).toBe("user-item-a");
     expect(finals[0].id).not.toBe(finals[1].id);
@@ -1034,7 +1213,9 @@ describe("useInterviewVoice live transcript streaming", () => {
     });
     await expect(committed).resolves.toBe("The finalized answer.");
     // The partial reached the panel (display) but never the commit path.
-    expect(segments.some((s) => !s.isFinal && s.content === "partial words")).toBe(true);
+    expect(
+      segments.some((s) => !s.isFinal && s.content === "partial words"),
+    ).toBe(true);
 
     unmount();
     vi.unstubAllGlobals();
@@ -1113,7 +1294,13 @@ describe("useInterviewVoice question-read watchdog", () => {
 
   function questionReads(ws: FakeWebSocket): string[] {
     return ws.sent
-      .map((s) => JSON.parse(s) as { type?: string; item?: { content?: { text?: string }[] } })
+      .map(
+        (s) =>
+          JSON.parse(s) as {
+            type?: string;
+            item?: { content?: { text?: string }[] };
+          },
+      )
       .filter((m) => m.type === "conversation.item.create")
       .map((m) => m.item?.content?.[0]?.text ?? "");
   }
@@ -1123,7 +1310,10 @@ describe("useInterviewVoice question-read watchdog", () => {
     vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
     let hook!: ReturnType<typeof useInterviewVoice>;
     function WatchHarness() {
-      hook = useInterviewVoice("iv-1", { locale: "zh-CN", tokenProvider: () => "tok" });
+      hook = useInterviewVoice("iv-1", {
+        locale: "zh-CN",
+        tokenProvider: () => "tok",
+      });
       return null;
     }
     const { unmount } = render(<WatchHarness />);
@@ -1132,7 +1322,8 @@ describe("useInterviewVoice question-read watchdog", () => {
       connectP = hook.connect("zh-CN");
     });
     await act(async () => {
-      for (let i = 0; i < 20 && !FakeWebSocket.last; i++) await Promise.resolve();
+      for (let i = 0; i < 20 && !FakeWebSocket.last; i++)
+        await Promise.resolve();
       FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
       await connectP;
     });
@@ -1181,7 +1372,9 @@ describe("useInterviewVoice question-read watchdog", () => {
     await act(async () => {
       vi.advanceTimersByTime(30_000);
     });
-    expect(questionReads(ws())).toEqual(["Describe a difficult decision you made."]);
+    expect(questionReads(ws())).toEqual([
+      "Describe a difficult decision you made.",
+    ]);
 
     unmount();
     vi.useRealTimers();
@@ -1267,17 +1460,23 @@ describe("useInterviewVoice question-read watchdog", () => {
     const { getHook, ws, unmount } = await connectHook();
 
     act(() => {
-      void getHook().speakQuestion("Please introduce your relevant experience for this role.");
+      void getHook().speakQuestion(
+        "Please introduce your relevant experience for this role.",
+      );
     });
     await act(async () => {
-      ws().receive({ type: "response.created", response: { id: "resp-read-1" } });
+      ws().receive({
+        type: "response.created",
+        response: { id: "resp-read-1" },
+      });
       // A fully paraphrased transcript under the CLAIMED id — shares few surface words, but the id
       // proves it's our read playing.
       ws().receive({
         type: "response.audio_transcript.delta",
         response_id: "resp-read-1",
         item_id: "i1",
-        delta: "Could you tell me a bit about what you've done that fits this position?",
+        delta:
+          "Could you tell me a bit about what you've done that fits this position?",
       });
     });
     await act(async () => {
@@ -1301,7 +1500,9 @@ describe("useInterviewVoice question-read watchdog", () => {
     const { getHook, ws, unmount } = await connectHook();
 
     act(() => {
-      void getHook().speakQuestion("Describe how you resolved a difficult customer complaint.");
+      void getHook().speakQuestion(
+        "Describe how you resolved a difficult customer complaint.",
+      );
     });
     // No `response.created` id claim; the transcript reorders/rewords but keeps the content words.
     await act(async () => {
@@ -1309,7 +1510,8 @@ describe("useInterviewVoice question-read watchdog", () => {
         type: "response.audio_transcript.done",
         response_id: "r-unclaimed",
         item_id: "i1",
-        transcript: "Please describe how you resolved a difficult complaint from a customer.",
+        transcript:
+          "Please describe how you resolved a difficult complaint from a customer.",
       });
     });
     await act(async () => {
@@ -1331,7 +1533,9 @@ describe("useInterviewVoice question-read watchdog", () => {
     const { getHook, ws, unmount } = await connectHook();
 
     act(() => {
-      void getHook().speakQuestion("How do you manage regulatory differences across markets?");
+      void getHook().speakQuestion(
+        "How do you manage regulatory differences across markets?",
+      );
     });
     await act(async () => {
       // Claimed id is resp-read; the transcript arrives under a DIFFERENT id with unrelated words.
@@ -1391,7 +1595,13 @@ describe("useInterviewVoice first-read avatar gate", () => {
 
   function questionReads(ws: FakeWebSocket): string[] {
     return ws.sent
-      .map((s) => JSON.parse(s) as { type?: string; item?: { content?: { text?: string }[] } })
+      .map(
+        (s) =>
+          JSON.parse(s) as {
+            type?: string;
+            item?: { content?: { text?: string }[] };
+          },
+      )
       .filter((m) => m.type === "conversation.item.create")
       .map((m) => m.item?.content?.[0]?.text ?? "");
   }
@@ -1404,7 +1614,10 @@ describe("useInterviewVoice first-read avatar gate", () => {
     vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
     let hook!: ReturnType<typeof useInterviewVoice>;
     function GateHarness({ tick }: { tick: number }) {
-      hook = useInterviewVoice("iv-1", { locale: "zh-CN", tokenProvider: () => "tok" });
+      hook = useInterviewVoice("iv-1", {
+        locale: "zh-CN",
+        tokenProvider: () => "tok",
+      });
       return <div data-testid="tick">{tick}</div>;
     }
     const { unmount, rerender } = render(<GateHarness tick={0} />);
@@ -1413,9 +1626,13 @@ describe("useInterviewVoice first-read avatar gate", () => {
       connectP = hook.connect("zh-CN");
     });
     await act(async () => {
-      for (let i = 0; i < 20 && !FakeWebSocket.last; i++) await Promise.resolve();
+      for (let i = 0; i < 20 && !FakeWebSocket.last; i++)
+        await Promise.resolve();
       if (avatarEnabled) {
-        FakeWebSocket.last!.receive({ type: "proxy.connected", avatar_enabled: true });
+        FakeWebSocket.last!.receive({
+          type: "proxy.connected",
+          avatar_enabled: true,
+        });
       }
       FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
       await connectP;
@@ -1433,7 +1650,9 @@ describe("useInterviewVoice first-read avatar gate", () => {
 
     // Avatar enabled but not yet painting frames — the first read is HELD (nothing on the wire).
     act(() => {
-      expect(getHook().speakQuestion("First question, please introduce yourself.")).toBe(true);
+      expect(
+        getHook().speakQuestion("First question, please introduce yourself."),
+      ).toBe(true);
     });
     expect(questionReads(ws())).toEqual([]);
 
@@ -1442,7 +1661,9 @@ describe("useInterviewVoice first-read avatar gate", () => {
     act(() => {
       rerender(1);
     });
-    expect(questionReads(ws())).toEqual(["First question, please introduce yourself."]);
+    expect(questionReads(ws())).toEqual([
+      "First question, please introduce yourself.",
+    ]);
 
     unmount();
     vi.unstubAllGlobals();
@@ -1503,7 +1724,10 @@ describe("useInterviewVoice first-read avatar gate", () => {
     act(() => {
       getHook().speakQuestion("Second question.");
     });
-    expect(questionReads(ws())).toEqual(["First question.", "Second question."]);
+    expect(questionReads(ws())).toEqual([
+      "First question.",
+      "Second question.",
+    ]);
 
     unmount();
     vi.unstubAllGlobals();

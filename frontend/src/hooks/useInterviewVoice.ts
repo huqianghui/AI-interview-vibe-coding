@@ -33,7 +33,11 @@ import type { RefObject } from "react";
 import { _internal as clientInternal, type VoiceSession } from "../api/client";
 import { useVoiceAudio } from "./useVoiceAudio";
 import { useAvatarStream } from "./useAvatarStream";
-import type { AudioState, TranscriptSegment, VoiceConnectionState } from "../types/voice";
+import type {
+  AudioState,
+  TranscriptSegment,
+  VoiceConnectionState,
+} from "../types/voice";
 
 /** Thrown ONLY when `getUserMedia` fails (mic denied / no hardware) — never for service errors. */
 export class MicAccessError extends Error {
@@ -77,6 +81,15 @@ export interface UseInterviewVoiceOptions {
    * not via an agent-generated reply. Pairs with the backend's `create_response=False`, which
    * suppresses the OTHER improvisation path (server-VAD auto-response). */
   externalMode?: boolean;
+  /**
+   * External-brain voice mode only: called when the candidate has stopped speaking and stayed
+   * silent for `EXTERNAL_SILENCE_AUTOCOMMIT_MS` (any new speech resets the timer). Lets the page
+   * auto-submit the buffered answer to the external workflow so the interview advances hands-free,
+   * for a natural back-and-forth feel — the "I'm done" button remains as an immediate override.
+   * The page wires this to the SAME commit-and-advance path the button uses. No-op in bank mode
+   * (the timer is only armed when `externalMode` is set).
+   */
+  onSilenceAutoCommit?: () => void;
 }
 
 const MAX_RECONNECT = 3;
@@ -107,6 +120,14 @@ const SPEAK_MAX_ATTEMPTS = 4;
 // — never leave the candidate in silence). Voice-only sessions don't gate (audio plays over the WS
 // AudioContext, ready at `session.updated`).
 const FIRST_READ_AVATAR_GATE_MS = 6_000;
+// External-brain voice mode: how long the candidate must stay silent after their last utterance
+// segment before we auto-submit the buffered answer to the external workflow (see
+// `onSilenceAutoCommit`). Server-VAD emits an end-of-utterance transcript on ANY mid-thought pause,
+// so a naive "submit on every completed" fragments one answer into several external calls; this
+// grace window (re-armed on every new segment, cleared when the candidate speaks again) waits for a
+// real end-of-answer instead. Kept as a constant for now — whether it should be configurable is a
+// pending product question; 3s is the agreed default.
+const EXTERNAL_SILENCE_AUTOCOMMIT_MS = 3_000;
 
 /** Wire shape of one entry in `session.updated`'s `session.avatar.ice_servers` (matches the Azure
  * SDK's `IceServer.as_dict()`: each server carries its OWN username/credential). */
@@ -128,15 +149,23 @@ function toRtcIceServers(raw: unknown): RTCIceServer[] {
     }));
 }
 
-function buildWsUrl(token: string, personaId: string | undefined, locale: string): string {
+function buildWsUrl(
+  token: string,
+  personaId: string | undefined,
+  locale: string,
+): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const params = new URLSearchParams({ token, locale });
   if (personaId) params.set("persona_id", personaId);
   return `${protocol}//${window.location.host}/api/voice-live/ws?${params.toString()}`;
 }
 
-export function useInterviewVoice(interviewId: string, options: UseInterviewVoiceOptions = {}) {
-  const [connectionState, setConnectionState] = useState<VoiceConnectionState>("disconnected");
+export function useInterviewVoice(
+  interviewId: string,
+  options: UseInterviewVoiceOptions = {},
+) {
+  const [connectionState, setConnectionState] =
+    useState<VoiceConnectionState>("disconnected");
   const [audioState, setAudioState] = useState<AudioState>("idle");
   const [isMuted, setIsMuted] = useState(false);
 
@@ -213,6 +242,19 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
   // `commitAnswer` drains this first; it's cleared on drain and on teardown so nothing leaks across
   // turns or sessions.
   const userSegmentsSinceCommitRef = useRef<string[]>([]);
+  // External-brain voice mode only: the silence-auto-commit timer (see EXTERNAL_SILENCE_AUTOCOMMIT_MS
+  // and `onSilenceAutoCommit`). Armed/re-armed each time a user utterance segment is buffered,
+  // cleared when the candidate resumes speaking, when a commit runs (button or auto), and on
+  // teardown. Held in a ref so the message handler can (re)arm it without re-subscribing.
+  const silenceAutoCommitTimerRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+  const clearSilenceAutoCommit = useCallback(() => {
+    if (silenceAutoCommitTimerRef.current) {
+      clearTimeout(silenceAutoCommitTimerRef.current);
+      silenceAutoCommitTimerRef.current = null;
+    }
+  }, []);
   // Live (partial) user-transcript accumulator, keyed by the Azure conversation item id. The
   // `input_audio_transcription.delta` events carry INCREMENTAL text for the utterance the user is
   // still speaking; we accumulate per item and emit the running text as a non-final segment under
@@ -262,9 +304,10 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
   // words aren't clipped by the still-loading avatar media pipeline. Latest-wins: a newer question
   // supersedes a held one. `avatarConnected` mirrors avatarStream.isConnected for the callback.
   const firstReadDoneRef = useRef(false);
-  const firstReadGateRef = useRef<{ text: string; timer: ReturnType<typeof setTimeout> } | null>(
-    null,
-  );
+  const firstReadGateRef = useRef<{
+    text: string;
+    timer: ReturnType<typeof setTimeout>;
+  } | null>(null);
   const avatarConnectedRef = useRef(false);
 
   // Settle any armed commit with whatever transcript has accumulated so far (usually ""). Called
@@ -324,7 +367,8 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
     // and reset firstReadDone so that next session re-gates the opening read behind its avatar.
     if (firstReadGateRef.current) {
       clearTimeout(firstReadGateRef.current.timer);
-      if (!resumeSpeakTextRef.current) resumeSpeakTextRef.current = firstReadGateRef.current.text;
+      if (!resumeSpeakTextRef.current)
+        resumeSpeakTextRef.current = firstReadGateRef.current.text;
       firstReadGateRef.current = null;
     }
     firstReadDoneRef.current = false;
@@ -332,13 +376,15 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
     // Drop any buffered user transcript — a new session starts a fresh turn; carrying stale
     // segments across a disconnect/reconnect would mis-attribute them to the next answer.
     userSegmentsSinceCommitRef.current = [];
+    // Disarm the external silence-auto-commit timer — its fire would target a dead session's turn.
+    clearSilenceAutoCommit();
     // Drop live partial accumulators too — their item ids belong to the dead Azure session.
     userLiveTranscriptRef.current.clear();
     assistantLiveTranscriptRef.current.clear();
     // Settle a commit still waiting on a transcript that will never arrive now that the WS is
     // going away — otherwise `await commitAnswer()` hangs forever on disconnect/reconnect/unmount.
     settlePendingCommit();
-  }, [audio, avatarStream, settlePendingCommit]);
+  }, [audio, avatarStream, settlePendingCommit, clearSilenceAutoCommit]);
 
   /** WS message handler — Azure Voice Live realtime events, relayed near-verbatim by the backend
    * proxy (plus its own `proxy.connected` bootstrap frame). */
@@ -355,8 +401,19 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
         return;
       }
 
-      const emit = (role: "user" | "assistant", content: string, isFinal: boolean, id: string) =>
-        optionsRef.current.onTranscript?.({ id, role, content, isFinal, timestamp: Date.now() });
+      const emit = (
+        role: "user" | "assistant",
+        content: string,
+        isFinal: boolean,
+        id: string,
+      ) =>
+        optionsRef.current.onTranscript?.({
+          id,
+          role,
+          content,
+          isFinal,
+          timestamp: Date.now(),
+        });
 
       // Question-read delivery confirmation. Fast path: transcript prefix matches the watched
       // question (a true verbatim read). Fallback: word-overlap similarity — the agent OFTEN
@@ -377,7 +434,10 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
         let delivered = Boolean(probe) && wanted.startsWith(probe);
         if (!delivered) {
           const words = (s: string) =>
-            s.replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((w) => w.length >= 3);
+            s
+              .replace(/[^\p{L}\p{N}\s]/gu, " ")
+              .split(/\s+/)
+              .filter((w) => w.length >= 3);
           const wantedWords = [...new Set(words(wanted))];
           if (wantedWords.length >= 3) {
             const spokenWords = new Set(words(spoken));
@@ -404,7 +464,8 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
 
         case "session.updated": {
           const session = msg.session as Record<string, unknown> | undefined;
-          const avatarConf = session?.avatar as Record<string, unknown> | undefined;
+          const avatarConf = session?.avatar as
+            Record<string, unknown> | undefined;
           const iceServers = toRtcIceServers(avatarConf?.ice_servers);
 
           sessionLiveRef.current = true;
@@ -430,9 +491,15 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
             "ice_servers:",
             iceServers.length,
           );
-          if (avatarConf && iceServers.length > 0 && !avatarStartedRef.current) {
+          if (
+            avatarConf &&
+            iceServers.length > 0 &&
+            !avatarStartedRef.current
+          ) {
             avatarStartedRef.current = true;
-            console.info("[voice] session.updated has avatar ice_servers → starting handshake");
+            console.info(
+              "[voice] session.updated has avatar ice_servers → starting handshake",
+            );
             void avatarStream
               .connect(iceServers, (clientSdp) => {
                 send({ type: "session.avatar.connect", client_sdp: clientSdp });
@@ -441,7 +508,10 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
                 avatarStartedRef.current = false;
                 // Non-fatal: avatar video failed to negotiate, keep the voice-only session alive
                 // (AvatarView's fallback orb covers this — see useAvatarStream's frame gate).
-                console.warn("[voice] avatar handshake failed; continuing voice-only", err);
+                console.warn(
+                  "[voice] avatar handshake failed; continuing voice-only",
+                  err,
+                );
               });
           }
 
@@ -460,13 +530,17 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
         }
 
         case "session.avatar.connecting": {
-          const serverSdp = (msg.server_sdp ?? msg.serverSdp) as string | undefined;
+          const serverSdp = (msg.server_sdp ?? msg.serverSdp) as
+            string | undefined;
           if (serverSdp) avatarStream.handleServerSdp(serverSdp);
           break;
         }
 
         case "input_audio_buffer.speech_started":
           setAudio("listening");
+          // The candidate resumed speaking — they haven't finished the answer yet, so cancel any
+          // pending external silence-auto-commit. It re-arms when the next utterance completes.
+          clearSilenceAutoCommit();
           break;
         case "input_audio_buffer.speech_stopped":
           setAudio("idle");
@@ -480,7 +554,8 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
           const itemId = msg.item_id as string | undefined;
           const delta = (msg.delta as string | undefined) ?? "";
           if (itemId && delta) {
-            const running = (userLiveTranscriptRef.current.get(itemId) ?? "") + delta;
+            const running =
+              (userLiveTranscriptRef.current.get(itemId) ?? "") + delta;
             userLiveTranscriptRef.current.set(itemId, running);
             emit("user", running, false, `user-${itemId}`);
           }
@@ -492,7 +567,9 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
           // replaced in place (no duplicate). Items that never streamed a delta (delta events off
           // or absent, e.g. plain azure-speech configs) fall back to the counter id as before.
           const itemId = msg.item_id as string | undefined;
-          const hadLive = Boolean(itemId && userLiveTranscriptRef.current.has(itemId));
+          const hadLive = Boolean(
+            itemId && userLiveTranscriptRef.current.has(itemId),
+          );
           if (itemId) userLiveTranscriptRef.current.delete(itemId);
           // Always feed the transcript panel first, so by the time commitAnswer()'s promise
           // resolves the answer bubble is already on screen ("fully shown before submit").
@@ -501,7 +578,9 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
               "user",
               transcript,
               true,
-              hadLive ? `user-${itemId}` : `user-${++transcriptIdCounter.current}`,
+              hadLive
+                ? `user-${itemId}`
+                : `user-${++transcriptIdCounter.current}`,
             );
           const pending = pendingCommitRef.current;
           if (pending) {
@@ -516,6 +595,17 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
             // event that already fired. (This was the empty-answer bug: the panel showed the bubble
             // but commitAnswer never saw the text.)
             userSegmentsSinceCommitRef.current.push(transcript);
+            // External-brain voice mode: arm/re-arm the silence-auto-commit timer. This segment is
+            // an end-of-utterance; if the candidate stays silent long enough (no new speech re-arms
+            // it, see the speech_started case), auto-submit the buffered answer to advance the
+            // interview hands-free. Bank mode never arms — its turns advance on the "I'm done" click.
+            if (optionsRef.current.externalMode) {
+              clearSilenceAutoCommit();
+              silenceAutoCommitTimerRef.current = setTimeout(() => {
+                silenceAutoCommitTimerRef.current = null;
+                optionsRef.current.onSilenceAutoCommit?.();
+              }, EXTERNAL_SILENCE_AUTOCOMMIT_MS);
+            }
           }
           break;
         }
@@ -534,8 +624,8 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
           if (awaitingReadResponseRef.current) {
             awaitingReadResponseRef.current = false;
             readResponseIdRef.current =
-              ((msg.response as Record<string, unknown> | undefined)?.id as string | undefined) ??
-              null;
+              ((msg.response as Record<string, unknown> | undefined)?.id as
+                string | undefined) ?? null;
           }
           setAudio("speaking");
           break;
@@ -549,12 +639,16 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
           const key = `assistant-${msg.response_id}-${msg.item_id}`;
           const delta = (msg.delta as string | undefined) ?? "";
           if (delta) {
-            const running = (assistantLiveTranscriptRef.current.get(key) ?? "") + delta;
+            const running =
+              (assistantLiveTranscriptRef.current.get(key) ?? "") + delta;
             assistantLiveTranscriptRef.current.set(key, running);
             emit("assistant", running, false, key);
             // A transcript under the response OUR read attempt created = delivery confirmed by
             // id, regardless of wording. Text similarity is the fallback for id-less paths.
-            if (msg.response_id && msg.response_id === readResponseIdRef.current) {
+            if (
+              msg.response_id &&
+              msg.response_id === readResponseIdRef.current
+            ) {
               const watch = speakWatchRef.current;
               if (watch) {
                 clearTimeout(watch.timer);
@@ -571,7 +665,10 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
           assistantLiveTranscriptRef.current.delete(key);
           if (msg.transcript) {
             emit("assistant", msg.transcript as string, true, key);
-            if (msg.response_id && msg.response_id === readResponseIdRef.current) {
+            if (
+              msg.response_id &&
+              msg.response_id === readResponseIdRef.current
+            ) {
               const watch = speakWatchRef.current;
               if (watch) {
                 clearTimeout(watch.timer);
@@ -595,7 +692,9 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
 
         case "error": {
           const errInfo = msg.error as Record<string, unknown> | undefined;
-          const error = new Error((errInfo?.message as string) || "Voice Live error");
+          const error = new Error(
+            (errInfo?.message as string) || "Voice Live error",
+          );
           // An in-band `error` on an already-live session is a PER-REQUEST rejection, not a dead
           // session — e.g. our manual `response.create` (speakQuestion / commitAnswer) colliding
           // with a server-VAD auto-response ("conversation already has an active response"). The
@@ -604,7 +703,10 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
           // (the "数字人有时候不出现" bug). Log and keep the session; only a pre-connect error is
           // fatal (the connect() promise must reject so callers can fall back).
           if (sessionLiveRef.current) {
-            console.warn("[voice] non-fatal Voice Live error event (session stays up):", error.message);
+            console.warn(
+              "[voice] non-fatal Voice Live error event (session stays up):",
+              error.message,
+            );
             // A collision rejection (`conversation_already_has_active_response`) means a response is
             // in fact still active even though our optimistic `activeResponseRef` said otherwise
             // (e.g. a server-VAD auto-response started between our check and send). Mark it active
@@ -636,7 +738,10 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
           // "face visible but voice-unavailable notice" contradiction. Reject the attempt (so the
           // loop advances) but don't call onError.
           if (reconnectAttemptRef.current > 0) {
-            console.warn("[voice] error during reconnect attempt (will retry):", error.message);
+            console.warn(
+              "[voice] error during reconnect attempt (will retry):",
+              error.message,
+            );
             onFatalError(error);
             break;
           }
@@ -647,7 +752,15 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
         }
       }
     },
-    [audio, avatarStream, send, setAudio, setConn, settlePendingCommit],
+    [
+      audio,
+      avatarStream,
+      send,
+      setAudio,
+      setConn,
+      settlePendingCommit,
+      clearSilenceAutoCommit,
+    ],
   );
 
   const connect = useCallback(
@@ -665,7 +778,8 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
       // Step 1: resolve the WS auth token (anon session token by default; admin editor Playground
       // passes its own tokenProvider). Not a network broker call anymore — the WS itself is the
       // session.
-      const tokenProvider = optionsRef.current.tokenProvider ?? (() => clientInternal.getToken());
+      const tokenProvider =
+        optionsRef.current.tokenProvider ?? (() => clientInternal.getToken());
       const token = tokenProvider();
       if (!token) {
         const error = new Error("No voice auth token available");
@@ -687,7 +801,11 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
 
       // Step 3: open the Voice Live WS proxy and wait for `session.updated` (connected) or an
       // error/timeout.
-      const wsUrl = buildWsUrl(token, optionsRef.current.personaId, effectiveLocale);
+      const wsUrl = buildWsUrl(
+        token,
+        optionsRef.current.personaId,
+        effectiveLocale,
+      );
       console.info(
         "[voice] opening WS proxy; persona:",
         optionsRef.current.personaId ?? "(default)",
@@ -721,14 +839,17 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
           const wasConnected = resolved;
           wsRef.current = null;
           if (!wasConnected) {
-            rejectOnce(new Error("Voice Live WebSocket closed before connecting"));
+            rejectOnce(
+              new Error("Voice Live WebSocket closed before connecting"),
+            );
             return;
           }
           if (intentionalCloseRef.current) return;
           // Reconnect on unexpected close: 3 attempts, 1s/2s/4s backoff.
           if (reconnectAttemptRef.current < MAX_RECONNECT) {
             reconnectAttemptRef.current++;
-            const delay = RECONNECT_DELAYS[reconnectAttemptRef.current - 1] ?? 4000;
+            const delay =
+              RECONNECT_DELAYS[reconnectAttemptRef.current - 1] ?? 4000;
             setConn("reconnecting");
             avatarStream.disconnect();
             audio.stopRecording();
@@ -742,7 +863,9 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
             }, delay);
           } else {
             setConn("error");
-            optionsRef.current.onError?.(new Error("Voice connection failed after 3 attempts"));
+            optionsRef.current.onError?.(
+              new Error("Voice connection failed after 3 attempts"),
+            );
           }
         };
 
@@ -827,6 +950,9 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
    * `COMMIT_TRANSCRIPT_TIMEOUT_MS` or the connection tears down first (fail-closed, never hangs).
    */
   const commitAnswer = useCallback((): Promise<string> => {
+    // This turn is being committed (via the "I'm done" button OR the external silence auto-commit),
+    // so disarm the silence timer — it must not fire a second commit for a turn already submitted.
+    clearSilenceAutoCommit();
     // Defensively settle any prior armed commit (e.g. a double-click) before arming a fresh one.
     settlePendingCommit();
 
@@ -867,7 +993,7 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
       if (!activeResponseRef.current && !optionsRef.current.externalMode)
         send({ type: "response.create" });
     });
-  }, [send, settlePendingCommit]);
+  }, [send, settlePendingCommit, clearSilenceAutoCommit]);
 
   // Emit the assistant-item + response.create pair that makes Voice Live read `text` verbatim.
   // Assumes no response is currently active (checked by the callers). Records the attempt so a
@@ -886,7 +1012,11 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
       spokenTextRef.current = text;
       send({
         type: "conversation.item.create",
-        item: { type: "message", role: "assistant", content: [{ type: "text", text }] },
+        item: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text }],
+        },
       });
       // The next `response.created` belongs to THIS attempt — its id becomes the delivery proof
       // for the watchdog (see readResponseIdRef).
@@ -932,14 +1062,23 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
       // is connected — or a short bound elapses (handshake stalled / avatar off despite the flag),
       // so we never leave the candidate in silence. Only gates the first read of a session, and only
       // when the avatar is enabled but not yet painting; every later question reads immediately.
-      if (!firstReadDoneRef.current && avatarEnabledRef.current && !avatarConnectedRef.current) {
-        if (firstReadGateRef.current) clearTimeout(firstReadGateRef.current.timer);
-        console.info("[voice] holding first question read until avatar is ready");
+      if (
+        !firstReadDoneRef.current &&
+        avatarEnabledRef.current &&
+        !avatarConnectedRef.current
+      ) {
+        if (firstReadGateRef.current)
+          clearTimeout(firstReadGateRef.current.timer);
+        console.info(
+          "[voice] holding first question read until avatar is ready",
+        );
         firstReadGateRef.current = {
           text,
           timer: setTimeout(() => {
             firstReadGateRef.current = null;
-            console.warn("[voice] avatar-ready gate elapsed; reading first question anyway");
+            console.warn(
+              "[voice] avatar-ready gate elapsed; reading first question anyway",
+            );
             firstReadDoneRef.current = true;
             speakQuestionRef.current?.(text);
           }, FIRST_READ_AVATAR_GATE_MS),
@@ -964,7 +1103,9 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
       if (attempts > SPEAK_MAX_ATTEMPTS) {
         // Retries exhausted — stop; the question card remains the fallback.
         speakWatchRef.current = null;
-        console.warn("[voice] question read retries exhausted; giving up on voice read");
+        console.warn(
+          "[voice] question read retries exhausted; giving up on voice read",
+        );
         return true;
       }
       speakWatchRef.current = {
@@ -977,7 +1118,8 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
             `[voice] question read unconfirmed after ${SPEAK_CONFIRM_TIMEOUT_MS}ms — retrying (attempt ${attempts + 1})`,
           );
           if (spokenTextRef.current === text) spokenTextRef.current = null;
-          if (pendingSpeakTextRef.current === text) pendingSpeakTextRef.current = null;
+          if (pendingSpeakTextRef.current === text)
+            pendingSpeakTextRef.current = null;
           speakQuestionRef.current?.(text);
         }, SPEAK_CONFIRM_TIMEOUT_MS),
       };
@@ -1029,7 +1171,11 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
   }, []);
 
   useEffect(() => {
-    if (interviewId) console.debug("[voice] useInterviewVoice bound to interview", interviewId);
+    if (interviewId)
+      console.debug(
+        "[voice] useInterviewVoice bound to interview",
+        interviewId,
+      );
   }, [interviewId]);
 
   // Mirror avatar connectivity into a ref (for speakQuestion's gate) and RELEASE a held first read
