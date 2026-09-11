@@ -26,6 +26,10 @@ export const resources = {
       orientation: {
         title: "Before we begin",
         body: "You'll answer {{total}} questions. Take your time — you can speak or type, and you decide when each answer is finished.",
+        // External mode exposes no fixed question count (the interviewer drives the flow turn by
+        // turn), so the count-based copy above would read "0 questions" — this variant drops it.
+        bodyExternal:
+          "The interviewer will guide you through the conversation. Take your time — you can speak or type, and you decide when each answer is finished.",
         begin: "I'm ready",
       },
       noQuestions: {
@@ -194,6 +198,8 @@ export const resources = {
       orientation: {
         title: "开始之前",
         body: "你将回答 {{total}} 道题。不用着急 —— 可以语音或打字作答，每题何时答完由你决定。",
+        // 外部模式没有固定题数(面试官逐题引导),沿用上面的题数文案会显示“0 道题”,故用此变体。
+        bodyExternal: "面试官会逐题引导你完成对话。不用着急 —— 可以语音或打字作答，每题何时答完由你决定。",
         begin: "我准备好了",
       },
       noQuestions: {
