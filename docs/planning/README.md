@@ -114,6 +114,24 @@ living specification is [`../../SPEC.md`](../../SPEC.md) at the repo root — st
   audit/rate-limit are net-new SHOULDs). Impl notes folded: async httpx + add `httpx-sse`, hand-rolled
   atomic-UPDATE CAS (`version_id_col` withdrawn) + aiosqlite `busy_timeout`. Next: build Slice 1.
 
+- [`plan-external-reader-prompt-20260911.md`](plan-external-reader-prompt-20260911.md) —
+  **LOCKED 2026-09-11 (`/plan-eng-review`), extends the external-brain design above.** Gives the
+  interviewer persona **two independent, separately-stored, separately-editable** prompt config
+  items: the existing `prompt_fragment` (bank-mode → Foundry agent `instructions`) and a NEW
+  `external_reader_prompt` (external-mode → shapes how the pure "mouth" reads the injected
+  `speech_text`). Owner's decisive constraint: once both exist they are **two independent nullable
+  columns**, not one field the `interview_brain` toggle swaps — switching brain back and forth
+  never destroys the other's content. Delivery = a connect-time **system conversation item**
+  (`build_reader_prompt_item`, parallel to `build_language_pin_item`) injected in
+  `voice_live_proxy.run_proxy` after the language pin when `is_external`, since external = MODEL
+  mode with no agent (v0.37.1.9) and Azure rejects `instructions` overrides in `response.create`.
+  Six locked decisions: NULL = "use generated default" (`default_external_reader_prompt(name)`,
+  always injected); **proxy-only** (WebRTC broker/admin-Playground deferred); `reconcile_persona`
+  never touches the new column; additive/dormant column, no backfill; editor shows only the active
+  mode's field. New migration `f6a7b8c9d0e1` (`down_revision = "e5f6a7b8c9d0"`, confirmed head).
+  Five implementation threads (model+migration / service CRUD / connect-time injection / frontend
+  editor / tests). Not yet implemented.
+
 - [`spec-azure-cicd-deploy.md`](spec-azure-cicd-deploy.md) — the CI/CD + Azure deployment plan
   (Container Apps, **Sweden Central**, co-located with the reused Foundry resource). Mirrors the
   sibling AI-Coach infra but simpler: **managed-identity** auth throughout, **ephemeral SQLite**
