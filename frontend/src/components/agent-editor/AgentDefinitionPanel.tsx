@@ -59,6 +59,9 @@ export interface AgentDefinitionPanelProps {
   /** Auto-generated instructions the backend pushes to Foundry when the field is empty — shown as
    * the effective default so the editor matches the Foundry Portal ("" for a new persona). */
   defaultInstructions?: string;
+  /** Auto-generated EXTERNAL-mode reader prompt used when externalReaderPrompt is blank — shown as
+   * the placeholder default for the external "mouth" path (parallel to defaultInstructions). */
+  defaultExternalReaderPrompt?: string;
 }
 
 export function AgentDefinitionPanel({
@@ -76,9 +79,11 @@ export function AgentDefinitionPanel({
   onToolsChange,
   personaId,
   defaultInstructions,
+  defaultExternalReaderPrompt,
 }: AgentDefinitionPanelProps) {
   const styles = useStyles();
   const voiceModeOn = Boolean(form.character);
+  const isExternal = form.interviewBrain === "external";
 
   return (
     <div className={styles.root} data-testid="agent-definition-sections">
@@ -184,28 +189,60 @@ export function AgentDefinitionPanel({
 
       <Divider />
 
-      {/* Instructions — when empty, the backend pushes an auto-generated default to Foundry, so
-          show that default here (placeholder + hint) instead of a blank field. Otherwise the
-          Foundry Portal displays instructions this editor doesn't, which reads as a mismatch. */}
-      <div className={styles.section}>
-        <Title3>Instructions</Title3>
-        <Field>
-          <Textarea
-            value={form.prompt_fragment}
-            placeholder={defaultInstructions || undefined}
-            resize="vertical"
-            rows={8}
-            onChange={(_, d) => onChange({ prompt_fragment: d.value })}
-            data-testid="persona-instructions"
-          />
-        </Field>
-        {!form.prompt_fragment && defaultInstructions ? (
-          <Text size={200} className={styles.hint} data-testid="persona-instructions-default-hint">
-            Using the auto-generated default shown above — it's what the Foundry agent runs (and
-            what the Azure Portal displays). Type here to replace it.
+      {/* Instructions / Reader prompt — the interview brain decides WHICH of the two independent
+          prompt config items is active (used at connect) and shown here. They are stored separately
+          and both persist: switching the brain back and forth never destroys the other's content.
+          - bank mode  → prompt_fragment → the Foundry agent's `instructions` (blank = generated
+            default, shown as placeholder so the editor matches the Portal).
+          - external mode → external_reader_prompt → the connect-time system item that shapes how the
+            pure "mouth" reads each injected speech_text (blank = generated default). No Foundry
+            agent exists in external mode, so this never touches the agent instructions. */}
+      {isExternal ? (
+        <div className={styles.section}>
+          <Title3>Reader prompt (external mode)</Title3>
+          <Text size={200} className={styles.hint}>
+            The external interview server decides WHAT to ask; this shapes only HOW the digital human
+            reads each turn's text aloud (verbatim, no improvising). It is independent of the
+            built-in-bank Instructions below — editing one never changes the other.
           </Text>
-        ) : null}
-      </div>
+          <Field>
+            <Textarea
+              value={form.externalReaderPrompt}
+              placeholder={defaultExternalReaderPrompt || undefined}
+              resize="vertical"
+              rows={8}
+              onChange={(_, d) => onChange({ externalReaderPrompt: d.value })}
+              data-testid="persona-reader-prompt"
+            />
+          </Field>
+          {!form.externalReaderPrompt && defaultExternalReaderPrompt ? (
+            <Text size={200} className={styles.hint} data-testid="persona-reader-prompt-default-hint">
+              Using the auto-generated default shown above — the reading contract the mouth follows.
+              Type here to replace it.
+            </Text>
+          ) : null}
+        </div>
+      ) : (
+        <div className={styles.section}>
+          <Title3>Instructions (Foundry agent)</Title3>
+          <Field>
+            <Textarea
+              value={form.prompt_fragment}
+              placeholder={defaultInstructions || undefined}
+              resize="vertical"
+              rows={8}
+              onChange={(_, d) => onChange({ prompt_fragment: d.value })}
+              data-testid="persona-instructions"
+            />
+          </Field>
+          {!form.prompt_fragment && defaultInstructions ? (
+            <Text size={200} className={styles.hint} data-testid="persona-instructions-default-hint">
+              Using the auto-generated default shown above — it's what the Foundry agent runs (and
+              what the Azure Portal displays). Type here to replace it.
+            </Text>
+          ) : null}
+        </div>
+      )}
 
       <Divider />
 

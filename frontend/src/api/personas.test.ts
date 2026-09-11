@@ -14,6 +14,7 @@ const SAMPLE: personas.PersonaOut = {
   character: "lisa",
   style: "casual",
   prompt_fragment: "You are an interviewer.",
+  external_reader_prompt: null,
   voice_map: '{"zh-CN":"zh-CN-XiaoxiaoNeural"}',
   greeting_map: '{"zh-CN":"你好"}',
   default_locale: "zh-CN",
@@ -35,6 +36,7 @@ const SAMPLE: personas.PersonaOut = {
   agent_sync_status: "synced",
   agent_sync_error: null,
   default_instructions: "You are Interviewer, an interviewer.",
+  default_external_reader_prompt: "You are Interviewer, the interviewer's voice.",
 };
 
 /** Mock fetch to capture requests and return `body` as a fresh 200 JSON response each call
@@ -79,6 +81,26 @@ describe("personas client", () => {
     expect(url).toBe("/api/admin/personas/p1");
     expect(init?.method).toBe("PUT");
     expect(JSON.parse(init?.body as string)).toEqual({ name: "Renamed" });
+  });
+
+  it("round-trips external_reader_prompt and its computed default on read", async () => {
+    // The two new fields must survive JSON transport intact: external_reader_prompt as a nullable
+    // stored value, default_external_reader_prompt as the server-computed placeholder default.
+    mockFetch(SAMPLE);
+    const p = await personas.getPersona("p1");
+    expect(p.external_reader_prompt).toBeNull();
+    expect(p.default_external_reader_prompt).toBe("You are Interviewer, the interviewer's voice.");
+  });
+
+  it("createPersona sends external_reader_prompt in the body", async () => {
+    const f = mockFetch(SAMPLE);
+    const body = {
+      ...SAMPLE,
+      external_reader_prompt: "read exactly what you're given",
+    } as unknown as personas.PersonaCreate;
+    await personas.createPersona(body);
+    const sent = JSON.parse(f.mock.calls[0][1]?.body as string);
+    expect(sent.external_reader_prompt).toBe("read exactly what you're given");
   });
 
   it("setDefaultPersona and retrySyncPersona POST their action paths", async () => {

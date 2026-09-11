@@ -46,6 +46,10 @@ class PersonaCreate(VoiceKnobs):
     character: str = ""
     style: str = ""
     prompt_fragment: str = ""
+    # EXTERNAL-mode reader prompt — INDEPENDENT of prompt_fragment (two separate config items, never
+    # one swapped by interview_brain). None (the default) persists as NULL = "use the generated
+    # default"; never coerced to "".
+    external_reader_prompt: str | None = None
     voice_map: str = "{}"
     greeting_map: str = "{}"
     # Editor's remembered "Language" selector locale (which voice_map/greeting_map locale it opens
@@ -74,6 +78,7 @@ class PersonaUpdate(BaseModel):
     character: str | None = None
     style: str | None = None
     prompt_fragment: str | None = None
+    external_reader_prompt: str | None = None
     voice_map: str | None = None
     greeting_map: str | None = None
     default_locale: str | None = None
@@ -105,6 +110,7 @@ class PersonaOut(BaseModel):
     character: str
     style: str
     prompt_fragment: str
+    external_reader_prompt: str | None
     voice_map: str
     greeting_map: str
     default_locale: str
@@ -128,6 +134,10 @@ class PersonaOut(BaseModel):
     # The auto-generated instructions pushed to Foundry when prompt_fragment is empty — surfaced so
     # the editor can display the EFFECTIVE instructions instead of a blank field (Portal parity).
     default_instructions: str
+    # The auto-generated EXTERNAL-mode reader prompt used when external_reader_prompt is
+    # NULL/blank — surfaced as the editor placeholder so the operator sees the effective reader
+    # prompt (parallel to default_instructions, but for the external "mouth" path).
+    default_external_reader_prompt: str
 
     @classmethod
     def of(cls, p: InterviewerPersona) -> "PersonaOut":

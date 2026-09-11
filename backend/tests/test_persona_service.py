@@ -309,3 +309,90 @@ async def test_reconcile_default_persona_propagates_model_to_master(db_session, 
 
     master = await config_service.get_master_config(db_session)
     assert master.model_or_deployment == "gpt-5"
+
+
+# --- external reader prompt: two independent, separately-stored config items -----------------
+#
+# prompt_fragment (bank mode → Foundry agent instructions) and external_reader_prompt (external
+# mode → the connect-time reader contract for the pure "mouth") are TWO independent columns, not one
+# field the interview_brain toggle swaps. NULL means "unset, use the generated default". These
+# tests nail down that they persist and edit independently — the owner's hard constraint that
+# switching the brain back and forth never destroys the other prompt's content.
+
+
+async def test_create_persists_external_reader_prompt_independently(db_session):
+    p = await _mk(
+        db_session,
+        name="Ava",
+        prompt_fragment="bank instructions",
+        external_reader_prompt="read exactly what you're given",
+    )
+    fetched = await svc.get_persona(db_session, p.id)
+    assert fetched.prompt_fragment == "bank instructions"
+    assert fetched.external_reader_prompt == "read exactly what you're given"
+
+
+async def test_create_leaves_external_reader_prompt_null_by_default(db_session):
+    # Unset stays NULL (the "use the generated default" sentinel), never coerced to "".
+    p = await _mk(db_session, name="Ava", prompt_fragment="bank instructions")
+    assert p.external_reader_prompt is None
+
+
+async def test_editing_one_prompt_never_mutates_the_other(db_session):
+    p = await _mk(
+        db_session,
+        name="Ava",
+        prompt_fragment="original bank",
+        external_reader_prompt="original reader",
+    )
+    # Edit only the reader prompt → the bank fragment is untouched.
+    await svc.update_persona(db_session, p.id, external_reader_prompt="new reader")
+    assert p.prompt_fragment == "original bank"
+    assert p.external_reader_prompt == "new reader"
+    # Edit only the bank fragment → the reader prompt is untouched.
+    await svc.update_persona(db_session, p.id, prompt_fragment="new bank")
+    assert p.prompt_fragment == "new bank"
+    assert p.external_reader_prompt == "new reader"
+
+
+async def test_toggling_the_brain_clears_neither_prompt(db_session):
+    # The interview_brain toggle decides which prompt is ACTIVE at connect — it must not destroy the
+    # inactive one. Round-trip external→bank→external and assert both survive verbatim.
+    p = await _mk(
+        db_session,
+        name="Ava",
+        interview_brain="external",
+        prompt_fragment="bank side",
+        external_reader_prompt="reader side",
+    )
+    await svc.update_persona(db_session, p.id, interview_brain="bank")
+    assert p.prompt_fragment == "bank side"
+    assert p.external_reader_prompt == "reader side"
+    await svc.update_persona(db_session, p.id, interview_brain="external")
+    assert p.prompt_fragment == "bank side"
+    assert p.external_reader_prompt == "reader side"
+
+
+async def test_reconcile_leaves_external_reader_prompt_untouched(db_session, monkeypatch):
+    # Reconcile pulls Portal edits into the bank-mode prompt_fragment only. external_reader_prompt
+    # has no Foundry agent behind it (external mode runs MODEL mode, no agent), so a reconcile —
+    # even one that rewrites prompt_fragment — must never touch it.
+    p = await _mk(
+        db_session,
+        name="edited",
+        external_reader_prompt="my custom reader contract",
+    )
+    await svc.mark_sync_succeeded(db_session, p, agent_id="a", agent_version="10")
+    p.model = "gpt-5.4-mini"
+    await db_session.commit()
+    _stub_adapter(
+        monkeypatch,
+        {
+            "agent_version": "11",
+            "model": "gpt-5.4-mini",
+            "instructions": "You are a strict interviewer. Ask follow-ups.",
+        },
+    )
+    out = await svc.reconcile_persona(db_session, p)
+    assert out.prompt_fragment == "You are a strict interviewer. Ask follow-ups."  # pulled
+    assert out.external_reader_prompt == "my custom reader contract"  # untouched

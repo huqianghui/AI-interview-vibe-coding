@@ -288,6 +288,9 @@ export function AgentEditorPage() {
             onToolsChange={(tools) => patchForm({ tools })}
             personaId={isNew ? null : current?.id ?? null}
             defaultInstructions={isNew ? "" : current?.default_instructions ?? ""}
+            defaultExternalReaderPrompt={
+              isNew ? "" : current?.default_external_reader_prompt ?? ""
+            }
           />
         )
       }

@@ -30,6 +30,11 @@ export interface PersonaFormState {
   character: string;
   style: string;
   prompt_fragment: string;
+  // EXTERNAL-mode reader prompt — INDEPENDENT of prompt_fragment (two separate config items, never
+  // one swapped by interviewBrain). Empty here means "use the generated default" (the proxy treats
+  // blank and NULL identically — both fall back to default_external_reader_prompt). Both fields
+  // persist independently, so toggling the brain never clears either.
+  externalReaderPrompt: string;
   voiceMap: Record<string, string>;
   greetingMap: Record<string, string>;
   defaultLocale: EditorLocale; // remembered "Language" selector locale (persisted, round-trips)
@@ -55,6 +60,7 @@ export function emptyPersonaForm(): PersonaFormState {
     character: "",
     style: "",
     prompt_fragment: "",
+    externalReaderPrompt: "",
     voiceMap: {},
     greetingMap: {},
     defaultLocale: EDITOR_LOCALES[0],
@@ -81,6 +87,7 @@ export function personaToForm(p: PersonaOut): PersonaFormState {
     character: p.character,
     style: p.style,
     prompt_fragment: p.prompt_fragment,
+    externalReaderPrompt: p.external_reader_prompt ?? "",
     voiceMap: parseLocaleMap(p.voice_map),
     greetingMap: parseLocaleMap(p.greeting_map),
     defaultLocale: normalizeLocale(p.default_locale),
@@ -107,6 +114,7 @@ export function formToPayload(form: PersonaFormState): PersonaCreate {
     character: form.character,
     style: form.style,
     prompt_fragment: form.prompt_fragment,
+    external_reader_prompt: form.externalReaderPrompt,
     voice_map: stringifyLocaleMap(form.voiceMap),
     greeting_map: stringifyLocaleMap(form.greetingMap),
     default_locale: form.defaultLocale,
