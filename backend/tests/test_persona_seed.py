@@ -8,6 +8,7 @@ and the best-effort Foundry sync (mock adapter → synced).
 
 import pytest
 
+from app.config import get_settings
 from app.services import persona_service as svc
 from app.services.persona_seed import (
     DEFAULT_PERSONA_ID,
@@ -51,6 +52,48 @@ async def test_seed_is_noop_when_another_enabled_default_exists(db_session):
     assert result is None
     default = await svc.get_default_persona(db_session)
     assert default is not None and default.id == other.id
+
+
+# --- SEED_PERSONA_BRAIN / SEED_PERSONA_READER_PROMPT (env-driven brain for the seeded persona) ---
+#
+# Ephemeral SQLite reseeds the default persona every boot; without these, an external-brain
+# deployment reverts to bank mode on every restart and needs a manual editor toggle. Mirrors the
+# seed_external_config_from_env pattern for the endpoint row.
+
+
+async def test_seed_defaults_to_bank_brain_with_no_reader_prompt(db_session):
+    persona = await seed_default_persona(db_session)
+    assert persona is not None
+    assert persona.interview_brain == "bank"
+    # NULL = "unset, use default_external_reader_prompt(name)" — never coerced to "".
+    assert persona.external_reader_prompt is None
+
+
+async def test_seed_persona_brain_env_makes_the_seeded_default_external(db_session, monkeypatch):
+    monkeypatch.setattr(get_settings(), "seed_persona_brain", "external")
+    persona = await seed_default_persona(db_session)
+    assert persona is not None
+    assert persona.interview_brain == "external"
+    # Reader prompt not seeded → stays NULL → the proxy injects the generated default contract.
+    assert persona.external_reader_prompt is None
+
+
+async def test_seed_persona_reader_prompt_env_seeds_the_reading_contract(db_session, monkeypatch):
+    monkeypatch.setattr(get_settings(), "seed_persona_brain", "external")
+    monkeypatch.setattr(get_settings(), "seed_persona_reader_prompt", "read exactly, then wait")
+    persona = await seed_default_persona(db_session)
+    assert persona is not None
+    assert persona.external_reader_prompt == "read exactly, then wait"
+
+
+async def test_seed_persona_brain_invalid_value_falls_back_to_bank(db_session, monkeypatch, caplog):
+    # A typo'd env var must not seed an invalid brain (the API validator would never allow it) —
+    # fall back to bank and say so in the log, never crash boot.
+    monkeypatch.setattr(get_settings(), "seed_persona_brain", "dify")
+    persona = await seed_default_persona(db_session)
+    assert persona is not None
+    assert persona.interview_brain == "bank"
+    assert "SEED_PERSONA_BRAIN" in caplog.text
 
 
 async def test_sync_default_persona_marks_synced_via_mock_adapter(db_session):
