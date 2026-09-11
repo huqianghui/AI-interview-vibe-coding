@@ -44,6 +44,7 @@ async def create_persona(
     character: str = "",
     style: str = "",
     prompt_fragment: str = "",
+    external_reader_prompt: str | None = None,
     voice_map: str = "{}",
     greeting_map: str = "{}",
     enabled: bool = True,
@@ -51,11 +52,14 @@ async def create_persona(
     **voice_knobs: object,
 ) -> InterviewerPersona:
     """Create a persona; if ``is_default`` (and enabled), demote any current enabled default."""
+    # ``external_reader_prompt`` is persisted as-is (NOT coerced None→""): NULL is the "use the
+    # generated default" sentinel, and it is independent of ``prompt_fragment`` — see the model.
     persona = InterviewerPersona(
         name=name,
         character=character,
         style=style,
         prompt_fragment=prompt_fragment,
+        external_reader_prompt=external_reader_prompt,
         voice_map=voice_map,
         greeting_map=greeting_map,
         enabled=enabled,
@@ -229,6 +233,9 @@ async def reconcile_persona(db: AsyncSession, persona: InterviewerPersona) -> In
         persona.model = remote_model
     if instructions_changed:
         persona.prompt_fragment = remote_instructions
+    # NOTE: reconcile NEVER touches ``external_reader_prompt``. It pulls Portal-edited agent
+    # ``instructions`` back into ``prompt_fragment`` (bank mode); external mode has NO Foundry
+    # agent, so there is nothing on the Portal to reconcile the reader prompt against.
     persona.agent_sync_status = "synced"
     persona.agent_sync_error = None
     await db.commit()

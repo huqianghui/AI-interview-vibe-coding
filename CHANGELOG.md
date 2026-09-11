@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.37.2.0 (2026-09-11)
+
+### Added
+- **External-mode interviewer persona gains its own independent reader prompt (`external_reader_prompt`).**
+  The interviewer persona now carries **two independent, separately-stored, separately-editable** prompt
+  config items instead of one: the existing `prompt_fragment` (bank mode → the Foundry agent's
+  `instructions`) and a NEW `external_reader_prompt` (external mode → the reading contract that shapes how
+  the persona "mouth" reads the backend-injected `speech_text`). They are two independent nullable
+  columns, **not** one field the `interview_brain` toggle swaps — switching the brain back and forth never
+  destroys the other prompt's content. `NULL`/blank means "unset, use the generated default"
+  (`default_external_reader_prompt(name)`), so an existing persona keeps working with no migration of its
+  data. Because external mode connects in **MODEL mode** with no Foundry agent (v0.37.1.9) and Azure
+  rejects `instructions` overrides in `response.create`, the reader contract is delivered as a
+  connect-time **system conversation item** (`build_reader_prompt_item`, parallel to
+  `build_language_pin_item`), injected in `voice_live_proxy.run_proxy` right after the language pin when
+  the session is external. The editor shows/edits only the active mode's field (bank → Instructions;
+  external → Reader prompt), with the generated default surfaced as the placeholder. `reconcile_persona`
+  never touches the new column (it has no Foundry agent behind it). Additive, dormant, nullable migration
+  `f6a7b8c9d0e1` (`down_revision = "e5f6a7b8c9d0"`), no backfill. Plan:
+  [`docs/planning/plan-external-reader-prompt-20260911.md`](docs/planning/plan-external-reader-prompt-20260911.md).
+
 ## 0.37.1.9 (2026-09-11)
 
 ### Fixed

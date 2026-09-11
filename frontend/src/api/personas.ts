@@ -19,6 +19,9 @@ export interface PersonaOut {
   character: string;
   style: string;
   prompt_fragment: string;
+  // EXTERNAL-mode reader prompt — INDEPENDENT of prompt_fragment (two separate config items, never
+  // one swapped by interview_brain). null means "unset, use default_external_reader_prompt".
+  external_reader_prompt: string | null;
   voice_map: string; // JSON string: {"zh-CN": "voiceName", ...}
   greeting_map: string; // JSON string: {"zh-CN": "greeting", ...}
   default_locale: string; // editor's remembered "Language" selector locale (view state, persisted)
@@ -45,12 +48,21 @@ export interface PersonaOut {
   // Auto-generated instructions the backend pushes to Foundry when prompt_fragment is empty —
   // shown in the editor as the effective default so it matches what the Foundry Portal displays.
   default_instructions: string;
+  // Auto-generated EXTERNAL-mode reader prompt used when external_reader_prompt is null/blank —
+  // shown in the editor as the placeholder default (parallel to default_instructions).
+  default_external_reader_prompt: string;
 }
 
-/** Fields accepted on create (server owns id + agent-sync bookkeeping). */
+/** Fields accepted on create (server owns id + agent-sync bookkeeping + computed defaults). */
 export type PersonaCreate = Omit<
   PersonaOut,
-  "id" | "agent_id" | "agent_version" | "agent_sync_status" | "agent_sync_error" | "default_instructions"
+  | "id"
+  | "agent_id"
+  | "agent_version"
+  | "agent_sync_status"
+  | "agent_sync_error"
+  | "default_instructions"
+  | "default_external_reader_prompt"
 >;
 
 /** All fields optional on update (backend PersonaUpdate). */

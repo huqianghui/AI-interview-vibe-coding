@@ -34,6 +34,7 @@ const PERSONA: personas.PersonaOut = {
   character: "lisa",
   style: "casual",
   prompt_fragment: "You are an interviewer.",
+  external_reader_prompt: null,
   voice_map: '{"zh-CN":"zh-CN-XiaoxiaoNeural"}',
   greeting_map: '{"zh-CN":"你好"}',
   default_locale: "zh-CN",
@@ -55,6 +56,7 @@ const PERSONA: personas.PersonaOut = {
   agent_sync_status: "synced",
   agent_sync_error: null,
   default_instructions: "You are Demo Interviewer, an interviewer.",
+  default_external_reader_prompt: "You are Demo Interviewer, the interviewer's voice.",
 };
 
 function mockAdminLogin() {
@@ -458,6 +460,52 @@ describe("AgentEditorPage", () => {
       expect(screen.getByTestId("persona-instructions")).toHaveValue("You are an interviewer."),
     );
     expect(screen.queryByTestId("persona-instructions-default-hint")).not.toBeInTheDocument();
+  });
+
+  it("external brain shows the reader-prompt field instead of Instructions", async () => {
+    // The interview brain decides WHICH of the two independent prompt config items the editor
+    // shows: external → the reader prompt (generated default as placeholder + hint), bank → the
+    // Foundry-agent Instructions. Only the ACTIVE field renders; the inactive one stays stored.
+    const user = userEvent.setup();
+    mockAdminLogin();
+    mockDiscovery();
+    mockKnowledge();
+    const external = { ...PERSONA, interview_brain: "external", external_reader_prompt: null };
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([external]);
+    vi.spyOn(personas, "getPersona").mockResolvedValue(external);
+
+    renderPage();
+    await signIn(user);
+    await pickPersona(user, "p1");
+    await waitFor(() => expect(screen.getByTestId("persona-name")).toHaveValue("Demo Interviewer"));
+
+    const reader = screen.getByTestId("persona-reader-prompt");
+    expect(reader).toHaveValue(""); // null = "unset, use the generated default"
+    expect(reader).toHaveAttribute(
+      "placeholder",
+      "You are Demo Interviewer, the interviewer's voice.",
+    );
+    expect(screen.getByTestId("persona-reader-prompt-default-hint")).toBeInTheDocument();
+    // The bank-mode Instructions textarea is NOT rendered in external mode (its stored
+    // prompt_fragment still persists and round-trips through save untouched).
+    expect(screen.queryByTestId("persona-instructions")).not.toBeInTheDocument();
+  });
+
+  it("bank brain keeps the Instructions field and hides the reader prompt", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    mockDiscovery();
+    mockKnowledge();
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([PERSONA]); // interview_brain: "bank"
+    vi.spyOn(personas, "getPersona").mockResolvedValue(PERSONA);
+
+    renderPage();
+    await signIn(user);
+    await pickPersona(user, "p1");
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-instructions")).toHaveValue("You are an interviewer."),
+    );
+    expect(screen.queryByTestId("persona-reader-prompt")).not.toBeInTheDocument();
   });
 
   it("reconcile pulls Portal-edited instructions into the field", async () => {

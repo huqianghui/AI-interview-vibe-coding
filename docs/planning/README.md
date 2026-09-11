@@ -130,7 +130,7 @@ living specification is [`../../SPEC.md`](../../SPEC.md) at the repo root — st
   never touches the new column; additive/dormant column, no backfill; editor shows only the active
   mode's field. New migration `f6a7b8c9d0e1` (`down_revision = "e5f6a7b8c9d0"`, confirmed head).
   Five implementation threads (model+migration / service CRUD / connect-time injection / frontend
-  editor / tests). Not yet implemented.
+  editor / tests). **SHIPPED v0.37.2.0** — all five threads landed; migration `f6a7b8c9d0e1` at head.
 
 - [`spec-azure-cicd-deploy.md`](spec-azure-cicd-deploy.md) — the CI/CD + Azure deployment plan
   (Container Apps, **Sweden Central**, co-located with the reused Foundry resource). Mirrors the

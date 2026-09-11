@@ -27,7 +27,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from app.models.persona import InterviewerPersona
+from app.models.persona import InterviewerPersona, default_external_reader_prompt
 from app.services.agents.voice_live_metadata import resolve_voice
 from app.services.azure_auth import COGNITIVE_SERVICES_SCOPE, get_azure_credential_cached
 
@@ -68,6 +68,27 @@ def build_language_pin_item(locale: str | None) -> dict[str, Any]:
         "candidate's accent, wording, or the language they answer in. Switch ONLY if the candidate "
         "explicitly asks you to use another language."
     )
+    return {
+        "type": "conversation.item.create",
+        "item": {
+            "type": "message",
+            "role": "system",
+            "content": [{"type": "input_text", "text": text}],
+        },
+    }
+
+
+def build_reader_prompt_item(text: str) -> dict[str, Any]:
+    """A system conversation item carrying the EXTERNAL-mode reader prompt.
+
+    Same shape and channel as :func:`build_language_pin_item` — a session-scoped ``role: "system"``
+    message sent right after ``session.update``. In external mode the persona is a pure "mouth"
+    running MODEL mode with no Foundry agent (v0.37.1.9), so there are no agent ``instructions`` to
+    carry the reading contract; this system item is the one channel that shapes how it reads each
+    injected ``speech_text`` (Azure rejects overriding ``instructions`` in ``response.create``).
+
+    Pure shaping (no network, no SDK imports) so it's unit-testable in the zero-Azure CI.
+    """
     return {
         "type": "conversation.item.create",
         "item": {
@@ -265,6 +286,16 @@ async def run_proxy(
             # build_language_pin_item) — the raw client-event send is the same path
             # _forward_client_to_azure uses for browser frames.
             await conn.send(build_language_pin_item(locale))
+
+            # External mode = a pure "mouth" with no agent instructions: inject the reader prompt
+            # as a session-scoped system item shaping the read (verbatim, no improvising).
+            # Ordering: language pin first (session-wide), reader prompt second (behavioral), both
+            # BEFORE any response. Bank mode injects none — its Foundry agent carries instructions.
+            if is_external:
+                reader_prompt = (persona.external_reader_prompt or "").strip() or (
+                    default_external_reader_prompt(persona.name)
+                )
+                await conn.send(build_reader_prompt_item(reader_prompt))
 
             await ws.send_text(
                 json.dumps(
