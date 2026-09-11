@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.37.1.5 (2026-09-11)
+
+### Fixed
+- **Mute button no longer reverts to "unmute" in external voice mode (issue2).** In external-brain
+  voice interviews, clicking Mute flipped straight back to unmuted. Root cause: the mic auto-pause
+  effect (pause while the interviewer produces the next turn / a stalled turn awaits 恢复) depended
+  on the voice object, whose identity changes every render, so it re-ran on every render and
+  re-asserted `setMuted(shouldPause)` — during an open turn `shouldPause` is false, so each unrelated
+  re-render fired `setMuted(false)` and clobbered the candidate's own Mute click. Extracted the logic
+  into `useExternalMicAutoPause`, which drives the mic only on *transitions* of the pause condition
+  (last value tracked in a ref); an unrelated re-render is now a no-op and a manual mute sticks. The
+  auto-pause-on-awaiting / unpause-on-reopen behavior is preserved. Bank mode was never affected.
+  Regression bug dated to the Phase-2 external brain (v0.37.0.0 / PR #76); now covered by four
+  `useExternalMicAutoPause` unit tests (manual-mute-sticks, pause/unpause transitions, inert while
+  inactive, clean re-pause after reconnect).
+
 ## 0.37.1.4 (2026-09-11)
 
 ### Fixed
