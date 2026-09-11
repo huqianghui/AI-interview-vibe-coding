@@ -808,7 +808,9 @@ export function InterviewPage() {
           <Card>
             <CardHeader header={<Text weight="semibold">{t("orientation.title")}</Text>} />
             <Body1 style={{ display: "block", marginBottom: 16 }}>
-              {t("orientation.body", { total: q.total })}
+              {isExternal
+                ? t("orientation.bodyExternal")
+                : t("orientation.body", { total: q.total })}
             </Body1>
             <Button appearance="primary" onClick={() => setPhase("interviewing")}>
               {t("orientation.begin")}

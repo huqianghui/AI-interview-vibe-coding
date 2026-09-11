@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.37.1.4 (2026-09-11)
+
+### Fixed
+- **Orientation copy no longer says "You'll answer 0 questions" in external mode.** External-brain
+  interviews expose no fixed question count (the interviewer drives the flow turn by turn), so the
+  count-based orientation line interpolated `total` as `0`. The orientation card now shows a
+  count-free variant (`orientation.bodyExternal`, both locales) whenever the session is external
+  (`interview.external_phase != null`); bank interviews keep the original "{{total}} questions" copy.
+
 ## 0.37.1.3 (2026-09-10)
 
 ### Tests
