@@ -72,9 +72,11 @@
 - 归属：**这属于外部 workflow 侧的逻辑，不在我方本地 agent。** 正确链路是：候选人答完 → 我方把回答回传外部
   workflow → workflow 自行决定是否追问 → 返回下一轮的 `speech_text`/`display_text`（可能是追问、也可能是
   下一题），我方原样读。这样追问**会被外部评分、表头/口播同步、状态 blob 一致**。
-- 为什么不放在我方本地 agent：本地即兴追问本质上等于重开 server-VAD 自动回话（`create_response=True`），会
-  重新引入重复气泡（原 issue3）+ 表头不同步（原 issue4），且这些追问外部 brain 不知情、不评分、状态对不上。
-  故我方 external persona 固定 `create_response=False`（v0.37.1.6），只当"嘴"。
+- 为什么不放在我方本地 agent：本地即兴追问本质上等于让 agent 自己产 turn，会重新引入重复气泡（原 issue3）+
+  表头不同步（原 issue4），且这些追问外部 brain 不知情、不评分、状态对不上。agent 模式下有**两条**让 agent
+  即兴的路径，都已在我方侧关闭：(1) server-VAD 自动回话 `create_response=False`（v0.37.1.6）；(2) 候选人点
+  "我说完了"时 `commitAnswer` 发的裸 `response.create`——external 模式下已跳过（v0.37.1.7，前端 `externalMode`
+  开关）。两条都堵上后，external agent 永远只当"嘴"，只读后端注入的 `speech_text`。
 - 待客户落实：把"围绕主题 + 基于回答、追问 1–2 次、其他不说"这套策略写进他们的 workflow prompt。
 
 ---
@@ -89,7 +91,8 @@
 | 题目措辞质量 | 问题不够好 | **外部 workflow** | ⏳ 待客户收集样例 + 调 prompt/知识 |
 | 重复气泡 | 同一题读两遍 | **我方** | ✅ 已修（v0.37.1.6，external persona `create_response=False`）|
 | 表头/口播不同步 | 上下题不一致 + 元指令泄漏 | **我方** | ✅ 同一 fix 修复（v0.37.1.6）|
-| 追问行为 | 围绕主题追问 1–2 次 | **外部 workflow**（方案 A）| ⏳ 待客户写进 workflow prompt |
+| 本地即兴追问 | agent 自己引用候选人回答追问 | **我方**（bug）| ✅ 已修（v0.37.1.7，external 模式 `commitAnswer` 不再发裸 `response.create`）|
+| 追问行为（想要的） | 围绕主题追问 1–2 次 | **外部 workflow**（方案 A）| ⏳ 待客户写进 workflow prompt |
 
 ## 讨论要带走的三个问题
 

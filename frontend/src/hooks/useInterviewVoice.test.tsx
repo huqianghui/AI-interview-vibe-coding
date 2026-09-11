@@ -286,12 +286,16 @@ describe("useInterviewVoice commitAnswer", () => {
 
   // Connect the hook over a FakeWebSocket and return the live handle + the socket. Mirrors the
   // connect dance used by the in-band-error tests above.
-  async function connectHook() {
+  async function connectHook(extraOptions: Partial<Parameters<typeof useInterviewVoice>[1]> = {}) {
     FakeWebSocket.last = null;
     vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
     let hook!: ReturnType<typeof useInterviewVoice>;
     function CommitHarness() {
-      hook = useInterviewVoice("iv-1", { locale: "zh-CN", tokenProvider: () => "tok" });
+      hook = useInterviewVoice("iv-1", {
+        locale: "zh-CN",
+        tokenProvider: () => "tok",
+        ...extraOptions,
+      });
       return null;
     }
     const { unmount } = render(<CommitHarness />);
@@ -324,6 +328,31 @@ describe("useInterviewVoice commitAnswer", () => {
       });
     });
     await expect(committed).resolves.toBe("My spoken answer.");
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("external mode: commitAnswer never fires a bare response.create (agent must not improvise)", async () => {
+    // In external-brain sessions the digital human is a pure mouth: a bare response.create would
+    // make the Foundry agent improvise an off-script follow-up (the bug this guards). The turn
+    // advances via the backend + speakQuestion verbatim read, not an agent-generated reply.
+    const { getHook, ws, unmount } = await connectHook({ externalMode: true });
+
+    // Buffered branch: a transcript already arrived this turn, then the user clicks "I'm done".
+    await act(async () => {
+      ws().receive({
+        type: "conversation.item.input_audio_transcription.completed",
+        transcript: "Organize them as the organization chart.",
+      });
+    });
+    let committed!: Promise<string>;
+    act(() => {
+      committed = getHook().commitAnswer();
+    });
+    await expect(committed).resolves.toBe("Organize them as the organization chart.");
+    // The transcript still resolves, but NO response.create was ever sent (no agent turn).
+    expect(ws().sent.some((s) => s.includes('"response.create"'))).toBe(false);
 
     unmount();
     vi.unstubAllGlobals();

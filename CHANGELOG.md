@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.37.1.7 (2026-09-11)
+
+### Fixed
+- **Digital human no longer improvises follow-up questions in external voice mode (issue5 — the
+  second improvisation path).** After v0.37.1.6 closed the server-VAD auto-response path, external
+  voice interviews still showed the avatar asking off-script follow-ups that quoted the candidate's
+  just-spoken answer (e.g. *"Could you clarify what you mean by 'organize them as the organization
+  chart'?"*) — questions the external brain never produced, never scored, and that never appeared in
+  the question header or `interview_turns`. Root cause: `commitAnswer()` (the "I'm done answering" /
+  P13 path) fires a bare `response.create` to advance the turn, and in agent mode a *bare*
+  `response.create` makes the hosted Foundry agent autonomously generate a turn from its own generic
+  instructions — i.e. an improvised follow-up. v0.37.1.6's `create_response=False` only suppressed
+  the *server-VAD* auto-response, not this explicit nudge; worse, with the auto-response gone the
+  nudge now fires on *every* commit (nothing else holds `activeResponseRef`), so the agent improvised
+  after every answer. Fix: `commitAnswer` skips the bare `response.create` when the session is
+  external (new `externalMode` option on `useInterviewVoice`, wired from `interview.external_phase`).
+  External turns advance via the backend → `speakQuestion` verbatim read only; the agent stays a pure
+  "mouth". Bank sessions are unchanged — their agent still drives the turn, so the nudge remains.
+  This is the frontend complement to the backend `create_response=False` fix: together they close
+  BOTH bare-`response.create` paths so an external-brain agent can never improvise. Follow-ups, if
+  wanted, belong to the external workflow (decided: Approach A — see
+  `docs/planning/discuss-external-question-presentation-20260911.md`). Covered by a new
+  commitAnswer external-mode test asserting no `response.create` is sent.
+
 ## 0.37.1.6 (2026-09-11)
 
 ### Fixed

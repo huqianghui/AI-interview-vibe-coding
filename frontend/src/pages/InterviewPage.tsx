@@ -319,6 +319,10 @@ export function InterviewPage() {
   const voice = useInterviewVoice(interview?.interview_session_id ?? "", {
     locale: i18n.language,
     videoRef: avatarVideoRef,
+    // External-brain sessions: the digital human must not improvise a turn (commitAnswer skips its
+    // bare response.create). `external_phase` is non-null ONLY for external sessions, so it doubles
+    // as the flag — read live here; the hook re-syncs options every render.
+    externalMode: interview?.external_phase != null,
     onTranscript,
     onError: (err) => {
       // A mic failure opens the permission dialog; anything else falls the page back to text.

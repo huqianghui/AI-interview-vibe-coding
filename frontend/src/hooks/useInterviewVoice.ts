@@ -67,6 +67,16 @@ export interface UseInterviewVoiceOptions {
   /** Pins the WS to a specific persona (editor Playground). Omitted for the candidate interview
    * path, which lets the backend resolve the default enabled persona. */
   personaId?: string;
+  /**
+   * External-brain session (Phase 2): the digital human is a pure "mouth" for the external
+   * workflow and must NEVER improvise its own turn. When true, `commitAnswer` skips its
+   * turn-advancing bare `response.create` — in agent mode a bare response.create makes the
+   * Foundry agent autonomously produce a turn from its generic instructions (an off-script
+   * follow-up that the external brain never sees, never scores, and that desyncs from the
+   * question header). External turns advance via the backend → `speakQuestion` verbatim read,
+   * not via an agent-generated reply. Pairs with the backend's `create_response=False`, which
+   * suppresses the OTHER improvisation path (server-VAD auto-response). */
+  externalMode?: boolean;
 }
 
 const MAX_RECONNECT = 3;
@@ -830,11 +840,15 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
       const text = buffered.join(" ").trim();
       userSegmentsSinceCommitRef.current = [];
       // Nudge the agent's turn along ONLY if nothing is already responding. Under server-VAD
-      // (production) Azure has usually auto-created the response already, so an unconditional
+      // (bank production) Azure has usually auto-created the response already, so an unconditional
       // response.create here just collides (`conversation_already_has_active_response`) — it's the
       // extra rejection this fix removes. On manual-VAD (no auto-response) the nudge is still needed
-      // to advance the turn, hence the guard rather than dropping it outright.
-      if (!activeResponseRef.current) send({ type: "response.create" });
+      // to advance the turn, hence the guard rather than dropping it outright. In EXTERNAL mode we
+      // NEVER nudge: a bare response.create makes the agent improvise its own follow-up (see
+      // `externalMode` in UseInterviewVoiceOptions); external turns advance via the backend +
+      // speakQuestion verbatim read, so the agent must stay silent here.
+      if (!activeResponseRef.current && !optionsRef.current.externalMode)
+        send({ type: "response.create" });
       return Promise.resolve(text);
     }
 
@@ -848,7 +862,10 @@ export function useInterviewVoice(interviewId: string, options: UseInterviewVoic
         resolve(pending.parts.join(" ").trim());
       }, COMMIT_TRANSCRIPT_TIMEOUT_MS);
       pendingCommitRef.current = { resolve, parts: [], timer };
-      if (!activeResponseRef.current) send({ type: "response.create" });
+      // Same external-mode guard as the buffered branch: never fire a bare response.create for an
+      // external-brain session (it would make the agent improvise an off-script follow-up).
+      if (!activeResponseRef.current && !optionsRef.current.externalMode)
+        send({ type: "response.create" });
     });
   }, [send, settlePendingCommit]);
 
