@@ -135,17 +135,28 @@ def build_avatar_session(persona: InterviewerPersona, *, locale: str | None) -> 
     if has_avatar:
         modalities.append(Modality.AVATAR)
 
+    # An external-brain persona has NO interview logic of its own — it is purely the "mouth" for the
+    # external workflow, reading exactly the ``speech_text`` the backend injects (via an explicit
+    # ``response.create``) and NOTHING else. So its VAD must NOT auto-generate a reply: with
+    # ``create_response=True`` the agent improvises its own turns the moment the candidate pauses,
+    # which (a) duplicates/competes with the injected verbatim read (two Azure responses → two
+    # Interviewer bubbles) and (b) diverges from the external-brain-driven question header, so the
+    # top question and the spoken question no longer match. Bank personas keep auto-response (their
+    # agent DOES drive the turn). VAD still detects end-of-utterance and transcribes in both modes —
+    # only the auto-REPLY is suppressed — so candidate-answer capture is unaffected (external mode
+    # advances via the "I'm done answering" / commitAnswer path, not the auto-response).
+    is_external = (getattr(persona, "interview_brain", "bank") or "bank") == "external"
     session_kwargs: dict[str, Any] = {
         "modalities": modalities,
         "voice": AzureStandardVoice(name=voice_name, type="azure-standard"),
         # Server VAD drives a fully hands-free turn (AI Foundry portal parity): Azure detects when
-        # the user stops speaking and AUTO-generates the agent's reply (create_response=True), and
-        # the user can barge in to cut the agent off mid-answer (interrupt_response=True). Set both
-        # EXPLICITLY rather than relying on Azure's defaults so behavior can't silently regress —
-        # this is why the interviewer wasn't replying without a manual trigger.
+        # the user stops speaking and — for BANK personas — AUTO-generates the agent's reply
+        # (create_response=True); external personas set it False (see above). The user can always
+        # barge in to cut the agent off mid-answer (interrupt_response=True). Set EXPLICITLY rather
+        # than relying on Azure's defaults so behavior can't silently regress.
         "turn_detection": AzureSemanticVad(
             type="azure_semantic_vad",
-            create_response=True,
+            create_response=not is_external,
             interrupt_response=True,
         ),
         "input_audio_transcription": AudioInputTranscriptionOptions(

@@ -5,9 +5,12 @@
 tests lock the shape that makes the digital human WORK end-to-end:
 
 - AVATAR modality present (+ h264 video) only when the persona has a character.
-- Server VAD drives a hands-free turn: `create_response`/`interrupt_response` EXPLICITLY True, so
-  Azure auto-generates the agent's spoken reply when the user stops speaking and lets the user barge
-  in — the fix for "the interviewer transcribes me but never replies".
+- Server VAD drives a hands-free turn for BANK personas: `create_response`/`interrupt_response`
+  EXPLICITLY True, so Azure auto-generates the agent's spoken reply when the user stops speaking and
+  lets the user barge in — the fix for "the interviewer transcribes me but never replies".
+- EXTERNAL personas set `create_response=False`: the agent is purely the external brain's mouth
+  (reads the injected `speech_text` only) and must never improvise its own turn — else it both
+  duplicates the verbatim read (two Interviewer bubbles) and diverges from the question header.
 """
 
 from dataclasses import dataclass
@@ -31,6 +34,7 @@ class FakePersona:
     style: str = "casual-sitting"
     agent_id: str = "interviewer-x:1"
     agent_version: str = "1"
+    interview_brain: str = "bank"
 
 
 def _as_dict(obj):
@@ -42,8 +46,19 @@ def test_avatar_session_enables_hands_free_vad_auto_response():
     session = build_avatar_session(FakePersona(), locale="zh-CN")
     td = _as_dict(session["turn_detection"])
     assert td["type"] == "azure_semantic_vad"
-    # Both EXPLICITLY set — hands-free auto-reply + barge-in (not relying on Azure defaults).
+    # Bank persona: both EXPLICITLY set — hands-free auto-reply + barge-in (not Azure defaults).
     assert td["create_response"] is True
+    assert td["interrupt_response"] is True
+
+
+def test_avatar_session_disables_auto_response_for_external_brain():
+    # External persona is the external brain's mouth only: it must NEVER auto-generate a turn (that
+    # both duplicates the injected verbatim read and desyncs from the question header). VAD stays on
+    # for transcription; only the auto-reply is suppressed. Barge-in stays enabled.
+    session = build_avatar_session(FakePersona(interview_brain="external"), locale="zh-CN")
+    td = _as_dict(session["turn_detection"])
+    assert td["type"] == "azure_semantic_vad"
+    assert td["create_response"] is False
     assert td["interrupt_response"] is True
 
 

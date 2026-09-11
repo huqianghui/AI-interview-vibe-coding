@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.37.1.6 (2026-09-11)
+
+### Fixed
+- **Digital human no longer improvises its own questions in external voice mode (issue3 + issue4 —
+  one root cause).** In external-brain voice interviews the avatar would (issue3) speak the same
+  question twice, rendering two Interviewer bubbles, and (issue4) ask a *different* question than the
+  one shown in the top question header — even leaking its internal meta-instruction
+  ("Please answer the question as the candidate: …"). Root cause: the Voice Live turn-detection was
+  built with `create_response=True` for *every* persona, so the moment the candidate paused, Azure
+  auto-generated a spoken agent turn from the persona's own instructions. But an external persona has
+  no interview logic of its own — it is purely the external brain's "mouth", meant to read exactly
+  the `speech_text` the backend injects (via an explicit `response.create`) and nothing else. The
+  auto-response therefore (a) competed with the injected verbatim read → two Azure responses → two
+  bubbles (issue3), and (b) diverged from the external-brain-driven `display_text` header → the top
+  question and the spoken question no longer matched (issue4). Fix: `build_avatar_session` now sets
+  `create_response=False` when `persona.interview_brain == "external"`, so the agent never generates
+  a turn on its own — the only audio it produces is the injected `speech_text`, which stays in
+  lockstep with the header `display_text`. VAD still detects end-of-utterance and transcribes in both
+  modes (candidate-answer capture unaffected; external advances via "I'm done answering" /
+  `commitAnswer`), and barge-in stays enabled. Bank personas keep hands-free auto-response — their
+  agent does drive the turn — and are unaffected. Covered by a new
+  `test_avatar_session_disables_auto_response_for_external_brain` guard (azure-equipped envs).
+
 ## 0.37.1.5 (2026-09-11)
 
 ### Fixed
