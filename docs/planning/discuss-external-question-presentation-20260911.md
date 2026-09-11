@@ -83,3 +83,62 @@
 1. 外部面试**有没有固定总题数**？要不要给候选人看进度？（决定议题 1 是否收尾）
 2. 候选人界面**要不要显示题目编号**？现在从 "Question 5" 起、且与作答顺序不符——是预期还是串号？（议题 2）
 3. 对题目**质量**的具体不满 + 样例，反馈给 workflow 侧调优。（议题 3）
+
+---
+
+## 附：「content」还是「display」——这块的设计与实现
+
+> 起因：讨论中被问到"候选人看到的到底是原始 question content 还是一个单独的 display content？"下面把外部
+> 模式下问题文本的产出 / 落库 / 呈现讲清楚，作为归属判断的技术依据。
+
+**一句话结论**：候选人**看到**的是外部 workflow 返回的 `display_text`（展示内容），**听到**的是另一个字段
+`speech_text`。两者都由外部返回、我方原样呈现；我方唯一的加工是**剥掉一个内部编号前缀**，不裁剪、不改写题目措辞。
+
+### 外部返回：一个"内容"，两种呈现
+
+外部 workflow 每一轮在 `public_response_json` 里返回一对候选人安全字段
+（`backend/app/services/external_interview_client.py`，约 71–77 行）：
+
+| 字段 | 用途 | 谁消费 |
+|---|---|---|
+| `speech_text` | 数字人 TTS **读出来**的文本 | 语音通道 |
+| `display_text` | 候选人**屏幕上看到**的文本 | UI 显示 |
+
+即：这不是"content vs display 二选一"，外部本来就返回**两个并列字段**，一个给耳朵、一个给眼睛，措辞可以不同，
+但都由外部那侧决定。此外还返回一个 `final_session_state_json`（不透明状态 blob，携带评分 / rubric）——**永不
+回传浏览器、永不进 LLM**（P3/P12），只在后端 round-trip。
+
+### 我方唯一的加工：剥编号前缀，不动措辞
+
+`scrub_display_text()`（`external_interview_client.py` 约 83–95 行）对 `display_text` 做**唯一一处**清洗：只匹配
+**开头**的 `<CODE>-Q<digits>` 形状的**内部 id 前缀**（如 `RFCMS-Q03 — …`、`ABC_Q7: …`），去掉它，没有该前缀
+则原样返回。`speech_text` 完全不清洗。目的是不让客户内部题号编码泄露到候选人界面——**不碰题目正文措辞**。
+
+> ⚠️ 与上文议题 2 区分：`scrub` 砍的是 `RFCMS-Q03` 这种**内部 id 编码**；而 `Question 5:` 是外部 workflow 自己
+> 写进题面的**人类可读编号**，我方不动它（是否去除仍待客户确认）。
+
+### 落库与投影（后端）
+
+1. `_public_snapshot` 把 `speech_text` + `display_text` 一起存进状态快照，供静默恢复重放。
+2. 写 `interview_turns` 的 interviewer turn 时，`content` **只存 `display_text`**——绝不写 `speech_text`，
+   绝不写状态 blob。
+3. `current_question()` 投影给前端的 `prompt` 取值：`display_text or speech_text or ""`——**优先 display_text，
+   缺失才回退 speech_text**。
+
+### 前端消费
+
+- **显示**：`currentPrompt = interview.current_question.prompt`（`InterviewPage.tsx`），渲染在题面 `{q.prompt}`。→ 即 `display_text`。
+- **语音 TTS**：`speakText = isExternal ? interview.speech_text ?? currentPrompt : currentPrompt`。→ 外部模式读 `speech_text`，题库模式读 prompt 本身。
+
+### 数据流
+
+```
+外部 workflow
+  └─ public_response_json { speech_text, display_text }
+        ├─ speech_text  ──────────────────────────► 前端 speakText ──► 数字人 TTS（耳朵）
+        └─ display_text ─(scrub 只剥内部 id 前缀)──► turn.content / current_question.prompt ──► 屏幕（眼睛）
+     final_session_state_json ─────────────────────► 后端状态 round-trip（永不出后端 / 永不进 LLM）
+```
+
+**归属呼应**：题目"内容 / 措辞 / 编号"的主动权都在客户 workflow 侧（他们决定 `speech_text` 与 `display_text`
+各写什么）；我方只做两件事——(1) 忠实呈现，(2) 剥一个内部 id 前缀，并把评分状态 blob 关在后端。
