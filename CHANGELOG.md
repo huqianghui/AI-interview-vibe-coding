@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.37.4.2 (2026-09-14)
+
+### Fixed
+- **Digital human appears ~7.5s faster: the avatar ICE gate no longer stalls to its 8s cap.** The
+  offer/answer handshake waited for the null-candidate signal or gathering "complete" — signals
+  that never fire on networks with VPN/mDNS interfaces — so EVERY avatar connect sat out the full
+  8s safety timeout before sending the SDP offer. Azure's avatar path runs over its TURN relay,
+  so the handshake can proceed once one relay (or srflx) candidate is gathered: the gate now sends
+  the offer after a 300ms settle window following the first usable candidate (null-candidate,
+  gathering-complete, and the 8s cap all remain as backstops). Measured live: gathering→offer
+  8.0s → 0.38s; click-Start→first video frame 16.0s → 11.2s (worst case, instant click-through —
+  with normal orientation reading time the avatar is ready before "I'm ready" is clicked), and the
+  avatar now becomes visible BEFORE the held first-question read is released instead of the
+  6s hold expiring first.
+
+### Added
+- **Production nginx now caches the built frontend assets.** Vite's content-hashed `/assets/*`
+  get `Cache-Control: public, max-age=31536000, immutable` (a release ships new hashed filenames,
+  so a stale file can never be served), and `index.html` — the one un-hashed file that names the
+  current assets — is `no-cache` so every load revalidates (cheap 304) and picks up a new release
+  immediately. Local dev (Vite) is unaffected.
+
 ## 0.37.4.1 (2026-09-14)
 
 ### Fixed
