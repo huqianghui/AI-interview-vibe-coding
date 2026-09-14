@@ -4,8 +4,13 @@
  * Layers, in order:
  * 1. A `<video>` element (always in the DOM so `ontrack` can attach a stream at any time) — shown
  *    once a real digital-human avatar video track arrives from Voice Live.
- * 2. The AudioOrb — shown when there's no avatar video (voice-only session, or avatar still
- *    negotiating, or the persona has no character). So the page always has a presence.
+ * 2. A cached still portrait of the interviewer (issue 5) — shown while the live stream is still
+ *    connecting, so the PERSON appears instantly on every visit after the first. The portrait is a
+ *    frame captured from the previous live session (localStorage), overlaid with the "connecting"
+ *    hint; the live video fades in over it when frames arrive.
+ * 3. The AudioOrb — shown when there's no avatar video AND no cached portrait yet (first-ever
+ *    visit, voice-only session, or the persona has no character). So the page always has a
+ *    presence.
  *
  * The `<video>` visibility is driven by opacity/z-index (not display:none) so the browser's
  * autoplay pipeline stays alive while a track is attaching.
@@ -16,10 +21,20 @@
  * safe because the avatar's AUDIO arrives on a SEPARATE `<audio>` element (see useInterviewVoice
  * ontrack), not this element.
  */
-import { forwardRef } from "react";
-import { makeStyles, mergeClasses } from "@fluentui/react-components";
+import { forwardRef, useCallback, useEffect, useRef, useState } from "react";
+import { makeStyles, mergeClasses, Text } from "@fluentui/react-components";
+import { useTranslation } from "react-i18next";
 import { AudioOrb } from "./AudioOrb";
 import type { AudioState } from "../types/voice";
+
+/** Single-slot portrait cache. This deployment runs ONE default interviewer persona, so the slot
+ * isn't keyed by character; a persona/avatar change self-corrects on the next successful session
+ * (the capture below overwrites the slot). Bump the suffix if the stored format ever changes. */
+export const AVATAR_PORTRAIT_STORAGE_KEY = "avatar-portrait-v1";
+/** Give the stream a beat after the first frames so the captured pose is settled, not mid-fade. */
+const PORTRAIT_CAPTURE_DELAY_MS = 2000;
+/** Downscale the 1080p frame for storage — a stage-quality still at a fraction of the quota. */
+const PORTRAIT_CAPTURE_WIDTH = 480;
 
 const useStyles = makeStyles({
   root: {
@@ -49,7 +64,58 @@ const useStyles = makeStyles({
   },
   hidden: { opacity: 0, zIndex: 0, pointerEvents: "none" },
   shown: { opacity: 1, zIndex: 10 },
+  // The still portrait sits UNDER the video layer (z-index 5 < shown 10) so the live stream fades
+  // in over it with no orb flash in between.
+  portrait: {
+    position: "absolute",
+    inset: "0",
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+    objectPosition: "center top",
+    borderRadius: "12px",
+    zIndex: 5,
+    // Slightly dimmed so "not live yet" is perceptible without hiding the person.
+    filter: "saturate(0.85) brightness(0.92)",
+  },
+  connectingHint: {
+    position: "absolute",
+    bottom: "16px",
+    left: "50%",
+    transform: "translateX(-50%)",
+    zIndex: 6,
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    padding: "6px 14px",
+    borderRadius: "16px",
+    backgroundColor: "rgba(0, 0, 0, 0.55)",
+    color: "#fff",
+    whiteSpace: "nowrap",
+  },
+  connectingDot: {
+    width: "8px",
+    height: "8px",
+    borderRadius: "50%",
+    backgroundColor: "#7ee787",
+    animationName: {
+      "0%": { opacity: 0.3 },
+      "50%": { opacity: 1 },
+      "100%": { opacity: 0.3 },
+    },
+    animationDuration: "1.2s",
+    animationIterationCount: "infinite",
+  },
 });
+
+function readCachedPortrait(): string | null {
+  try {
+    const v = localStorage.getItem(AVATAR_PORTRAIT_STORAGE_KEY);
+    return v && v.startsWith("data:image/") ? v : null;
+  } catch {
+    return null; // storage unavailable (privacy mode) → orb fallback, as before
+  }
+}
 
 interface AvatarViewProps {
   audioState: AudioState;
@@ -63,17 +129,72 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
   ref,
 ) {
   const styles = useStyles();
+  const { t } = useTranslation();
+  const [portrait, setPortrait] = useState<string | null>(readCachedPortrait);
+  const innerRef = useRef<HTMLVideoElement | null>(null);
+
+  // Merge the forwarded ref (the voice hook's stream target) with a local one (frame capture).
+  const setVideoRef = useCallback(
+    (el: HTMLVideoElement | null) => {
+      innerRef.current = el;
+      if (typeof ref === "function") ref(el);
+      else if (ref) ref.current = el;
+    },
+    [ref],
+  );
+
+  // Refresh the portrait slot from the LIVE stream so the next visit shows the person instantly.
+  // Best-effort: a failed capture (no frames yet, canvas unavailable, storage quota) just keeps
+  // whatever the slot already holds. MediaStream frames never taint the canvas, so toDataURL is
+  // safe here.
+  useEffect(() => {
+    if (!isAvatarConnected) return;
+    const timer = setTimeout(() => {
+      const video = innerRef.current;
+      if (!video || video.videoWidth === 0) return;
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = PORTRAIT_CAPTURE_WIDTH;
+        canvas.height = Math.round((video.videoHeight / video.videoWidth) * PORTRAIT_CAPTURE_WIDTH);
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
+        localStorage.setItem(AVATAR_PORTRAIT_STORAGE_KEY, dataUrl);
+        setPortrait(dataUrl);
+      } catch {
+        /* best-effort — keep the previous portrait (or none) */
+      }
+    }, PORTRAIT_CAPTURE_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [isAvatarConnected]);
+
+  const showPortrait = !isAvatarConnected && portrait !== null;
   return (
     <div className={styles.root} data-testid="avatar-view" data-avatar-connected={isAvatarConnected}>
       <video
-        ref={ref}
+        ref={setVideoRef}
         autoPlay
         playsInline
         muted
         className={mergeClasses(styles.video, isAvatarConnected ? styles.shown : styles.hidden)}
         data-testid="avatar-video"
       />
-      {!isAvatarConnected && <AudioOrb audioState={audioState} />}
+      {showPortrait && (
+        <>
+          <img
+            src={portrait}
+            alt=""
+            className={styles.portrait}
+            data-testid="avatar-portrait"
+          />
+          <div className={styles.connectingHint} data-testid="avatar-connecting-hint">
+            <span className={styles.connectingDot} aria-hidden />
+            <Text size={200}>{t("voice.connecting")}</Text>
+          </div>
+        </>
+      )}
+      {!isAvatarConnected && !showPortrait && <AudioOrb audioState={audioState} />}
     </div>
   );
 });
