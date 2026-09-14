@@ -67,6 +67,7 @@ export const resources = {
         emptyAnswer:
           'We didn\'t catch an answer — please speak, then tap "I\'m done answering" again.',
         endedFallback: "Voice unavailable — you can continue by text.",
+        errorDetail: "Voice unavailable: {{detail}} — you can continue by text.",
         transcriptEmpty: "The conversation will appear here as you speak.",
         roleYou: "You",
         roleInterviewer: "Interviewer",
@@ -233,6 +234,7 @@ export const resources = {
         imDone: "我答完了",
         emptyAnswer: "我们没有听到你的回答 —— 请说话后再次点击「我答完了」。",
         endedFallback: "语音不可用 —— 你可以改用文字继续。",
+        errorDetail: "语音不可用：{{detail}} —— 你可以改用文字继续。",
         transcriptEmpty: "对话内容将在你发言时显示在这里。",
         roleYou: "你",
         roleInterviewer: "面试官",

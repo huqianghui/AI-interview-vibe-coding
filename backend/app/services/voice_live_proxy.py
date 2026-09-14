@@ -27,7 +27,11 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from app.models.persona import InterviewerPersona, default_external_reader_prompt
+from app.models.persona import (
+    InterviewerPersona,
+    build_read_directive,
+    default_external_reader_prompt,
+)
 from app.services.agents.voice_live_metadata import resolve_voice
 from app.services.azure_auth import COGNITIVE_SERVICES_SCOPE, get_azure_credential_cached
 
@@ -291,11 +295,18 @@ async def run_proxy(
             # as a session-scoped system item shaping the read (verbatim, no improvising).
             # Ordering: language pin first (session-wide), reader prompt second (behavioral), both
             # BEFORE any response. Bank mode injects none — its Foundry agent carries instructions.
+            read_directive = ""
             if is_external:
                 reader_prompt = (persona.external_reader_prompt or "").strip() or (
                     default_external_reader_prompt(persona.name)
                 )
                 await conn.send(build_reader_prompt_item(reader_prompt))
+                # The same configurable reader prompt, as the per-turn read-directive template the
+                # frontend fills with each speech_text and sends as response.instructions (the only
+                # delivery gpt-4o reads verbatim in MODEL mode — see build_read_directive). Bank/
+                # agent mode omits it (Azure rejects instructions overrides there; the frontend then
+                # rides the text as an assistant item).
+                read_directive = build_read_directive(reader_prompt)
 
             await ws.send_text(
                 json.dumps(
@@ -306,6 +317,7 @@ async def run_proxy(
                         "model": "" if is_agent else default_model,
                         "avatar_enabled": bool((persona.character or "").strip()),
                         "persona_id": persona.id,
+                        "read_directive": read_directive,
                     }
                 )
             )

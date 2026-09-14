@@ -323,6 +323,10 @@ export function InterviewPage() {
   const [micDialogOpen, setMicDialogOpen] = useState(false);
   const [micRetried, setMicRetried] = useState(false);
   const [voiceUnavailable, setVoiceUnavailable] = useState(false);
+  // The REAL Azure Voice Live error (e.g. an invalid_model / quota / region rejection), surfaced
+  // verbatim instead of the generic "voice unavailable" note. Owner directive: this page must not
+  // silently degrade — when voice fails, show the actual message so a human can judge the cause.
+  const [voiceErrorDetail, setVoiceErrorDetail] = useState<string | null>(null);
   // Real scoring progress streamed from /report/stream (null until the first progress line, and
   // when the stream fell back to the batch endpoint — the copy then shows the latched fallback).
   const [scoringProgress, setScoringProgress] = useState<{
@@ -375,6 +379,7 @@ export function InterviewPage() {
       if (err instanceof MicAccessError) {
         setMicDialogOpen(true);
       } else {
+        setVoiceErrorDetail(err instanceof Error ? err.message : String(err));
         setVoiceUnavailable(true);
         setChannel("text");
       }
@@ -501,6 +506,7 @@ export function InterviewPage() {
     try {
       await voice.connect(i18n.language);
       setVoiceUnavailable(false); // a successful (re)connect clears a prior transient failure
+      setVoiceErrorDetail(null);
     } catch (err) {
       if (err instanceof MicAccessError) {
         setMicRetried((prev) => prev || micDialogOpen);
@@ -508,6 +514,8 @@ export function InterviewPage() {
       } else {
         // P5/P6b: any non-mic failure (agent not synced, voice off, WS proxy unreachable — the
         // WS transport rejects with a plain Error, not only VoiceSessionError) → stay on text.
+        // Surface the real message verbatim (invalid_model / quota / region) — no silent fallback.
+        setVoiceErrorDetail(err instanceof Error ? err.message : String(err));
         setVoiceUnavailable(true);
         setChannel("text");
       }
@@ -587,6 +595,7 @@ export function InterviewPage() {
   useEffect(() => {
     if (voice.connectionState === "connected" && voiceUnavailable) {
       setVoiceUnavailable(false);
+      setVoiceErrorDetail(null);
       setChannel("voice");
     }
   }, [voice.connectionState, voiceUnavailable]);
@@ -731,7 +740,9 @@ export function InterviewPage() {
 
       {voiceUnavailable && (
         <Text size={200} className={styles.fallbackNote}>
-          {t("voice.endedFallback")}
+          {voiceErrorDetail
+            ? t("voice.errorDetail", { detail: voiceErrorDetail })
+            : t("voice.endedFallback")}
         </Text>
       )}
 

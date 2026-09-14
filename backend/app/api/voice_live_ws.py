@@ -27,7 +27,7 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.db import async_session_factory
 from app.models.user import User
-from app.services import persona_service
+from app.services import config_service, persona_service
 from app.services.anonymous_session_service import AnonymousSessionError, verify_anonymous_token
 from app.services.voice_broker import DEFAULT_LOCALE
 from app.services.voice_live_proxy import run_proxy
@@ -35,6 +35,20 @@ from app.services.voice_live_proxy import run_proxy
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["voice-live-ws"])
+
+
+def resolve_voice_model(persona_model: str | None, master_model: str | None, env_model: str) -> str:
+    """Pick the Voice Live model from USER CONFIG, not a hardcoded env value.
+
+    Priority (owner directive): per-persona ``persona.model`` → admin-saved master config
+    ``service_config.model_or_deployment`` → the ``.env`` ``VOICE_LIVE_DEFAULT_MODEL`` as a
+    last-resort fallback. The first two are read from the DB per-connection, so a model change in
+    the admin UI takes effect on the NEXT interview without a backend restart — the env value alone
+    is frozen at process start because ``get_settings()`` is ``lru_cache``d.
+
+    Blank/whitespace-only values are skipped (an empty master row must not shadow the env default).
+    """
+    return (persona_model or "").strip() or (master_model or "").strip() or env_model
 
 
 async def _send_error_and_close(
@@ -132,7 +146,22 @@ async def voice_live_websocket(ws: WebSocket) -> None:
             )
             return
 
+        # Read the two user-config sources per-connection (see resolve_voice_model for the why).
+        _master = await config_service.get_master_config(db)
+        _persona_model = persona.model
+        _master_model = _master.model_or_deployment if _master else None
+
     settings = get_settings()
+    resolved_model = resolve_voice_model(
+        _persona_model, _master_model, settings.voice_live_default_model
+    )
+    logger.info(
+        "Voice Live model resolved to %r (persona.model=%r → master=%r → env=%r)",
+        resolved_model,
+        _persona_model or None,
+        _master_model or None,
+        settings.voice_live_default_model,
+    )
     try:
         await run_proxy(
             ws,
@@ -142,7 +171,7 @@ async def voice_live_websocket(ws: WebSocket) -> None:
             project=settings.azure_foundry_default_project,
             api_key=settings.azure_foundry_api_key,
             api_version=settings.voice_live_api_version,
-            default_model=settings.voice_live_default_model,
+            default_model=resolved_model,
         )
     except WebSocketDisconnect:
         logger.info("Voice Live WS: client disconnected")

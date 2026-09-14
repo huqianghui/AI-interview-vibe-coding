@@ -178,6 +178,14 @@ export function useInterviewVoice(
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const intentionalCloseRef = useRef(false);
+  // Set when a PRE-CONNECT Azure `error` frame (e.g. `invalid_model` — the configured Voice Live
+  // model isn't supported in this region) rejects the initial connect. Such a session never went
+  // live, so retrying is futile: Azure will reject the same model every time. Without this flag the
+  // reject sets the promise `resolved`, which `ws.onclose` reads as "was connected" → it enters the
+  // 3-attempt reconnect loop, and the terminal "failed after 3 attempts" error OVERWRITES the real
+  // Azure message the page already surfaced. Checked in onclose to skip reconnect and preserve the
+  // verbatim error.
+  const fatalErrorRef = useRef(false);
   const lastLocaleRef = useRef<string | undefined>(undefined);
   const transcriptIdCounter = useRef(0);
   const avatarEnabledRef = useRef(false);
@@ -294,6 +302,11 @@ export function useInterviewVoice(
   // (the "读两遍" regression, live-observed twice).
   const awaitingReadResponseRef = useRef(false);
   const readResponseIdRef = useRef<string | null>(null);
+  // EXTERNAL (MODEL) mode only: the per-turn read-directive template from `proxy.connected` (the
+  // admin-configurable reader prompt + a `{text}` placeholder). Present ⟺ external mode; emitSpeak
+  // fills `{text}` and sends it as `response.instructions` (the only delivery gpt-4o reads verbatim
+  // as a dumb "mouth"). Null in bank/agent mode → emitSpeak keeps the assistant-item delivery.
+  const readDirectiveRef = useRef<string | null>(null);
   // A question read that was still UNCONFIRMED when the session tore down (reconnect): re-spoken
   // once the next session reaches `session.updated`. Without this, a drop-during-reconnect is
   // unrecoverable — the page latched "spoken" and never asks again.
@@ -454,11 +467,19 @@ export function useInterviewVoice(
       switch (msg.type as string | undefined) {
         case "proxy.connected":
           avatarEnabledRef.current = Boolean(msg.avatar_enabled);
+          // EXTERNAL mode sends a non-empty read-directive template; bank/agent mode sends "" (or
+          // omits it) → null, so emitSpeak keeps the assistant-item delivery there.
+          readDirectiveRef.current =
+            typeof msg.read_directive === "string" && msg.read_directive
+              ? msg.read_directive
+              : null;
           console.info(
             "[voice] proxy.connected — mode:",
             msg.mode,
             "avatar_enabled:",
             msg.avatar_enabled,
+            "read_directive:",
+            readDirectiveRef.current ? "yes" : "no",
           );
           break;
 
@@ -745,6 +766,10 @@ export function useInterviewVoice(
             onFatalError(error);
             break;
           }
+          // Pre-connect fatal (never went live): mark it so onclose does NOT reconnect. Retrying an
+          // invalid_model / unsupported-region rejection is futile and its terminal generic error
+          // would overwrite this verbatim Azure message on the page.
+          fatalErrorRef.current = true;
           setConn("error");
           optionsRef.current.onError?.(error);
           onFatalError(error);
@@ -767,7 +792,10 @@ export function useInterviewVoice(
     async (locale?: string, isReconnect = false): Promise<void> => {
       const effectiveLocale = locale ?? optionsRef.current.locale ?? "en-US";
       lastLocaleRef.current = effectiveLocale;
-      if (!isReconnect) reconnectAttemptRef.current = 0;
+      if (!isReconnect) {
+        reconnectAttemptRef.current = 0;
+        fatalErrorRef.current = false;
+      }
       intentionalCloseRef.current = false;
       setConn("connecting");
 
@@ -845,6 +873,11 @@ export function useInterviewVoice(
             return;
           }
           if (intentionalCloseRef.current) return;
+          // A pre-connect fatal error (invalid_model / unsupported region) already surfaced the real
+          // Azure message and rejected the connect. The reject set `resolved` (hence wasConnected),
+          // but the session never actually went live — do NOT reconnect: retrying is futile and the
+          // terminal "failed after 3 attempts" would overwrite the verbatim error on the page.
+          if (fatalErrorRef.current) return;
           // Reconnect on unexpected close: 3 attempts, 1s/2s/4s backoff.
           if (reconnectAttemptRef.current < MAX_RECONNECT) {
             reconnectAttemptRef.current++;
@@ -1010,14 +1043,6 @@ export function useInterviewVoice(
       if (spokenTextRef.current === text) return;
       lastSpokenAttemptRef.current = text;
       spokenTextRef.current = text;
-      send({
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "assistant",
-          content: [{ type: "text", text }],
-        },
-      });
       // The next `response.created` belongs to THIS attempt — its id becomes the delivery proof
       // for the watchdog (see readResponseIdRef).
       awaitingReadResponseRef.current = true;
@@ -1025,7 +1050,33 @@ export function useInterviewVoice(
       // Optimistically mark active so a rapid second speakQuestion (or a commit nudge) defers
       // instead of colliding; the real `response.created` confirms it, `response.done` clears it.
       activeResponseRef.current = true;
-      send({ type: "response.create" });
+      const directive = readDirectiveRef.current;
+      if (directive) {
+        // EXTERNAL (MODEL) mode: the persona is a dumb "mouth". Carrying the text as an assistant
+        // item makes gpt-4o treat it as already-said and reply with an acknowledgment
+        // ("Understood.") or fabricate a different question; a user item makes it ANSWER the text
+        // as if the candidate asked. Only carrying the text inside `response.instructions` (the
+        // admin-configurable reader prompt with `{text}` filled here) makes it read the text
+        // verbatim (live-verified on gpt-4o). Function replacement so a `$`-sequence in the text
+        // (`$&`, `$1`) is inserted literally, not treated as a replacement pattern.
+        send({
+          type: "response.create",
+          response: { instructions: directive.replace("{text}", () => text) },
+        });
+      } else {
+        // BANK (AGENT) mode: Azure rejects overriding `instructions` in `response.create`
+        // ("Overriding instructions in response.create is not supported", live-verified), so the
+        // verbatim text rides as an assistant item and a bare `response.create` reads it.
+        send({
+          type: "conversation.item.create",
+          item: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "text", text }],
+          },
+        });
+        send({ type: "response.create" });
+      }
     },
     [send],
   );
@@ -1033,12 +1084,14 @@ export function useInterviewVoice(
   /** Speak the backend-provided question text verbatim (SPEC Phase 4 voice→turn sub-design).
    *
    * The backend keeps the question pointer authoritative, so voice must SPEAK its text, not let
-   * the agent generate its own. We inject the question as an assistant conversation item and ask
-   * Voice Live to read it exactly, rather than firing a bare `response.create` (which would make
-   * the agent autonomously produce whatever its generic instructions yield). Agent mode rejects
-   * overriding `instructions` in `response.create` ("Overriding instructions in response.create is
-   * not supported", live-verified), so the verbatim text rides as the assistant item and a bare
-   * `response.create` follows — same pattern as the old data-channel transport, now over the WS.
+   * the model/agent generate its own. HOW the text is delivered differs by mode (see emitSpeak):
+   * BANK (AGENT) mode rides the text as an assistant conversation item + a bare `response.create`
+   * (agent mode rejects overriding `instructions` in `response.create` — "Overriding instructions
+   * in response.create is not supported", live-verified). EXTERNAL (MODEL) mode instead carries the
+   * text inside `response.instructions` (built from the configurable reader prompt): as a dumb
+   * "mouth", gpt-4o treats an assistant item as already-said (acknowledges — "Understood." — or
+   * fabricates a question) and a user item as the candidate speaking (answers it); only the
+   * instructions form makes it read verbatim (live-verified on gpt-4o).
    *
    * CANCEL-THEN-SPEAK (the "数字人不说话" fix): under server-VAD (create_response=True, production)
    * Azure AUTO-creates a response when the user stops speaking, so at the moment the page wants to
