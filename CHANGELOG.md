@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.37.4.4 (2026-09-14)
+
+### Fixed
+- **Production had the chat-model-as-voice-model misconfig too — voice silently degraded to text
+  on the public deployment.** A production comparison test (same instrumented flow as the local
+  measurements) hit the same `"Model gpt-5.4-mini is not supported in this region"` loop:
+  `infra/azure/main.parameters.json` set `voiceLiveDefaultModel: gpt-5.4-mini` (changed alongside
+  the chat model — exactly the conflation v0.37.4.1 removed from the runtime overlay). Corrected
+  to `gpt-4o` in the parameters file, hotfixed live via `az containerapp update --set-env-vars`
+  (revision 0000032), and both infra copies' bicep `@description` now warn the param takes a
+  VOICE-capable native model, never the agent chat deployment. Live-verified on production after
+  the fix: voice channel auto-selected, 1080p avatar, face-before-voice.
+
+### Changed
+- **`docs/avatar-latency-ice-gathering.md` deep-dive expansion** (client review feedback): removed
+  a client name; added why the wait-for-complete pattern was originally CORRECT (one-shot vanilla
+  ICE signaling — the offer is sent once with no trickle channel), why relay-only makes the
+  sufficient-set wait safe (before/after difference table), and the mechanics of WHY VPN
+  interfaces stall gathering (silent UDP drops the browser can't distinguish from slow). The
+  remaining-latency section now carries the measured LOCAL vs AZURE-PRODUCTION comparison —
+  backend→Voice Live leg 2.5-2.7s → 0.95s when co-located in swedencentral (validating the
+  deployment guidance), click-Start→avatar-frames 11.25s → 9.99s — plus per-item answers: the
+  external-gateway leg collapses when the client deploys into their own network; the first-frame
+  ~3.5s splits into user↔region RTT (region choice helps) and Azure-side render pipeline spin-up
+  (irreducible, but paid once per interview and hidden by prewarm + the cached portrait).
+
 ## 0.37.4.3 (2026-09-14)
 
 ### Added
