@@ -85,7 +85,7 @@ param azureFoundryDefaultProject string = ''
 @description('Interviewer-agent model deployment name (FOUNDRY_AGENT_MODEL). Must exist on the reused Foundry resource.')
 param foundryAgentModel string = 'gpt-4o'
 
-@description('Voice Live session model deployment name (VOICE_LIVE_DEFAULT_MODEL).')
+@description('Voice Live MODEL-mode model (VOICE_LIVE_DEFAULT_MODEL). Must be a VOICE-capable native model (gpt-4o family / realtime) — NOT the agent chat deployment (foundryAgentModel); a chat model here fails every voice session with "Model X is not supported in this region" and the interview silently degrades to text.')
 param voiceLiveDefaultModel string = 'gpt-4o'
 
 @description('Voice Live realtime api-version (VOICE_LIVE_API_VERSION).')
