@@ -475,3 +475,61 @@ async def test_connection_no_credential_message(client, _restore_settings, monke
     body = (await client.post("/admin/config/ai-foundry/test", headers=AUTH)).json()
     assert body["success"] is False
     assert "Entra ID unavailable" in body["message"]
+
+
+async def test_clear_api_key(client, _restore_settings):
+    # Save with a key, then clear it: masked_key empties and stays empty on re-save with blank key.
+    await _seed(client)
+    got = (await client.get("/admin/config/ai-foundry", headers=AUTH)).json()
+    assert got["masked_key"] == "****"  # seed key "k" is <=4 chars → fully starred
+
+    resp = await client.put(
+        "/admin/config/ai-foundry",
+        headers=AUTH,
+        json={
+            "endpoint": "https://demo.services.ai.azure.com",
+            "api_key": "",
+            "clear_api_key": True,
+            "default_project": "demo-prj",
+            "model_or_deployment": "gpt-4o-mini",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["masked_key"] == ""
+    # Other fields survive the clear.
+    assert body["endpoint"] == "https://demo.services.ai.azure.com"
+    assert body["default_project"] == "demo-prj"
+
+    # A later plain save with a blank key must NOT resurrect anything — still keyless.
+    await client.put(
+        "/admin/config/ai-foundry",
+        headers=AUTH,
+        json={
+            "endpoint": "https://demo.services.ai.azure.com",
+            "api_key": "",
+            "default_project": "demo-prj",
+            "model_or_deployment": "gpt-4o-mini",
+        },
+    )
+    got = (await client.get("/admin/config/ai-foundry", headers=AUTH)).json()
+    assert got["masked_key"] == ""
+
+
+async def test_clear_api_key_wins_over_api_key(client, _restore_settings):
+    # clear=True beats a simultaneously-supplied key (belt-and-braces; the UI never sends both).
+    await _seed(client)
+    body = (
+        await client.put(
+            "/admin/config/ai-foundry",
+            headers=AUTH,
+            json={
+                "endpoint": "https://demo.services.ai.azure.com",
+                "api_key": "new-key-5678",
+                "clear_api_key": True,
+                "default_project": "demo-prj",
+                "model_or_deployment": "gpt-4o-mini",
+            },
+        )
+    ).json()
+    assert body["masked_key"] == ""

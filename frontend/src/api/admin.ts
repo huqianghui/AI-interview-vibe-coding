@@ -150,6 +150,7 @@ export interface AiFoundryConfig {
 export interface AiFoundryConfigInput {
   endpoint: string;
   api_key: string; // empty preserves the existing stored key
+  clear_api_key?: boolean; // true deletes the stored key (Entra ID / Managed Identity auth only)
   default_project: string;
   model_or_deployment: string;
   knowledge_base: string;

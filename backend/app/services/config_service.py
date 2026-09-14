@@ -120,12 +120,14 @@ async def upsert_master_config(
     updated_by: str,
     knowledge_base: str = "",
     knowledge_source: str = "",
+    clear_api_key: bool = False,
 ) -> ServiceConfig:
     """Create or update the master AI Foundry row.
 
     A non-empty ``api_key`` is encrypted and stored; an empty ``api_key`` PRESERVES the existing
-    encrypted key (so re-saving other fields from the masked UI never wipes the secret). Saving
-    always marks the row active.
+    encrypted key (so re-saving other fields from the masked UI never wipes the secret).
+    ``clear_api_key=True`` deletes the stored key instead (Entra ID / Managed Identity auth only)
+    and wins over ``api_key``. Saving always marks the row active.
     """
     # Validate the endpoint BEFORE any mutation — a swapped endpoint + preserved key is the
     # key-exfil path (P1). Raises InvalidEndpointError (→ 422 at the API) on a non-Azure host.
@@ -147,7 +149,9 @@ async def upsert_master_config(
     master.knowledge_source = knowledge_source
     master.is_active = True
     master.updated_by = updated_by
-    if api_key:
+    if clear_api_key:
+        master.api_key_encrypted = ""
+    elif api_key:
         master.api_key_encrypted = encrypt_value(api_key)
 
     await db.flush()

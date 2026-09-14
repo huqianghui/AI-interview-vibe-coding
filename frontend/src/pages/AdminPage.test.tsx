@@ -179,6 +179,46 @@ describe("AdminPage", () => {
     await waitFor(() => expect(screen.getByTestId("cfg-status")).toHaveTextContent(/saved/i));
   });
 
+  it("shows the effective auth mode and clears the saved key on demand", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    vi.spyOn(admin, "listBanks").mockResolvedValue([]);
+    const savedCfg = {
+      ...EMPTY_CFG,
+      endpoint: "https://demo.services.ai.azure.com",
+      masked_key: "****1234",
+      is_active: true,
+    };
+    // First load: key saved; after the clear, the refresh returns a keyless config.
+    const getCfg = vi
+      .spyOn(admin, "getAiFoundryConfig")
+      .mockResolvedValueOnce(savedCfg)
+      .mockResolvedValue({ ...savedCfg, masked_key: "" });
+    const update = vi.spyOn(admin, "updateAiFoundryConfig").mockResolvedValue(savedCfg);
+
+    renderPage();
+    await signIn(user);
+    await user.click(await screen.findByTestId("admin-tab-connection"));
+
+    // With a saved key, the auth-mode line names it as the fallback and offers the clear action.
+    await waitFor(() =>
+      expect(screen.getByTestId("cfg-auth-mode")).toHaveTextContent(/API key saved \(\*\*\*\*1234\)/),
+    );
+    await user.click(screen.getByTestId("cfg-clear-key"));
+
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({ clear_api_key: true, api_key: "" }),
+    );
+    expect(getCfg.mock.calls.length).toBeGreaterThan(1); // refreshed after the clear
+    // Keyless state: the auth-mode line flips to Entra ID / Managed Identity, no clear button.
+    await waitFor(() =>
+      expect(screen.getByTestId("cfg-auth-mode")).toHaveTextContent(/Entra ID \/ Managed Identity/),
+    );
+    expect(screen.queryByTestId("cfg-clear-key")).not.toBeInTheDocument();
+    expect(screen.getByTestId("cfg-status")).toHaveTextContent(/cleared/i);
+  });
+
   it("edits and saves a question's checklist (rubric), round-tripping the normalized result", async () => {
     const user = userEvent.setup();
     mockAdminLogin();
