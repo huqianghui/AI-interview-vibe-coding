@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.37.4.5 (2026-09-14)
+
+### Fixed
+- **External-mode reader contract now bans acknowledgment openers ("Understood." etc.) — issue 6.**
+  The digital human's transcript showed lines like "Understood. How do you typically handle…" as
+  if the external interview system had said them — but the "Understood." prefix was the MOUTH
+  model's own conversational filler (verified: the stored external `speech_text` turns carry no
+  such prefix, the codebase contains no "Understood" string, and one leaked bubble — "Understood!
+  Please proceed with the next piece of text for me to read." — contained no external text at
+  all). `default_external_reader_prompt` now explicitly requires the reply to begin with the
+  FIRST word of the provided text and names banned openers ("Understood", "Got it", "OK", "Sure",
+  "Thanks", "好的", "明白", "收到", "…or anything similar in any language"). Prompt-level
+  mitigation: an LLM contract is not a hard guarantee, but the named-opener + first-word framing
+  targets exactly the observed leak. Applies wherever the persona's `external_reader_prompt` is
+  unset/blank (the seeded default persona); a custom stored prompt is untouched by design.
+
 ## 0.37.4.4 (2026-09-14)
 
 ### Fixed

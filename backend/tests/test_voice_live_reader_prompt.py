@@ -43,3 +43,8 @@ def test_default_reader_prompt_names_the_persona_and_states_the_contract():
     assert "stop and wait" in lowered  # read once, then wait for the next injected text
     assert "do not decide the questions" in lowered  # the external system is the brain
     assert "never translate" in lowered  # read in the language it's written in
+    # Issue 6: the mouth model prepended acknowledgments ("Understood. <question>") that the
+    # transcript then showed as if the external system had said them. The contract must forbid
+    # acknowledgment openers and demand the reply start at the provided text's first word.
+    assert "first word" in lowered
+    assert '"understood"' in lowered  # named as a banned opener (with 好的/明白/收到 for zh)
