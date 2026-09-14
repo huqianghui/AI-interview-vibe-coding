@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.37.4.3 (2026-09-14)
+
+### Added
+- **The interviewer's figure now appears instantly: cached portrait stands in while the live
+  stream connects (issue 5).** The remaining seconds of avatar startup are network/service RTT
+  (external gateway + Azure session + first 1080p frame) that the client cannot remove — so the
+  wait moves to the perception layer instead: ~2s after the live avatar connects, a frame is
+  captured from the video element (MediaStream frames never taint the canvas), downscaled to
+  480px JPEG, and stored in localStorage; on every later visit the person shows IMMEDIATELY
+  (slightly dimmed, with the existing "connecting" hint pill) and the live video fades in over
+  the portrait — no orb flash in between. First-ever visit (or cleared storage / non-image slot
+  value, which is rejected) falls back to the orb exactly as before. Single-slot cache by design
+  (this deployment runs one default persona); a persona change self-corrects on the next session.
+- **`docs/avatar-latency-ice-gathering.md`** — client-facing write-up of the digital-human
+  latency investigation: when the 8s ICE-gathering stall bites (VPN/mDNS multi-interface
+  networks), how the relay-candidate fast path fixes it, the full measured before/after stage
+  breakdown (16.0s → 11.2s worst-case; ~0 perceived with orientation prewarm + the portrait
+  above), and the lessons for avoiding the pattern (never block on gathering "complete";
+  timestamp every wait; measure before optimizing; alert when a safety timeout is consistently
+  maxed out).
+
 ## 0.37.4.2 (2026-09-14)
 
 ### Fixed

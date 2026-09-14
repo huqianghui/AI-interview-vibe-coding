@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import "../i18n";
-import { AvatarView } from "./AvatarView";
+import { AVATAR_PORTRAIT_STORAGE_KEY, AvatarView } from "./AvatarView";
 
 function renderView(isAvatarConnected: boolean) {
   const ref = createRef<HTMLVideoElement>();
@@ -43,5 +43,47 @@ describe("AvatarView", () => {
   it("exposes the video element via ref for the voice hook to attach a stream", () => {
     const ref = renderView(true);
     expect(ref.current).toBeInstanceOf(HTMLVideoElement);
+  });
+
+  it("shows the cached portrait (not the orb) while connecting, once a portrait exists", () => {
+    // Issue 5: the interviewer's FIGURE should appear instantly on every visit after the first —
+    // a frame captured from the previous live session stands in while the stream connects.
+    localStorage.setItem(
+      AVATAR_PORTRAIT_STORAGE_KEY,
+      "data:image/jpeg;base64,aGVsbG8=",
+    );
+    try {
+      renderView(false);
+      expect(screen.getByTestId("avatar-portrait")).toBeInTheDocument();
+      expect(screen.getByTestId("avatar-connecting-hint")).toBeInTheDocument();
+      expect(screen.queryByTestId("audio-orb")).not.toBeInTheDocument();
+    } finally {
+      localStorage.removeItem(AVATAR_PORTRAIT_STORAGE_KEY);
+    }
+  });
+
+  it("hides the portrait and its connecting hint once the live video is up", () => {
+    localStorage.setItem(
+      AVATAR_PORTRAIT_STORAGE_KEY,
+      "data:image/jpeg;base64,aGVsbG8=",
+    );
+    try {
+      renderView(true);
+      expect(screen.queryByTestId("avatar-portrait")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("avatar-connecting-hint")).not.toBeInTheDocument();
+    } finally {
+      localStorage.removeItem(AVATAR_PORTRAIT_STORAGE_KEY);
+    }
+  });
+
+  it("ignores a non-image value in the portrait slot (falls back to the orb)", () => {
+    localStorage.setItem(AVATAR_PORTRAIT_STORAGE_KEY, "javascript:alert(1)");
+    try {
+      renderView(false);
+      expect(screen.queryByTestId("avatar-portrait")).not.toBeInTheDocument();
+      expect(screen.getByTestId("audio-orb")).toBeInTheDocument();
+    } finally {
+      localStorage.removeItem(AVATAR_PORTRAIT_STORAGE_KEY);
+    }
   });
 });
