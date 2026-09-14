@@ -140,7 +140,10 @@ async def test_overlay_makes_db_win_over_default(db_session, _restore_settings):
 
     # The singleton now carries the DB values (overlay won over the code default gpt-4o).
     assert settings.foundry_agent_model == "gpt-5.4"
-    assert settings.voice_live_default_model == "gpt-5.4"
+    # …EXCEPT the Voice Live model: model_or_deployment is the agent's CHAT deployment, and
+    # overlaying it onto the voice model broke model-mode voice sessions ("Model X is not
+    # supported in this region", issue 4). The voice model stays env/code-configured.
+    assert settings.voice_live_default_model == "gpt-4o"
     assert settings.foundry_project_endpoint == "https://demo.services.ai.azure.com"
     assert settings.default_agent_sync_provider == "azure"
     # LLM path flipped → real Foundry scoring adapter registered (Phase 5).

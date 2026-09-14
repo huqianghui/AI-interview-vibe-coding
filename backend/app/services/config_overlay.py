@@ -48,13 +48,15 @@ async def apply_master_config_to_settings(db: AsyncSession) -> bool:
     settings.foundry_api_key = api_key
     settings.foundry_agent_model = master.model_or_deployment or settings.foundry_agent_model
 
-    # Voice Live path (voice_broker reads these at request time).
+    # Voice Live path (voice_broker reads these at request time). NOTE: deliberately does NOT
+    # overlay voice_live_default_model — ``model_or_deployment`` is the agent's CHAT deployment
+    # (e.g. gpt-5.4-mini), while Voice Live MODEL mode takes a native voice-capable model name
+    # (gpt-4o family / realtime); overlaying the chat model broke every model-mode voice session
+    # with "Model X is not supported in this region" the moment an admin saved a config (issue 4).
+    # The voice model stays env-configured: VOICE_LIVE_DEFAULT_MODEL > code default.
     settings.azure_foundry_endpoint = master.endpoint
     settings.azure_foundry_api_key = api_key
     settings.azure_foundry_default_project = master.default_project
-    settings.voice_live_default_model = (
-        master.model_or_deployment or settings.voice_live_default_model
-    )
 
     # SOP retrieval path (Foundry IQ). kb -> the URL path segment; ks -> the retrieve-body name.
     # Registry guards on endpoint/index/knowledge_source, so only overlay when kb+ks are set.

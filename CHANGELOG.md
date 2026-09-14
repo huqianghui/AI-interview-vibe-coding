@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.37.4.1 (2026-09-14)
+
+### Fixed
+- **Saving an admin config no longer breaks model-mode voice sessions (voice fell back to text).**
+  `config_overlay` overlaid the master row's `model_or_deployment` — the agent's **chat**
+  deployment (e.g. `gpt-5.4-mini`) — onto `voice_live_default_model`, but Voice Live MODEL mode
+  takes a native voice-capable model name (gpt-4o family / realtime). The moment an admin saved a
+  config with a model picked, every model-mode voice connect (external-brain personas, and the
+  new v0.37.4.0 voice-by-default flow) failed with *"Model gpt-5.4-mini is not supported in this
+  region"* and the interview silently degraded to the text channel. The overlay no longer touches
+  the voice model; it stays env-configured (`VOICE_LIVE_DEFAULT_MODEL` > code default `gpt-4o`).
+  Live-verified: with `gpt-5.4-mini` saved as the agent model, the voice session brokers `gpt-4o`,
+  the interview auto-enters the voice channel, and the 1080p digital human streams.
+
 ## 0.37.4.0 (2026-09-14)
 
 ### Added
