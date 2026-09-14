@@ -60,6 +60,9 @@ class FakePC {
     this.iceGatheringState = "complete";
     this.onicecandidate?.({ candidate: null });
   }
+  emitCandidate(sdpFragment: string) {
+    this.onicecandidate?.({ candidate: { candidate: sdpFragment } as RTCIceCandidate });
+  }
 }
 
 function makeVideoRef() {
@@ -104,6 +107,47 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+});
+
+describe("useAvatarStream ICE gathering gate", () => {
+  it("sends the offer shortly after the first relay candidate instead of waiting out the 8s cap", async () => {
+    // Networks with VPN/mDNS interfaces often never signal gathering "complete" — the old gate
+    // then stalled EVERY avatar connect for the full 8s safety timeout (issue 5, measured live).
+    // Azure's avatar path runs over its TURN relay, so one relay candidate is enough to proceed.
+    const videoRef = makeVideoRef();
+    const sendOffer = vi.fn();
+    const { result } = renderHook(() => useAvatarStream(videoRef));
+
+    await act(async () => {
+      void result.current.connect([{ urls: "turn:relay.example.com" }], sendOffer);
+    });
+    await flush(); // createOffer + setLocalDescription resolve
+
+    // A host candidate alone must NOT open the fast path (it can't reach Azure's TURN relay).
+    await act(async () => {
+      FakePC.instances[0].emitCandidate(
+        "candidate:1 1 udp 2122260223 192.168.1.2 50000 typ host generation 0",
+      );
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    expect(sendOffer).not.toHaveBeenCalled();
+
+    // First relay candidate → 300ms settle window → offer goes out, no gathering-complete needed.
+    await act(async () => {
+      FakePC.instances[0].emitCandidate(
+        "candidate:2 1 udp 41885439 20.1.2.3 3478 typ relay raddr 0.0.0.0 rport 0 generation 0",
+      );
+      await vi.advanceTimersByTimeAsync(350);
+    });
+    expect(sendOffer).toHaveBeenCalledTimes(1);
+
+    // Late gathering-complete must not send a second offer.
+    await act(async () => {
+      FakePC.instances[0].completeGathering();
+      await Promise.resolve();
+    });
+    expect(sendOffer).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("useAvatarStream self-heal", () => {

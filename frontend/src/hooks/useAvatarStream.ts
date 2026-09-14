@@ -33,6 +33,11 @@ import type { RefObject } from "react";
 
 /** All candidates gathered within this window before falling back to sending whatever we have. */
 const ICE_GATHERING_TIMEOUT_MS = 8000;
+/** Settle window after the first usable (relay/srflx) candidate: give gathering a beat to add a
+ * couple more candidates to the SDP, then send the offer — instead of stalling to the 8s cap on
+ * networks that never signal gathering "complete" (VPN/mDNS interfaces). Azure's avatar path runs
+ * over its TURN relay, so one relay candidate is enough to connect. */
+const ICE_SETTLE_AFTER_CANDIDATE_MS = 300;
 /** Azure's SDP answer (`session.avatar.connecting`) must arrive within this window. */
 const SERVER_SDP_TIMEOUT_MS = 15000;
 /** An ICE `disconnected` often self-heals (brief network blip). Wait this long before treating it
@@ -225,17 +230,31 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
       pc.addTransceiver("audio", { direction: "recvonly" });
       console.info("[avatar-stream] transceivers added; calling createOffer()");
 
-      // ICE-complete gate: resolve on whichever fires first — the null-candidate signal, the
-      // gathering-state transition, or an 8s safety timeout (some networks never signal complete).
+      // ICE gate: resolve on whichever fires first — the null-candidate signal, the
+      // gathering-state transition, a short settle window after the first USABLE candidate, or an
+      // 8s safety timeout. The settle window is the fast path that matters in practice: Azure's
+      // avatar ICE server is a TURN relay, so the handshake can proceed as soon as one relay (or
+      // srflx) candidate is in the SDP — networks with VPN/mDNS interfaces often NEVER signal
+      // gathering "complete", which used to stall every connect for the full 8s cap (measured
+      // live: the avatar's time-to-first-frame dropped ~7.5s with this gate).
       const offerReadyPromise = new Promise<string>((resolve) => {
         let sent = false;
+        let settleTimer: ReturnType<typeof setTimeout> | null = null;
         const sendOnce = () => {
           if (sent || !pc.localDescription) return;
           sent = true;
+          if (settleTimer) clearTimeout(settleTimer);
+          // localDescription.sdp is re-read here, so it carries every candidate gathered so far.
           resolve(btoa(JSON.stringify({ type: "offer", sdp: pc.localDescription.sdp })));
         };
         pc.onicecandidate = (e) => {
-          if (!e.candidate) sendOnce();
+          if (!e.candidate) {
+            sendOnce();
+            return;
+          }
+          if (!settleTimer && / typ (relay|srflx)(\s|$)/.test(e.candidate.candidate ?? "")) {
+            settleTimer = setTimeout(sendOnce, ICE_SETTLE_AFTER_CANDIDATE_MS);
+          }
         };
         pc.onicegatheringstatechange = () => {
           if (pc.iceGatheringState === "complete") sendOnce();
