@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.37.3.1 (2026-09-14)
+
+### Fixed
+- **Admin "Test connection" now works keyless (Entra ID / Managed Identity) and probes the right
+  API.** The probe previously required a saved API key and always hit the legacy
+  `/openai/deployments` path — which returns 404 on `services.ai.azure.com` Foundry resources
+  regardless of auth, so a correctly-configured key-disabled resource showed "Endpoint returned
+  404." It now mirrors the runtime auth strategy (Entra bearer first, saved key as fallback),
+  probes the Foundry project deployments API when a project is set, resolves the connection the
+  same way runtime does (DB row, `.env` field-by-field fallback), and reports which auth
+  succeeded ("Connection succeeded (Entra ID).") or why each attempt failed — a 404 with a
+  project set now hints "check the project name" instead of reading like a broken endpoint.
+- **Admin UI says the API key is optional.** The Foundry connection card and the key input's
+  placeholder now state that a blank key means Entra ID / Managed Identity auth (required for
+  key-disabled resources) and a saved key is only a fallback, instead of implying a key is
+  expected.
+
 ## 0.37.3.0 (2026-09-11)
 
 ### Added

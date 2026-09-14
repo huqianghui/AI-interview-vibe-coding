@@ -411,3 +411,67 @@ async def test_knowledge_bases_env_fallback_without_db_row(client, _restore_sett
 async def test_dropdowns_require_admin(client):
     assert (await client.get("/admin/config/ai-foundry/model-deployments")).status_code == 401
     assert (await client.get("/admin/config/ai-foundry/knowledge-bases")).status_code == 401
+
+
+# --- Test-connection endpoint (Entra-first, key fallback — mocked httpx, no live Azure) --------
+
+
+async def test_connection_entra_no_key(client, _restore_settings, monkeypatch):
+    # Key-disabled resource: no API key saved, Entra bearer available → probe passes via Entra.
+    await client.put(
+        "/admin/config/ai-foundry",
+        headers=AUTH,
+        json={
+            "endpoint": "https://demo.services.ai.azure.com",
+            "api_key": "",
+            "default_project": "demo-prj",
+            "model_or_deployment": "gpt-4o-mini",
+        },
+    )
+    _mock_bearer(monkeypatch, "entra-token")
+    _FakeAsyncClient._responses = [_FakeResp(200, {"value": []})]
+    monkeypatch.setattr("app.api.admin_config.httpx.AsyncClient", _FakeAsyncClient)
+    body = (await client.post("/admin/config/ai-foundry/test", headers=AUTH)).json()
+    assert body["success"] is True
+    assert "Entra ID" in body["message"]
+
+
+async def test_connection_key_fallback_when_no_entra(client, _restore_settings, monkeypatch):
+    # No Entra available, saved key works → probe passes via the API key.
+    await _seed(client)
+    _mock_bearer(monkeypatch, None)
+    _FakeAsyncClient._responses = [_FakeResp(200, {"value": []})]
+    monkeypatch.setattr("app.api.admin_config.httpx.AsyncClient", _FakeAsyncClient)
+    body = (await client.post("/admin/config/ai-foundry/test", headers=AUTH)).json()
+    assert body["success"] is True
+    assert "API key" in body["message"]
+
+
+async def test_connection_404_hints_project_name(client, _restore_settings, monkeypatch):
+    # A wrong project name 404s on the project deployments API — the message should say so
+    # instead of the bare "Endpoint returned 404" that used to read like a broken endpoint.
+    await _seed(client)
+    _mock_bearer(monkeypatch, "entra-token")
+    _FakeAsyncClient._responses = [_FakeResp(404, {}), _FakeResp(404, {})]
+    monkeypatch.setattr("app.api.admin_config.httpx.AsyncClient", _FakeAsyncClient)
+    body = (await client.post("/admin/config/ai-foundry/test", headers=AUTH)).json()
+    assert body["success"] is False
+    assert "check the project name" in body["message"]
+
+
+async def test_connection_no_credential_message(client, _restore_settings, monkeypatch):
+    # Endpoint configured but neither Entra nor a key is available → explicit no-credential fail.
+    await client.put(
+        "/admin/config/ai-foundry",
+        headers=AUTH,
+        json={
+            "endpoint": "https://demo.services.ai.azure.com",
+            "api_key": "",
+            "default_project": "demo-prj",
+            "model_or_deployment": "gpt-4o-mini",
+        },
+    )
+    _mock_bearer(monkeypatch, None)
+    body = (await client.post("/admin/config/ai-foundry/test", headers=AUTH)).json()
+    assert body["success"] is False
+    assert "Entra ID unavailable" in body["message"]
