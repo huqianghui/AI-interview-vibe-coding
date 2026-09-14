@@ -123,26 +123,57 @@ async def update_ai_foundry_config(
 
 @router.post("/ai-foundry/test", response_model=ConnectionTestResult)
 async def test_ai_foundry_config(db: AsyncSession = Depends(get_db)) -> ConnectionTestResult:
-    """Lightweight connectivity probe against the saved endpoint/key.
+    """Lightweight connectivity probe against the effective Foundry connection (DB row, .env fill).
 
-    Lists deployments on the Azure OpenAI endpoint — enough to prove the endpoint + key are valid
-    without needing a specific model. Never raises: returns a structured pass/fail either way.
+    Auth mirrors the runtime strategy (``azure_auth``): Entra bearer first (az login / Managed
+    Identity), saved API key as fallback — so a blank key passes on key-disabled resources. Probes
+    the project deployments API when a project is set (the legacy ``/openai/deployments`` path
+    404s on ``services.ai.azure.com`` resources regardless of auth), else the legacy path. Never
+    raises: returns a structured pass/fail either way, naming the auth that succeeded.
     """
-    master = await config_service.get_master_config(db)
-    if master is None or not master.endpoint:
-        return ConnectionTestResult(success=False, message="AI Foundry not configured.")
-    api_key = await config_service.get_decrypted_key(db)
-    if not api_key:
-        return ConnectionTestResult(success=False, message="No API key saved.")
+    # Imported lazily like the other azure_auth users to keep module import light for tests.
+    from app.services.azure_auth import FOUNDRY_SCOPE, get_bearer_token
 
-    base = master.endpoint.rstrip("/")
-    url = f"{base}/openai/deployments?api-version=2024-10-21"
+    endpoint, project, api_key, _model = await config_service.resolve_foundry_connection(db)
+    if not endpoint:
+        return ConnectionTestResult(success=False, message="AI Foundry not configured.")
+
+    bearer = await get_bearer_token(FOUNDRY_SCOPE)
+    if not bearer and not api_key:
+        return ConnectionTestResult(
+            success=False,
+            message=(
+                "No credential: Entra ID unavailable (az login / Managed Identity) "
+                "and no API key saved."
+            ),
+        )
+
+    base = endpoint.rstrip("/")
+    if project:
+        url = f"{base}/api/projects/{project}/deployments?api-version=v1"
+    else:
+        url = f"{base}/openai/deployments?api-version=2024-10-21"
+
+    attempts = [
+        a
+        for a in (
+            ("Entra ID", {"Authorization": f"Bearer {bearer}"}) if bearer else None,
+            ("API key", {"api-key": api_key}) if api_key else None,
+        )
+        if a
+    ]
+    failures: list[str] = []
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(url, headers={"api-key": api_key})
-        if resp.status_code == 200:
-            return ConnectionTestResult(success=True, message="Connection succeeded.")
-        return ConnectionTestResult(success=False, message=f"Endpoint returned {resp.status_code}.")
+            for auth_label, headers in attempts:
+                resp = await client.get(url, headers=headers)
+                if resp.status_code == 200:
+                    return ConnectionTestResult(
+                        success=True, message=f"Connection succeeded ({auth_label})."
+                    )
+                hint = " — check the project name" if resp.status_code == 404 and project else ""
+                failures.append(f"{auth_label}: {resp.status_code}{hint}")
+        return ConnectionTestResult(success=False, message=f"Failed — {'; '.join(failures)}.")
     except httpx.HTTPError as exc:
         return ConnectionTestResult(success=False, message=f"Connection failed: {exc}")
 

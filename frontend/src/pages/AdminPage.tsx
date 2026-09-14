@@ -708,8 +708,10 @@ export function AdminPage() {
         <Card className={styles.card}>
           <CardHeader header={<Title3>Azure AI Foundry connection</Title3>} />
           <Body1>
-            Saved here and used at runtime — overrides <code>.env</code>. The API key is write-only;
-            leave it blank to keep the existing key.
+            Saved here and used at runtime — overrides <code>.env</code>. The API key is optional:
+            leave it blank to authenticate with Entra ID / Managed Identity (required for
+            key-disabled resources); a saved key is used as fallback. The key is write-only; blank
+            keeps the existing key.
           </Body1>
           <div className={styles.fieldGrid}>
             <Input
@@ -727,7 +729,11 @@ export function AdminPage() {
             <Input
               type="password"
               value={cfgKey}
-              placeholder={cfg?.masked_key ? `API key (saved: ${cfg.masked_key})` : "API key"}
+              placeholder={
+                cfg?.masked_key
+                  ? `API key (saved: ${cfg.masked_key})`
+                  : "API key — optional (blank = Entra ID / Managed Identity)"
+              }
               onChange={(_, d) => setCfgKey(d.value)}
               data-testid="cfg-key"
             />
