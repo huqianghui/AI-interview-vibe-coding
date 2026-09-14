@@ -34,6 +34,9 @@ class AiFoundryConfigIn(BaseModel):
     endpoint: str = Field(default="", max_length=500)
     # Write-only. Empty preserves the existing stored key (so saving from the masked UI is safe).
     api_key: str = ""
+    # True deletes the stored key — the connection then authenticates with Entra ID / Managed
+    # Identity only. Wins over api_key.
+    clear_api_key: bool = False
     default_project: str = Field(default="", max_length=200)
     model_or_deployment: str = Field(default="", max_length=100)
     knowledge_base: str = Field(default="", max_length=200)
@@ -100,6 +103,7 @@ async def update_ai_foundry_config(
             db,
             endpoint=body.endpoint,
             api_key=body.api_key,
+            clear_api_key=body.clear_api_key,
             default_project=body.default_project,
             model_or_deployment=body.model_or_deployment,
             knowledge_base=body.knowledge_base,

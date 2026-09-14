@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.37.3.2 (2026-09-14)
+
+### Added
+- **Admin Foundry card shows the effective auth mode and can clear a saved API key.** A stale
+  saved key kept showing as "API key (saved: ****xxxx)" forever with no way to remove it, and
+  nothing in the UI said keyless Entra ID / Managed Identity auth was actually in effect. The key
+  input now has an auth-mode line underneath: keyless → "No API key saved — authenticating with
+  Entra ID / Managed Identity."; key saved → "API key saved (****xxxx) — used as fallback; Entra
+  ID / Managed Identity is tried first." plus a **Clear key** button. Clearing sends the new
+  `clear_api_key: true` on the config PUT, which deletes the stored key (blank `api_key` still
+  preserves it, so re-saving other fields from the masked UI stays safe; `clear_api_key` wins if
+  both are sent).
+
 ## 0.37.3.1 (2026-09-14)
 
 ### Fixed

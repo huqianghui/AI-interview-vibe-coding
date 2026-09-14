@@ -737,6 +737,46 @@ export function AdminPage() {
               onChange={(_, d) => setCfgKey(d.value)}
               data-testid="cfg-key"
             />
+            {/* Auth-mode line: make the effective credential visible — a saved key is easy to
+                forget and reads like a requirement; keyless is the normal state on key-disabled
+                resources. Clearing is a deliberate separate action (blank on Save = keep key). */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              {cfg?.masked_key ? (
+                <>
+                  <Text data-testid="cfg-auth-mode">
+                    API key saved ({cfg.masked_key}) — used as fallback; Entra ID / Managed
+                    Identity is tried first.
+                  </Text>
+                  <Button
+                    size="small"
+                    data-testid="cfg-clear-key"
+                    onClick={() =>
+                      guard(async () => {
+                        setCfgStatus(null);
+                        await admin.updateAiFoundryConfig({
+                          endpoint: cfgEndpoint.trim(),
+                          api_key: "",
+                          clear_api_key: true,
+                          default_project: cfgProject.trim(),
+                          model_or_deployment: cfgModel.trim(),
+                          knowledge_base: cfgKb.trim(),
+                          knowledge_source: cfgKs.trim(),
+                        });
+                        setCfgKey("");
+                        setCfgStatus("API key cleared — using Entra ID / Managed Identity.");
+                        await refreshConfig();
+                      })
+                    }
+                  >
+                    Clear key
+                  </Button>
+                </>
+              ) : (
+                <Text data-testid="cfg-auth-mode">
+                  No API key saved — authenticating with Entra ID / Managed Identity.
+                </Text>
+              )}
+            </div>
             <Button data-testid="cfg-load-options" onClick={loadOptions}>
               Load models & knowledge bases
             </Button>
