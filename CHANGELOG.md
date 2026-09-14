@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.37.4.0 (2026-09-14)
+
+### Added
+- **The interview's default channel now follows the interviewer persona's configuration.** The
+  page always opened in the text channel; a fully voice-configured digital-human persona still
+  required the candidate to find the voice pill. `/start` and the GET-resume route now return
+  `voice_default: true` when the enabled default persona carries an operator-configured voice
+  (any non-blank `voice_map` entry — `resolve_voice`'s built-in fallback deliberately does NOT
+  count), and the page then auto-enters the voice + digital-human channel. The connection is
+  **prewarmed at the orientation screen**: the seconds the candidate spends reading orientation
+  copy absorb the WebRTC + avatar handshake, so the digital human is live the moment they click
+  "I'm ready" — with the speak-question effect now phase-gated (nothing is read over the
+  orientation screen; this also applies to a manual orientation-time voice click) and the mic
+  auto-muted until the live phase (orientation-screen speech must not feed server-VAD or the
+  pre-click transcript buffer that drains into the first answer). One attempt per interview: a
+  failed connect or a manual switch back to text is never re-forced, and every existing
+  degradation path (mic denied → dialog, connect failure → text) is unchanged. A persona without
+  a configured voice — or no default persona — keeps text as the default.
+
 ## 0.37.3.2 (2026-09-14)
 
 ### Added

@@ -514,6 +514,44 @@ export function InterviewPage() {
     }
   }, [voice, i18n.language, micDialogOpen]);
 
+  // Issue 3: when the interviewer persona is voice-configured (backend `voice_default`), the
+  // interview OPENS in the voice + digital-human channel — the candidate shouldn't have to find
+  // the pill. Connecting starts at ORIENTATION as a prewarm: the seconds spent reading the
+  // orientation copy absorb the WebRTC + avatar handshake, so the digital human is live the
+  // moment the candidate clicks "I'm ready" (the speak-question effect is phase-gated below, so
+  // nothing is read over the orientation screen; the resume path enters at "interviewing"
+  // directly and connects there). One attempt per interview (keyed on the session id): a failed
+  // connect or a manual switch back to text must not re-force voice, and startVoice's own
+  // fallbacks still degrade to text exactly as before.
+  const autoVoiceForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      (phase === "orientation" || phase === "interviewing") &&
+      interview?.voice_default &&
+      interview.status === "in_progress" &&
+      autoVoiceForRef.current !== interview.interview_session_id
+    ) {
+      autoVoiceForRef.current = interview.interview_session_id;
+      void startVoice();
+    }
+  }, [phase, interview, startVoice]);
+
+  // Keep the mic muted while a prewarmed voice session sits on the orientation screen: candidate
+  // speech there would feed server-VAD (agent auto-responses + the pre-click transcript buffer
+  // that drains into the FIRST answer commit). Unmuted on entering the live phase. Guarded to the
+  // orientation↔interviewing transition so it never clobbers a manual Mute mid-interview.
+  const prevPhaseRef = useRef<typeof phase>(phase);
+  useEffect(() => {
+    const prev = prevPhaseRef.current;
+    prevPhaseRef.current = phase;
+    if (channel !== "voice" || voice.connectionState !== "connected") return;
+    if (phase === "orientation") {
+      voice.setMuted(true);
+    } else if (prev === "orientation" && phase === "interviewing") {
+      voice.setMuted(false);
+    }
+  }, [phase, channel, voice]);
+
   // Resume an in-progress interview on mount (edge b): a reload lands back on the pending question
   // instead of stranding it behind a fresh /start. No saved/live interview → stay on the idle
   // screen. Runs once.
@@ -582,6 +620,7 @@ export function InterviewPage() {
   const suppressVerbatimRead = !isExternal && currentIsFollowUp;
   useEffect(() => {
     if (
+      phase === "interviewing" && // a prewarmed session must not read Q1 over the orientation screen
       channel === "voice" &&
       voice.connectionState === "connected" &&
       speakText &&
@@ -592,7 +631,7 @@ export function InterviewPage() {
         spokenQuestionId.current = speakText;
       }
     }
-  }, [channel, voice, speakText, suppressVerbatimRead]);
+  }, [phase, channel, voice, speakText, suppressVerbatimRead]);
 
   // External awaiting/recovery: pause the mic while the turn isn't open, unpause when it reopens.
   // Transition-only (see the hook) so an unrelated re-render never clobbers a manual Mute — issue2.

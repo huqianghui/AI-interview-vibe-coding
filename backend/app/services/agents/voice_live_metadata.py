@@ -57,6 +57,17 @@ def _parse_json_map(raw: str | None) -> dict[str, str]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def has_configured_voice(voice_map_raw: str | None) -> bool:
+    """True when the persona carries at least one explicitly configured (non-blank) voice.
+
+    Distinct from :func:`resolve_voice`, which always falls back to a built-in default voice:
+    this asks whether the OPERATOR configured a voice at all — the signal the interview UI uses
+    to default the candidate to the voice + digital-human channel instead of text (issue 3).
+    """
+    voice_map = _parse_json_map(voice_map_raw)
+    return any(isinstance(v, str) and v.strip() for v in voice_map.values())
+
+
 def resolve_voice(voice_map_raw: str | None, locale: str | None) -> tuple[str, str]:
     """Pick (locale, voice_name) from a persona ``voice_map``.
 

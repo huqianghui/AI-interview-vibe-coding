@@ -31,6 +31,10 @@ export interface Interview {
   // The current external question's speech text (candidate-safe, for the digital human to read).
   // Display text still rides in current_question.prompt. null for bank sessions / no pending Q.
   speech_text?: string | null;
+  // True when the interviewer persona has a configured voice — the page then defaults the
+  // candidate to the voice + digital-human channel instead of text. Present on start/resume
+  // responses; mutation responses leave it false (the page reads it once per interview).
+  voice_default?: boolean;
 }
 
 /** One rubric item's graded result (F4). Present on scored (non-stub) question entries. */
