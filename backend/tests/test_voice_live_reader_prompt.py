@@ -12,7 +12,7 @@ importorskip — both ``build_reader_prompt_item`` and ``default_external_reader
 must stay importable (and tested) without the ``azure`` extra.
 """
 
-from app.models.persona import default_external_reader_prompt
+from app.models.persona import build_read_directive, default_external_reader_prompt
 from app.services.voice_live_proxy import build_reader_prompt_item
 
 
@@ -48,3 +48,23 @@ def test_default_reader_prompt_names_the_persona_and_states_the_contract():
     # acknowledgment openers and demand the reply start at the provided text's first word.
     assert "first word" in lowered
     assert '"understood"' in lowered  # named as a banned opener (with 好的/明白/收到 for zh)
+
+
+def test_read_directive_wraps_the_reader_prompt_with_a_text_placeholder():
+    # EXTERNAL-mode per-turn delivery: the frontend fills `{text}` and sends the result as
+    # response.instructions (the only form gpt-4o reads verbatim as a dumb "mouth" — an assistant
+    # item is acknowledged, a user item is answered). All wording lives in the reader prompt +
+    # this separator; the frontend carries none of its own.
+    directive = build_read_directive("READER CONTRACT")
+    assert directive.startswith("READER CONTRACT")  # the configurable prompt leads, unchanged
+    assert "{text}" in directive  # literal placeholder the frontend replaces per turn
+    assert "verbatim" in directive.lower()  # the separator restates read-only intent
+
+
+def test_read_directive_is_pure_concatenation_not_formatted():
+    # It must NOT be .format()-ed server-side: the reader prompt has literal quotes and the text
+    # arrives with the placeholder still intact, so the frontend can substitute exactly once.
+    prompt = default_external_reader_prompt("Ava")
+    directive = build_read_directive(prompt)
+    assert directive.count("{text}") == 1
+    assert prompt in directive  # the whole configurable contract is preserved verbatim

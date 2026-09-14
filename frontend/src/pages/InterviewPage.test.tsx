@@ -579,4 +579,100 @@ describe("InterviewPage", () => {
       global.WebSocket = realWS;
     }
   });
+
+  it("surfaces the real Azure error verbatim, not the generic notice (owner: 显示错误信息)", async () => {
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "in_progress",
+      current_question: { question_id: "q1", prompt: "Question one?", index: 0, total: 2 },
+    });
+    // A WS that connects, then emits a pre-connect Voice Live `error` frame carrying Azure's real
+    // message (e.g. an invalid_model / region rejection). The hook rejects connect() with that
+    // message verbatim → the page must show IT, not the generic "you can continue by text" note.
+    const AZURE_MSG = "The model gpt-5.4-mini is not supported in this region.";
+    const realWS = global.WebSocket;
+    class ErrorFrameWS {
+      onerror: ((e: unknown) => void) | null = null;
+      onopen: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+      onmessage: ((e: { data: string }) => void) | null = null;
+      readyState = 1;
+      constructor() {
+        setTimeout(() => {
+          this.onmessage?.({
+            data: JSON.stringify({
+              type: "error",
+              error: { code: "invalid_model", message: AZURE_MSG },
+            }),
+          });
+        }, 0);
+      }
+      send() {}
+      close() {}
+    }
+    // jsdom has no Web Audio; connect() calls prepareAudioContext()/initMic() BEFORE the WS, so
+    // without these stubs it would reject with "AudioContext is not defined" and the error-frame
+    // path (the real Azure failure this test guards) would never be reached.
+    class FakeAudioContext {
+      state = "running";
+      destination = {};
+      audioWorklet = { addModule: () => Promise.resolve() };
+      createMediaStreamSource() {
+        return { connect() {} };
+      }
+      resume() {
+        return Promise.resolve();
+      }
+      close() {
+        return Promise.resolve();
+      }
+    }
+    class FakeAudioWorkletNode {
+      port = { postMessage() {}, onmessage: null };
+      connect() {}
+    }
+    const realAudioContext = (global as { AudioContext?: unknown }).AudioContext;
+    const realWorkletNode = (global as { AudioWorkletNode?: unknown }).AudioWorkletNode;
+    // @ts-expect-error test stub
+    global.WebSocket = ErrorFrameWS;
+    // @ts-expect-error test stub
+    global.AudioContext = FakeAudioContext;
+    // @ts-expect-error test stub
+    global.AudioWorkletNode = FakeAudioWorkletNode;
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: vi
+          .fn()
+          .mockResolvedValue({ getTracks: () => [], getAudioTracks: () => [] }),
+      },
+    });
+
+    // The WS auth token defaults to the anon-session token held in localStorage; give it one so
+    // connect() gets past token acquisition to the WS where the error frame arrives.
+    localStorage.setItem("anon_session_token", "test-token");
+
+    try {
+      renderPage();
+      await user.click(screen.getByRole("button", { name: /start interview/i }));
+      await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+      await screen.findByText("Question one?");
+      await user.click(screen.getByRole("button", { name: /answer by voice/i }));
+
+      // The verbatim Azure message is on screen — the diagnostic the owner wants a human to judge,
+      // NOT swallowed behind the generic "you can continue by text" note.
+      await waitFor(() =>
+        expect(screen.getByText(new RegExp(AZURE_MSG))).toBeInTheDocument(),
+      );
+    } finally {
+      global.WebSocket = realWS;
+      // @ts-expect-error restore
+      global.AudioContext = realAudioContext;
+      // @ts-expect-error restore
+      global.AudioWorkletNode = realWorkletNode;
+      localStorage.removeItem("anon_session_token");
+    }
+  });
 });

@@ -199,6 +199,73 @@ describe("useInterviewVoice in-band error events", () => {
     vi.unstubAllGlobals();
   });
 
+  it("does NOT reconnect after a pre-connect fatal error — the verbatim Azure message survives (invalid_model)", async () => {
+    // Regression: a MODEL-mode `invalid_model` rejection (the configured Voice Live model isn't
+    // supported in this region) arrives as a pre-connect `error` frame, THEN Azure closes the WS.
+    // The reject sets the connect promise `resolved`, which onclose read as "was connected" → it
+    // entered the 3-attempt reconnect loop, and the terminal onError("Voice connection failed after
+    // 3 attempts") OVERWROTE the real Azure message the page had already shown. A model rejection is
+    // deterministic, so retrying is futile: onclose must NOT reconnect, and the ONLY onError the page
+    // sees must be the verbatim Azure message.
+    const AZURE_MSG = "The model gpt-5.4-mini is not supported in this region.";
+    FakeWebSocket.last = null;
+    vi.useFakeTimers();
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    const onError = vi.fn();
+    let hook!: ReturnType<typeof useInterviewVoice>;
+    function ErrHarness() {
+      hook = useInterviewVoice("iv-1", {
+        locale: "zh-CN",
+        tokenProvider: () => "tok",
+        onError,
+      });
+      return null;
+    }
+    const { unmount } = render(<ErrHarness />);
+
+    let connectP!: Promise<void>;
+    act(() => {
+      connectP = hook.connect("zh-CN");
+      connectP.catch(() => undefined);
+    });
+    const firstWs = await act(async () => {
+      for (let i = 0; i < 20 && !FakeWebSocket.last; i++)
+        await Promise.resolve();
+      const ws = FakeWebSocket.last!;
+      // Pre-connect error (never reached session.updated) — the real Azure rejection.
+      ws.receive({
+        type: "error",
+        error: { code: "invalid_model", message: AZURE_MSG },
+      });
+      await expect(connectP).rejects.toThrow(AZURE_MSG);
+      // ...then Azure drops the socket, exactly as the proxy relays it (ws.close after the error).
+      ws.close();
+      return ws;
+    });
+
+    // No reconnect: state is a terminal error, not "reconnecting", and even after the longest
+    // backoff window elapses NO new WS is opened.
+    expect(hook.connectionState).toBe("error");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8000);
+    });
+    expect(FakeWebSocket.last).toBe(firstWs); // no second socket ever created
+
+    // The page only ever heard the verbatim Azure message — never the generic reconnect-exhaustion
+    // notice that used to clobber it.
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError.mock.calls[0][0].message).toBe(AZURE_MSG);
+    expect(onError).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining("failed after 3 attempts"),
+      }),
+    );
+
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
   it("does NOT surface a transient error to the page during a background reconnect", async () => {
     // A WS drop triggers the silent reconnect loop. If an attempt's pre-connect error fired
     // onError, the interview page showed "语音不可用" even when the NEXT attempt succeeded —

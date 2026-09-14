@@ -110,6 +110,28 @@ def default_external_reader_prompt(name: str) -> str:
     )
 
 
+# The per-turn text-to-read is appended to the reading contract with this English separator, and the
+# whole thing is sent to Azure as ``response.instructions`` (EXTERNAL/MODEL mode only). Why not a
+# conversation item: gpt-4o treats an ``assistant`` item as already-said (it replies with an
+# acknowledgment — "Understood." — or fabricates a different question) and a ``user`` item as the
+# candidate speaking (it answers the text); only carrying the text inside ``response.instructions``
+# makes the "mouth" read it verbatim (live-verified on gpt-4o). ``{text}`` is a literal placeholder
+# the frontend fills each turn (never .format()-ed here — the reader prompt contains no braces).
+READ_DIRECTIVE_SEPARATOR = "\n\nText to read this turn — say ONLY this, verbatim:\n\n{text}"
+
+
+def build_read_directive(reader_prompt: str) -> str:
+    """The per-turn ``response.instructions`` template for the EXTERNAL-mode "mouth".
+
+    Combines the (admin-configurable) ``reader_prompt`` with :data:`READ_DIRECTIVE_SEPARATOR`, whose
+    ``{text}`` placeholder the frontend replaces with the ``speech_text`` to read. All wording lives
+    here or in ``reader_prompt`` — the frontend carries no read-directive text of its own. Pure
+    string shaping so it's unit-testable in the zero-Azure CI (parallel to
+    :func:`app.services.voice_live_proxy.build_reader_prompt_item`).
+    """
+    return reader_prompt + READ_DIRECTIVE_SEPARATOR
+
+
 class InterviewerPersona(TimestampMixin, Base):
     __tablename__ = "interviewer_personas"
 
