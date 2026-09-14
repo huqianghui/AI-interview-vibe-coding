@@ -27,6 +27,7 @@ from app.models.anonymous_session import AnonymousCandidateSession
 from app.models.interview import InterviewSession
 from app.models.sop import SopDocument
 from app.services import persona_service, question_service, voice_broker
+from app.services.agents.voice_live_metadata import has_configured_voice
 from app.services.storage import get_storage
 from app.services.voice_broker import DEFAULT_LOCALE, VoiceAgentNotSynced, VoiceUnavailable
 
@@ -71,6 +72,11 @@ class InterviewOut(BaseModel):
     # The current external question's speech text (for TTS/voice reading), candidate-safe. The
     # display text rides in ``current_question.prompt``. None for bank sessions / no pending Q.
     speech_text: str | None = None
+    # True when the default interviewer persona has a configured voice — the UI then defaults the
+    # candidate to the voice + digital-human channel instead of text (issue 3). Best-effort intent
+    # only: a failed voice connect still degrades to text exactly as before. Populated on the two
+    # entry points (start / GET-resume); the mutation routes leave it False (the UI reads it once).
+    voice_default: bool = False
 
 
 class AnswerIn(BaseModel):
@@ -162,7 +168,9 @@ class VoiceSessionOut(BaseModel):
     avatar_enabled: bool = False
 
 
-def _to_interview_out(session: InterviewSession, question: dict | None) -> InterviewOut:
+def _to_interview_out(
+    session: InterviewSession, question: dict | None, *, voice_default: bool = False
+) -> InterviewOut:
     is_external = session.brain_mode == "external"
     return InterviewOut(
         interview_session_id=session.id,
@@ -170,7 +178,19 @@ def _to_interview_out(session: InterviewSession, question: dict | None) -> Inter
         current_question=QuestionOut(**question) if question else None,
         external_phase=session.external_phase if is_external else None,
         speech_text=external_runner.speech_text_for(session) if is_external else None,
+        voice_default=voice_default,
     )
+
+
+async def _voice_default(db: AsyncSession) -> bool:
+    """Whether the interview should default to the voice channel (issue 3).
+
+    True iff the enabled default persona has an operator-configured voice. Deliberately NOT
+    "would voice work" (agent sync, Azure reachability…) — those failures already degrade to
+    text at connect time; this only encodes the operator's intent.
+    """
+    persona = await persona_service.get_default_persona(db)
+    return persona is not None and has_configured_voice(persona.voice_map)
 
 
 async def _current_question(db: AsyncSession, session: InterviewSession) -> dict | None:
@@ -264,7 +284,7 @@ async def start(
         else:
             session = await state_machine.start_interview(db, candidate.id)
     question = await _current_question(db, session)
-    return _to_interview_out(session, question)
+    return _to_interview_out(session, question, voice_default=await _voice_default(db))
 
 
 @router.get("/{interview_id}", response_model=InterviewOut)
@@ -281,7 +301,7 @@ async def get_interview(
     """
     session = await _owned_interview(db, interview_id, candidate)
     question = await _current_question(db, session)
-    return _to_interview_out(session, question)
+    return _to_interview_out(session, question, voice_default=await _voice_default(db))
 
 
 @router.post("/{interview_id}/answer", response_model=InterviewOut)

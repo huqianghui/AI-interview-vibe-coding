@@ -243,6 +243,97 @@ describe("InterviewPage", () => {
     expect(screen.getByText("Question one?")).toBeInTheDocument();
   });
 
+  it("opens in the voice channel when the interviewer persona is voice-configured (voice_default)", async () => {
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "in_progress",
+      current_question: { question_id: "q1", prompt: "Question one?", index: 0, total: 2 },
+      voice_default: true,
+    });
+    // Track calls with plain counters (not vi.fn — see the stable-mock note above).
+    let connectCalls = 0;
+    let speakCalls = 0;
+    const mutedCalls: boolean[] = [];
+    const voiceMock = {
+      connect: () => {
+        connectCalls += 1;
+        return Promise.resolve();
+      },
+      disconnect: () => Promise.resolve(),
+      toggleMute: () => undefined,
+      setMuted: (m: boolean) => {
+        mutedCalls.push(m);
+      },
+      commitAnswer: () => Promise.resolve(""),
+      speakQuestion: () => {
+        speakCalls += 1;
+        return true;
+      },
+      isMuted: false,
+      connectionState: "connected" as const,
+      audioState: "listening" as const,
+      isAvatarConnected: false,
+    };
+    const voiceModule = await import("../hooks/useInterviewVoice");
+    vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(voiceMock);
+
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    // Orientation prewarm: the voice session connects while the candidate reads the orientation
+    // copy — but Q1 must NOT be read over that screen, and the mic stays muted there.
+    await waitFor(() => expect(connectCalls).toBeGreaterThan(0));
+    expect(speakCalls).toBe(0);
+    expect(mutedCalls.at(-1)).toBe(true);
+
+    await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+    await screen.findByText("Question one?");
+
+    // Entering the live phase: mic unmutes, the question is spoken, and the voice answer control
+    // renders instead of the text box — all without touching the channel pill.
+    await waitFor(() => expect(speakCalls).toBeGreaterThan(0));
+    expect(mutedCalls.at(-1)).toBe(false);
+    expect(await screen.findByRole("button", { name: /i'm done answering/i })).toBeInTheDocument();
+  });
+
+  it("stays on the text channel when voice_default is absent (no auto-connect)", async () => {
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "in_progress",
+      current_question: { question_id: "q1", prompt: "Question one?", index: 0, total: 2 },
+    });
+    let connectCalls = 0;
+    const voiceMock = {
+      connect: () => {
+        connectCalls += 1;
+        return Promise.resolve();
+      },
+      disconnect: () => Promise.resolve(),
+      toggleMute: () => undefined,
+      setMuted: () => undefined,
+      commitAnswer: () => Promise.resolve(""),
+      speakQuestion: () => true,
+      isMuted: false,
+      connectionState: "disconnected" as const,
+      audioState: "idle" as const,
+      isAvatarConnected: false,
+    };
+    const voiceModule = await import("../hooks/useInterviewVoice");
+    vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(voiceMock);
+
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+    await screen.findByText("Question one?");
+
+    // Text stays the default: the text answer box renders and no voice connect was attempted.
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
+    expect(connectCalls).toBe(0);
+  });
+
   it("submits the awaited transcript, not a stale/empty synchronous read (race regression)", async () => {
     await i18n.changeLanguage("en-US");
     const user = userEvent.setup();

@@ -16,6 +16,7 @@ from app.services.agents.voice_live_metadata import (
     build_voice_live_metadata,
     chunk_metadata_value,
     decode_voice_live_metadata,
+    has_configured_voice,
     resolve_voice,
 )
 
@@ -67,6 +68,21 @@ def test_resolve_voice_survives_malformed_json():
 def test_resolve_voice_survives_empty_voice_map():
     assert resolve_voice("", "en-US") == ("en-US", "en-US-AvaNeural")
     assert resolve_voice(None, None) == ("en-US", "en-US-AvaNeural")
+
+
+def test_has_configured_voice_true_for_any_nonblank_entry():
+    assert has_configured_voice('{"zh-CN": "zh-CN-XiaoxiaoNeural"}') is True
+    assert has_configured_voice('{"zh-CN": "", "en-US": "en-US-AvaNeural"}') is True
+
+
+def test_has_configured_voice_false_for_empty_blank_or_malformed():
+    # Unlike resolve_voice (which always falls back to a built-in default), this reports whether
+    # the operator configured anything at all — so all of these are False, not defaulted.
+    assert has_configured_voice("{}") is False
+    assert has_configured_voice('{"zh-CN": "  "}') is False
+    assert has_configured_voice("not json") is False
+    assert has_configured_voice(None) is False
+    assert has_configured_voice('{"zh-CN": 3}') is False
 
 
 # --- build_session shape (the snake_case guard) ----------------------------

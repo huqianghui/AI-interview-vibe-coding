@@ -619,3 +619,47 @@ async def test_sop_document_404_for_uncited_or_unknown_id(client, db_session):
         f"/candidate/interview/{interview_id}/sop/not-a-cited-doc", headers=headers
     )
     assert resp.status_code == 404
+
+
+# --- voice_default (issue 3: persona-driven default interview channel) ------------------------
+
+
+@pytest.mark.asyncio
+async def test_start_voice_default_true_when_persona_has_voice(client, db_session):
+    from app.services import persona_service as psvc
+
+    await psvc.create_persona(
+        db_session,
+        name="Interviewer",
+        character="lisa",
+        voice_map='{"en-US": "en-US-AvaNeural"}',
+        is_default=True,
+    )
+    headers = await _new_candidate_headers(client)
+    body = (await client.post("/candidate/interview/start", headers=headers)).json()
+    assert body["voice_default"] is True
+
+    # The GET (resume) entry point carries it too — a reload must land in the same channel.
+    got = (
+        await client.get(f"/candidate/interview/{body['interview_session_id']}", headers=headers)
+    ).json()
+    assert got["voice_default"] is True
+
+
+@pytest.mark.asyncio
+async def test_start_voice_default_false_without_configured_voice(client, db_session):
+    from app.services import persona_service as psvc
+
+    # A default persona exists but the operator never configured a voice → text stays the default
+    # (resolve_voice's built-in fallback voice must NOT count as "configured").
+    await psvc.create_persona(db_session, name="Interviewer", is_default=True)
+    headers = await _new_candidate_headers(client)
+    body = (await client.post("/candidate/interview/start", headers=headers)).json()
+    assert body["voice_default"] is False
+
+
+@pytest.mark.asyncio
+async def test_start_voice_default_false_without_persona(client):
+    headers = await _new_candidate_headers(client)
+    body = (await client.post("/candidate/interview/start", headers=headers)).json()
+    assert body["voice_default"] is False
