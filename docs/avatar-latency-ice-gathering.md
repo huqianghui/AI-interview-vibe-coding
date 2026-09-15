@@ -159,10 +159,11 @@ Azure 的 relay，**永远不会被选中**，等它们纯属浪费。
   （localStorage），下次进入时**人物形象立即显示**（略调暗 + 「连接中」提示），直播流一到
   无缝淡入替换。首次访问以外，「人物出现」的体感时间 ≈ 0。
 
-**部署给客户时的检查项**（本次生产对照测试顺带发现并修复的坑）：`VOICE_LIVE_DEFAULT_MODEL`
-（bicep 参数 `voiceLiveDefaultModel`）必须是**语音专用**的原生模型（gpt-4o 系列 /
-realtime），**不要**跟着聊天模型一起改成 gpt-5.4-mini 之类——配错的症状就是本文第 1 节的
-「永远停在 text、控制台报 Model X is not supported in this region」。
+**部署给客户时的检查项**：`VOICE_LIVE_DEFAULT_MODEL`（bicep 参数 `voiceLiveDefaultModel`）
+只是 Voice Live 会话的**默认模型**（实际所用模型也可由 persona / 主配置指定）。填一个**你的
+订阅 / 区域已为 Voice Live 开通**的模型即可，不确定就用默认的 `gpt-4o-mini`。代码侧对模型名
+不做任何硬性限制，是纯透传：若填了当前订阅/区域未开通的模型，Azure 会直接返回
+`Model X is not supported in this region`、语音退化为纯文字——换成该订阅/区域可用的模型即可。
 
 ## 5. 后续如何避免类似问题
 
