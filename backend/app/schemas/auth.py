@@ -28,9 +28,17 @@ class UserResponse(BaseModel):
 
 
 class AdminUserResponse(UserResponse):
-    """Admin view of a user (adds business_unit)."""
+    """Admin view of a user (adds business_unit + the #102 derived-password view).
+
+    ``generated_password`` is the derived password when the account has a system-derived one
+    (``password_generation`` set) AND it still matches the stored hash; ``password_stale`` is True
+    when it no longer matches (SECRET_KEY was rotated after seeding) — the UI shows "Reset
+    required" instead of a wrong password. Both are null/False for self-set (admin) passwords.
+    """
 
     business_unit: str
+    generated_password: str | None = None
+    password_stale: bool = False
 
 
 class UserUpdate(BaseModel):

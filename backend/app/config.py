@@ -10,6 +10,7 @@ required to boot.
 
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,8 +22,12 @@ class Settings(BaseSettings):
     debug: bool = False
     database_url: str = "sqlite+aiosqlite:///./ai_interview.db"
 
-    # Auth
-    secret_key: str = "dev-only-change-me"
+    # Auth. REQUIRED — no code default on purpose: SECRET_KEY signs every JWT AND (since #102) is
+    # the key the seeded candidate passwords are derived from, so a well-known default would make
+    # those passwords publicly computable from this (public) repo. Local dev: set it in the
+    # gitignored backend/.env (see .env.example); Azure/client deploys inject it from bicep /
+    # gen-secrets.sh.
+    secret_key: str = ""
     # Fernet key (urlsafe-base64 32 bytes) encrypting at-rest secrets in `service_configs` (the
     # admin-saved Azure API key). Empty in dev → a key is derived from `secret_key` (dev-only, see
     # utils/encryption). Set a real ENCRYPTION_KEY in prod so secrets survive restarts/rotation.
@@ -121,6 +126,20 @@ class Settings(BaseSettings):
     # = use default_external_reader_prompt) — same env-seeding pattern as the external endpoint row.
     seed_persona_brain: str = "bank"
     seed_persona_reader_prompt: str = ""
+
+    @model_validator(mode="after")
+    def _require_secret_key(self) -> "Settings":
+        """Refuse to boot with a missing/placeholder SECRET_KEY.
+
+        Candidate passwords derive from it (see auth_service.derive_candidate_password).
+        """
+        if not self.secret_key or self.secret_key == "dev-only-change-me":
+            raise ValueError(
+                "SECRET_KEY is not set. It signs JWTs and derives the seeded candidate passwords, "
+                "so a public default is not allowed. Generate one with `openssl rand -hex 32` and "
+                "put it in backend/.env (see .env.example) or the deployment's secret store."
+            )
+        return self
 
 
 @lru_cache

@@ -28,6 +28,9 @@ os.environ.update(
         # .env and defaults debug=off, where encryption now fails closed without a key). Not a real
         # secret — a throwaway key used only by the test suite.
         "ENCRYPTION_KEY": "v_ftieq-S7JwF27OzZw7kUFzULt1FF_rY2vn0jEkfYQ=",
+        # #102: SECRET_KEY is required (no code default) — a fixed test key keeps derived
+        # candidate passwords deterministic across the suite.
+        "SECRET_KEY": "test-secret-key-do-not-use-in-prod",
     }
 )
 
@@ -129,6 +132,7 @@ async def client(db_session):
     app.dependency_overrides[get_session_factory] = lambda: db_session._test_factory
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        ac._db_session = db_session  # for tests.candidate_helpers.mint_candidate_headers (#102)
         yield ac
     app.dependency_overrides.clear()
 
@@ -157,3 +161,24 @@ async def admin_auth(db_session):
     await db_session.commit()
     await db_session.refresh(admin)
     return {"Authorization": f"Bearer {create_access_token(data={'sub': admin.id})}"}
+
+
+@pytest_asyncio.fixture
+async def candidate_auth(db_session):
+    """Create a role=user candidate in the test DB and return a real JWT auth header (#102).
+
+    Mirrors ``admin_auth``: minting an anonymous candidate session now requires this bearer.
+    """
+    from app.models.user import User
+    from app.services.auth_service import create_access_token, get_password_hash
+
+    user = User(
+        username="test-candidate",
+        email="test-candidate@local",
+        hashed_password=get_password_hash("pw"),
+        role="user",
+    )
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+    return {"Authorization": f"Bearer {create_access_token(data={'sub': user.id})}"}

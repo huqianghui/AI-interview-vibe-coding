@@ -8,6 +8,7 @@ from app.db import get_db
 from app.dependencies import require_role
 from app.models.user import User
 from app.schemas.auth import AdminUserResponse, UserUpdate
+from app.services.auth_service import derive_candidate_password, verify_password
 
 router = APIRouter(
     prefix="/admin/users", tags=["admin-users"], dependencies=[Depends(require_role("admin"))]
@@ -20,7 +21,7 @@ async def list_users(
     role: str | None = None,
     is_active: bool | None = None,
     db: AsyncSession = Depends(get_db),
-) -> list[User]:
+) -> list[AdminUserResponse]:
     """List users with optional search (name/username/email), role, and active filters."""
     query = select(User)
     if search:
@@ -37,7 +38,22 @@ async def list_users(
     if is_active is not None:
         query = query.where(User.is_active == is_active)
     query = query.order_by(User.created_at.desc())
-    return list((await db.execute(query)).scalars().all())
+    return [_with_derived_password(u) for u in (await db.execute(query)).scalars().all()]
+
+
+def _with_derived_password(user: User) -> AdminUserResponse:
+    """Attach the #102 derived-password view (see AdminUserResponse).
+
+    bcrypt-verifies only rows with a generation set (the 3 seeded candidates), so the admin row
+    costs nothing.
+    """
+    out = AdminUserResponse.model_validate(user)
+    if user.password_generation is None:
+        return out
+    derived = derive_candidate_password(user.username, user.password_generation)
+    if verify_password(derived, user.hashed_password):
+        return out.model_copy(update={"generated_password": derived})
+    return out.model_copy(update={"password_stale": True})
 
 
 async def _get_or_404(db: AsyncSession, user_id: str) -> User:

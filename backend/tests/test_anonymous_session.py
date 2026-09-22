@@ -21,11 +21,18 @@ def _naive_utc() -> datetime:
 
 
 @pytest.mark.asyncio
-async def test_create_session_endpoint(client):
-    resp = await client.post("/public/candidate/session")
+async def test_create_session_endpoint(client, candidate_auth):
+    # #102: minting a session requires a logged-in role=user candidate.
+    resp = await client.post("/public/candidate/session", headers=candidate_auth)
     assert resp.status_code == 200
     body = resp.json()
     assert body["session_id"] and body["token"] and body["expires_at"]
+
+
+@pytest.mark.asyncio
+async def test_create_session_requires_candidate_login(client):
+    resp = await client.post("/public/candidate/session")
+    assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
@@ -73,7 +80,7 @@ async def test_protected_dep_missing_header_401(client):
     # (No candidate-protected route yet; assert the session-create flow then a
     # manual dependency call would 401 — covered by dependency unit below.)
     resp = await client.post("/public/candidate/session")
-    assert resp.status_code == 200
+    assert resp.status_code == 401
 
 
 @pytest.mark.asyncio

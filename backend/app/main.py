@@ -53,7 +53,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         seed_client_banks,
         seed_default_bank,
     )
-    from app.services.user_seed import seed_default_admin
+    from app.services.user_seed import seed_default_admin, seed_default_candidates
 
     try:
         async with async_session_factory() as session:
@@ -82,6 +82,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         async with async_session_factory() as session:
             await seed_default_admin(session)
     except Exception:  # noqa: BLE001 — admin seed is best-effort; never block startup
+        pass
+    try:
+        # #102: the three candidate accounts (derived passwords; idempotent). Independent of the
+        # admin seed on purpose — see user_seed's module docstring for why the gates differ.
+        async with async_session_factory() as session:
+            await seed_default_candidates(session)
+    except Exception:  # noqa: BLE001 — candidate seed is best-effort; never block startup
         pass
     try:
         async with async_session_factory() as session:

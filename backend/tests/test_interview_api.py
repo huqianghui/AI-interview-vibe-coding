@@ -6,11 +6,12 @@ Proves ask → answer → placeholder report over HTTP, plus the auth + ownershi
 
 import pytest
 
+from tests.candidate_helpers import mint_candidate_headers
+
 
 async def _new_candidate_headers(client) -> dict:
-    resp = await client.post("/public/candidate/session")
-    assert resp.status_code == 200
-    return {"X-Anon-Session": resp.json()["token"]}
+    # #102: minting a session needs a logged-in candidate; each call = a fresh candidate user.
+    return await mint_candidate_headers(client)
 
 
 # --- F2 candidate question list (AC #2, P3 no-leak) ------------------------

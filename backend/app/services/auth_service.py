@@ -5,6 +5,9 @@ avatar project's ``AppException``). This is the admin/user JWT system, separate 
 anonymous-session auth.
 """
 
+import base64
+import hashlib
+import hmac
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
@@ -37,6 +40,26 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 def get_password_hash(password: str) -> str:
     """Hash a password with bcrypt (utf-8, 72-byte cap)."""
     return bcrypt.hashpw(_pw_bytes(password), bcrypt.gensalt()).decode("utf-8")
+
+
+# #102 — seeded candidate passwords are DERIVED, never stored in plaintext:
+#   password = base32(HMAC-SHA256(key=SECRET_KEY,
+#                                 msg="candidate-password:v1:<username>:<generation>")).lower()[:12]
+#   formatted xxxx-xxxx-xxxx (the hyphenated string IS the password)
+# Same (key, username, generation) → same password, so an ephemeral-SQLite rebuild reseeds identical
+# credentials and the admin Users tab can re-display them at any time. Secrecy == SECRET_KEY secrecy
+# (already the JWT signing key; config refuses a missing/placeholder value). The domain label keeps
+# this HMAC use separate from any other use of the key.
+_CANDIDATE_PW_LABEL = "candidate-password:v1"
+
+
+def derive_candidate_password(username: str, generation: int = 1) -> str:
+    """Deterministic 14-char password (``xxxx-xxxx-xxxx``) for a seeded candidate account."""
+    key = get_settings().secret_key.encode("utf-8")
+    msg = f"{_CANDIDATE_PW_LABEL}:{username}:{generation}".encode()
+    digest = hmac.new(key, msg, hashlib.sha256).digest()
+    raw = base64.b32encode(digest).decode("ascii").lower()[:12]
+    return f"{raw[0:4]}-{raw[4:8]}-{raw[8:12]}"
 
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
