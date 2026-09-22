@@ -95,9 +95,27 @@ export async function finishOpenInterview(token: string): Promise<void> {
     // start() resumes an in-progress interview (or creates one); end it so the next start is fresh.
     const started = await api.post("/candidate/interview/start", { headers: anon });
     if (!started.ok()) return; // e.g. no default bank yet — nothing to clean
-    const iv = (await started.json()) as { interview_session_id: string; status: string };
-    if (iv.status === "in_progress") {
-      await api.post(`/candidate/interview/${iv.interview_session_id}/end`, { headers: anon });
+    let iv = (await started.json()) as {
+      interview_session_id: string;
+      status: string;
+      external_phase?: string | null;
+    };
+    if (iv.status !== "in_progress") return;
+    const id = iv.interview_session_id;
+    if (iv.external_phase != null) {
+      // External brain: the end turn finalizes it.
+      await api.post(`/candidate/interview/${id}/end`, { headers: anon });
+      return;
+    }
+    // Bank interview: /end is a no-op for it (it completes when its questions run out), so walk it
+    // to completion with placeholder answers. Nothing is scored until a report is requested.
+    for (let i = 0; i < 30 && iv.status === "in_progress"; i++) {
+      const r = await api.post(`/candidate/interview/${id}/answer`, {
+        headers: anon,
+        data: { text: "(e2e cleanup) skipped", source: "text" },
+      });
+      if (!r.ok()) break;
+      iv = (await r.json()) as typeof iv;
     }
   } finally {
     await api.dispose();
