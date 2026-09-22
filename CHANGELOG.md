@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.37.4.7 (2026-09-22)
+
+### Changed
+- **Seeded interviewer persona is now strictly linear — no follow-up questions.** The client wants
+  the simplest flow: one question, one answer, move on. The boot-seeded `prompt_fragment`
+  (`persona_seed._PROMPT_FRAGMENT`, what every fresh public/client deployment boots with and what
+  the Foundry agent's instructions are synced from) previously allowed "AT MOST ONE short
+  follow-up", which is exactly where the digital human's extra probing came from in bank mode
+  (server VAD auto-response + the "I'm done" `response.create` both give the model a free turn).
+  The Guidance section now bans follow-ups of any kind, limits the post-answer turn to one short
+  neutral acknowledgment ("Thank you."), allows only a verbatim re-read when the candidate asks
+  to repeat, and the Role-boundary/Language wording no longer mentions follow-ups. Pinned by
+  `test_seeded_prompt_is_linear_no_follow_ups`. Bank-level `max_follow_ups` is unchanged (the
+  client's default bank already has 0 on every question). Prompt-level mitigation only: the model
+  still gets a turn after each answer; a code-level silent-advance mode for bank personas is a
+  separate follow-up. Persistent-DB installs keep their existing persona row (the seed is
+  idempotent) — update the fragment in the digital-human editor to pick this up.
+
 ## 0.37.4.5 (2026-09-14)
 
 ### Fixed

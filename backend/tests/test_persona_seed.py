@@ -35,6 +35,22 @@ async def test_seed_creates_enabled_default_with_fixed_id(db_session):
     assert persona.agent_sync_status == "none"
 
 
+async def test_seeded_prompt_is_linear_no_follow_ups(db_session):
+    """The client's linear-flow requirement: the seeded interviewer NEVER asks follow-ups.
+
+    This fragment is what every fresh deployment (public demo + client delivery) boots with, so it
+    is the single source of truth for the interviewer contract — pin the no-follow-up wording so a
+    future edit can't quietly re-introduce the old "AT MOST ONE short follow-up" allowance.
+    """
+    persona = await seed_default_persona(db_session)
+    assert persona is not None
+    fragment = persona.prompt_fragment
+    assert "Do NOT ask follow-up questions of any kind" in fragment
+    assert "ONE short neutral" in fragment  # answer → brief acknowledgment → wait for next question
+    assert "AT MOST ONE" not in fragment  # the old allowance must not come back
+    assert "Ask more questions" not in fragment
+
+
 async def test_seed_is_idempotent(db_session):
     first = await seed_default_persona(db_session)
     again = await seed_default_persona(db_session)
