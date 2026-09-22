@@ -903,6 +903,7 @@ export function InterviewPage() {
           busy={candidateLoginBusy}
           onSubmit={onCandidateLogin}
           testIdPrefix="candidate"
+          titleAs="h2"
         />
       </div>
     );

@@ -1,5 +1,7 @@
 """Admin user management (admin-only). Plain-list + HTTPException style (adapted from AI-avatar)."""
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,20 +40,23 @@ async def list_users(
     if is_active is not None:
         query = query.where(User.is_active == is_active)
     query = query.order_by(User.created_at.desc())
-    return [_with_derived_password(u) for u in (await db.execute(query)).scalars().all()]
+    rows = (await db.execute(query)).scalars().all()
+    return [await _with_derived_password(u) for u in rows]
 
 
-def _with_derived_password(user: User) -> AdminUserResponse:
+async def _with_derived_password(user: User) -> AdminUserResponse:
     """Attach the #102 derived-password view (see AdminUserResponse).
 
     bcrypt-verifies only rows with a generation set (the 3 seeded candidates), so the admin row
-    costs nothing.
+    costs nothing. The verify is CPU-bound (~100-300 ms at the default work factor) and bcrypt is
+    synchronous, so it runs in a worker thread — never on the event loop that is also carrying
+    live interview / voice traffic.
     """
     out = AdminUserResponse.model_validate(user)
     if user.password_generation is None:
         return out
     derived = derive_candidate_password(user.username, user.password_generation)
-    if verify_password(derived, user.hashed_password):
+    if await asyncio.to_thread(verify_password, derived, user.hashed_password):
         return out.model_copy(update={"generated_password": derived})
     return out.model_copy(update={"password_stale": True})
 

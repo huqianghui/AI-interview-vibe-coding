@@ -23,9 +23,19 @@ export interface LoginCardProps {
   busy: boolean;
   onSubmit: (username: string, password: string) => void;
   testIdPrefix: string;
+  /** Heading level for the card title — "h2" when the page already renders its own h1. */
+  titleAs?: "h1" | "h2";
 }
 
-export function LoginCard({ title, body, error, busy, onSubmit, testIdPrefix }: LoginCardProps) {
+export function LoginCard({
+  title,
+  body,
+  error,
+  busy,
+  onSubmit,
+  testIdPrefix,
+  titleAs = "h1",
+}: LoginCardProps) {
   const styles = useStyles();
   const { t } = useTranslation();
   const [username, setUsername] = useState("");
@@ -35,7 +45,7 @@ export function LoginCard({ title, body, error, busy, onSubmit, testIdPrefix }: 
 
   return (
     <div className={styles.loginPage}>
-      <Title2 as="h1">{title}</Title2>
+      <Title2 as={titleAs}>{title}</Title2>
       <Body1 style={{ display: "block", margin: "12px 0" }}>{body}</Body1>
       <Input
         value={username}
