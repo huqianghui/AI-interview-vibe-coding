@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { primeCandidateLogin } from "./helpers/candidateLogin";
 
 /**
  * Admin editor + scored report + voice-fallback E2E (SPEC F2b/F3b/F4/F8/F9).
@@ -60,6 +61,7 @@ test("admin authors a bank + checklist, candidate gets a scored report", async (
   }
 
   // --- Candidate: interview against the authored bank, reach a SCORED report ---
+  await primeCandidateLogin(page); // #102: /interview is login-gated
   await page.goto("/interview");
   await page.getByRole("button", { name: /开始面试|start interview/i }).click();
   await page.getByRole("button", { name: /我准备好了|i'm ready/i }).click();
@@ -104,6 +106,7 @@ test("voice channel with no mic falls back to the mic-permission dialog (F9 AC#4
   // Fresh context WITHOUT microphone permission so getUserMedia fails and the dialog appears.
   const context = await browser.newContext({ permissions: [] });
   const page = await context.newPage();
+  await primeCandidateLogin(page); // #102: /interview is login-gated
   await page.goto("/interview");
   await page.getByRole("button", { name: /开始面试|start interview/i }).click();
   await page.getByRole("button", { name: /我准备好了|i'm ready/i }).click();

@@ -10,6 +10,7 @@
  * Run: LIVE_VOICE=1 npx playwright test audio-diagnostic --config=e2e/live.config.ts
  */
 import { test, expect } from "@playwright/test";
+import { primeCandidateLogin } from "./helpers/candidateLogin";
 
 const LIVE = process.env.LIVE_VOICE === "1";
 const BASE = process.env.BASE || "http://localhost:5173";
@@ -52,6 +53,8 @@ test.describe("Audio diagnostic (real Azure)", () => {
         }
       } as unknown as typeof RTCPeerConnection;
     });
+
+    await primeCandidateLogin(page); // #102: /interview is login-gated
 
     await page.goto(`${BASE}/interview`);
     await page.getByRole("button", { name: /开始面试|start interview/i }).click();

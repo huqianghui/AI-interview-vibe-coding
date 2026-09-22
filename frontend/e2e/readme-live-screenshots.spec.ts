@@ -10,6 +10,7 @@
  *   LIVE_VOICE=1 SCREENSHOTS=1 npx playwright test readme-live-screenshots --config=e2e/live.config.ts
  */
 import { test, expect } from "@playwright/test";
+import { primeCandidateLogin } from "./helpers/candidateLogin";
 
 const ENABLED = process.env.LIVE_VOICE === "1" && process.env.SCREENSHOTS === "1";
 const BASE = process.env.BASE || "http://localhost:5173";
@@ -21,6 +22,7 @@ test.describe("README live avatar screenshots (real Azure)", () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
   test("capture voice mode: digital-human avatar speaking", async ({ page }) => {
+    await primeCandidateLogin(page); // #102: /interview is login-gated
     await page.goto(`${BASE}/interview`);
     await page.getByRole("button", { name: /开始面试|start interview/i }).click();
     await page.getByRole("button", { name: /我准备好了|i'm ready/i }).click();

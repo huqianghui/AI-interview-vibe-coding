@@ -1,4 +1,5 @@
 import { test, expect, request as pwRequest } from "@playwright/test";
+import { primeCandidateLogin } from "./helpers/candidateLogin";
 
 /**
  * Opt-in LIVE external-brain interview E2E — drives the REAL running dev servers against the REAL
@@ -103,6 +104,8 @@ test("live external-brain interview runs to completion against the real server",
 }) => {
   // Real gateway round-trips are seconds each; a ~10-question interview needs a generous budget.
   test.setTimeout(600_000);
+
+  await primeCandidateLogin(page); // #102: /interview is login-gated
 
   await page.goto("/interview");
   await page.getByRole("button", { name: /开始面试|start interview/i }).click();

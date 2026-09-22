@@ -21,6 +21,7 @@
  * (see e2e/live.config.ts). Skipped entirely unless LIVE_VOICE=1.
  */
 import { test, expect } from "@playwright/test";
+import { primeCandidateLogin } from "./helpers/candidateLogin";
 
 const LIVE = process.env.LIVE_VOICE === "1";
 const BASE = process.env.BASE || "http://localhost:5173";
@@ -65,6 +66,8 @@ test.describe("Voice Live agent-mode (real Azure)", () => {
         }
       });
     });
+
+    await primeCandidateLogin(page); // #102: /interview is login-gated
 
     await page.goto(`${BASE}/interview`);
     await page.getByRole("button", { name: /开始面试|start interview/i }).click();

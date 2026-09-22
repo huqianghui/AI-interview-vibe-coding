@@ -12,6 +12,7 @@
  * (live.config.ts adds the fake-audio-capture flag pointing at /tmp/answer-raw.wav)
  */
 import { test, expect } from "@playwright/test";
+import { primeCandidateLogin } from "./helpers/candidateLogin";
 
 const LIVE = process.env.LIVE_VOICE === "1";
 const BASE = process.env.BASE || "http://localhost:5173";
@@ -100,6 +101,8 @@ test.describe("Second-turn audio diagnostic (real Azure)", () => {
         return null;
       });
     };
+
+    await primeCandidateLogin(page); // #102: /interview is login-gated
 
     await page.goto(`${BASE}/interview`);
     await page.getByRole("button", { name: /开始面试|start interview/i }).click();
