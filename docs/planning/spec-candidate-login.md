@@ -124,3 +124,70 @@ backend ~25 min · frontend ~30 min · test migration ~30 min · docs ~10 min.
 - A2 derived password: 12 lowercase base32 chars, shown `xxxx-xxxx-xxxx`.
 - A3 Users tab has no pagination/search UI (the list API already supports `search`).
 - A4 the Voice Live WS proxy keeps trusting `X-Anon-Session` only; no extra JWT check.
+
+---
+
+## Engineering review (`/plan-eng-review`, 2026-09-22) — decisions that supersede the spec above
+
+**Scope decision (Step 0, SCOPE_REDUCED):** ship the minimal version — login gate on `/interview`, seeded `user1/user2/user3`, and a **read-only** admin Users tab (list + view derived passwords). No create-account and no reset-password endpoints or buttons in this PR (owner: accounts are generated once at first boot, like the admin account; runtime account management is not needed). Sign-out button kept.
+
+| # | Finding | Decision |
+|---|---|---|
+| 1 | [P1] A leftover `anon_session_token` in localStorage plus the mount-time `resumeInterview()` (`InterviewPage.tsx:568-574`) would bypass the login gate; clearing it blindly would lose the in-progress interview | **1A** — session rows store `user_id`; `POST /public/candidate/session` returns the caller's existing unexpired, unrevoked session when one exists (idempotent), so resume survives re-login; the page shows the login card whenever the candidate JWT (sessionStorage) is absent, discards any leftover anon token, and always re-requests the session after login |
+| 1+ | Interview endpoints trust `X-Anon-Session` alone (`dependencies.py:68-79`) — a copied anon token works for its 120-min TTL | **1+B** — keep as is (accepted residual risk); ownership is enforced only at session creation |
+| 2 | [P1] `client.ts:198-207` 401 self-heal calls `ensureSession()` with no identity → after this change it fails with a bare red `401` line and no way out | **2A** — `ensureSession()` sends the bearer; 401/403 from the session endpoint raise a typed `CandidateAuthError(status, detail)` and clear both tokens; `InterviewPage.guard()` routes it to the login card showing the backend `detail` verbatim |
+| 3 | [P2] `voice_live_ws.py:74-83` accepts any active non-anonymous JWT (no role check) — candidate JWTs now exist | **3 keep** — owner: any logged-in (non-anonymous) account may use the WS channel; no role check |
+| 4 | [P2] `users.password_generation` is unnecessary under the reduced scope | **4B** — keep the column (seed = 1, admin = NULL) for a future reset feature; `generated_password` is shown only when `verify_password(derived, hashed)` is true, else `password_stale: true` |
+| 5 | [P2] `config.py:25` default `SECRET_KEY` makes seeded passwords publicly computable | **5A** — WARNING log at boot when the key is the code default and candidates are seeded; still seed (dev convenience; prod keys come from bicep / gen-secrets.sh) |
+| 6 | [P3] `SPEC.md:64-66` says the anon token "never" touches localStorage; `client.ts:10,175` stores it there | **6A** — rewrite §4 with the login model and the real token storage (candidate JWT → sessionStorage; anon token → localStorage for resume) |
+| 7 | [P2] DRY: 27-line admin login card (`AdminPage.tsx:390-416`) would be duplicated | **7A** — shared `components/LoginCard.tsx` (props: title, body, error, busy, onSubmit, testIdPrefix); AdminPage switches to it, `admin-*` testids preserved |
+| 8 | [P2] DRY: third copy of the guarded get/set/clear token trio | **8A** — `api/tokenStore.ts` factory used by admin, anon and candidate tokens; exported names unchanged |
+| 9 | [P2] DRY: seed user creation duplicated | **9B** — keep `seed_default_admin` and `seed_default_candidates` separate |
+
+**Test review:** 35 gaps (6 E2E) + 2 mandatory regression suites (the 9 backend test files and 13 E2E specs that start an interview anonymously). All listed in the coverage diagram in the review transcript and in the `/qa` test plan (`~/.gstack/projects/…/huqianghui-feat-candidate-login-eng-review-test-plan-20260922-203452.md`). **Performance:** no blocking issues; `GET /admin/users` bcrypt-verifies only rows with `password_generation` set (3 rows, ~0.5 s total).
+
+### What already exists (reused, not rebuilt)
+- `require_role` / `get_current_user` (`dependencies.py:31-65`) — JWT + `is_active` check; deactivated users already get 401 on any bearer call.
+- `/auth/login` + `auth_service` bcrypt helpers (already bcrypt-direct, dodging the passlib/bcrypt-5 pitfall).
+- `admin_users.py` list / patch / soft-delete; `user_seed.py` admin seed pattern; `admin_auth` conftest fixture (mirror it as `candidate_auth`).
+- Admin login card styles + `admin.*` i18n keys; existing E2E admin-login pattern (`candidate-interview.spec.ts` beforeAll).
+- Anonymous-session machinery (`anonymous_session_service.py`) — kept; only creation is gated and the row gains `user_id`.
+
+### NOT in scope (considered, deferred)
+- Create-account / reset-password endpoints and buttons — accounts are generated once at boot; owner declined a TODO.
+- Per-request JWT + session-ownership check on interview endpoints (1+A) — accepted residual risk; owner declined a TODO.
+- Role check on the Voice Live WS JWT branch — owner explicitly keeps "any logged-in account".
+- Per-candidate interview history in admin; rename / hard delete / self-service password change / login lockout.
+- Bank-mode silent-advance switch — captured in `TODOS.md` (admin-configurable, default ON at 3 s).
+
+### Failure modes (new code paths)
+| Path | Realistic failure | Test | Handling | User sees |
+|---|---|---|---|---|
+| `require_candidate` | expired JWT mid-interview | unit + E2E | 401 → `CandidateAuthError` → login card | clear "please sign in again" |
+| session reuse-if-active | two tabs log in as user1 simultaneously | unit | both get the same session row (idempotent) | consistent resume |
+| `derive_candidate_password` | `SECRET_KEY` rotated after seeding | unit | verify fails → `password_stale` | "Reset required / not viewable" (no wrong password shown) |
+| `seed_default_candidates` | `users` table not migrated yet on first boot | existing best-effort try in `lifespan` | logged, startup continues | admin sees no candidate rows → check logs |
+| `GET /admin/users` | bcrypt verify slow under load | none (3 rows) | n/a | ~0.5 s list |
+| Voice WS | candidate JWT used as WS token | existing specs (anon path) | accepted (3 keep) | n/a |
+No critical gaps (every silent failure has a test or an explicit handling path).
+
+### Worktree parallelization
+| Step | Modules | Depends on |
+|---|---|---|
+| S1 backend auth: migration, `require_candidate`, session reuse, derivation, seed, admin list field | `backend/app/**`, `backend/alembic/`, `backend/tests/` | — |
+| S2 frontend: `tokenStore`, `LoginCard`, InterviewPage gate, Users tab, i18n, unit tests | `frontend/src/**` | S1's API shapes (documented above; can mock) |
+| S3 E2E helper + 13 spec updates | `frontend/e2e/` | S1 + S2 |
+| S4 docs: SPEC §4, IMPLEMENTATION-STATUS, CHANGELOG, delivery manual | `docs/`, `SPEC.md`, `delivery/docs/` | S1 + S2 |
+Lanes: **A** = S1 (backend). **B** = S2 (frontend, against the documented API contract). Launch A + B in parallel, merge, then S3 and S4 sequentially. No shared module directories between A and B.
+
+### Implementation Tasks
+Synthesized from the findings above; checkbox as you ship.
+- [ ] **T1 (P1, human ~4h / CC ~20min)** — backend — alembic revision: `users.password_generation` (nullable int), `anonymous_candidate_sessions.user_id` (nullable FK); models updated. Surfaced by: spec + 4B. Files: `backend/alembic/versions/`, `backend/app/models/user.py`, `backend/app/models/anonymous_session.py`. Verify: `alembic upgrade head` on a fresh DB + `pytest -q`.
+- [ ] **T2 (P1, human ~4h / CC ~15min)** — backend — `require_candidate` dependency (401 no/invalid/inactive, 403 admin with the exact detail) + `POST /public/candidate/session` reuse-if-active and `user_id` write. Surfaced by: 1A, 1+B, 2A. Files: `backend/app/api/candidate_session.py`, `backend/app/services/anonymous_session_service.py`, `backend/tests/test_anonymous_session.py`. Verify: new unit tests (200/401/403/reuse/expired→new).
+- [ ] **T3 (P1, human ~3h / CC ~15min)** — backend — `derive_candidate_password(username, generation)` (HMAC-SHA256 over `SECRET_KEY`, domain label `candidate-password:v1`, 12 base32 chars as `xxxx-xxxx-xxxx`) + `seed_default_candidates()` (idempotent by username, WARNING on default key) wired into `lifespan`. Surfaced by: spec, 5A, 9B. Files: `backend/app/services/auth_service.py`, `backend/app/services/user_seed.py`, `backend/app/main.py`, `backend/tests/test_user_seed.py`. Verify: determinism/format/key-sensitivity tests; boot log check.
+- [ ] **T4 (P1, human ~2h / CC ~10min)** — backend — `GET /admin/users` gains `generated_password` + `password_stale` (verify against hash; NULL generation → null/false). Surfaced by: 4B. Files: `backend/app/api/admin_users.py`, `backend/app/schemas/auth.py`, `backend/tests/test_auth.py` or new `test_admin_users.py`. Verify: 3 unit tests (ok / stale / admin).
+- [ ] **T5 (P1, human ~1d / CC ~30min)** — frontend — `api/tokenStore.ts` factory (8A); `CandidateAuthError` + bearer on `ensureSession` + 401/403 handling (2A); `components/LoginCard.tsx` (7A) used by AdminPage and the new InterviewPage gate (resume effect only after auth; sign-out clears candidate JWT, anon token, saved interview id; voice teardown first); i18n en-US/zh-CN. Surfaced by: 1A, 2A, 7A, 8A. Files: `frontend/src/api/*.ts`, `frontend/src/components/LoginCard.tsx`, `frontend/src/pages/InterviewPage.tsx`, `frontend/src/pages/AdminPage.tsx`, `frontend/src/i18n.ts`. Verify: vitest (LoginCard, InterviewPage gate branches, tokenStore, client 401/403).
+- [ ] **T6 (P1, human ~4h / CC ~15min)** — frontend — Admin **Users** tab (read-only table: username / password with copy / role / active; "not viewable" for NULL generation; "Reset required" when stale) + `api/admin.ts` users client. Surfaced by: scope decision. Files: `frontend/src/pages/AdminPage.tsx`, `frontend/src/api/admin.ts`, `frontend/src/pages/AdminPage.test.tsx`. Verify: vitest renders 3 rows + admin row state.
+- [ ] **T7 (P1 REGRESSION, human ~1d / CC ~30min)** — tests — `candidate_auth` conftest fixture; update the 9 backend test files; `frontend/e2e/helpers/candidateLogin.ts` + the 13 E2E specs; new admin Users tab E2E. Surfaced by: test review (mandatory regression rule). Verify: `pytest -q` ≥ 85%; `npm run e2e` green.
+- [ ] **T8 (P2, human ~2h / CC ~10min)** — docs — SPEC.md §4 (login model + real token storage, 6A), `docs/IMPLEMENTATION-STATUS.md`, `CHANGELOG.md`, `delivery/docs/手册-v2.md` "候选人账号" section (incl. SECRET_KEY rotation note and what survives an ephemeral rebuild). Surfaced by: spec AC8, 6A. Verify: docs review.
+_No new tasks from Performance review._
