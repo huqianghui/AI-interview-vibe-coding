@@ -181,3 +181,6 @@ and OS cruft (`.DS_Store`). Those stay in `~/.gstack/` by design.
 
 For "what's actually built vs. the spec", see [`../IMPLEMENTATION-STATUS.md`](../IMPLEMENTATION-STATUS.md)
 and `CHANGELOG.md`.
+
+- [`spec-candidate-login.md`](spec-candidate-login.md) — candidate login for `/interview` + admin-managed
+  interview accounts (`user1/2/3`, HMAC-derived passwords viewable by admin, Users tab). Filed as #102.
