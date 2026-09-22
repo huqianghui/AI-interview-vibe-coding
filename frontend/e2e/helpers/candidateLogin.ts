@@ -63,9 +63,43 @@ export async function candidateToken(username = "user1"): Promise<string> {
   }
 }
 
-/** Make every document on `page` start with a valid candidate JWT in sessionStorage. */
-export async function primeCandidateLogin(page: Page, username = "user1"): Promise<string> {
+/**
+ * Finish any in-progress interview of this candidate so the spec starts from a clean "Start
+ * interview" screen. Session creation is idempotent per account (#102, decision 1A), so without this
+ * a spec would RESUME whatever the previous spec left behind on the shared user1 account — the old
+ * anonymous world minted a fresh session per spec, and these specs are written for that.
+ */
+export async function finishOpenInterview(token: string): Promise<void> {
+  const api = await pwRequest.newContext({ baseURL: API });
+  try {
+    const sess = await api.post("/public/candidate/session", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!sess.ok()) throw new Error(`session mint failed: ${sess.status()} ${await sess.text()}`);
+    const anon = { "X-Anon-Session": (await sess.json()).token as string };
+    // start() resumes an in-progress interview (or creates one); end it so the next start is fresh.
+    const started = await api.post("/candidate/interview/start", { headers: anon });
+    if (!started.ok()) return; // e.g. no default bank yet — nothing to clean
+    const iv = (await started.json()) as { interview_session_id: string; status: string };
+    if (iv.status === "in_progress") {
+      await api.post(`/candidate/interview/${iv.interview_session_id}/end`, { headers: anon });
+    }
+  } finally {
+    await api.dispose();
+  }
+}
+
+/**
+ * Make every document on `page` start with a valid candidate JWT in sessionStorage, on a clean
+ * slate (any open interview of that account is ended first; pass `fresh: false` to keep it).
+ */
+export async function primeCandidateLogin(
+  page: Page,
+  username = "user1",
+  opts: { fresh?: boolean } = {},
+): Promise<string> {
   const token = await candidateToken(username);
+  if (opts.fresh !== false) await finishOpenInterview(token);
   await page.addInitScript(
     ([key, value]: readonly [string, string]) => {
       sessionStorage.setItem(key, value);
@@ -73,4 +107,31 @@ export async function primeCandidateLogin(page: Page, username = "user1"): Promi
     [CANDIDATE_TOKEN_KEY, token] as const,
   );
   return token;
+}
+
+/** Resolves once the interviewing screen is up (bank or external brain, text or voice channel). */
+export async function waitForInterviewStage(page: Page): Promise<void> {
+  await page.getByTestId("interview-stage").waitFor({ state: "visible", timeout: 60_000 });
+}
+
+/**
+ * Put the page in the voice channel. Since v0.37.4.0 a voice-configured persona opens the interview
+ * in voice mode by itself (`voice_default`), so the "Answer by voice" click is only needed when the
+ * page landed in the text channel (mock persona / no voice configured).
+ */
+export async function enterVoiceChannel(page: Page): Promise<void> {
+  await waitForInterviewStage(page);
+  if (await page.getByRole("textbox").isVisible().catch(() => false)) {
+    await page.getByRole("button", { name: /语音作答|answer by voice/i }).click();
+  }
+}
+
+/** Put the page in the text channel (the auto-voice persona opens in voice mode). */
+export async function enterTextChannel(page: Page): Promise<void> {
+  await waitForInterviewStage(page);
+  const textbox = page.getByRole("textbox");
+  if (!(await textbox.isVisible().catch(() => false))) {
+    await page.getByRole("button", { name: /文字作答|answer by text/i }).click();
+  }
+  await textbox.waitFor({ state: "visible", timeout: 15_000 });
 }

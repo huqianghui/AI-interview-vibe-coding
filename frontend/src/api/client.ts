@@ -314,6 +314,17 @@ export function signOutCandidate(): void {
   clearSavedInterviewId();
 }
 
+/**
+ * Called right after a successful candidate login (#102, decision 1A): drop any anon token and
+ * saved interview id left in localStorage by whoever used this browser before, so the very next
+ * call mints a session bound to THIS account. Resume is not lost — the backend hands the same
+ * account its live session back and `start` resumes that account's in-progress interview.
+ */
+export function resetCandidateSession(): void {
+  clearToken();
+  clearSavedInterviewId();
+}
+
 /** Start an interview — or resume the candidate's in-progress one (the backend reuses it), and
  * persist the id so a page reload can resume via {@link resumeInterview}. */
 export async function startInterview(): Promise<Interview> {

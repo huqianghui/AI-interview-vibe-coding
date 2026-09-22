@@ -711,6 +711,8 @@ describe("InterviewPage candidate login gate (#102)", () => {
     sessionStorage.removeItem("candidate_access_token");
     const user = userEvent.setup();
     vi.spyOn(auth, "loginCandidate").mockResolvedValue("jwt-token");
+    // Decision 1A: a successful login immediately mints this account's session.
+    const mint = vi.spyOn(client, "ensureSession").mockResolvedValue("anon-token");
     renderPage();
     await user.type(screen.getByTestId("candidate-username-input"), "user1");
     await user.type(screen.getByTestId("candidate-password-input"), "pw");
@@ -718,6 +720,27 @@ describe("InterviewPage candidate login gate (#102)", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /start interview/i })).toBeInTheDocument(),
     );
+    expect(mint).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses an admin account on the card with the backend's reason (403 at session mint)", async () => {
+    await i18n.changeLanguage("en-US");
+    sessionStorage.removeItem("candidate_access_token");
+    const user = userEvent.setup();
+    vi.spyOn(auth, "loginCandidate").mockResolvedValue("admin-jwt");
+    vi.spyOn(client, "ensureSession").mockRejectedValue(
+      new client.CandidateAuthError("Admin accounts cannot take interviews", 403),
+    );
+    renderPage();
+    await user.type(screen.getByTestId("candidate-username-input"), "admin");
+    await user.type(screen.getByTestId("candidate-password-input"), "pw");
+    await user.click(screen.getByTestId("candidate-login"));
+    await waitFor(() =>
+      expect(screen.getByText("Admin accounts cannot take interviews")).toBeInTheDocument(),
+    );
+    // Still on the card — no Start button for an admin.
+    expect(screen.queryByRole("button", { name: /start interview/i })).toBeNull();
+    expect(screen.getByTestId("candidate-login")).toBeInTheDocument();
   });
 
   it("shows the localized wrong-credentials message on a 401", async () => {

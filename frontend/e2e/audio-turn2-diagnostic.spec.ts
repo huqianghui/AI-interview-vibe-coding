@@ -12,7 +12,7 @@
  * (live.config.ts adds the fake-audio-capture flag pointing at /tmp/answer-raw.wav)
  */
 import { test, expect } from "@playwright/test";
-import { primeCandidateLogin } from "./helpers/candidateLogin";
+import { enterVoiceChannel, primeCandidateLogin } from "./helpers/candidateLogin";
 
 const LIVE = process.env.LIVE_VOICE === "1";
 const BASE = process.env.BASE || "http://localhost:5173";
@@ -107,8 +107,8 @@ test.describe("Second-turn audio diagnostic (real Azure)", () => {
     await page.goto(`${BASE}/interview`);
     await page.getByRole("button", { name: /开始面试|start interview/i }).click();
     await page.getByRole("button", { name: /我准备好了|i'm ready/i }).click();
-    await expect(page.getByRole("textbox")).toBeVisible();
-    await page.getByRole("button", { name: /语音作答|answer by voice/i }).click();
+    await expect(page.getByTestId("question-progress")).toBeVisible(); // voice_default: no textbox
+    await enterVoiceChannel(page); // auto-voice persona: only clicks when still in text mode
 
     // Wait for the FIRST agent response to complete (greeting/question spoken).
     await expect.poll(() => responsesDone, { timeout: 60_000 }).toBeGreaterThan(0);

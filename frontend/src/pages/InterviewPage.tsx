@@ -43,6 +43,8 @@ import {
   type AnsweredQuestion,
   type Interview,
   type Report,
+  resetCandidateSession,
+  ensureSession,
 } from "../api/client";
 import { AuthError, getCandidateToken, loginCandidate } from "../api/auth";
 import { useExternalMicAutoPause } from "../hooks/useExternalMicAutoPause";
@@ -610,9 +612,18 @@ export function InterviewPage() {
     setCandidateLoginBusy(true);
     setCandidateLoginError(null);
     void loginCandidate(username, password)
-      .then(() => setCandidateAuthed(true))
+      .then(async () => {
+        // Never inherit the previous visitor's session/interview pointer (decision 1A), then mint
+        // this account's session right away so an admin account is refused HERE, on the card,
+        // with the backend's reason — not later on "Start interview".
+        resetCandidateSession();
+        await ensureSession();
+        setCandidateAuthed(true);
+      })
       .catch((e) => {
-        if (e instanceof AuthError && e.status === 401) {
+        if (e instanceof CandidateAuthError) {
+          setCandidateLoginError(e.detail || e.message);
+        } else if (e instanceof AuthError && e.status === 401) {
           setCandidateLoginError(t("candidate.wrongCredentials"));
         } else {
           setCandidateLoginError(e instanceof Error ? e.message : String(e));

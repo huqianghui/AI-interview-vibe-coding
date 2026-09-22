@@ -4,7 +4,8 @@
  * Unlike the default playwright.config.ts (mock-only, boots its own servers), this config assumes
  * the real frontend (:5173) + backend (:8000, real Foundry credentials) are already running, and
  * launches Chromium with fake-media flags so getUserMedia succeeds without a physical microphone.
- * Only the voice-live-azure spec (self-skips unless LIVE_VOICE=1) is collected here.
+ * Collects the live-gated specs (self-skip unless LIVE_VOICE=1) plus candidate-login (#102), which
+ * runs in both configs so the login gate is verified against the real backend too.
  *
  * Run: LIVE_VOICE=1 npx playwright test --config=e2e/live.config.ts
  */
@@ -14,7 +15,7 @@ const BASE = process.env.BASE || "http://localhost:5173";
 
 export default defineConfig({
   testDir: ".",
-  testMatch: /(voice-live-azure|avatar-diagnostic|avatar-stability-probe|audio-diagnostic|audio-turn2-diagnostic|anon-recovery|readme-live-screenshots|external-interview-live|external-voice-live)\.spec\.ts/,
+  testMatch: /(candidate-login|voice-live-azure|avatar-diagnostic|avatar-stability-probe|audio-diagnostic|audio-turn2-diagnostic|anon-recovery|readme-live-screenshots|external-interview-live|external-voice-live)\.spec\.ts/,
   timeout: 120_000,
   expect: { timeout: 15_000 },
   fullyParallel: false,
