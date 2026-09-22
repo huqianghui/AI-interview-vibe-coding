@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.38.0.0 (2026-09-22)
+
+### Added
+- **Candidates now sign in to take an interview.** `/interview` opens on a "Candidate sign-in" card;
+  only a `user`-role account can start an interview (an admin account is told "Admin accounts cannot
+  take interviews"). The candidate stays signed in for the tab's lifetime, a reload resumes the
+  in-progress interview, and closing the tab then signing in again resumes the SAME interview
+  (session creation is idempotent per account). A "Sign out" button clears everything and returns
+  to the card. Usage rule: one account is used by one person at a time.
+- **Three ready-made candidate accounts, visible to the admin.** `user1`, `user2`, `user3` are
+  created on every boot with passwords derived from the deployment's `SECRET_KEY` (`xxxx-xxxx-xxxx`),
+  so they are unique per deployment, survive an ephemeral-SQLite restart unchanged, and are never
+  stored in plaintext. The `/admin` page gains a read-only **Users** tab that lists them with a Copy
+  button, marks the admin row "not viewable", and shows "Reset required" if `SECRET_KEY` was changed
+  after seeding. (Create / reset are intentionally not in this release.)
+
+### Changed
+- **`SECRET_KEY` is now required.** The backend refuses to start when it is missing or still the old
+  placeholder — it signs every JWT and now also derives the candidate passwords, so a public default
+  would make those passwords computable from the repo. Local dev: set it in `backend/.env`
+  (`openssl rand -hex 32`, see `.env.example`); Azure and client deployments already inject it.
+- `POST /public/candidate/session` requires `Authorization: Bearer <candidate JWT>`; the session row
+  records `user_id`. All other interview endpoints are unchanged (`X-Anon-Session`).
+- `GET /admin/users` items carry `generated_password` and `password_stale`.
+- Migration `b8c9d0e1f2a3`: `users.password_generation`, `anonymous_candidate_sessions.user_id`
+  (both nullable; downgrade-safe).
+- E2E specs sign in as `user1` through a shared `e2e/helpers/candidateLogin.ts` (reads the derived
+  password via the admin API, never hardcodes it).
+
 ## 0.37.4.7 (2026-09-22)
 
 ### Changed

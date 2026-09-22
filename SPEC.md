@@ -61,10 +61,21 @@ agent registry 2025-01-01-preview; AI Search retrieve 2026-05-01-preview (PREVIE
 
 ## 4. Auth & multi-tenancy
 
-- **Candidate:** anonymous session. JWT `{"sid", "typ":"anon", "exp"}`, sent via `X-Anon-Session`
-  header, DB row authoritative (revocation + expiry checked against the row, not just the JWT).
-  Token lives in React state only, never localStorage.
-- **Admin:** standard JWT, role `user`/`admin`.
+- **Candidate (v0.38.0.0, #102):** username/password login on `/interview` (same `/auth/login` as the
+  admin; only `role=user` accounts may interview — an admin account gets a 403 "Admin accounts cannot
+  take interviews"). The candidate JWT is presented ONLY to `POST /public/candidate/session`, which
+  mints the candidate session token every other interview call uses; the session row records
+  `user_id` and creation is idempotent per user (an unexpired, unrevoked session is reused, so
+  closing the tab and logging in again resumes the same interview). Interview calls keep trusting
+  the session token alone (`X-Anon-Session`; DB row authoritative for revocation + expiry).
+  **Token storage:** candidate JWT → `sessionStorage` (dies with the tab); session token and the saved
+  interview id → `localStorage` (so a reload can resume). Three candidate accounts `user1/user2/user3`
+  are seeded on every boot with passwords DERIVED from the deployment's `SECRET_KEY`
+  (HMAC-SHA256 → `xxxx-xxxx-xxxx`): unique per deployment, identical after an ephemeral-SQLite
+  rebuild, never stored in plaintext, and viewable by the admin in `/admin` → Users. `SECRET_KEY`
+  is therefore REQUIRED (no code default; boot refuses a missing/placeholder value). Usage rule:
+  one account is used by one person at a time.
+- **Admin:** standard JWT, role `admin` (seeded from `SEED_ADMIN_PASSWORD`; self-set, never viewable).
 - **No multi-tenancy** for the PoC.
 
 ---
