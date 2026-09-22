@@ -138,7 +138,7 @@ backend ~25 min · frontend ~30 min · test migration ~30 min · docs ~10 min.
 | 2 | [P1] `client.ts:198-207` 401 self-heal calls `ensureSession()` with no identity → after this change it fails with a bare red `401` line and no way out | **2A** — `ensureSession()` sends the bearer; 401/403 from the session endpoint raise a typed `CandidateAuthError(status, detail)` and clear both tokens; `InterviewPage.guard()` routes it to the login card showing the backend `detail` verbatim |
 | 3 | [P2] `voice_live_ws.py:74-83` accepts any active non-anonymous JWT (no role check) — candidate JWTs now exist | **3 keep** — owner: any logged-in (non-anonymous) account may use the WS channel; no role check |
 | 4 | [P2] `users.password_generation` is unnecessary under the reduced scope | **4B** — keep the column (seed = 1, admin = NULL) for a future reset feature; `generated_password` is shown only when `verify_password(derived, hashed)` is true, else `password_stale: true` |
-| 5 | [P2] `config.py:25` default `SECRET_KEY` makes seeded passwords publicly computable | **5A** — WARNING log at boot when the key is the code default and candidates are seeded; still seed (dev convenience; prod keys come from bicep / gen-secrets.sh) |
+| 5 | [P2] `config.py:25` default `SECRET_KEY` makes seeded passwords publicly computable | **5A → superseded by X1** — `SECRET_KEY` becomes REQUIRED: the code default is removed, boot fails with a clear "set SECRET_KEY (see .env.example)" error when it is missing. Local dev reads it from the gitignored `backend/.env` (already set), Azure/client deploys from bicep / gen-secrets.sh, E2E passes a test key in `playwright.config.ts` |
 | 6 | [P3] `SPEC.md:64-66` says the anon token "never" touches localStorage; `client.ts:10,175` stores it there | **6A** — rewrite §4 with the login model and the real token storage (candidate JWT → sessionStorage; anon token → localStorage for resume) |
 | 7 | [P2] DRY: 27-line admin login card (`AdminPage.tsx:390-416`) would be duplicated | **7A** — shared `components/LoginCard.tsx` (props: title, body, error, busy, onSubmit, testIdPrefix); AdminPage switches to it, `admin-*` testids preserved |
 | 8 | [P2] DRY: third copy of the guarded get/set/clear token trio | **8A** — `api/tokenStore.ts` factory used by admin, anon and candidate tokens; exported names unchanged |
@@ -191,3 +191,34 @@ Synthesized from the findings above; checkbox as you ship.
 - [ ] **T7 (P1 REGRESSION, human ~1d / CC ~30min)** — tests — `candidate_auth` conftest fixture; update the 9 backend test files; `frontend/e2e/helpers/candidateLogin.ts` + the 13 E2E specs; new admin Users tab E2E. Surfaced by: test review (mandatory regression rule). Verify: `pytest -q` ≥ 85%; `npm run e2e` green.
 - [ ] **T8 (P2, human ~2h / CC ~10min)** — docs — SPEC.md §4 (login model + real token storage, 6A), `docs/IMPLEMENTATION-STATUS.md`, `CHANGELOG.md`, `delivery/docs/手册-v2.md` "候选人账号" section (incl. SECRET_KEY rotation note and what survives an ephemeral rebuild). Surfaced by: spec AC8, 6A. Verify: docs review.
 _No new tasks from Performance review._
+
+### Outside voice (Claude subagent; codex refused to run because the project CLAUDE.md's gstack-install gate is not satisfied in its own skill directory) — cross-model decisions
+| # | Outside-voice finding | Owner decision |
+|---|---|---|
+| X1 | Public default `SECRET_KEY` + log-only mitigation | **Adopted (owner's variant):** `SECRET_KEY` required, no code default, boot fails when missing; `.env.example` keeps a placeholder + `openssl rand -hex 32` hint |
+| X2 | `password_generation` is YAGNI under the reduced scope | **Keep 4B** (column stays) |
+| X3 | Candidate seed ungated while admin seed is gated | **Keep spec:** candidates always seeded; docstring explains why derived, always-on candidate credentials are acceptable where a known-credential admin is not |
+| X4 | Decision 3 also means a candidate JWT can pick any `persona_id` on the WS | **Accepted explicitly** (no role check, no persona restriction) |
+| X5 | Two devices logging in as `user1` share one interview session | **Accepted:** documented usage rule "one account = one person at a time" in the Users tab hint and the client manual; no code change |
+| #4 | Precedent inversion undocumented | Folded: one paragraph in `user_seed.py` docstring |
+| #7 | Resume-after-relogin path not traced | Folded: the login card does NOT touch `localStorage.interview_session_id`; after login `ensureSession()` replaces the anon token with the (idempotently reused) session; `resumeInterview()` then reads the saved id as today. E2E "close tab → re-login → same question" pins it |
+| #8 | Two auth-failure UX paths | Folded: `request()`'s 401 self-heal calls `ensureSession()`; when that raises `CandidateAuthError` it propagates to the login card, so JWT loss mid-interview and at creation share one path; a pure anon-token expiry with a valid JWT mints a new session and the stale saved interview id is cleared by the existing resume fallback |
+| #9 | Shared `LoginCard`/`tokenStore` couples the two flows | **Rejected** (7A/8A stand): `testIdPrefix` is test isolation, not behavioural divergence; post-login behaviour lives in the pages, not the card |
+
+Implementation task delta: **T3** gains "make `SECRET_KEY` required (remove default, startup check, `.env.example` note, E2E key)"; **T6/T8** gain the "one account = one person at a time" hint + manual sentence.
+
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | — |
+| Codex Review | `/codex review` | Independent 2nd opinion | 0 | — | — |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | CLEAR (PLAN, SCOPE_REDUCED) | 9 issues + 5 cross-model decisions, 0 critical gaps, 35 test gaps planned |
+| Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | — |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | — |
+
+- **CROSS-MODEL:** outside voice (Claude subagent) raised 9 points; 1 adopted (X1), 4 folded as clarifications (#4, #7, #8 + X5 documentation), 3 kept as previously decided (X2, X3, X4), 1 rejected (#9). No unresolved tension.
+- **VERDICT:** ENG CLEARED — ready to implement (scope: login gate + seeded user1/2/3 + read-only Users tab).
+
+NO UNRESOLVED DECISIONS
