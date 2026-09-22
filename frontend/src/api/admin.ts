@@ -220,3 +220,25 @@ export const testExternalConfig = () =>
 /** Return the PLAINTEXT external API key for a deliberate admin click-to-reveal. Never cached. */
 export const revealExternalKey = () =>
   adminRequest<{ api_key: string }>("/admin/external-interviewer/reveal");
+
+// ── Users (#102, read-only per the eng review — no create/reset-password endpoints yet) ────────
+// One shared account per candidate seat (user1/user2/user3…): the Users tab exists so an admin can
+// hand out the seeded credentials, not to manage accounts. `generated_password` is the plaintext
+// the backend generated at seed/creation time — it's only ever returned while that password is
+// still current; once the signing SECRET_KEY rotates, existing generated passwords go stale
+// (`password_stale`) and the admin must re-seed/reset out of band (not exposed here yet).
+
+export interface AdminUser {
+  id: string;
+  username: string;
+  role: string;
+  is_active: boolean;
+  // The plaintext password generated for this account, or null once it's no longer viewable
+  // (rotated out-of-band, or never had one on record).
+  generated_password: string | null;
+  // True when the backend's signing key has rotated since this password was generated — the
+  // account needs a fresh password before it can be handed out again.
+  password_stale: boolean;
+}
+
+export const listUsers = () => adminRequest<AdminUser[]>("/admin/users");

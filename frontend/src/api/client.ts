@@ -4,10 +4,19 @@
  * The anonymous session token is created once and held in memory + localStorage, then sent as
  * X-Anon-Session on every candidate call (mirrors the backend auth contract). No secrets here —
  * the token is a signed pointer whose authority is the server-side DB row.
+ *
+ * #102: minting that anon session now requires the candidate's own JWT (Authorization: Bearer) —
+ * the backend ties one candidate account to one interview session. ensureSession() sends it; a
+ * 401/403 there means the candidate token is missing/invalid/expired or belongs to an admin, so
+ * both the candidate token and the (now-orphaned) anon token are dropped and a typed
+ * {@link CandidateAuthError} is thrown for the page to react to (back to the login card).
  */
+import { clearCandidateToken, getCandidateToken } from "./auth";
+import { tokenStore } from "./tokenStore";
 
 const BASE = "/api";
 const TOKEN_KEY = "anon_session_token";
+const anonTokenStore = tokenStore("local", TOKEN_KEY);
 
 export interface Question {
   question_id: string;
@@ -171,16 +180,47 @@ export class VoiceSessionError extends Error {
   }
 }
 
+/**
+ * Thrown when minting/refreshing the anon session is rejected because the candidate's own JWT is
+ * missing, invalid, expired, or (403) belongs to an admin account — never a candidate. `detail` is
+ * the backend's message (verbatim for the 403 "Admin accounts cannot take interviews" case; the
+ * 401 detail varies and the page shows its own copy instead). Callers should treat this as "back to
+ * the login card", not a generic request failure.
+ */
+export class CandidateAuthError extends Error {
+  status: number;
+  detail: string;
+  constructor(detail: string, status: number) {
+    super(detail);
+    this.name = "CandidateAuthError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
 function getToken(): string | null {
-  return typeof localStorage !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
+  return anonTokenStore.get();
 }
 
 function setToken(token: string): void {
-  if (typeof localStorage !== "undefined") localStorage.setItem(TOKEN_KEY, token);
+  anonTokenStore.set(token);
 }
 
 function clearToken(): void {
-  if (typeof localStorage !== "undefined") localStorage.removeItem(TOKEN_KEY);
+  anonTokenStore.clear();
+}
+
+/** Extract a human-readable error detail from a non-ok response: the `detail` field of a JSON
+ * body when present, otherwise the raw response text. */
+async function extractErrorDetail(resp: Response): Promise<string> {
+  const text = await resp.text().catch(() => "");
+  try {
+    const parsed = JSON.parse(text) as { detail?: unknown };
+    if (parsed && typeof parsed.detail === "string") return parsed.detail;
+  } catch {
+    /* not JSON — fall through to the raw text */
+  }
+  return text;
 }
 
 async function request<T>(path: string, init: RequestInit = {}, _retried = false): Promise<T> {
@@ -211,14 +251,37 @@ async function request<T>(path: string, init: RequestInit = {}, _retried = false
   return (await resp.json()) as T;
 }
 
-/** Ensure an anonymous candidate session exists; returns the token. */
+/**
+ * Ensure an anonymous candidate session exists; returns the token. Reuses a cached anon token
+ * without a network call; otherwise mints one, sending the candidate's own JWT as
+ * `Authorization: Bearer` (#102 — the backend requires it and reuses the same session while it's
+ * unexpired, so this stays idempotent per user / safe to call again on resume). A 401 (missing/
+ * invalid/expired/inactive candidate token) or 403 (an admin account trying to take an interview)
+ * clears BOTH the candidate token and the anon token and throws {@link CandidateAuthError}.
+ */
 export async function ensureSession(): Promise<string> {
   const existing = getToken();
   if (existing) return existing;
-  const body = await request<{ session_id: string; token: string; expires_at: string }>(
-    "/public/candidate/session",
-    { method: "POST" },
-  );
+
+  const headers = new Headers({ "Content-Type": "application/json" });
+  const candidateToken = getCandidateToken();
+  if (candidateToken) headers.set("Authorization", `Bearer ${candidateToken}`);
+
+  const resp = await fetch(`${BASE}/public/candidate/session`, {
+    method: "POST",
+    headers,
+  });
+  if (!resp.ok) {
+    if (resp.status === 401 || resp.status === 403) {
+      const detail = await extractErrorDetail(resp);
+      clearCandidateToken();
+      clearToken();
+      throw new CandidateAuthError(detail, resp.status);
+    }
+    const detail = await resp.text().catch(() => "");
+    throw new Error(`${resp.status} ${resp.statusText}: ${detail}`);
+  }
+  const body = (await resp.json()) as { session_id: string; token: string; expires_at: string };
   setToken(body.token);
   return body.token;
 }
@@ -235,6 +298,20 @@ function saveInterviewId(id: string): void {
 
 function clearSavedInterviewId(): void {
   if (typeof localStorage !== "undefined") localStorage.removeItem(INTERVIEW_KEY);
+}
+
+/**
+ * Candidate sign-out (#102): clears the candidate JWT, the anon session token, and the saved
+ * interview id — exactly these three keys. The saved interview id is deliberately NOT cleared
+ * anywhere else (so logging back in resumes the same in-progress interview via
+ * {@link resumeInterview}); it's cleared here because a signed-out candidate must not have their
+ * next visit silently resume someone else's session on a shared machine. Callers should tear down
+ * any live voice connection BEFORE calling this.
+ */
+export function signOutCandidate(): void {
+  clearCandidateToken();
+  clearToken();
+  clearSavedInterviewId();
 }
 
 /** Start an interview — or resume the candidate's in-progress one (the backend reuses it), and

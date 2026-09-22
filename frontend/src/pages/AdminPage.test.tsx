@@ -342,4 +342,110 @@ describe("AdminPage", () => {
     await user.click(await screen.findByTestId("admin-nav-agent"));
     await waitFor(() => expect(screen.getByText("Agent editor page")).toBeInTheDocument());
   });
+
+  // #102 (eng-review-reduced scope): a read-only Users tab so an admin can hand out the seeded
+  // shared-account credentials — no create/reset-password affordances yet.
+  describe("Users tab (#102)", () => {
+    async function openUsersTab(user: ReturnType<typeof userEvent.setup>) {
+      mockAdminLogin();
+      vi.spyOn(admin, "listBanks").mockResolvedValue([]);
+      vi.spyOn(admin, "getAiFoundryConfig").mockResolvedValue(EMPTY_CFG);
+      renderPage();
+      await signIn(user);
+      await user.click(await screen.findByTestId("admin-tab-users"));
+    }
+
+    it("loads and renders users with a generated password, a stale password, and no password", async () => {
+      const user = userEvent.setup();
+      const listUsers = vi.spyOn(admin, "listUsers").mockResolvedValue([
+        {
+          id: "u1",
+          username: "user1",
+          role: "user",
+          is_active: true,
+          generated_password: "abc12345",
+          password_stale: false,
+        },
+        {
+          id: "u2",
+          username: "user2",
+          role: "user",
+          is_active: false,
+          generated_password: null,
+          password_stale: true,
+        },
+        {
+          id: "u3",
+          username: "user3",
+          role: "user",
+          is_active: true,
+          generated_password: null,
+          password_stale: false,
+        },
+      ]);
+
+      await openUsersTab(user);
+
+      await waitFor(() => expect(listUsers).toHaveBeenCalled());
+      // Active user with a viewable generated password: shown in the clear + a Copy button.
+      expect(screen.getByTestId("user-password-user1")).toHaveTextContent("abc12345");
+      expect(screen.getByTestId("user-copy-user1")).toBeInTheDocument();
+      // Stale password (signing key rotated): the stale message, not the password.
+      expect(screen.getByTestId("user-password-stale-user2")).toBeInTheDocument();
+      expect(screen.getByText(/password needs reset/i)).toBeInTheDocument();
+      expect(screen.getByText(/inactive/i)).toBeInTheDocument();
+      // No password on record, not stale: "not viewable".
+      expect(screen.getByTestId("user-password-not-viewable-user3")).toBeInTheDocument();
+    });
+
+    it("copies the password and shows Copied after the click", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(admin, "listUsers").mockResolvedValue([
+        {
+          id: "u1",
+          username: "user1",
+          role: "user",
+          is_active: true,
+          generated_password: "abc12345",
+          password_stale: false,
+        },
+      ]);
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText },
+        configurable: true,
+      });
+
+      await openUsersTab(user);
+      await screen.findByTestId("user-copy-user1");
+      await user.click(screen.getByTestId("user-copy-user1"));
+
+      expect(writeText).toHaveBeenCalledWith("abc12345");
+      await waitFor(() => expect(screen.getByTestId("user-copy-user1")).toHaveTextContent(/copied/i));
+    });
+
+    it("shows a loading state while the request is in flight", async () => {
+      const user = userEvent.setup();
+      let resolveUsers: (value: admin.AdminUser[]) => void = () => {};
+      vi.spyOn(admin, "listUsers").mockImplementation(
+        () => new Promise((resolve) => (resolveUsers = resolve)),
+      );
+
+      await openUsersTab(user);
+
+      expect(screen.getByTestId("users-loading")).toBeInTheDocument();
+      resolveUsers([]);
+      await waitFor(() => expect(screen.queryByTestId("users-loading")).not.toBeInTheDocument());
+    });
+
+    it("shows an error state when the request fails", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(admin, "listUsers").mockRejectedValue(new admin.AdminApiError("500 boom", 500));
+
+      await openUsersTab(user);
+
+      await waitFor(() => expect(screen.getByTestId("users-error")).toHaveTextContent(/500 boom/));
+      expect(screen.queryByTestId("users-table")).not.toBeInTheDocument();
+    });
+  });
 });

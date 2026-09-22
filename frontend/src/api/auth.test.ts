@@ -56,3 +56,41 @@ describe("auth client", () => {
     expect(u?.role).toBe("admin");
   });
 });
+
+// #102: candidates authenticate against the same /auth/login endpoint as admins, but their JWT is
+// kept under its own sessionStorage key so it never collides with (or is cleared alongside) an
+// admin session.
+describe("candidate auth (#102)", () => {
+  it("loginCandidate stores the JWT under the candidate key and returns it", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ access_token: "candidate-jwt-1" }), { status: 200 }),
+    );
+    const token = await auth.loginCandidate("user1", "pw");
+    expect(token).toBe("candidate-jwt-1");
+    expect(auth.getCandidateToken()).toBe("candidate-jwt-1");
+    // Admin token is untouched by a candidate login.
+    expect(auth.getToken()).toBe("");
+  });
+
+  it("loginCandidate throws AuthError on 401 and stores nothing", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 401 }));
+    await expect(auth.loginCandidate("user1", "bad")).rejects.toBeInstanceOf(auth.AuthError);
+    expect(auth.getCandidateToken()).toBe("");
+  });
+
+  it("loginCandidate throws AuthError with the response status for non-401 failures", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 500 }));
+    await expect(auth.loginCandidate("user1", "pw")).rejects.toMatchObject({ status: 500 });
+  });
+
+  it("setCandidateToken/clearCandidateToken round-trip independently of the admin token", () => {
+    auth.setToken("admin-jwt");
+    auth.setCandidateToken("candidate-jwt");
+    expect(auth.getToken()).toBe("admin-jwt");
+    expect(auth.getCandidateToken()).toBe("candidate-jwt");
+
+    auth.clearCandidateToken();
+    expect(auth.getCandidateToken()).toBe("");
+    expect(auth.getToken()).toBe("admin-jwt"); // unaffected
+  });
+});
