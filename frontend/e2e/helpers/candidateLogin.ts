@@ -114,8 +114,13 @@ export async function finishOpenInterview(token: string): Promise<void> {
         headers: anon,
         data: { text: "(e2e cleanup) skipped", source: "text" },
       });
-      if (!r.ok()) break;
+      if (!r.ok()) break; // no current question left (review stage) → finalize below
       iv = (await r.json()) as typeof iv;
+    }
+    if (iv.status === "in_progress") {
+      // All questions answered but not yet submitted: requesting the report scores + closes it
+      // (mock scorer locally), so the next start is a fresh interview.
+      await api.post(`/candidate/interview/${id}/report`, { headers: anon });
     }
   } finally {
     await api.dispose();
