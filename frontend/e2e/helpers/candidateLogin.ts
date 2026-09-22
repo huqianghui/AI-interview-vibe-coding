@@ -21,6 +21,21 @@ export const CANDIDATE_TOKEN_KEY = "candidate_access_token";
 
 type AdminUserRow = { username: string; generated_password: string | null };
 
+/** An API context + the seeded admin's bearer headers (JSON content type included). */
+export async function adminApi(): Promise<{
+  api: Awaited<ReturnType<typeof pwRequest.newContext>>;
+  headers: Record<string, string>;
+}> {
+  const api = await pwRequest.newContext({ baseURL: API });
+  const login = await api.post("/auth/login", {
+    headers: { "Content-Type": "application/json" },
+    data: { username: ADMIN_USER, password: ADMIN_PW },
+  });
+  if (!login.ok()) throw new Error(`admin login failed: ${login.status()} ${await login.text()}`);
+  const token = (await login.json()).access_token as string;
+  return { api, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } };
+}
+
 /** Log in as the admin and return the derived password of a seeded candidate account. */
 export async function candidatePassword(username = "user1"): Promise<string> {
   const api = await pwRequest.newContext({ baseURL: API });

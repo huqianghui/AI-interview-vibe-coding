@@ -1,5 +1,12 @@
 import { expect, test } from "@playwright/test";
-import { candidatePassword, enterTextChannel, waitForInterviewStage } from "./helpers/candidateLogin";
+import {
+  adminApi,
+  candidatePassword,
+  candidateToken,
+  enterTextChannel,
+  finishOpenInterview,
+  waitForInterviewStage,
+} from "./helpers/candidateLogin";
 
 /**
  * #102 — candidate login gate + admin Users tab. Runs in BOTH configs:
@@ -13,6 +20,51 @@ import { candidatePassword, enterTextChannel, waitForInterviewStage } from "./he
 const ADMIN_USER = process.env.E2E_ADMIN_USERNAME || "admin";
 const ADMIN_PW = process.env.E2E_ADMIN_PASSWORD || "e2e-admin-pw";
 const PW_RE = /[a-z2-7]{4}-[a-z2-7]{4}-[a-z2-7]{4}/;
+// Live runs (real .env) drive the client's real default persona/bank (often the external brain) —
+// never touch their default bank. Mock runs author a deterministic multi-question bank so "answer
+// Q1, resume at Q2" is guaranteed regardless of what a sibling spec left as default.
+const LIVE = process.env.LIVE_VOICE === "1";
+let previousDefaultBankId: string | null = null;
+
+test.beforeAll(async () => {
+  if (LIVE) return;
+  const { api, headers } = await adminApi();
+  try {
+    const banks = (await (await api.get("/admin/question-banks", { headers })).json()) as {
+      bank_id: string;
+      is_default: boolean;
+    }[];
+    previousDefaultBankId = banks.find((b) => b.is_default)?.bank_id ?? null;
+    const bank = (await (
+      await api.post("/admin/question-banks", {
+        headers,
+        data: { name: `E2E Login Bank ${Date.now()}`, is_default: true },
+      })
+    ).json()) as { bank_id: string };
+    for (const text of [
+      "Describe how you prepare a site for an inspection.",
+      "How do you track training completion across the region?",
+      "What do you do when a deviation is found during an audit?",
+    ]) {
+      await api.post(`/admin/question-banks/${bank.bank_id}/questions`, {
+        headers,
+        data: { text, max_follow_ups: 0 },
+      });
+    }
+  } finally {
+    await api.dispose();
+  }
+});
+
+test.afterAll(async () => {
+  if (LIVE || !previousDefaultBankId) return;
+  const { api, headers } = await adminApi();
+  try {
+    await api.post(`/admin/question-banks/${previousDefaultBankId}/default`, { headers });
+  } finally {
+    await api.dispose();
+  }
+});
 
 async function signIn(page: import("@playwright/test").Page, username: string, password: string) {
   await page.getByTestId("candidate-username-input").fill(username);
@@ -36,6 +88,8 @@ test("interview page is gated: card shown, wrong password rejected, admin refuse
 test("user1 signs in, starts, answers, signs out, and resumes after a fresh tab", async ({ page, browser }) => {
   test.setTimeout(240_000);
   const password = await candidatePassword("user1");
+  // Clean slate: a sibling spec may have left user1 mid-interview (sessions are per account).
+  await finishOpenInterview(await candidateToken("user1"));
 
   await page.goto("/interview");
   await signIn(page, "user1", password);
