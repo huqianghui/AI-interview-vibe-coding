@@ -58,6 +58,10 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   if (LIVE || !previousDefaultBankId) return;
+  // Walk user1's leftover interview to completion BEFORE switching the default bank back: bank
+  // questions resolve against the current default bank, so an interview parked at Q2 of our
+  // 3-question bank would be stranded (no question, not scorable) once a 1-question bank is default.
+  await finishOpenInterview(await candidateToken("user1"));
   const { api, headers } = await adminApi();
   try {
     await api.post(`/admin/question-banks/${previousDefaultBankId}/default`, { headers });
