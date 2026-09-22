@@ -49,7 +49,10 @@ test("user1 signs in, starts, answers, signs out, and resumes after a fresh tab"
   await enterTextChannel(page);
   await page.getByRole("textbox").fill("A first answer of reasonable length for the resume check.");
   await page.getByRole("button", { name: /提交回答|submit answer/i }).click();
-  await expect(page.getByRole("textbox")).toHaveValue("", { timeout: 60_000 });
+  // An external brain hides the input while it "thinks"; wait for the next turn to open, then the
+  // box is back and empty.
+  await expect(page.getByRole("textbox")).toBeVisible({ timeout: 120_000 });
+  await expect(page.getByRole("textbox")).toHaveValue("");
 
   // A brand-new context = closed tab (sessionStorage AND localStorage gone).
   const fresh = await browser.newContext();
@@ -60,6 +63,8 @@ test("user1 signs in, starts, answers, signs out, and resumes after a fresh tab"
   // Same account → the backend hands back the same session → Start RESUMES the same interview
   // (same interview id, no orientation screen).
   await page2.getByRole("button", { name: /开始面试|start interview/i }).click();
+  // The page always shows the orientation beat after Start (resume included).
+  await page2.getByRole("button", { name: /我准备好了|i'm ready/i }).click();
   await waitForInterviewStage(page2);
   const resumedId = await page2.evaluate(() => localStorage.getItem("interview_session_id"));
   expect(resumedId).toBe(interviewId);
