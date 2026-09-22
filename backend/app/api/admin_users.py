@@ -69,19 +69,21 @@ async def _get_or_404(db: AsyncSession, user_id: str) -> User:
 
 
 @router.get("/{user_id}", response_model=AdminUserResponse)
-async def get_user(user_id: str, db: AsyncSession = Depends(get_db)) -> User:
-    return await _get_or_404(db, user_id)
+async def get_user(user_id: str, db: AsyncSession = Depends(get_db)) -> AdminUserResponse:
+    return await _with_derived_password(await _get_or_404(db, user_id))
 
 
 @router.patch("/{user_id}", response_model=AdminUserResponse)
-async def update_user(user_id: str, data: UserUpdate, db: AsyncSession = Depends(get_db)) -> User:
+async def update_user(
+    user_id: str, data: UserUpdate, db: AsyncSession = Depends(get_db)
+) -> AdminUserResponse:
     """Update user fields (partial). Only fields present in the body are changed."""
     user = await _get_or_404(db, user_id)
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(user, field, value)
     await db.commit()
     await db.refresh(user)
-    return user
+    return await _with_derived_password(user)
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)

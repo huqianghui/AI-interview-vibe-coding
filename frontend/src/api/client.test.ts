@@ -5,6 +5,7 @@ import {
   _internal,
   ensureSession,
   getReportStream,
+  resetCandidateSession,
   signOutCandidate,
   startInterview,
 } from "./client";
@@ -162,6 +163,25 @@ describe("signOutCandidate (#102)", () => {
     expect(localStorage.getItem(_internal.TOKEN_KEY)).toBeNull();
     expect(localStorage.getItem("interview_session_id")).toBeNull();
     expect(localStorage.getItem("unrelated_key")).toBe("keep-me");
+  });
+});
+
+describe("resetCandidateSession (#102, decision 1A)", () => {
+  afterEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+
+  it("drops the inherited anon token and saved interview id but keeps the candidate JWT", () => {
+    auth.setCandidateToken("candidate-jwt");
+    localStorage.setItem(_internal.TOKEN_KEY, "previous-visitor-anon-tok");
+    localStorage.setItem("interview_session_id", "previous-visitor-iv");
+
+    resetCandidateSession();
+
+    expect(auth.getCandidateToken()).toBe("candidate-jwt");
+    expect(localStorage.getItem(_internal.TOKEN_KEY)).toBeNull();
+    expect(localStorage.getItem("interview_session_id")).toBeNull();
   });
 });
 

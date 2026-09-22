@@ -38,17 +38,9 @@ export async function adminApi(): Promise<{
 
 /** Log in as the admin and return the derived password of a seeded candidate account. */
 export async function candidatePassword(username = "user1"): Promise<string> {
-  const api = await pwRequest.newContext({ baseURL: API });
+  const { api, headers } = await adminApi();
   try {
-    const admin = await api.post("/auth/login", {
-      headers: { "Content-Type": "application/json" },
-      data: { username: ADMIN_USER, password: ADMIN_PW },
-    });
-    if (!admin.ok()) throw new Error(`admin login failed: ${admin.status()} ${await admin.text()}`);
-    const adminToken = (await admin.json()).access_token as string;
-    const users = await api.get("/admin/users", {
-      headers: { Authorization: `Bearer ${adminToken}` },
-    });
+    const users = await api.get("/admin/users", { headers });
     if (!users.ok()) throw new Error(`GET /admin/users failed: ${users.status()}`);
     const row = ((await users.json()) as AdminUserRow[]).find((u) => u.username === username);
     if (!row?.generated_password) {

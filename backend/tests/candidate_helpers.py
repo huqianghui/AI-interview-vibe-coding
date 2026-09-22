@@ -13,11 +13,12 @@ from app.services.auth_service import create_access_token, get_password_hash
 _HASH = get_password_hash("pw")  # bcrypt once per module; the password itself never matters here
 
 
-async def new_candidate_bearer(db_session) -> dict:
-    """Create a unique role=user account and return its JWT auth header."""
+async def new_candidate_bearer(db_session, username: str | None = None) -> dict:
+    """Create a role=user account (unique name unless given) and return its JWT auth header."""
+    username = username or f"cand-{uuid.uuid4().hex[:10]}"
     user = User(
-        username=f"cand-{uuid.uuid4().hex[:10]}",
-        email=f"cand-{uuid.uuid4().hex[:10]}@local",
+        username=username,
+        email=f"{username}@local",
         hashed_password=_HASH,
         role="user",
     )

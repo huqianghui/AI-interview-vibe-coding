@@ -34,7 +34,17 @@ class SessionCreateResponse(BaseModel):
     expires_at: str
 
 
-@router.post("/session", response_model=SessionCreateResponse)
+@router.post(
+    "/session",
+    response_model=SessionCreateResponse,
+    summary="Mint the candidate session token (requires a candidate login)",
+    description=(
+        "Despite the `/public` path segment (kept for URL stability), this route REQUIRES "
+        "`Authorization: Bearer <candidate JWT>` from `/auth/login` with a `user`-role account: "
+        "401 when missing/invalid/inactive, 403 for admin accounts. Idempotent per account — an "
+        "unexpired, unrevoked session is returned again (fresh token, same session)."
+    ),
+)
 async def create_session(
     request: Request,
     candidate: User = Depends(require_candidate),

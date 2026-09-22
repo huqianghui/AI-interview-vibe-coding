@@ -75,15 +75,6 @@ async def test_touch_increments_request_count(db_session):
 
 
 @pytest.mark.asyncio
-async def test_protected_dep_missing_header_401(client):
-    # verify_anonymous_token is exercised via the dependency: no header → 401.
-    # (No candidate-protected route yet; assert the session-create flow then a
-    # manual dependency call would 401 — covered by dependency unit below.)
-    resp = await client.post("/public/candidate/session")
-    assert resp.status_code == 401
-
-
-@pytest.mark.asyncio
 async def test_get_anonymous_session_dependency_missing_header(db_session):
     from fastapi import HTTPException
 

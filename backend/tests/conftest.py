@@ -169,16 +169,6 @@ async def candidate_auth(db_session):
 
     Mirrors ``admin_auth``: minting an anonymous candidate session now requires this bearer.
     """
-    from app.models.user import User
-    from app.services.auth_service import create_access_token, get_password_hash
+    from tests.candidate_helpers import new_candidate_bearer
 
-    user = User(
-        username="test-candidate",
-        email="test-candidate@local",
-        hashed_password=get_password_hash("pw"),
-        role="user",
-    )
-    db_session.add(user)
-    await db_session.commit()
-    await db_session.refresh(user)
-    return {"Authorization": f"Bearer {create_access_token(data={'sub': user.id})}"}
+    return await new_candidate_bearer(db_session, username="test-candidate")
