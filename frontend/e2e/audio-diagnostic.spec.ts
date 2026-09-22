@@ -10,7 +10,7 @@
  * Run: LIVE_VOICE=1 npx playwright test audio-diagnostic --config=e2e/live.config.ts
  */
 import { test, expect } from "@playwright/test";
-import { enterVoiceChannel, primeCandidateLogin } from "./helpers/candidateLogin";
+import { enterVoiceChannel, primeCandidateLogin, waitForInterviewStage } from "./helpers/candidateLogin";
 
 const LIVE = process.env.LIVE_VOICE === "1";
 const BASE = process.env.BASE || "http://localhost:5173";
@@ -59,7 +59,7 @@ test.describe("Audio diagnostic (real Azure)", () => {
     await page.goto(`${BASE}/interview`);
     await page.getByRole("button", { name: /开始面试|start interview/i }).click();
     await page.getByRole("button", { name: /我准备好了|i'm ready/i }).click();
-    await expect(page.getByTestId("question-progress")).toBeVisible(); // voice_default: no textbox
+    await waitForInterviewStage(page); // bank or external brain, text or voice channel
     await enterVoiceChannel(page); // auto-voice persona: only clicks when still in text mode
 
     // Wait for the agent to produce its first spoken turn (transcript deltas streaming).
