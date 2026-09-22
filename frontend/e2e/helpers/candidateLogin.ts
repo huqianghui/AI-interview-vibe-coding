@@ -111,7 +111,9 @@ export async function primeCandidateLogin(
 
 /** Resolves once the interviewing screen is up (bank or external brain, text or voice channel). */
 export async function waitForInterviewStage(page: Page): Promise<void> {
-  await page.getByTestId("interview-stage").waitFor({ state: "visible", timeout: 60_000 });
+  // The top bar (progress + channel switch) always has content; the avatar stage itself can collapse
+  // to zero height while no video is attached, which Playwright counts as not visible.
+  await page.getByTestId("interview-topbar").waitFor({ state: "visible", timeout: 60_000 });
 }
 
 /**
