@@ -82,11 +82,11 @@ param foundryProjectEndpoint string = ''
 @description('Existing Foundry default project name (AZURE_FOUNDRY_DEFAULT_PROJECT).')
 param azureFoundryDefaultProject string = ''
 
-@description('Interviewer-agent model deployment name (FOUNDRY_AGENT_MODEL). Must exist on the reused Foundry resource.')
-param foundryAgentModel string = 'gpt-4o'
+@description('Interviewer-agent model deployment name (FOUNDRY_AGENT_MODEL). Must exist on the reused Foundry resource. Project default gpt-5-mini; second choice gpt-4.1-mini.')
+param foundryAgentModel string = 'gpt-5-mini'
 
-@description('Voice Live MODEL-mode model (VOICE_LIVE_DEFAULT_MODEL). Must be a VOICE-capable native model (gpt-4o family / realtime) — NOT the agent chat deployment (foundryAgentModel); a chat model here fails every voice session with "Model X is not supported in this region" and the interview silently degrades to text.')
-param voiceLiveDefaultModel string = 'gpt-4o'
+@description('Voice Live MODEL-mode model (VOICE_LIVE_DEFAULT_MODEL). Must be a model Voice Live hosts natively in the region (Learn: Speech regions → Voice Live tab), NOT an arbitrary deployment. Project default gpt-5-mini; second choice gpt-4.1-mini (both live-verified on swedencentral 2026-09-23; gpt-5.6-luna/sol, gpt-5.4-mini and gpt-6-* are rejected with "Model X is not supported in this region" and the interview silently degrades to text).')
+param voiceLiveDefaultModel string = 'gpt-5-mini'
 
 @description('Voice Live realtime api-version (VOICE_LIVE_API_VERSION).')
 param voiceLiveApiVersion string = '2026-01-01-preview'

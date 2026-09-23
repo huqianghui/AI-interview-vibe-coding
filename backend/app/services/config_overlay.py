@@ -50,8 +50,9 @@ async def apply_master_config_to_settings(db: AsyncSession) -> bool:
 
     # Voice Live path (voice_broker reads these at request time). NOTE: deliberately does NOT
     # overlay voice_live_default_model — ``model_or_deployment`` is the agent's CHAT deployment
-    # (e.g. gpt-5.4-mini), while Voice Live MODEL mode takes a native voice-capable model name
-    # (gpt-4o family / realtime); overlaying the chat model broke every model-mode voice session
+    # (e.g. gpt-5.4-mini), while Voice Live MODEL mode takes a model Voice Live hosts natively in
+    # the region (gpt-5-mini / gpt-4.1-mini / gpt-4o / realtime); overlaying broke every voice
+    # session
     # with "Model X is not supported in this region" the moment an admin saved a config (issue 4).
     # The voice model stays env-configured: VOICE_LIVE_DEFAULT_MODEL > code default.
     settings.azure_foundry_endpoint = master.endpoint
