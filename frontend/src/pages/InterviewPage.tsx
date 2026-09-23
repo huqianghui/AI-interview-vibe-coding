@@ -329,6 +329,12 @@ export function InterviewPage() {
   const [reviewAnswers, setReviewAnswers] = useState<AnsweredQuestion[]>([]);
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
+  // Synchronous mirror of `busy` for callbacks that fire outside React's render cycle (the silence
+  // auto-submit timer): a re-entrant commit while a submit is still in flight would arm a second
+  // `commitAnswer()` awaiter that the NEXT question's transcript could resolve — a misattributed
+  // answer that advances the interview twice. The button path is already `disabled={busy}`; the
+  // timer path checks this ref instead (state alone lags a render behind).
+  const busyRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [channel, setChannel] = useState<Channel>("text");
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
@@ -396,6 +402,9 @@ export function InterviewPage() {
     // closure always sees the latest.
     silenceAutoCommitMs: autoSubmitSeconds > 0 ? autoSubmitSeconds * 1000 : null,
     onSilenceAutoCommit: () => {
+      // A submit is already in flight (button click or an earlier timer fire): the buffered speech
+      // is being committed by THAT call — a second commit would misattribute the next transcript.
+      if (busyRef.current) return;
       void onVoiceDone();
     },
     onTranscript,
@@ -412,6 +421,7 @@ export function InterviewPage() {
   });
 
   async function guard(fn: () => Promise<void>) {
+    busyRef.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -430,6 +440,7 @@ export function InterviewPage() {
         setError(e instanceof Error ? e.message : String(e));
       }
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }

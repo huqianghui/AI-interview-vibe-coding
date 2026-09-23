@@ -131,6 +131,16 @@ async def test_voice_auto_submit_pairs_round_trip_and_validate(client):
     final = (await client.get(f"/admin/personas/{plain['id']}", headers=AUTH)).json()
     assert final["bank_auto_submit_silence_seconds"] == 10
     assert final["external_auto_submit_silence_seconds"] == 3
+    # An EXPLICIT null (as opposed to omitting the field) is rejected as 422, never persisted.
+    for field in (
+        "bank_auto_submit_enabled",
+        "bank_auto_submit_silence_seconds",
+        "external_auto_submit_enabled",
+        "external_auto_submit_silence_seconds",
+    ):
+        assert (
+            await client.put(f"/admin/personas/{plain['id']}", headers=AUTH, json={field: None})
+        ).status_code == 422
     # The adjacent VALID boundaries are accepted on both create and update.
     for field in ("bank_auto_submit_silence_seconds", "external_auto_submit_silence_seconds"):
         for ok in (1, 60):

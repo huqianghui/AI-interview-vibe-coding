@@ -11,7 +11,7 @@ in the persona payload — it never 500s the create/update (F5 AC #4).
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
@@ -34,6 +34,12 @@ router = APIRouter(
 # anything past a minute is indistinguishable from "off" for the candidate.
 VOICE_AUTO_SUBMIT_MIN_SECONDS = 1
 VOICE_AUTO_SUBMIT_MAX_SECONDS = 60
+AUTO_SUBMIT_FIELDS = (
+    "bank_auto_submit_enabled",
+    "bank_auto_submit_silence_seconds",
+    "external_auto_submit_enabled",
+    "external_auto_submit_silence_seconds",
+)
 
 
 class VoiceKnobs(BaseModel):
@@ -128,6 +134,15 @@ class PersonaUpdate(BaseModel):
         if v is not None and v not in BRAIN_MODES:
             raise ValueError(f"interview_brain must be one of {BRAIN_MODES}")
         return v
+
+    @model_validator(mode="after")
+    def _reject_explicit_null_auto_submit(self) -> "PersonaUpdate":
+        # ``None`` here means "not sent" (exclude_unset drops it). An EXPLICIT ``null`` would slip
+        # past the ge/le bounds and hit the NOT NULL column as a misleading 409 — reject it as 422.
+        for field in AUTO_SUBMIT_FIELDS:
+            if field in self.model_fields_set and getattr(self, field) is None:
+                raise ValueError(f"{field} may not be null")
+        return self
 
 
 class PersonaOut(BaseModel):

@@ -23,10 +23,16 @@
   responses so the page's per-session latch is never switched off mid-interview). `useInterviewVoice`
   takes `silenceAutoCommitMs` instead of the removed `EXTERNAL_SILENCE_AUTOCOMMIT_MS` constant. The
   seconds input edits a draft and clamps on blur/Enter (no more per-keystroke snapping).
+- Hardening from the pre-landing adversarial review: a silence auto-submit that fires while a
+  submit is already in flight is dropped (the page mirrors `busy` in a ref the timer path checks), so
+  a second `commitAnswer()` can never be resolved by the NEXT question's transcript; and an explicit
+  `null` for any of the four new persona fields is rejected as 422 instead of surfacing as a
+  misleading 409 from the NOT NULL column.
 - Tests: +6 backend (per-engine defaults, bank/external pairs, session-snapshot engine, boundaries,
-  mutation routes unreported), +1 admin round-trip/validation; frontend +6 rail tests (new
-  `ConfigurationRail.test.tsx`), +4 form round-trips, +2 page latch tests, hook matrix extended
-  (bank arms too; default-off never arms for bank/external/0/null/NaN/Infinity/negative).
+  mutation routes unreported, explicit-null 422), +1 admin round-trip/validation; frontend +6 rail
+  tests (new `ConfigurationRail.test.tsx`), +4 form round-trips, +3 page tests (latch, off, no
+  double commit), hook matrix extended (bank arms too; default-off never arms for
+  bank/external/0/null/NaN/Infinity/negative).
 
 ## 0.38.0.2 (2026-09-23)
 
