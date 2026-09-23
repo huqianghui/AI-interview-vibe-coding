@@ -170,6 +170,24 @@ def build_avatar_session(persona: InterviewerPersona, *, locale: str | None) -> 
     # agent DOES drive the turn). VAD still detects end-of-utterance and transcribes in both modes —
     # only the auto-REPLY is suppressed — so candidate-answer capture is unaffected (external mode
     # advances via the "I'm done answering" / commitAnswer path, not the auto-response).
+    #
+    # This flag IS the backend half of "linear turns" (the frontend half is `linearTurns` in
+    # useInterviewVoice, which suppresses the turn-advancing bare ``response.create``; either half
+    # alone still leaves the model a way to speak). It is deliberately derived from the ENGINE and
+    # is NOT an admin knob — decided 2026-09-23 after the question "can bank mode acknowledge the
+    # answer but never follow up?" was explored and found unreachable:
+    #   1. ``create_response`` is a SINGLE boolean. The turn Azure auto-creates when the candidate
+    #      stops speaking is both the source of a "Thank you." acknowledgment AND of an unwanted
+    #      follow-up — there is no protocol-level way to allow one and forbid the other.
+    #   2. In agent mode Azure REJECTS overriding ``instructions`` inside ``response.create`` (live
+    #      verified; see useInterviewVoice's emitSpeak branch), so a scoped one-off "acknowledge
+    #      only, ask nothing" turn cannot be constructed for a bank persona either.
+    #   3. Owner decision: bank mode stays under MODEL + PROMPT control (``prompt_fragment``), since
+    #      turning linear turns on there would buy structural silence at the price of ALL reaction
+    #      between questions. External mode is linear because it supplies no brain at all.
+    # So: do not "add a linear_turns toggle" here — for bank it would be a blunt mute, and for
+    # external the behavior already is linear. Guarded by test_voice_live_proxy.py (bank ⇒ True,
+    # external ⇒ False).
     is_external = (getattr(persona, "interview_brain", "bank") or "bank") == "external"
     session_kwargs: dict[str, Any] = {
         "modalities": modalities,

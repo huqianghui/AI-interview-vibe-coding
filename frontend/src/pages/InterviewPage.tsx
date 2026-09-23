@@ -389,10 +389,13 @@ export function InterviewPage() {
   const voice = useInterviewVoice(interview?.interview_session_id ?? "", {
     locale: i18n.language,
     videoRef: avatarVideoRef,
-    // External-brain sessions: the digital human must not improvise a turn (commitAnswer skips its
-    // bare response.create). `external_phase` is non-null ONLY for external sessions, so it doubles
-    // as the flag — read live here; the hook re-syncs options every render.
-    externalMode: interview?.external_phase != null,
+    // LINEAR TURNS — on for external-brain sessions only: the external workflow supplies the brain,
+    // so the digital human gets no generative turn of its own and only reads what the backend
+    // injects (commitAnswer skips its bare response.create). Bank sessions keep their turn and let
+    // the PROMPT govern it — an engine decision, not an admin knob (see `linearTurns` in
+    // useInterviewVoice). `external_phase` is non-null ONLY for external sessions, so it doubles as
+    // the flag — read live here; the hook re-syncs options every render.
+    linearTurns: interview?.external_phase != null,
     // Silence auto-submit (admin-controlled per persona, OFF by default): when the persona enables
     // it, after the candidate stops speaking and stays silent for the configured window the hook
     // auto-submits the buffered answer via the SAME commit-and-advance path the "I'm done" button
