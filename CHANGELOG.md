@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.38.0.1 (2026-09-23)
+
+### Fixed
+- **Photo avatars (Adrian, Amara, …) now connect in voice mode** (#103). Picking any avatar from the
+  editor's **Photo** tab made the Playground and the candidate `/interview` page fail to connect
+  (owner saw "The `type` field of SessionUpdatedMessage message should be 'session.update'"; today
+  Azure reports it as `avatar_verification_failed: Avatar with character [adrian] and style [None]
+  not found`). Root cause: Azure's standard **photo** avatars (VASA-1 talking heads) have no style
+  and must be requested with `"type": "photo-avatar"` + `"model": "vasa-1"`; the session builders
+  sent only `character`/`customized`/`video`, so Azure treated "adrian" as a **video** avatar and
+  rejected the session. Video avatars (Lisa/Harry/Meg/Jeff/Lori/Max) were never affected.
+  - New single source of truth `build_avatar_config()` / `is_photo_avatar()` in
+    `voice_live_metadata.py` (rosters mirror `frontend/src/data/avatarCharacters.ts`) used by the
+    WS-proxy session (`voice_live_proxy.build_avatar_session`), the `/calls` broker session and the
+    agent metadata — photo → `type`/`model`, no `style`; video → `character` + `style` (a blank
+    video style now falls back to that character's own default, e.g. Harry → `business`, instead
+    of being sent as `null` or as Lisa-only `casual-sitting`, both of which Azure rejects). The
+    agent metadata previously stamped `casual-sitting` onto photo avatars; that is dropped too (a
+    photo avatar sent WITH a style is rejected by Azure). A backend test now parses the frontend
+    roster file so the two avatar lists can never drift apart silently.
+  - **Live-verified 2026-09-23** against real Azure in agent AND model mode, and end-to-end
+    through the backend WS proxy: all 6 video avatars + 5 sampled photo avatars reach
+    `session.updated` with `avatar.type` `video-avatar`/`photo-avatar` and ICE servers; a
+    re-synced agent whose metadata carries the new photo shape initializes fine. +14 backend
+    regression tests (wire shape for photo/video/blank/stale-style, metadata stays one ≤512-char
+    key). No frontend behavior change.
+
 ## 0.38.0.0 (2026-09-22)
 
 ### Added
