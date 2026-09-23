@@ -36,6 +36,15 @@ export interface PersonaOut {
   proactive_engagement: boolean;
   voice_temperature: number;
   playback_speed: number;
+  // Voice silence auto-submit — ONE INDEPENDENT PAIR PER ENGINE (bank defaults off, external
+  // defaults on, both 3s). When the pair for a session's engine is enabled, the candidate page
+  // auto-submits the buffered voice answer after that many seconds of silence; the "I'm done"
+  // button stays as the immediate override. Each window is remembered while its switch is off,
+  // and flipping interview_brain never carries one engine's pair into the other.
+  bank_auto_submit_enabled: boolean;
+  bank_auto_submit_silence_seconds: number;
+  external_auto_submit_enabled: boolean;
+  external_auto_submit_silence_seconds: number;
   model: string | null; // per-persona Foundry model deployment ("" / null → global default)
   // Phase 2: which interview engine drives this persona — "bank" (built-in question bank) or
   // "external" (the client's external interview API/server). Vendor-neutral token, never a product

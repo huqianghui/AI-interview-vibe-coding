@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { PersonaOut } from "../api/personas";
-import { formToPayload, normalizeLocale, personaToForm } from "./agentEditorForm";
+import { emptyPersonaForm, formToPayload, normalizeLocale, personaToForm } from "./agentEditorForm";
 
 const persona = (over: Partial<PersonaOut> = {}): PersonaOut => ({
   id: "p1",
@@ -29,6 +29,10 @@ const persona = (over: Partial<PersonaOut> = {}): PersonaOut => ({
   proactive_engagement: false,
   voice_temperature: 0.8,
   playback_speed: 1.0,
+  bank_auto_submit_enabled: false,
+  bank_auto_submit_silence_seconds: 3,
+  external_auto_submit_enabled: true,
+  external_auto_submit_silence_seconds: 3,
   model: null,
   interview_brain: "bank",
   agent_id: null,
@@ -91,5 +95,66 @@ describe("agentEditorForm externalReaderPrompt round-trip", () => {
     );
     expect(form.prompt_fragment).toBe("bank side");
     expect(form.externalReaderPrompt).toBe("reader side");
+  });
+});
+
+describe("agentEditorForm voice auto-submit pairs (one per engine, never shared)", () => {
+  it("new persona defaults: bank OFF / external ON, both 3s", () => {
+    const f = emptyPersonaForm();
+    expect(f.bank_auto_submit_enabled).toBe(false);
+    expect(f.bank_auto_submit_silence_seconds).toBe(3);
+    expect(f.external_auto_submit_enabled).toBe(true);
+    expect(f.external_auto_submit_silence_seconds).toBe(3);
+  });
+
+  it("loads both pairs from the persona and sends both in the payload", () => {
+    const form = personaToForm(
+      persona({
+        bank_auto_submit_enabled: true,
+        bank_auto_submit_silence_seconds: 10,
+        external_auto_submit_enabled: false,
+        external_auto_submit_silence_seconds: 20,
+      }),
+    );
+    expect(form.bank_auto_submit_enabled).toBe(true);
+    expect(form.bank_auto_submit_silence_seconds).toBe(10);
+    expect(form.external_auto_submit_enabled).toBe(false);
+    expect(form.external_auto_submit_silence_seconds).toBe(20);
+    const payload = formToPayload(form);
+    expect(payload.bank_auto_submit_enabled).toBe(true);
+    expect(payload.bank_auto_submit_silence_seconds).toBe(10);
+    expect(payload.external_auto_submit_enabled).toBe(false);
+    expect(payload.external_auto_submit_silence_seconds).toBe(20);
+  });
+
+  it("falls back to the engine defaults when an older backend omits the fields", () => {
+    const legacy = persona() as unknown as Record<string, unknown>;
+    delete legacy.bank_auto_submit_enabled;
+    delete legacy.bank_auto_submit_silence_seconds;
+    delete legacy.external_auto_submit_enabled;
+    delete legacy.external_auto_submit_silence_seconds;
+    const form = personaToForm(legacy as unknown as PersonaOut);
+    expect(form.bank_auto_submit_enabled).toBe(false);
+    expect(form.bank_auto_submit_silence_seconds).toBe(3);
+    expect(form.external_auto_submit_enabled).toBe(true);
+    expect(form.external_auto_submit_silence_seconds).toBe(3);
+  });
+
+  it("flipping the interview brain carries BOTH pairs untouched (separate config items)", () => {
+    const form = personaToForm(
+      persona({
+        interview_brain: "bank",
+        bank_auto_submit_enabled: true,
+        bank_auto_submit_silence_seconds: 7,
+        external_auto_submit_enabled: false,
+        external_auto_submit_silence_seconds: 15,
+      }),
+    );
+    const payload = formToPayload({ ...form, interviewBrain: "external" });
+    expect(payload.interview_brain).toBe("external");
+    expect(payload.bank_auto_submit_enabled).toBe(true);
+    expect(payload.bank_auto_submit_silence_seconds).toBe(7);
+    expect(payload.external_auto_submit_enabled).toBe(false);
+    expect(payload.external_auto_submit_silence_seconds).toBe(15);
   });
 });
