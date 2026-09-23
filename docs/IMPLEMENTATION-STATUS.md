@@ -162,10 +162,11 @@ Runtime config precedence is **DB > .env > code default**:
 - **`.env` (dev fallback)** — fills gaps when no DB row exists. `backend/.env.example` (committed,
   secret-free) documents every knob. Copy to `backend/.env` (gitignored) and fill in real values.
   Leaving the providers as `mock` needs zero Azure.
-- **Model deployments (gotcha)** — the model MUST be a deployment that exists on the target resource.
-  `gpt-4o` (the neutral code default) is NOT deployed on the demo resource and 404s on agent-create /
-  Voice Live; deployed there: `gpt-5.4-mini`, `gpt-4o-mini`, `gpt-5.4`, `gpt-5`. Set a deployed model
-  in the config page (or `FOUNDRY_AGENT_MODEL` / `VOICE_LIVE_DEFAULT_MODEL` in `.env`).
+- **Model deployments (gotcha)** — project default is `gpt-5-mini` for both the agent chat model and
+  the Voice Live model (second choice `gpt-4.1-mini`, v0.38.0.2). `FOUNDRY_AGENT_MODEL` must be a
+  deployment on the Foundry resource; `VOICE_LIVE_DEFAULT_MODEL` must be a model Voice Live hosts
+  natively in the region (own deployments don't count; `gpt-5.6-luna/sol`, `gpt-5.4-mini`, `gpt-6-*`
+  are rejected on swedencentral). Override in the config page or `.env`.
 
 ### Azure CI/CD deployment (v0.33.0.0)
 
