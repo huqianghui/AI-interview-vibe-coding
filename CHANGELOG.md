@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.38.1.0 (2026-09-23)
+
+### Changed
+- **Voice silence auto-submit is now admin-controlled per persona, with one independent setting
+  per interview engine.** Voice sessions used to auto-submit the candidate's answer after a hardcoded
+  3s of silence (external-brain sessions), which fired while candidates were still *thinking* — a
+  pause is not an end of answer. The `/admin/agent` Configuration rail gets an **Answer submission
+  (voice)** block showing the pair for the persona's current engine: **Auto-submit answer after
+  silence** (switch) and **Silence before auto-submit (seconds)** (1–60, remembered while off).
+  Defaults: **Question bank OFF** (the turn advances only on the explicit **I'm done** click) and
+  **External interview API ON at 3s** (its hands-free flow is unchanged). Both are admin-editable,
+  and the two engines are separate config items — switching the engine never carries one pair into
+  the other (same rule as the two prompt fields). When on, the interview page arms the timer after
+  every utterance, clears it when the candidate speaks again, and the button stays as the
+  immediate override.
+- Wire: `interviewer_personas.{bank,external}_auto_submit_enabled` /
+  `{bank,external}_auto_submit_silence_seconds` (migration `d0e1f2a3b4c5`, server defaults
+  0/3 and 1/3 — existing personas keep today's behaviour), `PersonaOut` / create / update carry all
+  four (422 outside 1–60), and the candidate `start` / `GET` responses carry
+  `voice_auto_submit_seconds` for the SESSION's engine (0 = off, N = seconds; `null` on mutation
+  responses so the page's per-session latch is never switched off mid-interview). `useInterviewVoice`
+  takes `silenceAutoCommitMs` instead of the removed `EXTERNAL_SILENCE_AUTOCOMMIT_MS` constant. The
+  seconds input edits a draft and clamps on blur/Enter (no more per-keystroke snapping).
+- Tests: +6 backend (per-engine defaults, bank/external pairs, session-snapshot engine, boundaries,
+  mutation routes unreported), +1 admin round-trip/validation; frontend +6 rail tests (new
+  `ConfigurationRail.test.tsx`), +4 form round-trips, +2 page latch tests, hook matrix extended
+  (bank arms too; default-off never arms for bank/external/0/null/NaN/Infinity/negative).
+
 ## 0.38.0.2 (2026-09-23)
 
 ### Changed

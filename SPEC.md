@@ -360,7 +360,11 @@ F7 Memory (rides on F5+F6)
 
 - Embedding model choice (text-embedding-3-large assumed — confirm multilingual retrieval quality).
 - Whether F2b/F3b admin editors are truly needed for greenlight or can stay stubbed.
-- Voice EOU silence-threshold default (start 3–4s, tune on real audio).
+- ~~Voice EOU silence-threshold default (start 3–4s, tune on real audio).~~ Resolved v0.38.1.0:
+  silence auto-submit is an admin-controlled per-persona setting with ONE independent pair per
+  engine (switch + 1–60s window): question bank defaults **off** (a fixed 3s fired while candidates
+  were still thinking; off ⇒ the turn advances only on the explicit "I'm done" click), external
+  interview API defaults **on** at 3s. Both admin-editable; never shared between engines.
 
 ---
 
