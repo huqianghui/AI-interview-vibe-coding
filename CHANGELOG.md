@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.38.1.1 (2026-09-23)
+
+### Changed
+- **`linear_turns` closed by design, not by adding a setting — zero behavior change.** The open
+  proposal was a per-persona `linear_turns` switch so question-bank sessions could also run the fully
+  silent turn contract (no model turn at all between questions). It turns out the useful middle
+  ground it aimed at is unreachable: Azure's server-VAD `create_response` is a **single boolean**, so
+  the turn created when the candidate stops speaking is simultaneously the source of a "Thank you."
+  acknowledgment and of an unwanted follow-up — the switch could only ever mean "all reaction" or
+  "total silence", never "acknowledge but don't ask". And agent mode **rejects overriding
+  `instructions` inside `response.create`**, so a scoped one-off "acknowledge only, ask nothing" turn
+  cannot be built for a bank persona either. Decision: **bank mode stays under model + prompt control
+  (`prompt_fragment`); external mode is linear because it supplies no brain at all** — the engine
+  decides, there is no knob. That is exactly what already shipped, so this release only makes the
+  concept explicit: the frontend option `externalMode` is renamed **`linearTurns`** (the two bare
+  `response.create` guards in `commitAnswer`), and the three reasons above are recorded in
+  `voice_live_proxy.py` next to `create_response=not is_external` and in the hook's option doc so the
+  item is not re-filed as a quick win. No migration, no new persona field, no admin-UI change, no
+  prompt text touched. Existing regression guards keep it honest: `test_voice_live_proxy.py`
+  (bank ⇒ `create_response=True`, external ⇒ `False`) and the `linear turns: commitAnswer never
+  fires a bare response.create` hook test. Note for future readers: the OTHER `response.create` in
+  the hook — paired with an assistant item in `emitSpeak` — is the verbatim read trigger, keyed off
+  `readDirectiveRef`, and must keep firing under linear turns or the question is never spoken.
+
 ## 0.38.1.0 (2026-09-23)
 
 ### Changed

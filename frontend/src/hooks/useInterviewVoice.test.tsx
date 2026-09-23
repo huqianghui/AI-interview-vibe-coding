@@ -412,11 +412,12 @@ describe("useInterviewVoice commitAnswer", () => {
     vi.unstubAllGlobals();
   });
 
-  it("external mode: commitAnswer never fires a bare response.create (agent must not improvise)", async () => {
-    // In external-brain sessions the digital human is a pure mouth: a bare response.create would
-    // make the Foundry agent improvise an off-script follow-up (the bug this guards). The turn
-    // advances via the backend + speakQuestion verbatim read, not an agent-generated reply.
-    const { getHook, ws, unmount } = await connectHook({ externalMode: true });
+  it("linear turns: commitAnswer never fires a bare response.create (model must not improvise)", async () => {
+    // Under linear turns (external-brain sessions) the digital human is a pure mouth: this bare
+    // response.create is the model's only remaining way to produce a turn of its own, and it would
+    // improvise an off-script follow-up (the bug this guards). The turn advances via the backend +
+    // speakQuestion verbatim read, not a model-generated reply.
+    const { getHook, ws, unmount } = await connectHook({ linearTurns: true });
 
     // Buffered branch: a transcript already arrived this turn, then the user clicks "I'm done".
     await act(async () => {
@@ -599,13 +600,13 @@ describe("useInterviewVoice commitAnswer", () => {
   // Silence-auto-commit (admin-controlled per persona, OFF by default): when the page passes a
   // `silenceAutoCommitMs` window, after the candidate stops speaking and stays silent that long the
   // hook auto-submits via onSilenceAutoCommit — the same commit-and-advance path the "I'm done"
-  // button uses. New speech resets the timer; no window (the default) never arms it — in bank OR
-  // external mode — so a thinking pause can never submit an answer.
+  // button uses. New speech resets the timer; no window (the default) never arms it — under linear
+  // turns OR bank turns — so a thinking pause can never submit an answer.
   it("auto-commits after the configured silence window following an utterance", async () => {
     vi.useFakeTimers();
     const onSilenceAutoCommit = vi.fn();
     const { ws, unmount } = await connectHook({
-      externalMode: true,
+      linearTurns: true,
       silenceAutoCommitMs: 3_000,
       onSilenceAutoCommit,
     });
@@ -639,7 +640,7 @@ describe("useInterviewVoice commitAnswer", () => {
     vi.useFakeTimers();
     const onSilenceAutoCommit = vi.fn();
     const { ws, unmount } = await connectHook({
-      externalMode: true,
+      linearTurns: true,
       silenceAutoCommitMs: 3_000,
       onSilenceAutoCommit,
     });
@@ -680,7 +681,7 @@ describe("useInterviewVoice commitAnswer", () => {
   it("bank mode with a window: arms the same silence timer (the setting is engine-agnostic)", async () => {
     vi.useFakeTimers();
     const onSilenceAutoCommit = vi.fn();
-    // No externalMode → bank session. With the admin window set, silence auto-submits here too.
+    // No linearTurns → bank session. With the admin window set, silence auto-submits here too.
     const { ws, unmount } = await connectHook({
       silenceAutoCommitMs: 10_000,
       onSilenceAutoCommit,
@@ -707,8 +708,8 @@ describe("useInterviewVoice commitAnswer", () => {
 
   it.each([
     ["bank mode", {}],
-    ["external mode", { externalMode: true }],
-    ["an explicit 0 window", { externalMode: true, silenceAutoCommitMs: 0 }],
+    ["linear turns", { linearTurns: true }],
+    ["an explicit 0 window", { linearTurns: true, silenceAutoCommitMs: 0 }],
     ["an explicit null window", { silenceAutoCommitMs: null }],
     ["a NaN window", { silenceAutoCommitMs: Number.NaN }],
     ["an Infinity window", { silenceAutoCommitMs: Number.POSITIVE_INFINITY }],

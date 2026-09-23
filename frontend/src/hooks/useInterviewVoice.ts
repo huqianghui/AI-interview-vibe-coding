@@ -72,15 +72,26 @@ export interface UseInterviewVoiceOptions {
    * path, which lets the backend resolve the default enabled persona. */
   personaId?: string;
   /**
-   * External-brain session (Phase 2): the digital human is a pure "mouth" for the external
-   * workflow and must NEVER improvise its own turn. When true, `commitAnswer` skips its
-   * turn-advancing bare `response.create` — in agent mode a bare response.create makes the
-   * Foundry agent autonomously produce a turn from its generic instructions (an off-script
-   * follow-up that the external brain never sees, never scores, and that desyncs from the
-   * question header). External turns advance via the backend → `speakQuestion` verbatim read,
-   * not via an agent-generated reply. Pairs with the backend's `create_response=False`, which
-   * suppresses the OTHER improvisation path (server-VAD auto-response). */
-  externalMode?: boolean;
+   * LINEAR TURNS — the model gets NO generative turn of its own between questions, so it can only
+   * utter text the backend hands it verbatim. Not an admin knob: the ENGINE decides it.
+   *
+   * true for EXTERNAL-brain sessions (Phase 2), because the external workflow supplies the brain —
+   * the digital human is a pure "mouth" that reads exactly what the backend injects. When true,
+   * `commitAnswer` skips its turn-advancing bare `response.create`: in agent mode a bare
+   * response.create makes the Foundry agent autonomously produce a turn from its generic
+   * instructions (an off-script follow-up the external brain never sees, never scores, and that
+   * desyncs from the question header). Pairs with the backend's `create_response=False`
+   * (`voice_live_proxy.py`) — both halves must agree, since either one alone still leaves the
+   * model a way to speak.
+   *
+   * false for BANK sessions, deliberately (owner decision 2026-09-23): there the model keeps its
+   * turn and the PROMPT governs what it says in it. It could not be made selective anyway —
+   * Azure's `create_response` is a single boolean, so the turn that produces a "Thank you."
+   * acknowledgment is the same turn that could produce an unwanted follow-up; and agent mode
+   * rejects overriding `instructions` per `response.create` (see the emitSpeak branch below), so a
+   * scoped "acknowledge only, ask nothing" turn is unreachable. Enabling this for bank mode would
+   * buy structural silence at the price of ALL reaction between questions. */
+  linearTurns?: boolean;
   /**
    * Silence auto-submit window in ms (admin-controlled per persona; the page derives it from the
    * backend's `voice_auto_submit_seconds`). When > 0, after the candidate finishes an utterance and
@@ -1012,11 +1023,17 @@ export function useInterviewVoice(
       // (bank production) Azure has usually auto-created the response already, so an unconditional
       // response.create here just collides (`conversation_already_has_active_response`) — it's the
       // extra rejection this fix removes. On manual-VAD (no auto-response) the nudge is still needed
-      // to advance the turn, hence the guard rather than dropping it outright. In EXTERNAL mode we
-      // NEVER nudge: a bare response.create makes the agent improvise its own follow-up (see
-      // `externalMode` in UseInterviewVoiceOptions); external turns advance via the backend +
-      // speakQuestion verbatim read, so the agent must stay silent here.
-      if (!activeResponseRef.current && !optionsRef.current.externalMode)
+      // to advance the turn, hence the guard rather than dropping it outright. Under LINEAR TURNS we
+      // NEVER nudge: this bare response.create is the model's only remaining way to produce a turn
+      // of its own, and it would improvise an off-script follow-up (see `linearTurns` in
+      // UseInterviewVoiceOptions); those sessions advance via the backend + speakQuestion verbatim
+      // read, so the model must stay silent here.
+      //
+      // NOT to be confused with the OTHER response.create in this file — the one paired with an
+      // assistant item in the emitSpeak branch below. That one is the verbatim READ TRIGGER: it keys
+      // off `readDirectiveRef`, never off `linearTurns`, and it MUST keep firing under linear turns
+      // or the question is never spoken at all.
+      if (!activeResponseRef.current && !optionsRef.current.linearTurns)
         send({ type: "response.create" });
       return Promise.resolve(text);
     }
@@ -1031,9 +1048,9 @@ export function useInterviewVoice(
         resolve(pending.parts.join(" ").trim());
       }, COMMIT_TRANSCRIPT_TIMEOUT_MS);
       pendingCommitRef.current = { resolve, parts: [], timer };
-      // Same external-mode guard as the buffered branch: never fire a bare response.create for an
-      // external-brain session (it would make the agent improvise an off-script follow-up).
-      if (!activeResponseRef.current && !optionsRef.current.externalMode)
+      // Same linear-turns guard as the buffered branch: never fire a bare response.create when the
+      // model has no turn of its own (it would improvise an off-script follow-up).
+      if (!activeResponseRef.current && !optionsRef.current.linearTurns)
         send({ type: "response.create" });
     });
   }, [send, settlePendingCommit, clearSilenceAutoCommit]);
