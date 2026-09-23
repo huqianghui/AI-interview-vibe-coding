@@ -87,6 +87,65 @@ async def test_interview_brain_round_trips_and_validates(client):
     assert bad_update.status_code == 422
 
 
+async def test_voice_auto_submit_pairs_round_trip_and_validate(client):
+    # Admin-controlled silence auto-submit, one independent pair per engine: bank OFF by default,
+    # external ON by default, both remembering a 3s window.
+    plain = (await client.post("/admin/personas", headers=AUTH, json={"name": "S0"})).json()
+    assert plain["bank_auto_submit_enabled"] is False
+    assert plain["bank_auto_submit_silence_seconds"] == 3
+    assert plain["external_auto_submit_enabled"] is True
+    assert plain["external_auto_submit_silence_seconds"] == 3
+    # Turn the bank pair on with a longer window — the external pair is untouched.
+    updated = (
+        await client.put(
+            f"/admin/personas/{plain['id']}",
+            headers=AUTH,
+            json={"bank_auto_submit_enabled": True, "bank_auto_submit_silence_seconds": 10},
+        )
+    ).json()
+    assert updated["bank_auto_submit_enabled"] is True
+    assert updated["bank_auto_submit_silence_seconds"] == 10
+    assert updated["external_auto_submit_enabled"] is True
+    assert updated["external_auto_submit_silence_seconds"] == 3
+    # Toggling the external pair off keeps its window and never touches the bank pair.
+    off = (
+        await client.put(
+            f"/admin/personas/{plain['id']}",
+            headers=AUTH,
+            json={"external_auto_submit_enabled": False, "interview_brain": "external"},
+        )
+    ).json()
+    assert off["external_auto_submit_enabled"] is False
+    assert off["external_auto_submit_silence_seconds"] == 3
+    assert off["bank_auto_submit_enabled"] is True
+    assert off["bank_auto_submit_silence_seconds"] == 10
+    # Out-of-range windows are rejected (422) on both create and update, for either pair.
+    for field in ("bank_auto_submit_silence_seconds", "external_auto_submit_silence_seconds"):
+        for bad in (0, 61):
+            assert (
+                await client.post("/admin/personas", headers=AUTH, json={"name": "S1", field: bad})
+            ).status_code == 422
+            assert (
+                await client.put(f"/admin/personas/{plain['id']}", headers=AUTH, json={field: bad})
+            ).status_code == 422
+    final = (await client.get(f"/admin/personas/{plain['id']}", headers=AUTH)).json()
+    assert final["bank_auto_submit_silence_seconds"] == 10
+    assert final["external_auto_submit_silence_seconds"] == 3
+    # The adjacent VALID boundaries are accepted on both create and update.
+    for field in ("bank_auto_submit_silence_seconds", "external_auto_submit_silence_seconds"):
+        for ok in (1, 60):
+            created = await client.post(
+                "/admin/personas", headers=AUTH, json={"name": "S2", field: ok}
+            )
+            assert created.status_code == 201, created.text
+            assert created.json()[field] == ok
+            updated_ok = await client.put(
+                f"/admin/personas/{plain['id']}", headers=AUTH, json={field: ok}
+            )
+            assert updated_ok.status_code == 200, updated_ok.text
+            assert updated_ok.json()[field] == ok
+
+
 async def test_default_locale_round_trips(client):
     # The editor's "Language" selector persists as default_locale so it survives a reload (the bug:
     # it used to be ephemeral client state that reset to zh-CN on refresh even after Save).

@@ -77,6 +77,13 @@ class InterviewOut(BaseModel):
     # only: a failed voice connect still degrades to text exactly as before. Populated on the two
     # entry points (start / GET-resume); the mutation routes leave it False (the UI reads it once).
     voice_default: bool = False
+    # Voice answer auto-submit window from the default persona's pair for THIS session's engine
+    # (admin-controlled per engine; bank defaults OFF, external defaults ON): ``0`` ⇒ disabled (the
+    # turn advances only on the "I'm done" click); ``N > 0`` ⇒ the page auto-submits the buffered
+    # voice answer after N seconds of silence. ``None`` ⇒ "not reported on this response" — like
+    # ``voice_default`` it is populated only on the two entry points (start / GET-resume) and the
+    # UI latches it per session, so a mutation response never turns the feature off mid-interview.
+    voice_auto_submit_seconds: int | None = None
 
 
 class AnswerIn(BaseModel):
@@ -169,7 +176,11 @@ class VoiceSessionOut(BaseModel):
 
 
 def _to_interview_out(
-    session: InterviewSession, question: dict | None, *, voice_default: bool = False
+    session: InterviewSession,
+    question: dict | None,
+    *,
+    voice_default: bool = False,
+    voice_auto_submit_seconds: int | None = None,
 ) -> InterviewOut:
     is_external = session.brain_mode == "external"
     return InterviewOut(
@@ -179,18 +190,29 @@ def _to_interview_out(
         external_phase=session.external_phase if is_external else None,
         speech_text=external_runner.speech_text_for(session) if is_external else None,
         voice_default=voice_default,
+        voice_auto_submit_seconds=voice_auto_submit_seconds,
     )
 
 
-async def _voice_default(db: AsyncSession) -> bool:
-    """Whether the interview should default to the voice channel (issue 3).
+async def _persona_voice_flags(db: AsyncSession, session: InterviewSession) -> dict:
+    """The default persona's candidate-facing voice intent, for the start / resume entry points.
 
-    True iff the enabled default persona has an operator-configured voice. Deliberately NOT
-    "would voice work" (agent sync, Azure reachability…) — those failures already degrade to
-    text at connect time; this only encodes the operator's intent.
+    ``voice_default`` (issue 3): True iff the enabled default persona has an operator-configured
+    voice. Deliberately NOT "would voice work" (agent sync, Azure reachability…) — those failures
+    already degrade to text at connect time; this only encodes the operator's intent.
+
+    ``voice_auto_submit_seconds``: the admin-controlled silence auto-submit window for the engine
+    THIS session runs on (``session.brain_mode`` — the per-session snapshot, so a persona flipped
+    mid-interview never re-interprets a live session): ``0`` when that engine's pair is OFF or
+    there is no persona, else its configured seconds.
     """
     persona = await persona_service.get_default_persona(db)
-    return persona is not None and has_configured_voice(persona.voice_map)
+    if persona is None:
+        return {"voice_default": False, "voice_auto_submit_seconds": 0}
+    return {
+        "voice_default": has_configured_voice(persona.voice_map),
+        "voice_auto_submit_seconds": persona.voice_auto_submit_seconds_for(session.brain_mode),
+    }
 
 
 async def _current_question(db: AsyncSession, session: InterviewSession) -> dict | None:
@@ -284,7 +306,7 @@ async def start(
         else:
             session = await state_machine.start_interview(db, candidate.id)
     question = await _current_question(db, session)
-    return _to_interview_out(session, question, voice_default=await _voice_default(db))
+    return _to_interview_out(session, question, **(await _persona_voice_flags(db, session)))
 
 
 @router.get("/{interview_id}", response_model=InterviewOut)
@@ -301,7 +323,7 @@ async def get_interview(
     """
     session = await _owned_interview(db, interview_id, candidate)
     question = await _current_question(db, session)
-    return _to_interview_out(session, question, voice_default=await _voice_default(db))
+    return _to_interview_out(session, question, **(await _persona_voice_flags(db, session)))
 
 
 @router.post("/{interview_id}/answer", response_model=InterviewOut)
