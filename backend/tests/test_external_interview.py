@@ -50,6 +50,7 @@ from app.services.external_interview_client import (
     parse_sse_outputs,
     scrub_display_text,
 )
+from tests.candidate_helpers import mint_candidate_headers
 
 # The suite runs under pytest-asyncio (asyncio_mode="auto"), so async tests/fixtures need no marker
 # and share one event loop per test — critical for the uvicorn fixture below, whose server task must
@@ -574,9 +575,7 @@ async def _external_headers(client, db_session):
     await persona_service.create_persona(
         db_session, name="External", is_default=True, interview_brain="external"
     )
-    resp = await client.post("/public/candidate/session")
-    assert resp.status_code == 200
-    return {"X-Anon-Session": resp.json()["token"]}
+    return await mint_candidate_headers(client, db_session)  # #102: login-gated
 
 
 async def _external_state_blob(db_session, interview_id: str) -> str:

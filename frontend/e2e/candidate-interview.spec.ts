@@ -1,4 +1,5 @@
 import { test, expect, request as pwRequest } from "@playwright/test";
+import { primeCandidateLogin } from "./helpers/candidateLogin";
 
 /**
  * Candidate interview E2E (SPEC F6/F7/F8/F9) — real browser, real backend (mock providers).
@@ -40,6 +41,7 @@ test.beforeAll(async () => {
 });
 
 test("candidate completes a text interview and reaches a report", async ({ page }) => {
+  await primeCandidateLogin(page); // #102: /interview is login-gated
   await page.goto("/interview");
   await page.getByRole("button", { name: /开始面试|start interview/i }).click();
 
@@ -99,6 +101,7 @@ test("candidate completes a text interview and reaches a report", async ({ page 
 });
 
 test("candidate never sees rubric/checklist content (P3)", async ({ page }) => {
+  await primeCandidateLogin(page); // #102: /interview is login-gated
   await page.goto("/interview");
   await page.getByRole("button", { name: /开始面试|start interview/i }).click();
   await page.getByRole("button", { name: /我准备好了|i'm ready/i }).click();
@@ -113,6 +116,7 @@ test("candidate never sees rubric/checklist content (P3)", async ({ page }) => {
 test("candidate resumes an in-progress interview after a page reload (F6 edge b)", async ({
   page,
 }) => {
+  await primeCandidateLogin(page); // #102: /interview is login-gated
   await page.goto("/interview");
   await page.getByRole("button", { name: /开始面试|start interview/i }).click();
   await page.getByRole("button", { name: /我准备好了|i'm ready/i }).click();

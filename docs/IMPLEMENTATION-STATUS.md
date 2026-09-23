@@ -44,6 +44,18 @@ a fused text/voice interview flow, in phases (branch-per-phase, independently re
 | **F2b** Question-bank admin editor | ✅ Done | v0.12.0.0 | CRUD + reorder + set-default; admin API + `/admin` UI. |
 | **F3b** Checklist admin editor | ✅ Done | v0.12.0.0 | Edit items, re-normalize weights to 100; `/admin` UI. **Mandatory-checklist invariant (v0.29.0.0, [`planning/design-B-checklist-mandatory-20260818.md`](planning/design-B-checklist-mandatory-20260818.md)):** every question is auto-drafted a **non-empty** checklist at create time — SOP-optional draft (rubric drafted from the question text when no SOP passage is retrieved) with a generic-required-item fallback so scoring never degrades to a length-based stub; auto-draft is non-blocking on AI failure. The `/admin` editor now surfaces a per-question **评分标准 / Rubric** button + status marker (✓ N items / ⚙ not configured — count only, P3-safe) and a wired editable form (add/edit/delete items, change kind/weight, save → re-normalized to 100, regenerate on demand). **Admin UI refactor (v0.29.1.0):** `/admin` moved from a single vertical stack of inline-styled cards to a **two-tab workspace** (`题库与评分标准 / Content` + `Azure 连接 / Connection`) with the scoring rubric kept as an inline panel under the selected question; migrated to the project's Fluent `makeStyles`+`tokens` baseline (matching `InterviewPage`); rubric editor gains a weight-total bar (green at 100 / amber otherwise), kind-color Badges, read-only `source_quote` display (admin-only, P3-safe), and save/generate status feedback; a top-bar link cross-navigates to the `/admin/agent` persona editor. No backend or API-contract change. |
 
+## Candidate login + admin-managed interview accounts (#102, v0.38.0.0)
+
+| Item | Status | Shipped | Notes |
+|---|---|---|---|
+| `/interview` login gate | ✅ Done | v0.38.0.0 | Login card (shared `LoginCard` with `/admin`); candidate JWT in sessionStorage; sign-out clears JWT + session token + saved interview id. Typed `CandidateAuthError` routes any auth failure back to the card with the backend detail. |
+| Gated session minting | ✅ Done | v0.38.0.0 | `POST /public/candidate/session` requires a `role=user` JWT (401 / 403 for admins); row records `user_id`; idempotent per user so resume survives re-login — **DB-enforced** (migration `c9d0e1f2a3b4`: unique `active_user_id` seat, released on expiry/revoke; concurrent first logins collapse onto one session). `/auth/login` pays one bcrypt verify on the unknown-username path too (no timing oracle). Interview calls still trust `X-Anon-Session` alone (accepted, eng review 1+B). |
+| Seeded `user1/2/3` | ✅ Done | v0.38.0.0 | Derived passwords (HMAC over `SECRET_KEY`, `xxxx-xxxx-xxxx`); always seeded, idempotent by username; identical after an ephemeral-SQLite rebuild. `SECRET_KEY` now REQUIRED (no code default). |
+| Admin **Users** tab (read-only) | ✅ Done | v0.38.0.0 | Lists accounts with the derived password + copy; admin row "not viewable"; "Reset required" when `SECRET_KEY` changed after seeding. No create/reset in this release (owner: accounts are generated once at first boot). |
+| Live-Azure validation | ⏳ Pending | — | Deploys automatically on merge (ephemeral SQLite reseeds `user1/2/3`); verify login + Users tab on the public URL after the deploy run. |
+
+Planning trail: [`planning/spec-candidate-login.md`](planning/spec-candidate-login.md) (spec + `/plan-eng-review` decisions; GitHub #102).
+
 ## External interview brain (Phase 2, [`planning/design-external-interview-brain-integration.md`](planning/design-external-interview-brain-integration.md))
 
 A second, per-persona interview mode that hands every turn to the client's **external interview

@@ -4,6 +4,8 @@ import json
 
 import pytest
 
+from tests.candidate_helpers import mint_candidate_headers
+
 AUTH: dict = {}
 
 
@@ -72,8 +74,7 @@ async def test_checklist_never_exposed_to_candidate(client, db_session):
     question_id = await _seed_question(db_session, points=["mentions PPE"])
     await client.post(f"/admin/checklists/questions/{question_id}/draft", headers=AUTH)
 
-    sess = await client.post("/public/candidate/session")
-    cand_headers = {"X-Anon-Session": sess.json()["token"]}
+    cand_headers = await mint_candidate_headers(client, db_session)  # #102: login-gated
     listing = await client.get("/candidate/interview/questions", headers=cand_headers)
     flat = str(listing.json()).lower()
     for leaked in ("checklist", "rubric", "weight", "source_quote", "forbidden", "expected_points"):

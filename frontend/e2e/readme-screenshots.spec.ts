@@ -1,4 +1,5 @@
 import { test, expect, request as pwRequest } from "@playwright/test";
+import { primeCandidateLogin } from "./helpers/candidateLogin";
 
 /**
  * README screenshot capture (opt-in, NOT a test of behavior).
@@ -51,6 +52,7 @@ test.beforeAll(async () => {
 });
 
 test("capture candidate flow: interview → follow-up → review → report", async ({ page }) => {
+  await primeCandidateLogin(page); // #102: /interview is login-gated
   await page.goto("/interview");
   await expect(page.getByRole("button", { name: /开始面试|start interview/i })).toBeVisible();
   await page.screenshot({ path: `${OUT}/01-landing.png` });

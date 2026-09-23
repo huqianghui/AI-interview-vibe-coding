@@ -1,6 +1,15 @@
 /** API client tests — session bootstrap + header injection, with fetch mocked. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { _internal, ensureSession, getReportStream, startInterview } from "./client";
+import {
+  CandidateAuthError,
+  _internal,
+  ensureSession,
+  getReportStream,
+  resetCandidateSession,
+  signOutCandidate,
+  startInterview,
+} from "./client";
+import * as auth from "./auth";
 
 function mockFetchOnce(body: unknown, ok = true, status = 200) {
   return vi.fn().mockResolvedValueOnce({
@@ -59,6 +68,120 @@ describe("api client", () => {
     localStorage.setItem(_internal.TOKEN_KEY, "tok");
     vi.stubGlobal("fetch", mockFetchOnce({ detail: "boom" }, false, 409));
     await expect(startInterview()).rejects.toThrow(/409/);
+  });
+});
+
+// #102: ensureSession() now requires the candidate's own JWT to mint/reuse the anon session.
+describe("ensureSession candidate auth (#102)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+
+  it("sends the candidate JWT as a bearer when minting a session", async () => {
+    auth.setCandidateToken("candidate-jwt");
+    const fetchSpy = mockFetchOnce({ session_id: "s1", token: "tok-123", expires_at: "later" });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await ensureSession();
+
+    const [, init] = fetchSpy.mock.calls[0];
+    const headers = new Headers(init.headers);
+    expect(headers.get("Authorization")).toBe("Bearer candidate-jwt");
+  });
+
+  it("reuses a cached anon token without sending a candidate bearer (idempotent per user)", async () => {
+    localStorage.setItem(_internal.TOKEN_KEY, "existing");
+    auth.setCandidateToken("candidate-jwt");
+    const fetchSpy = mockFetchOnce({});
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const token = await ensureSession();
+
+    expect(token).toBe("existing");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("throws CandidateAuthError and clears both tokens on 401 (missing/invalid/expired candidate JWT)", async () => {
+    auth.setCandidateToken("stale-jwt");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        statusText: "Unauthorized",
+        text: async () => JSON.stringify({ detail: "Not authenticated" }),
+      }),
+    );
+
+    await expect(ensureSession()).rejects.toBeInstanceOf(CandidateAuthError);
+    expect(auth.getCandidateToken()).toBe("");
+    expect(localStorage.getItem(_internal.TOKEN_KEY)).toBeNull();
+  });
+
+  it("throws CandidateAuthError with the backend detail verbatim on 403 (admin account)", async () => {
+    auth.setCandidateToken("admin-jwt");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        statusText: "Forbidden",
+        text: async () => JSON.stringify({ detail: "Admin accounts cannot take interviews" }),
+      }),
+    );
+
+    await expect(ensureSession()).rejects.toMatchObject({
+      detail: "Admin accounts cannot take interviews",
+      status: 403,
+    });
+    expect(auth.getCandidateToken()).toBe("");
+    expect(localStorage.getItem(_internal.TOKEN_KEY)).toBeNull();
+  });
+});
+
+describe("signOutCandidate (#102)", () => {
+  afterEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+
+  it("clears exactly the candidate token, the anon session token, and the saved interview id", () => {
+    auth.setCandidateToken("candidate-jwt");
+    localStorage.setItem(_internal.TOKEN_KEY, "anon-tok");
+    localStorage.setItem("interview_session_id", "iv1");
+    localStorage.setItem("unrelated_key", "keep-me");
+
+    signOutCandidate();
+
+    expect(auth.getCandidateToken()).toBe("");
+    expect(localStorage.getItem(_internal.TOKEN_KEY)).toBeNull();
+    expect(localStorage.getItem("interview_session_id")).toBeNull();
+    expect(localStorage.getItem("unrelated_key")).toBe("keep-me");
+  });
+});
+
+describe("resetCandidateSession (#102, decision 1A)", () => {
+  afterEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+
+  it("drops the inherited anon token and saved interview id but keeps the candidate JWT", () => {
+    auth.setCandidateToken("candidate-jwt");
+    localStorage.setItem(_internal.TOKEN_KEY, "previous-visitor-anon-tok");
+    localStorage.setItem("interview_session_id", "previous-visitor-iv");
+
+    resetCandidateSession();
+
+    expect(auth.getCandidateToken()).toBe("candidate-jwt");
+    expect(localStorage.getItem(_internal.TOKEN_KEY)).toBeNull();
+    expect(localStorage.getItem("interview_session_id")).toBeNull();
   });
 });
 

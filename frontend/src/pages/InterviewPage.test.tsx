@@ -6,7 +6,7 @@
  * new demo-critical beats (orientation, scoring-in-progress, report-ready) and the text channel.
  * Voice is exercised via the P5/503 fallback path (no live WebRTC in jsdom).
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
@@ -15,6 +15,7 @@ import i18n from "../i18n";
 import { InterviewPage } from "./InterviewPage";
 import { collectVoiceAnswer } from "./interviewVoiceAnswer";
 import * as client from "../api/client";
+import * as auth from "../api/auth";
 import type { TranscriptSegment } from "../types/voice";
 
 function seg(id: string, content: string, role: "user" | "assistant", isFinal: boolean): TranscriptSegment {
@@ -60,9 +61,22 @@ describe("collectVoiceAnswer", () => {
 });
 
 describe("InterviewPage", () => {
+  // #102: every existing flow test below predates the candidate login gate and expects the page to
+  // start straight on the interview UI. Seed a candidate token before each one (mirroring how the
+  // "surfaces the real Azure error" test seeds the anon-session token) so candidateAuthed is true at
+  // mount and these flows keep exercising exactly what they exercised before the gate landed. The
+  // login-gate/sign-out/CandidateAuthError behavior itself is covered by its own describe block below.
+  beforeEach(() => {
+    sessionStorage.setItem("candidate_access_token", "test-candidate-token");
+  });
+
+  afterEach(() => {
+    sessionStorage.removeItem("candidate_access_token");
+  });
+
   it("renders the start button initially", () => {
     renderPage();
-    expect(screen.getByRole("button")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /start interview/i })).toBeInTheDocument();
   });
 
   it("runs start → orientation → ask → answer → review → explicit submit → report", async () => {
@@ -674,5 +688,118 @@ describe("InterviewPage", () => {
       global.AudioWorkletNode = realWorkletNode;
       localStorage.removeItem("anon_session_token");
     }
+  });
+});
+
+describe("InterviewPage candidate login gate (#102)", () => {
+  afterEach(() => {
+    sessionStorage.removeItem("candidate_access_token");
+    localStorage.removeItem("anon_session_token");
+  });
+
+  it("shows only the login card when no candidate token is present", () => {
+    sessionStorage.removeItem("candidate_access_token");
+    renderPage();
+    expect(screen.getByTestId("candidate-username-input")).toBeInTheDocument();
+    expect(screen.getByTestId("candidate-password-input")).toBeInTheDocument();
+    expect(screen.getByTestId("candidate-login")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /start interview/i })).not.toBeInTheDocument();
+  });
+
+  it("logs in and reveals the start button on success", async () => {
+    await i18n.changeLanguage("en-US");
+    sessionStorage.removeItem("candidate_access_token");
+    const user = userEvent.setup();
+    vi.spyOn(auth, "loginCandidate").mockResolvedValue("jwt-token");
+    // Decision 1A: a successful login immediately mints this account's session.
+    const mint = vi.spyOn(client, "ensureSession").mockResolvedValue("anon-token");
+    renderPage();
+    await user.type(screen.getByTestId("candidate-username-input"), "user1");
+    await user.type(screen.getByTestId("candidate-password-input"), "pw");
+    await user.click(screen.getByTestId("candidate-login"));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /start interview/i })).toBeInTheDocument(),
+    );
+    expect(mint).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses an admin account on the card with the backend's reason (403 at session mint)", async () => {
+    await i18n.changeLanguage("en-US");
+    sessionStorage.removeItem("candidate_access_token");
+    const user = userEvent.setup();
+    vi.spyOn(auth, "loginCandidate").mockResolvedValue("admin-jwt");
+    vi.spyOn(client, "ensureSession").mockRejectedValue(
+      new client.CandidateAuthError("Admin accounts cannot take interviews", 403),
+    );
+    renderPage();
+    await user.type(screen.getByTestId("candidate-username-input"), "admin");
+    await user.type(screen.getByTestId("candidate-password-input"), "pw");
+    await user.click(screen.getByTestId("candidate-login"));
+    await waitFor(() =>
+      expect(screen.getByText("Admin accounts cannot take interviews")).toBeInTheDocument(),
+    );
+    // Still on the card — no Start button for an admin.
+    expect(screen.queryByRole("button", { name: /start interview/i })).toBeNull();
+    expect(screen.getByTestId("candidate-login")).toBeInTheDocument();
+  });
+
+  it("shows the localized wrong-credentials message on a 401", async () => {
+    await i18n.changeLanguage("en-US");
+    sessionStorage.removeItem("candidate_access_token");
+    const user = userEvent.setup();
+    vi.spyOn(auth, "loginCandidate").mockRejectedValue(new auth.AuthError("用户名或密码错误", 401));
+    renderPage();
+    await user.type(screen.getByTestId("candidate-username-input"), "user1");
+    await user.type(screen.getByTestId("candidate-password-input"), "wrong");
+    await user.click(screen.getByTestId("candidate-login"));
+    await waitFor(() =>
+      expect(screen.getByText("Incorrect username or password.")).toBeInTheDocument(),
+    );
+  });
+
+  it("shows the AuthError message verbatim for a non-401 failure", async () => {
+    await i18n.changeLanguage("en-US");
+    sessionStorage.removeItem("candidate_access_token");
+    const user = userEvent.setup();
+    vi.spyOn(auth, "loginCandidate").mockRejectedValue(new auth.AuthError("登录失败 (500)", 500));
+    renderPage();
+    await user.type(screen.getByTestId("candidate-username-input"), "user1");
+    await user.type(screen.getByTestId("candidate-password-input"), "pw");
+    await user.click(screen.getByTestId("candidate-login"));
+    await waitFor(() => expect(screen.getByText("登录失败 (500)")).toBeInTheDocument());
+  });
+
+  it("drops back to the login card showing the backend detail verbatim on CandidateAuthError", async () => {
+    sessionStorage.setItem("candidate_access_token", "stale-token");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockRejectedValue(
+      new client.CandidateAuthError("Admin accounts cannot take interviews", 403),
+    );
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    await waitFor(() =>
+      expect(screen.getByText("Admin accounts cannot take interviews")).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("candidate-login")).toBeInTheDocument();
+  });
+
+  it("signs out: disconnects voice, clears tokens, and returns to the login card", async () => {
+    sessionStorage.setItem("candidate_access_token", "test-candidate-token");
+    localStorage.setItem("anon_session_token", "anon-token");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "in_progress",
+      current_question: { question_id: "q1", prompt: "Question one?", index: 0, total: 1 },
+    });
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+    await screen.findByText("Question one?");
+
+    await user.click(screen.getByTestId("candidate-sign-out"));
+    await waitFor(() => expect(screen.getByTestId("candidate-login")).toBeInTheDocument());
+    expect(sessionStorage.getItem("candidate_access_token")).toBeNull();
+    expect(localStorage.getItem("anon_session_token")).toBeNull();
   });
 });

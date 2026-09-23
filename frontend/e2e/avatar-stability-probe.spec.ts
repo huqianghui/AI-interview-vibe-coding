@@ -9,6 +9,7 @@
  * Run: LIVE_VOICE=1 npx playwright test avatar-stability-probe --config=e2e/live.config.ts
  */
 import { test, expect } from "@playwright/test";
+import { enterVoiceChannel, primeCandidateLogin, waitForInterviewStage } from "./helpers/candidateLogin";
 
 const LIVE = process.env.LIVE_VOICE === "1";
 const BASE = process.env.BASE || "http://localhost:5173";
@@ -53,11 +54,13 @@ test.describe("Avatar stability probe (real Azure)", () => {
       } as unknown as typeof RTCPeerConnection;
     });
 
+    await primeCandidateLogin(page); // #102: /interview is login-gated
+
     await page.goto(`${BASE}/interview`);
     await page.getByRole("button", { name: /开始面试|start interview/i }).click();
     await page.getByRole("button", { name: /我准备好了|i'm ready/i }).click();
-    await expect(page.getByRole("textbox")).toBeVisible();
-    await page.getByRole("button", { name: /语音作答|answer by voice/i }).click();
+    await waitForInterviewStage(page); // bank or external brain, text or voice channel
+    await enterVoiceChannel(page); // auto-voice persona: only clicks when still in text mode
 
     // Sample the live <video> + orb + avatar-connected flag once per second.
     const samples: string[] = [];

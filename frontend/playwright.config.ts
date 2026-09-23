@@ -41,9 +41,14 @@ export default defineConfig({
       // backend virtualenv so `npm run e2e` works without activating it.
       command:
         "cd ../backend && rm -f e2e.db && " +
-        'DATABASE_URL=sqlite+aiosqlite:///./e2e.db "${ALEMBIC_BIN:-.venv/bin/alembic}" upgrade head && ' +
+        // #102: SECRET_KEY is required at import time (Settings validation) — the migration step
+        // needs it too, not just uvicorn, or a CI runner with no .env fails before the server starts.
+        'DATABASE_URL=sqlite+aiosqlite:///./e2e.db SECRET_KEY=e2e-secret-key-do-not-use-in-prod ' +
+        '"${ALEMBIC_BIN:-.venv/bin/alembic}" upgrade head && ' +
         "DATABASE_URL=sqlite+aiosqlite:///./e2e.db " +
         "SEED_ADMIN_USERNAME=admin SEED_ADMIN_PASSWORD=e2e-admin-pw " +
+        // #102: SECRET_KEY is required (no code default); a fixed key keeps user1..3 stable.
+        "SECRET_KEY=e2e-secret-key-do-not-use-in-prod " +
         "DEFAULT_LLM_PROVIDER=mock DEFAULT_RETRIEVAL_PROVIDER=mock DEFAULT_VOICE_PROVIDER=mock " +
         // Throwaway Fernet key so the external-config E2E can exercise the API-key
         // encryption path. Production supplies ENCRYPTION_KEY as a Container App

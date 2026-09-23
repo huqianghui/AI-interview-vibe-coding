@@ -1,4 +1,5 @@
 import { test, expect, request as pwRequest } from "@playwright/test";
+import { primeCandidateLogin } from "./helpers/candidateLogin";
 
 /**
  * Opt-in LIVE voice + external-brain interview E2E — the exact demo combination: the default VOICE
@@ -108,6 +109,8 @@ test("voice persona + external brain: spoken questions, spoken answers, real com
       }
     });
   });
+
+  await primeCandidateLogin(page); // #102: /interview is login-gated
 
   await page.goto("/interview");
   await page.getByRole("button", { name: /开始面试|start interview/i }).click();

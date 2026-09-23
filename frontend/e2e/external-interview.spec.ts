@@ -1,4 +1,5 @@
 import { test, expect, request as pwRequest } from "@playwright/test";
+import { primeCandidateLogin } from "./helpers/candidateLogin";
 
 /**
  * External-brain candidate interview E2E (SPEC Phase 2, vendor-neutral).
@@ -54,6 +55,7 @@ test.beforeAll(async () => {
 test("external-brain interview runs to the completion acknowledgement (no local report — P12)", async ({
   page,
 }) => {
+  await primeCandidateLogin(page); // #102: /interview is login-gated
   await page.goto("/interview");
   await page.getByRole("button", { name: /开始面试|start interview/i }).click();
 

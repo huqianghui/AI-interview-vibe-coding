@@ -21,6 +21,7 @@
  * (see e2e/live.config.ts). Skipped entirely unless LIVE_VOICE=1.
  */
 import { test, expect } from "@playwright/test";
+import { enterVoiceChannel, primeCandidateLogin, waitForInterviewStage } from "./helpers/candidateLogin";
 
 const LIVE = process.env.LIVE_VOICE === "1";
 const BASE = process.env.BASE || "http://localhost:5173";
@@ -66,14 +67,16 @@ test.describe("Voice Live agent-mode (real Azure)", () => {
       });
     });
 
+    await primeCandidateLogin(page); // #102: /interview is login-gated
+
     await page.goto(`${BASE}/interview`);
     await page.getByRole("button", { name: /开始面试|start interview/i }).click();
     await page.getByRole("button", { name: /我准备好了|i'm ready/i }).click();
-    await expect(page.getByRole("textbox")).toBeVisible();
+    await waitForInterviewStage(page); // bank or external brain, text or voice channel
 
     // Click 语音作答 (Answer by voice) → the hook opens the WS proxy; the backend brokers the Azure
     // Voice Live agent session and relays frames back.
-    await page.getByRole("button", { name: /语音作答|answer by voice/i }).click();
+    await enterVoiceChannel(page); // auto-voice persona: only clicks when still in text mode
 
     // The mic-permission dialog must NOT appear (fake device grants getUserMedia).
     await expect(page.getByText(/需要麦克风权限|microphone/i)).toHaveCount(0, { timeout: 5_000 });

@@ -5,6 +5,10 @@ avatar project's ``AppException``). This is the admin/user JWT system, separate 
 anonymous-session auth.
 """
 
+import base64
+import hashlib
+import hmac
+import secrets
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
@@ -39,6 +43,31 @@ def get_password_hash(password: str) -> str:
     return bcrypt.hashpw(_pw_bytes(password), bcrypt.gensalt()).decode("utf-8")
 
 
+# #102 — seeded candidate passwords are DERIVED, never stored in plaintext:
+#   password = base32(HMAC-SHA256(key=SECRET_KEY,
+#                                 msg="candidate-password:v1:<username>:<generation>")).lower()[:12]
+#   formatted xxxx-xxxx-xxxx (the hyphenated string IS the password)
+# Same (key, username, generation) → same password, so an ephemeral-SQLite rebuild reseeds identical
+# credentials and the admin Users tab can re-display them at any time. Secrecy == SECRET_KEY secrecy
+# (already the JWT signing key; config refuses a missing/placeholder value). The domain label keeps
+# this HMAC use separate from any other use of the key.
+_CANDIDATE_PW_LABEL = "candidate-password:v1"
+
+
+def derive_candidate_password(username: str, generation: int = 1) -> str:
+    """Deterministic 14-char password (``xxxx-xxxx-xxxx``) for a seeded candidate account."""
+    key = get_settings().secret_key.encode("utf-8")
+    msg = f"{_CANDIDATE_PW_LABEL}:{username}:{generation}".encode()
+    digest = hmac.new(key, msg, hashlib.sha256).digest()
+    raw = base64.b32encode(digest).decode("ascii").lower()[:12]
+    return f"{raw[0:4]}-{raw[4:8]}-{raw[8:12]}"
+
+
+# Hash of a random throwaway secret, computed once at import — the "user does not exist" branch of
+# authenticate_user verifies against it so both branches cost one bcrypt check (timing oracle fix).
+_DUMMY_HASH = bcrypt.hashpw(secrets.token_bytes(32), bcrypt.gensalt()).decode("utf-8")
+
+
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     """Create a signed JWT access token (HS256), expiring per settings unless overridden."""
     settings = get_settings()
@@ -54,7 +83,12 @@ async def authenticate_user(db: AsyncSession, username: str, password: str) -> U
     """Return the user if username+password match; else raise 401 (same message for both cases)."""
     result = await db.execute(select(User).where(User.username == username))
     user = result.scalar_one_or_none()
-    if user is None or not verify_password(password, user.hashed_password):
+    # Constant-cost failure path: an unknown username still pays one bcrypt verify (against a
+    # throwaway hash) so response time does not reveal whether the account exists. Matters since
+    # #102 exposed /auth/login to the public interview page with well-known usernames.
+    hashed = user.hashed_password if user is not None else _DUMMY_HASH
+    ok = verify_password(password, hashed)
+    if user is None or not ok:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",

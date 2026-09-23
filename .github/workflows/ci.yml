@@ -11,6 +11,10 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    env:
+      # #102: SECRET_KEY is required at import time (no code default) — the migration step imports
+      # app.models via alembic/env.py, and pytest's conftest sets the same throwaway value.
+      SECRET_KEY: test-secret-key-do-not-use-in-prod
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

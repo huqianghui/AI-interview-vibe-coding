@@ -1,4 +1,20 @@
-"""Seed a default admin user on boot so the admin/editor UI is usable out of the box.
+"""Seed the default admin + the three candidate accounts on boot (#102).
+
+Two seeds with deliberately DIFFERENT gates:
+
+* **Admin** (``seed_default_admin``): only when ``SEED_ADMIN_PASSWORD`` is set — the admin's
+  password is self-chosen and stored only as a hash, so shipping a known default would be a
+  known-credential admin.
+* **Candidates** (``seed_default_candidates``): ALWAYS. ``user1/user2/user3`` get passwords DERIVED
+  from the deployment's ``SECRET_KEY`` (``auth_service.derive_candidate_password``), which config
+  refuses to leave at a placeholder — so they are unique per deployment, never committed anywhere,
+  identical after an ephemeral-SQLite rebuild, and re-displayable to the admin (Users tab) without
+  storing plaintext. That inversion of the admin rule is intentional: the client requires that
+  candidates can always log in with zero manual setup, and "recoverable by the admin" is the
+  feature, not a leak. Usage rule (documented in the Users tab + manual): one account is used by
+  one person at a time.
+
+Admin seed details:
 
 Idempotent: no-op if any admin already exists. Credentials come from settings
 (`seed_admin_username` / `seed_admin_password`); when the password is empty (default), seeding is
@@ -11,7 +27,7 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.models.user import User
-from app.services.auth_service import get_password_hash
+from app.services.auth_service import derive_candidate_password, get_password_hash
 
 logger = logging.getLogger(__name__)
 
@@ -40,3 +56,40 @@ async def seed_default_admin(db) -> None:
     )
     await db.commit()
     logger.info("Seeded default admin user %r", settings.seed_admin_username)
+
+
+CANDIDATE_USERNAMES = ("user1", "user2", "user3")
+CANDIDATE_PASSWORD_GENERATION = 1
+
+
+async def seed_default_candidates(db) -> list[str]:
+    """Create ``user1/user2/user3`` (role ``user``) with derived passwords. Idempotent by username.
+
+    An existing row with one of these usernames — in ANY state (other role, inactive, NULL
+    generation) — is left untouched. Returns the usernames created this boot.
+    """
+    existing = set(
+        (await db.execute(select(User.username).where(User.username.in_(CANDIDATE_USERNAMES))))
+        .scalars()
+        .all()
+    )
+    created: list[str] = []
+    for username in CANDIDATE_USERNAMES:
+        if username in existing:
+            continue
+        password = derive_candidate_password(username, CANDIDATE_PASSWORD_GENERATION)
+        db.add(
+            User(
+                username=username,
+                email=f"{username}@local",
+                hashed_password=get_password_hash(password),
+                full_name=username,
+                role="user",
+                password_generation=CANDIDATE_PASSWORD_GENERATION,
+            )
+        )
+        created.append(username)
+    if created:
+        await db.commit()
+        logger.info("Seeded candidate accounts %s (derived passwords)", created)
+    return created

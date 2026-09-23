@@ -4,6 +4,7 @@
  * dead-ending. Run: LIVE_VOICE=1 npx playwright test anon-recovery --config=e2e/live.config.ts
  */
 import { test, expect } from "@playwright/test";
+import { primeCandidateLogin } from "./helpers/candidateLogin";
 
 const LIVE = process.env.LIVE_VOICE === "1";
 const BASE = process.env.BASE || "http://localhost:5173";
@@ -16,6 +17,7 @@ test.describe("Anon token self-heal (real backend)", () => {
     await page.addInitScript(() => {
       localStorage.setItem("anon_session_token", "stale.invalid.token");
     });
+    await primeCandidateLogin(page); // #102: /interview is login-gated
     await page.goto(`${BASE}/interview`);
     await page.getByRole("button", { name: /开始面试|start interview/i }).click();
 

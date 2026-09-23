@@ -31,21 +31,27 @@ import {
   tokens,
 } from "@fluentui/react-components";
 import {
+  CandidateAuthError,
   getReport,
   getReportStream,
   getReview,
   recoverInterview,
   resumeInterview,
+  signOutCandidate,
   startInterview,
   submitAnswer,
   type AnsweredQuestion,
   type Interview,
   type Report,
+  resetCandidateSession,
+  ensureSession,
 } from "../api/client";
+import { AuthError, getCandidateToken, loginCandidate } from "../api/auth";
 import { useExternalMicAutoPause } from "../hooks/useExternalMicAutoPause";
 import { MicAccessError, useInterviewVoice } from "../hooks/useInterviewVoice";
 import type { AudioState, TranscriptSegment } from "../types/voice";
 import { AvatarView } from "../components/AvatarView";
+import { LoginCard } from "../components/LoginCard";
 import { QuestionProgress } from "../components/QuestionProgress";
 import { MicPermissionDialog } from "../components/MicPermissionDialog";
 import { Transcript } from "../components/Transcript";
@@ -309,6 +315,12 @@ const STATUS_ORDER: AudioState[] = ["idle", "listening", "speaking", "muted"];
 export function InterviewPage() {
   const styles = useStyles();
   const { t, i18n } = useTranslation();
+  // Candidate login gate (#102): the page shows the login card whenever no candidate JWT is
+  // present — checked once at mount from sessionStorage; loginCandidate()/signOutCandidate() are
+  // the only things that flip it afterward.
+  const [candidateAuthed, setCandidateAuthed] = useState(() => Boolean(getCandidateToken()));
+  const [candidateLoginError, setCandidateLoginError] = useState<string | null>(null);
+  const [candidateLoginBusy, setCandidateLoginBusy] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [interview, setInterview] = useState<Interview | null>(null);
   const [report, setReport] = useState<Report | null>(null);
@@ -392,7 +404,18 @@ export function InterviewPage() {
     try {
       await fn();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      // #102: ensureSession() rejects a missing/expired/inactive candidate token (401) or an admin
+      // account (403) with CandidateAuthError. Either way both tokens are already cleared (client.ts)
+      // — drop back to the login card showing the backend's detail verbatim, rather than the
+      // generic error banner (there is no page left to show the error on).
+      if (e instanceof CandidateAuthError) {
+        setCandidateAuthed(false);
+        setInterview(null);
+        setPhase("idle");
+        setCandidateLoginError(e.detail);
+      } else {
+        setError(e instanceof Error ? e.message : String(e));
+      }
     } finally {
       setBusy(false);
     }
@@ -562,8 +585,10 @@ export function InterviewPage() {
 
   // Resume an in-progress interview on mount (edge b): a reload lands back on the pending question
   // instead of stranding it behind a fresh /start. No saved/live interview → stay on the idle
-  // screen. Runs once.
+  // screen. Gated on candidateAuthed (#102): resumeInterview() calls ensureSession(), which now
+  // requires a candidate bearer — running it before login would just throw. Runs once per sign-in.
   useEffect(() => {
+    if (!candidateAuthed) return;
     let active = true;
     void (async () => {
       try {
@@ -579,7 +604,45 @@ export function InterviewPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [candidateAuthed]);
+
+  // #102: candidate sign-in. On success the resume effect above re-fires (candidateAuthed flips to
+  // true) and picks up any in-progress interview for this candidate.
+  const onCandidateLogin = (username: string, password: string) => {
+    setCandidateLoginBusy(true);
+    setCandidateLoginError(null);
+    void loginCandidate(username, password)
+      .then(async () => {
+        // Never inherit the previous visitor's session/interview pointer (decision 1A), then mint
+        // this account's session right away so an admin account is refused HERE, on the card,
+        // with the backend's reason — not later on "Start interview".
+        resetCandidateSession();
+        await ensureSession();
+        setCandidateAuthed(true);
+      })
+      .catch((e) => {
+        if (e instanceof CandidateAuthError) {
+          setCandidateLoginError(e.detail || e.message);
+        } else if (e instanceof AuthError && e.status === 401) {
+          setCandidateLoginError(t("candidate.wrongCredentials"));
+        } else {
+          setCandidateLoginError(e instanceof Error ? e.message : String(e));
+        }
+      })
+      .finally(() => setCandidateLoginBusy(false));
+  };
+
+  // #102: release the mic/voice connection before clearing tokens, then drop back to the login
+  // card. signOutCandidate() clears exactly the candidate token, the anon session token, and the
+  // saved-interview-id — so a re-login always starts a fresh ensureSession() round-trip.
+  const onSignOut = () => {
+    void voice.disconnect().catch(() => undefined);
+    signOutCandidate();
+    setCandidateAuthed(false);
+    setInterview(null);
+    setPhase("idle");
+    setCandidateLoginError(null);
+  };
 
   // Tear down the voice connection when the page unmounts (mic + WebRTC + signaling socket).
   useEffect(() => {
@@ -824,6 +887,28 @@ export function InterviewPage() {
     </Card>
   );
 
+  // Candidate login gate (#102): whenever no candidate JWT is present, the page shows ONLY the
+  // header + login card — nothing else renders (no stale interview state peeking through).
+  if (!candidateAuthed) {
+    return (
+      <div className={styles.page}>
+        <div className={styles.header}>
+          <Title2 as="h1">{t("appTitle")}</Title2>
+          <Body1 style={{ display: "block", opacity: 0.7 }}>{t("tagline")}</Body1>
+        </div>
+        <LoginCard
+          title={t("candidate.loginTitle")}
+          body={t("candidate.loginBody")}
+          error={candidateLoginError}
+          busy={candidateLoginBusy}
+          onSubmit={onCandidateLogin}
+          testIdPrefix="candidate"
+          titleAs="h2"
+        />
+      </div>
+    );
+  }
+
   // Live Q&A: a global top bar over a full-width two-column stage (avatar left, controls right).
   if (phase === "interviewing" && q) {
     const voiceActive = channel === "voice";
@@ -834,6 +919,11 @@ export function InterviewPage() {
           <div className={styles.header}>
             <Title2 as="h1">{t("appTitle")}</Title2>
             <Body1 style={{ opacity: 0.7 }}>{t("tagline")}</Body1>
+            <div>
+              <Button size="small" onClick={onSignOut} data-testid="candidate-sign-out">
+                {t("candidate.signOut")}
+              </Button>
+            </div>
           </div>
 
           {/* Status legend: describe each state as a tip AND highlight the current one. Shown in
@@ -940,6 +1030,11 @@ export function InterviewPage() {
           <Body1 style={{ display: "block", opacity: 0.7 }}>
             {t("tagline")}
           </Body1>
+          <div>
+            <Button size="small" onClick={onSignOut} data-testid="candidate-sign-out">
+              {t("candidate.signOut")}
+            </Button>
+          </div>
         </div>
 
         {phase === "idle" && (

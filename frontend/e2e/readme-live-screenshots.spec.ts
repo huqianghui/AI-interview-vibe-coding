@@ -10,6 +10,7 @@
  *   LIVE_VOICE=1 SCREENSHOTS=1 npx playwright test readme-live-screenshots --config=e2e/live.config.ts
  */
 import { test, expect } from "@playwright/test";
+import { enterVoiceChannel, primeCandidateLogin, waitForInterviewStage } from "./helpers/candidateLogin";
 
 const ENABLED = process.env.LIVE_VOICE === "1" && process.env.SCREENSHOTS === "1";
 const BASE = process.env.BASE || "http://localhost:5173";
@@ -21,12 +22,13 @@ test.describe("README live avatar screenshots (real Azure)", () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
   test("capture voice mode: digital-human avatar speaking", async ({ page }) => {
+    await primeCandidateLogin(page); // #102: /interview is login-gated
     await page.goto(`${BASE}/interview`);
     await page.getByRole("button", { name: /开始面试|start interview/i }).click();
     await page.getByRole("button", { name: /我准备好了|i'm ready/i }).click();
-    await expect(page.getByRole("textbox")).toBeVisible();
+    await waitForInterviewStage(page); // bank or external brain, text or voice channel
 
-    await page.getByRole("button", { name: /语音作答|answer by voice/i }).click();
+    await enterVoiceChannel(page); // auto-voice persona: only clicks when still in text mode
 
     // Wait for the avatar VIDEO to render real frames (not the orb): the recvonly PC attached a
     // stream and the element is actually decoding (videoWidth > 0 and time advances).

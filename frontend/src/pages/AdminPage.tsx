@@ -28,6 +28,12 @@ import {
   Option,
   Tab,
   TabList,
+  Table,
+  TableBody,
+  TableCell,
+  TableHeader,
+  TableHeaderCell,
+  TableRow,
   Text,
   Title2,
   Title3,
@@ -37,6 +43,7 @@ import {
 import * as admin from "../api/admin";
 import type {
   AdminQuestion,
+  AdminUser,
   AiFoundryConfig,
   Bank,
   Checklist,
@@ -45,6 +52,7 @@ import type {
   ExternalConfig,
 } from "../api/admin";
 import * as auth from "../api/auth";
+import { LoginCard } from "../components/LoginCard";
 
 const useStyles = makeStyles({
   loginPage: { maxWidth: "420px", margin: "0 auto", padding: "24px" },
@@ -163,16 +171,17 @@ const KIND_COLOR: Record<string, "danger" | "success" | "warning" | "informative
 export function AdminPage() {
   const styles = useStyles();
   const { t } = useTranslation();
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
   const [authed, setAuthed] = useState(false);
   // A residual token in sessionStorage is NOT proof of a live session (it may be expired, or signed
   // with a rotated secret_key). Start in a "checking" state whenever a token exists so we validate
   // it via me() before rendering the admin UI — otherwise we'd fire protected requests with a stale
   // token and get a wall of 401s while the page pretends we're logged in.
   const [authChecking, setAuthChecking] = useState(Boolean(auth.getToken()));
+  // LoginCard's `busy` prop — this page's guard() has no busy concept of its own (unlike
+  // InterviewPage's), so the login flow tracks it separately just for the card's disabled state.
+  const [loginBusy, setLoginBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"content" | "connection">("content");
+  const [tab, setTab] = useState<"content" | "connection" | "users">("content");
 
   const [banks, setBanks] = useState<Bank[]>([]);
   const [selectedBank, setSelectedBank] = useState<string | null>(null);
@@ -210,6 +219,13 @@ export function AdminPage() {
   const [extStatus, setExtStatus] = useState<string | null>(null);
   // null = hidden; a string = the revealed plaintext key (shown read-only, never in the edit field).
   const [extRevealed, setExtRevealed] = useState<string | null>(null);
+
+  // Users tab (#102, read-only per the eng review): one shared account per candidate seat, so an
+  // admin can hand out the seeded username/password — not an account-management screen.
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersError, setUsersError] = useState<string | null>(null);
+  const [copiedUserId, setCopiedUserId] = useState<string | null>(null);
 
   const guard = useCallback(async (fn: () => Promise<void>) => {
     setError(null);
@@ -291,16 +307,42 @@ export function AdminPage() {
     }
   }, [authed, refreshBanks, refreshConfig, refreshExternalConfig]);
 
-  const onLogin = () =>
-    guard(async () => {
-      await auth.login(username.trim(), password);
+  const loadUsers = useCallback(async () => {
+    setUsersLoading(true);
+    setUsersError(null);
+    try {
+      setUsers(await admin.listUsers());
+    } catch (e) {
+      setUsersError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setUsersLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (authed && tab === "users") void loadUsers();
+  }, [authed, tab, loadUsers]);
+
+  const copyPassword = (userId: string, generatedPassword: string) => {
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      void navigator.clipboard.writeText(generatedPassword).then(() => {
+        setCopiedUserId(userId);
+      });
+    }
+  };
+
+  const onLogin = (username: string, password: string) => {
+    setLoginBusy(true);
+    void guard(async () => {
+      await auth.login(username, password);
       const user = await auth.me();
       if (!user || user.role !== "admin") {
         auth.clearToken();
         throw new Error(t("admin.errAdminRequired"));
       }
       setAuthed(true);
-    });
+    }).finally(() => setLoginBusy(false));
+  };
 
   // Adopt a freshly loaded/generated/saved checklist as both the display + edit state.
   const adoptChecklist = (c: Checklist | null) => {
@@ -389,40 +431,14 @@ export function AdminPage() {
 
   if (!authed) {
     return (
-      <div className={styles.loginPage}>
-        <Title2 as="h1">{t("admin.loginTitle")}</Title2>
-        <Body1 style={{ display: "block", margin: "12px 0" }}>{t("admin.loginBody")}</Body1>
-        <Input
-          value={username}
-          placeholder={t("admin.username")}
-          onChange={(_, d) => setUsername(d.value)}
-          style={{ width: "100%", marginBottom: 8 }}
-          data-testid="admin-username-input"
-        />
-        <Input
-          type="password"
-          value={password}
-          placeholder={t("admin.password")}
-          onChange={(_, d) => setPassword(d.value)}
-          onKeyDown={(e) => e.key === "Enter" && onLogin()}
-          style={{ width: "100%" }}
-          data-testid="admin-password-input"
-        />
-        <div style={{ marginTop: 12 }}>
-          <Button appearance="primary" onClick={onLogin} data-testid="admin-login">
-            {t("admin.login")}
-          </Button>
-        </div>
-        {error && (
-          <Body1
-            role="alert"
-            className={styles.errorText}
-            style={{ display: "block", marginTop: 12 }}
-          >
-            {error}
-          </Body1>
-        )}
-      </div>
+      <LoginCard
+        title={t("admin.loginTitle")}
+        body={t("admin.loginBody")}
+        error={error}
+        busy={loginBusy}
+        onSubmit={onLogin}
+        testIdPrefix="admin"
+      />
     );
   }
 
@@ -437,13 +453,16 @@ export function AdminPage() {
 
       <TabList
         selectedValue={tab}
-        onTabSelect={(_, d) => setTab(d.value as "content" | "connection")}
+        onTabSelect={(_, d) => setTab(d.value as "content" | "connection" | "users")}
       >
         <Tab value="content" data-testid="admin-tab-content">
           {t("admin.tabContent")}
         </Tab>
         <Tab value="connection" data-testid="admin-tab-connection">
           {t("admin.tabConnection")}
+        </Tab>
+        <Tab value="users" data-testid="admin-tab-users">
+          {t("admin.users.tab")}
         </Tab>
       </TabList>
 
@@ -958,6 +977,71 @@ export function AdminPage() {
           </div>
         </Card>
         </>
+      )}
+
+      {tab === "users" && (
+        <Card className={styles.card} data-testid="users-tab">
+          <CardHeader header={<Title3>{t("admin.users.tab")}</Title3>} />
+          <div style={{ padding: "0 16px 16px" }}>
+            <Body1 style={{ display: "block", marginBottom: 12 }}>{t("admin.users.hint")}</Body1>
+            {usersLoading && <Text data-testid="users-loading">{t("admin.users.loading")}</Text>}
+            {usersError && (
+              <Body1 role="alert" className={styles.errorText} data-testid="users-error">
+                {t("admin.users.loadError", { message: usersError })}
+              </Body1>
+            )}
+            {!usersLoading && !usersError && (
+              <Table data-testid="users-table">
+                <TableHeader>
+                  <TableRow>
+                    <TableHeaderCell>{t("admin.users.colUsername")}</TableHeaderCell>
+                    <TableHeaderCell>{t("admin.users.colRole")}</TableHeaderCell>
+                    <TableHeaderCell>{t("admin.users.colStatus")}</TableHeaderCell>
+                    <TableHeaderCell>{t("admin.users.colPassword")}</TableHeaderCell>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {users.map((u) => (
+                    <TableRow key={u.id} data-testid={`user-row-${u.username}`}>
+                      <TableCell>{u.username}</TableCell>
+                      <TableCell>{u.role}</TableCell>
+                      <TableCell>
+                        {u.is_active ? t("admin.users.statusActive") : t("admin.users.statusInactive")}
+                      </TableCell>
+                      <TableCell>
+                        {u.password_stale ? (
+                          <Text data-testid={`user-password-stale-${u.username}`}>
+                            {t("admin.users.passwordStale")}
+                          </Text>
+                        ) : u.generated_password ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <Text
+                              style={{ fontFamily: "monospace" }}
+                              data-testid={`user-password-${u.username}`}
+                            >
+                              {u.generated_password}
+                            </Text>
+                            <Button
+                              size="small"
+                              data-testid={`user-copy-${u.username}`}
+                              onClick={() => copyPassword(u.id, u.generated_password as string)}
+                            >
+                              {copiedUserId === u.id ? t("admin.users.copied") : t("admin.users.copy")}
+                            </Button>
+                          </div>
+                        ) : (
+                          <Text data-testid={`user-password-not-viewable-${u.username}`}>
+                            {t("admin.users.notViewable")}
+                          </Text>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </div>
+        </Card>
       )}
 
       {error && (
