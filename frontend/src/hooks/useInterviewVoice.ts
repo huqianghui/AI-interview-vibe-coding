@@ -82,12 +82,18 @@ export interface UseInterviewVoiceOptions {
    * suppresses the OTHER improvisation path (server-VAD auto-response). */
   externalMode?: boolean;
   /**
-   * External-brain voice mode only: called when the candidate has stopped speaking and stayed
-   * silent for `EXTERNAL_SILENCE_AUTOCOMMIT_MS` (any new speech resets the timer). Lets the page
-   * auto-submit the buffered answer to the external workflow so the interview advances hands-free,
-   * for a natural back-and-forth feel — the "I'm done" button remains as an immediate override.
-   * The page wires this to the SAME commit-and-advance path the button uses. No-op in bank mode
-   * (the timer is only armed when `externalMode` is set).
+   * Silence auto-submit window in ms (admin-controlled per persona; the page derives it from the
+   * backend's `voice_auto_submit_seconds`). When > 0, after the candidate finishes an utterance and
+   * stays silent this long (any new speech resets the timer) the hook calls `onSilenceAutoCommit`.
+   * `undefined` / `null` / `0` ⇒ OFF (the default): silence alone never advances the turn — it
+   * advances only on the "I'm done" click. Applies to bank AND external sessions alike.
+   */
+  silenceAutoCommitMs?: number | null;
+  /**
+   * Called when the candidate has stopped speaking and stayed silent for `silenceAutoCommitMs`.
+   * Lets the page auto-submit the buffered answer so the interview advances hands-free — the
+   * "I'm done" button remains as an immediate override. The page wires this to the SAME
+   * commit-and-advance path the button uses. Never called while `silenceAutoCommitMs` is unset/0.
    */
   onSilenceAutoCommit?: () => void;
 }
@@ -120,14 +126,16 @@ const SPEAK_MAX_ATTEMPTS = 4;
 // — never leave the candidate in silence). Voice-only sessions don't gate (audio plays over the WS
 // AudioContext, ready at `session.updated`).
 const FIRST_READ_AVATAR_GATE_MS = 6_000;
-// External-brain voice mode: how long the candidate must stay silent after their last utterance
-// segment before we auto-submit the buffered answer to the external workflow (see
-// `onSilenceAutoCommit`). Server-VAD emits an end-of-utterance transcript on ANY mid-thought pause,
-// so a naive "submit on every completed" fragments one answer into several external calls; this
-// grace window (re-armed on every new segment, cleared when the candidate speaks again) waits for a
-// real end-of-answer instead. Kept as a constant for now — whether it should be configurable is a
-// pending product question; 3s is the agreed default.
-const EXTERNAL_SILENCE_AUTOCOMMIT_MS = 3_000;
+// Silence auto-submit (see `silenceAutoCommitMs` / `onSilenceAutoCommit`): server-VAD emits an
+// end-of-utterance transcript on ANY mid-thought pause, so a naive "submit on every completed" would
+// fragment one answer into several submissions; the grace window (re-armed on every new segment,
+// cleared when the candidate speaks again) waits for a real end-of-answer instead. The window used to
+// be a hardcoded 3s for external sessions; it fired while candidates were still THINKING, so it is
+// now OFF unless an admin enables it on the persona and picks the seconds (owner directive
+// 2026-09-23). Sanitized here so a malformed value can never arm a zero-delay timer.
+function silenceAutoCommitDelay(ms: number | null | undefined): number | null {
+  return typeof ms === "number" && Number.isFinite(ms) && ms > 0 ? ms : null;
+}
 
 /** Wire shape of one entry in `session.updated`'s `session.avatar.ice_servers` (matches the Azure
  * SDK's `IceServer.as_dict()`: each server carries its OWN username/credential). */
@@ -250,7 +258,7 @@ export function useInterviewVoice(
   // `commitAnswer` drains this first; it's cleared on drain and on teardown so nothing leaks across
   // turns or sessions.
   const userSegmentsSinceCommitRef = useRef<string[]>([]);
-  // External-brain voice mode only: the silence-auto-commit timer (see EXTERNAL_SILENCE_AUTOCOMMIT_MS
+  // The silence-auto-commit timer (see `silenceAutoCommitMs` / silenceAutoCommitDelay
   // and `onSilenceAutoCommit`). Armed/re-armed each time a user utterance segment is buffered,
   // cleared when the candidate resumes speaking, when a commit runs (button or auto), and on
   // teardown. Held in a ref so the message handler can (re)arm it without re-subscribing.
@@ -389,7 +397,7 @@ export function useInterviewVoice(
     // Drop any buffered user transcript — a new session starts a fresh turn; carrying stale
     // segments across a disconnect/reconnect would mis-attribute them to the next answer.
     userSegmentsSinceCommitRef.current = [];
-    // Disarm the external silence-auto-commit timer — its fire would target a dead session's turn.
+    // Disarm the silence-auto-commit timer — its fire would target a dead session's turn.
     clearSilenceAutoCommit();
     // Drop live partial accumulators too — their item ids belong to the dead Azure session.
     userLiveTranscriptRef.current.clear();
@@ -560,7 +568,7 @@ export function useInterviewVoice(
         case "input_audio_buffer.speech_started":
           setAudio("listening");
           // The candidate resumed speaking — they haven't finished the answer yet, so cancel any
-          // pending external silence-auto-commit. It re-arms when the next utterance completes.
+          // pending silence-auto-commit. It re-arms when the next utterance completes.
           clearSilenceAutoCommit();
           break;
         case "input_audio_buffer.speech_stopped":
@@ -616,16 +624,18 @@ export function useInterviewVoice(
             // event that already fired. (This was the empty-answer bug: the panel showed the bubble
             // but commitAnswer never saw the text.)
             userSegmentsSinceCommitRef.current.push(transcript);
-            // External-brain voice mode: arm/re-arm the silence-auto-commit timer. This segment is
-            // an end-of-utterance; if the candidate stays silent long enough (no new speech re-arms
-            // it, see the speech_started case), auto-submit the buffered answer to advance the
-            // interview hands-free. Bank mode never arms — its turns advance on the "I'm done" click.
-            if (optionsRef.current.externalMode) {
+            // Arm/re-arm the silence-auto-commit timer when the admin enabled it on the persona.
+            // This segment is an end-of-utterance; if the candidate stays silent for the configured
+            // window (no new speech re-arms it, see the speech_started case), auto-submit the
+            // buffered answer to advance the interview hands-free. OFF (the default) never arms —
+            // the turn advances only on the "I'm done" click, so a thinking pause can't submit.
+            const delay = silenceAutoCommitDelay(optionsRef.current.silenceAutoCommitMs);
+            if (delay !== null) {
               clearSilenceAutoCommit();
               silenceAutoCommitTimerRef.current = setTimeout(() => {
                 silenceAutoCommitTimerRef.current = null;
                 optionsRef.current.onSilenceAutoCommit?.();
-              }, EXTERNAL_SILENCE_AUTOCOMMIT_MS);
+              }, delay);
             }
           }
           break;
@@ -983,7 +993,7 @@ export function useInterviewVoice(
    * `COMMIT_TRANSCRIPT_TIMEOUT_MS` or the connection tears down first (fail-closed, never hangs).
    */
   const commitAnswer = useCallback((): Promise<string> => {
-    // This turn is being committed (via the "I'm done" button OR the external silence auto-commit),
+    // This turn is being committed (via the "I'm done" button OR the silence auto-commit),
     // so disarm the silence timer — it must not fire a second commit for a turn already submitted.
     clearSilenceAutoCommit();
     // Defensively settle any prior armed commit (e.g. a double-click) before arming a fresh one.

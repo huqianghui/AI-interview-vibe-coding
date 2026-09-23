@@ -664,3 +664,111 @@ async def test_start_voice_default_false_without_persona(client):
     headers = await _new_candidate_headers(client)
     body = (await client.post("/candidate/interview/start", headers=headers)).json()
     assert body["voice_default"] is False
+    # No persona ⇒ no auto-submit either (0 = off), never null on an entry point.
+    assert body["voice_auto_submit_seconds"] == 0
+
+
+# --- voice_auto_submit_seconds (admin-controlled silence auto-submit, one pair per engine) ----
+
+
+@pytest.mark.asyncio
+async def test_start_bank_voice_auto_submit_is_off_by_default(client, db_session):
+    from app.services import persona_service as psvc
+
+    # A bank persona that never touched the knob → 0 = disabled. The turn advances only on the
+    # explicit "I'm done" click (owner directive: silence alone must never advance a bank turn).
+    await psvc.create_persona(db_session, name="Interviewer", is_default=True)
+    headers = await _new_candidate_headers(client)
+    body = (await client.post("/candidate/interview/start", headers=headers)).json()
+    assert body["voice_auto_submit_seconds"] == 0
+
+
+@pytest.mark.asyncio
+async def test_start_bank_voice_auto_submit_seconds_when_enabled(client, db_session):
+    from app.services import persona_service as psvc
+
+    await psvc.create_persona(
+        db_session,
+        name="Interviewer",
+        is_default=True,
+        bank_auto_submit_enabled=True,
+        bank_auto_submit_silence_seconds=8,
+        # The EXTERNAL pair is a separate config item and must not leak into a bank session.
+        external_auto_submit_enabled=True,
+        external_auto_submit_silence_seconds=20,
+    )
+    headers = await _new_candidate_headers(client)
+    body = (await client.post("/candidate/interview/start", headers=headers)).json()
+    assert body["voice_auto_submit_seconds"] == 8
+    # The GET (resume) entry point carries it too; a mutation response leaves it null (not
+    # reported) so the UI's per-session latch is never turned off mid-interview.
+    iv = body["interview_session_id"]
+    got = (await client.get(f"/candidate/interview/{iv}", headers=headers)).json()
+    assert got["voice_auto_submit_seconds"] == 8
+    answered = (
+        await client.post(
+            f"/candidate/interview/{iv}/answer",
+            headers=headers,
+            json={"text": "an answer", "source": "voice"},
+        )
+    ).json()
+    assert answered["voice_auto_submit_seconds"] is None
+    # Every mutation route leaves it unreported — /end included.
+    ended = (await client.post(f"/candidate/interview/{iv}/end", headers=headers)).json()
+    assert ended["voice_auto_submit_seconds"] is None
+
+
+@pytest.mark.asyncio
+async def test_start_bank_voice_auto_submit_zero_when_window_set_but_disabled(client, db_session):
+    from app.services import persona_service as psvc
+
+    # The window is remembered while the switch is off, but the candidate page must see "off".
+    await psvc.create_persona(
+        db_session,
+        name="Interviewer",
+        is_default=True,
+        bank_auto_submit_enabled=False,
+        bank_auto_submit_silence_seconds=12,
+    )
+    headers = await _new_candidate_headers(client)
+    body = (await client.post("/candidate/interview/start", headers=headers)).json()
+    assert body["voice_auto_submit_seconds"] == 0
+
+
+@pytest.mark.asyncio
+async def test_start_external_voice_auto_submit_uses_external_pair(client, db_session):
+    from app.services import persona_service as psvc
+
+    # An external persona reads ITS OWN pair: ON by default (hands-free external workflow) at 3s,
+    # regardless of the bank pair being off.
+    await psvc.create_persona(
+        db_session, name="Interviewer", is_default=True, interview_brain="external"
+    )
+    headers = await _new_candidate_headers(client)
+    body = (await client.post("/candidate/interview/start", headers=headers)).json()
+    assert body["external_phase"] is not None
+    assert body["voice_auto_submit_seconds"] == 3
+
+
+@pytest.mark.asyncio
+async def test_external_voice_auto_submit_follows_the_session_engine_snapshot(client, db_session):
+    from app.services import persona_service as psvc
+
+    # The pair is picked by the SESSION's brain_mode (the frozen snapshot), not by the persona's
+    # current engine: a persona flipped mid-interview never re-interprets the live session.
+    persona = await psvc.create_persona(
+        db_session,
+        name="Interviewer",
+        is_default=True,
+        interview_brain="external",
+        external_auto_submit_enabled=False,
+        bank_auto_submit_enabled=True,
+        bank_auto_submit_silence_seconds=9,
+    )
+    headers = await _new_candidate_headers(client)
+    body = (await client.post("/candidate/interview/start", headers=headers)).json()
+    assert body["voice_auto_submit_seconds"] == 0  # external pair OFF → off, bank pair ignored
+    await psvc.update_persona(db_session, persona.id, interview_brain="bank")
+    iv = body["interview_session_id"]
+    got = (await client.get(f"/candidate/interview/{iv}", headers=headers)).json()
+    assert got["voice_auto_submit_seconds"] == 0  # still the external session → still off

@@ -6,7 +6,7 @@
  * persona fields. Turn-detection + audio-processing knobs live under a collapsible Advanced block
  * (the portal's named controls are the top-level ones; these are secondary).
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Accordion,
   AccordionHeader,
@@ -36,6 +36,11 @@ const VOICE_OPTIONS: Record<EditorLocale, string[]> = {
   "zh-CN": ["zh-CN-XiaoxiaoNeural", "zh-CN-YunxiNeural", "zh-CN-XiaoyiNeural"],
   "en-US": ["en-US-AvaNeural", "en-US-AndrewNeural", "en-US-EmmaNeural"],
 };
+
+// Bounds for the silence auto-submit window — mirror the backend's VOICE_AUTO_SUBMIT_MIN/MAX_SECONDS
+// (1s would fire on any breath pause; past a minute is indistinguishable from "off").
+const AUTO_SUBMIT_MIN_SECONDS = 1;
+const AUTO_SUBMIT_MAX_SECONDS = 60;
 
 const TURN_DETECTION_OPTIONS = [
   "azure_semantic_vad",
@@ -134,6 +139,21 @@ export function ConfigurationRail({
       </div>
 
       <Divider />
+      <Subtitle2>Answer submission (voice)</Subtitle2>
+
+      {/* Silence auto-submit — ONE INDEPENDENT PAIR PER ENGINE, and only the active engine's pair
+          is shown (same rule as the two prompt fields: the other pair keeps its value untouched).
+          Bank defaults OFF: a fixed 3s window used to submit while candidates were still thinking,
+          so the admin decides whether silence may end a bank answer at all. External defaults ON
+          (its hands-free flow). Off ⇒ the turn advances only on the "I'm done" click. */}
+      <AutoSubmitControls
+        key={form.interviewBrain}
+        engine={form.interviewBrain === "external" ? "external" : "bank"}
+        form={form}
+        onChange={onChange}
+      />
+
+      <Divider />
       <Subtitle2>Avatar</Subtitle2>
 
       {/* Avatar grid */}
@@ -216,6 +236,85 @@ export function ConfigurationRail({
           </AccordionPanel>
         </AccordionItem>
       </Accordion>
+    </div>
+  );
+}
+
+type AutoSubmitEngine = "bank" | "external";
+
+const AUTO_SUBMIT_FIELDS = {
+  bank: {
+    enabled: "bank_auto_submit_enabled",
+    seconds: "bank_auto_submit_silence_seconds",
+    title: "Question bank",
+  },
+  external: {
+    enabled: "external_auto_submit_enabled",
+    seconds: "external_auto_submit_silence_seconds",
+    title: "External interview API",
+  },
+} as const;
+
+interface AutoSubmitControlsProps {
+  engine: AutoSubmitEngine;
+  form: PersonaFormState;
+  onChange: (patch: Partial<PersonaFormState>) => void;
+}
+
+/** The active engine's (switch, seconds) pair. Mounted with `key={interviewBrain}` by the rail so
+ * the seconds draft resets when the admin switches engines. */
+function AutoSubmitControls({ engine, form, onChange }: AutoSubmitControlsProps) {
+  const styles = useStyles();
+  const fields = AUTO_SUBMIT_FIELDS[engine];
+  const enabled = form[fields.enabled];
+  const seconds = form[fields.seconds];
+  // The seconds input edits a local DRAFT string and commits (parsed + clamped to 1–60) on blur /
+  // Enter — clamping on every keystroke snapped an emptied field to "1" and fought the next digit.
+  const [draft, setDraft] = useState(String(seconds));
+  useEffect(() => {
+    setDraft(String(seconds));
+  }, [seconds]);
+  const commit = () => {
+    const n = Math.round(Number(draft));
+    if (!Number.isFinite(n) || draft.trim() === "") {
+      setDraft(String(seconds)); // garbage / empty → revert to the saved value
+      return;
+    }
+    const clamped = Math.min(AUTO_SUBMIT_MAX_SECONDS, Math.max(AUTO_SUBMIT_MIN_SECONDS, n));
+    setDraft(String(clamped));
+    if (clamped !== seconds) onChange({ [fields.seconds]: clamped });
+  };
+  return (
+    <div className={styles.section} data-testid={`config-auto-submit-${engine}`}>
+      <Switch
+        label={`Auto-submit answer after silence (${fields.title})`}
+        checked={enabled}
+        onChange={(_, d) => onChange({ [fields.enabled]: d.checked })}
+        data-testid="config-auto-submit"
+      />
+      <Field
+        label="Silence before auto-submit (seconds)"
+        hint={
+          enabled
+            ? "Counted from the end of the candidate's last utterance; speaking again resets it. The \"I'm done\" button still submits immediately."
+            : `Off for ${fields.title}: the candidate must click "I'm done" to submit — a thinking pause never ends the answer.`
+        }
+      >
+        <Input
+          type="number"
+          value={draft}
+          min={AUTO_SUBMIT_MIN_SECONDS}
+          max={AUTO_SUBMIT_MAX_SECONDS}
+          step={1}
+          disabled={!enabled}
+          onChange={(_, d) => setDraft(d.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commit();
+          }}
+          data-testid="config-auto-submit-seconds"
+        />
+      </Field>
     </div>
   );
 }

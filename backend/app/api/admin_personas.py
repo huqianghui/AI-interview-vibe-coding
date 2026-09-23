@@ -11,7 +11,7 @@ in the persona payload — it never 500s the create/update (F5 AC #4).
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
@@ -30,6 +30,18 @@ router = APIRouter(
 )
 
 
+# Bounds for the voice auto-submit silence window (seconds). 1s would fire on any breath pause;
+# anything past a minute is indistinguishable from "off" for the candidate.
+VOICE_AUTO_SUBMIT_MIN_SECONDS = 1
+VOICE_AUTO_SUBMIT_MAX_SECONDS = 60
+AUTO_SUBMIT_FIELDS = (
+    "bank_auto_submit_enabled",
+    "bank_auto_submit_silence_seconds",
+    "external_auto_submit_enabled",
+    "external_auto_submit_silence_seconds",
+)
+
+
 class VoiceKnobs(BaseModel):
     turn_detection: str = "azure_semantic_vad"
     eou_detection: bool = True
@@ -39,6 +51,18 @@ class VoiceKnobs(BaseModel):
     proactive_engagement: bool = False
     voice_temperature: float = 0.8
     playback_speed: float = 1.0
+    # Voice answer auto-submit after silence — one independent pair per engine (owner directive:
+    # bank OFF by default because a fixed window fired while candidates were still thinking;
+    # external keeps its hands-free ON default). The windows are bounded so a typo can't make the
+    # page submit instantly or never.
+    bank_auto_submit_enabled: bool = False
+    bank_auto_submit_silence_seconds: int = Field(
+        default=3, ge=VOICE_AUTO_SUBMIT_MIN_SECONDS, le=VOICE_AUTO_SUBMIT_MAX_SECONDS
+    )
+    external_auto_submit_enabled: bool = True
+    external_auto_submit_silence_seconds: int = Field(
+        default=3, ge=VOICE_AUTO_SUBMIT_MIN_SECONDS, le=VOICE_AUTO_SUBMIT_MAX_SECONDS
+    )
 
 
 class PersonaCreate(VoiceKnobs):
@@ -93,6 +117,14 @@ class PersonaUpdate(BaseModel):
     proactive_engagement: bool | None = None
     voice_temperature: float | None = None
     playback_speed: float | None = None
+    bank_auto_submit_enabled: bool | None = None
+    bank_auto_submit_silence_seconds: int | None = Field(
+        default=None, ge=VOICE_AUTO_SUBMIT_MIN_SECONDS, le=VOICE_AUTO_SUBMIT_MAX_SECONDS
+    )
+    external_auto_submit_enabled: bool | None = None
+    external_auto_submit_silence_seconds: int | None = Field(
+        default=None, ge=VOICE_AUTO_SUBMIT_MIN_SECONDS, le=VOICE_AUTO_SUBMIT_MAX_SECONDS
+    )
     model: str | None = None
     interview_brain: str | None = None
 
@@ -102,6 +134,15 @@ class PersonaUpdate(BaseModel):
         if v is not None and v not in BRAIN_MODES:
             raise ValueError(f"interview_brain must be one of {BRAIN_MODES}")
         return v
+
+    @model_validator(mode="after")
+    def _reject_explicit_null_auto_submit(self) -> "PersonaUpdate":
+        # ``None`` here means "not sent" (exclude_unset drops it). An EXPLICIT ``null`` would slip
+        # past the ge/le bounds and hit the NOT NULL column as a misleading 409 — reject it as 422.
+        for field in AUTO_SUBMIT_FIELDS:
+            if field in self.model_fields_set and getattr(self, field) is None:
+                raise ValueError(f"{field} may not be null")
+        return self
 
 
 class PersonaOut(BaseModel):
@@ -125,6 +166,10 @@ class PersonaOut(BaseModel):
     proactive_engagement: bool
     voice_temperature: float
     playback_speed: float
+    bank_auto_submit_enabled: bool
+    bank_auto_submit_silence_seconds: int
+    external_auto_submit_enabled: bool
+    external_auto_submit_silence_seconds: int
     model: str | None
     interview_brain: str
     agent_id: str | None

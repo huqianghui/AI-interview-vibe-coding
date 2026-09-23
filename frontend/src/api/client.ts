@@ -44,6 +44,11 @@ export interface Interview {
   // candidate to the voice + digital-human channel instead of text. Present on start/resume
   // responses; mutation responses leave it false (the page reads it once per interview).
   voice_default?: boolean;
+  // Admin-controlled voice silence auto-submit window (from the default persona): 0 ⇒ OFF (the
+  // default — the turn advances only on the "I'm done" click), N > 0 ⇒ auto-submit the buffered
+  // voice answer after N seconds of silence. Present on start/resume responses; null/absent on
+  // mutation responses ("not reported"), so the page latches it per session.
+  voice_auto_submit_seconds?: number | null;
 }
 
 /** One rubric item's graded result (F4). Present on scored (non-stub) question entries. */

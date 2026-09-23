@@ -311,6 +311,152 @@ describe("InterviewPage", () => {
     expect(await screen.findByRole("button", { name: /i'm done answering/i })).toBeInTheDocument();
   });
 
+  it("latches the persona's silence auto-submit window per session and never lets a mutation response turn it off", async () => {
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    // Entry point reports the admin-configured window (5s) …
+    vi.spyOn(client, "startInterview").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "in_progress",
+      current_question: { question_id: "q1", prompt: "Question one?", index: 0, total: 2 },
+      voice_auto_submit_seconds: 5,
+    });
+    // … the answer mutation does NOT (null = "not reported"), which must not flip the latch.
+    vi.spyOn(client, "submitAnswer").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "in_progress",
+      current_question: { question_id: "q2", prompt: "Question two?", index: 1, total: 2 },
+      voice_auto_submit_seconds: null,
+    });
+    const voiceMock = {
+      connect: () => Promise.resolve(),
+      disconnect: () => Promise.resolve(),
+      toggleMute: () => undefined,
+      setMuted: () => undefined,
+      commitAnswer: () => Promise.resolve(""),
+      speakQuestion: () => true,
+      isMuted: false,
+      connectionState: "disconnected" as const,
+      audioState: "idle" as const,
+      isAvatarConnected: false,
+    };
+    const voiceModule = await import("../hooks/useInterviewVoice");
+    const hookSpy = vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(voiceMock);
+    const lastWindow = () => hookSpy.mock.calls.at(-1)?.[1]?.silenceAutoCommitMs;
+
+    renderPage();
+    // Before any interview exists the hook is OFF (null), never a zero-delay timer.
+    expect(lastWindow()).toBeNull();
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+    await screen.findByText("Question one?");
+    // The start response's 5s window reaches the hook as milliseconds.
+    await waitFor(() => expect(lastWindow()).toBe(5_000));
+
+    await user.type(screen.getByRole("textbox"), "a sufficiently long answer");
+    await user.click(screen.getByRole("button", { name: /submit answer/i }));
+    await screen.findByText("Question two?");
+    // The mutation response carried null — the latch keeps the session's 5s window.
+    expect(lastWindow()).toBe(5_000);
+  });
+
+  it("drops a silence auto-submit that fires while a submit is already in flight (no double commit)", async () => {
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "in_progress",
+      current_question: { question_id: "q1", prompt: "Question one?", index: 0, total: 2 },
+      voice_default: true,
+      voice_auto_submit_seconds: 3,
+    });
+    // submitAnswer stays PENDING until we release it — the window in which a second commit could
+    // sneak in.
+    let releaseSubmit!: (v: client.Interview) => void;
+    const submitSpy = vi.spyOn(client, "submitAnswer").mockImplementation(
+      () => new Promise<client.Interview>((resolve) => (releaseSubmit = resolve)),
+    );
+    let commitCalls = 0;
+    const voiceMock = {
+      connect: () => Promise.resolve(),
+      disconnect: () => Promise.resolve(),
+      toggleMute: () => undefined,
+      setMuted: () => undefined,
+      commitAnswer: () => {
+        commitCalls += 1;
+        return Promise.resolve("my spoken answer");
+      },
+      speakQuestion: () => true,
+      isMuted: false,
+      connectionState: "connected" as const,
+      audioState: "idle" as const,
+      isAvatarConnected: false,
+    };
+    const voiceModule = await import("../hooks/useInterviewVoice");
+    const hookSpy = vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(voiceMock);
+
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+    await screen.findByText("Question one?");
+    const doneBtn = await screen.findByRole("button", { name: /i'm done answering/i });
+
+    // The candidate clicks "I'm done" → one commit + one (pending) submit.
+    await user.click(doneBtn);
+    await waitFor(() => expect(submitSpy).toHaveBeenCalledTimes(1));
+    expect(commitCalls).toBe(1);
+
+    // The silence timer fires while that submit is still in flight — it must be dropped.
+    const fire = hookSpy.mock.calls.at(-1)?.[1]?.onSilenceAutoCommit;
+    expect(fire).toBeTypeOf("function");
+    fire?.();
+    fire?.();
+    expect(commitCalls).toBe(1);
+    expect(submitSpy).toHaveBeenCalledTimes(1);
+
+    // Release the submit → next question; a later timer fire is allowed again.
+    releaseSubmit({
+      interview_session_id: "iv1",
+      status: "in_progress",
+      current_question: { question_id: "q2", prompt: "Question two?", index: 1, total: 2 },
+    });
+    await screen.findByText("Question two?");
+    hookSpy.mock.calls.at(-1)?.[1]?.onSilenceAutoCommit?.();
+    await waitFor(() => expect(commitCalls).toBe(2));
+  });
+
+  it("passes no silence window to the hook when the persona has auto-submit off (0)", async () => {
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "in_progress",
+      current_question: { question_id: "q1", prompt: "Question one?", index: 0, total: 1 },
+      voice_auto_submit_seconds: 0,
+    });
+    const voiceMock = {
+      connect: () => Promise.resolve(),
+      disconnect: () => Promise.resolve(),
+      toggleMute: () => undefined,
+      setMuted: () => undefined,
+      commitAnswer: () => Promise.resolve(""),
+      speakQuestion: () => true,
+      isMuted: false,
+      connectionState: "disconnected" as const,
+      audioState: "idle" as const,
+      isAvatarConnected: false,
+    };
+    const voiceModule = await import("../hooks/useInterviewVoice");
+    const hookSpy = vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(voiceMock);
+
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+    await screen.findByText("Question one?");
+    // 0 = off ⇒ the hook gets null (no timer), not 0ms.
+    expect(hookSpy.mock.calls.at(-1)?.[1]?.silenceAutoCommitMs).toBeNull();
+  });
+
   it("stays on the text channel when voice_default is absent (no auto-connect)", async () => {
     await i18n.changeLanguage("en-US");
     const user = userEvent.setup();

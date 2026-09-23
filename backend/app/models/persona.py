@@ -16,7 +16,7 @@ PUBLIC repo: no real persona content (client wording, voice names) is stored her
 schema definitions plus neutral defaults only.
 """
 
-from sqlalchemy import Boolean, Float, Index, String, Text, text
+from sqlalchemy import Boolean, Float, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -187,6 +187,42 @@ class InterviewerPersona(TimestampMixin, Base):
     proactive_engagement: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     voice_temperature: Mapped[float] = mapped_column(Float, default=0.8, nullable=False)
     playback_speed: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+
+    # Voice answer auto-submit ("hands-free" end of answer), ONE INDEPENDENT PAIR PER ENGINE.
+    # When enabled for the engine a session runs on, the interview page auto-submits the
+    # candidate's buffered voice answer once they have stayed silent for the pair's
+    # ``*_silence_seconds`` after their last utterance (new speech resets the timer); the "I'm done"
+    # button stays as the immediate override. Owner directives (2026-09-23): (1) BANK mode defaults
+    # OFF — a fixed 3s window fired while candidates were still thinking, so silence alone must
+    # never advance a bank turn unless an admin opts in; (2) EXTERNAL mode defaults ON at 3s — the
+    # external workflow was designed hands-free and keeps that behaviour; (3) the two engines are
+    # SEPARATE config items (like prompt_fragment vs external_reader_prompt): flipping
+    # ``interview_brain`` must never carry one engine's setting into the other, and editing one
+    # never touches the other. The candidate API picks the pair by the SESSION's brain_mode. Server
+    # defaults mirror the migration's.
+    bank_auto_submit_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0", nullable=False
+    )
+    bank_auto_submit_silence_seconds: Mapped[int] = mapped_column(
+        Integer, default=3, server_default="3", nullable=False
+    )
+    external_auto_submit_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="1", nullable=False
+    )
+    external_auto_submit_silence_seconds: Mapped[int] = mapped_column(
+        Integer, default=3, server_default="3", nullable=False
+    )
+
+    def voice_auto_submit_seconds_for(self, brain_mode: str) -> int:
+        """The silence auto-submit window (seconds) for a session on ``brain_mode``; 0 = OFF."""
+        if brain_mode == "external":
+            enabled, seconds = (
+                self.external_auto_submit_enabled,
+                self.external_auto_submit_silence_seconds,
+            )
+        else:
+            enabled, seconds = self.bank_auto_submit_enabled, self.bank_auto_submit_silence_seconds
+        return seconds if enabled else 0
 
     # Per-persona agent tools (SPEC F5) — JSON array of tool dicts synced into the Foundry prompt
     # agent's `tools`. Executed by the Foundry runtime, not here; this app only carries the config.

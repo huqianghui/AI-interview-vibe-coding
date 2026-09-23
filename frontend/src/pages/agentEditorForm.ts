@@ -48,6 +48,13 @@ export interface PersonaFormState {
   proactive_engagement: boolean;
   voice_temperature: number;
   playback_speed: number;
+  // Silence auto-submit, one independent pair per engine (bank OFF / external ON by default).
+  // The rail edits only the active interviewBrain's pair; both persist so toggling the brain
+  // never clears or copies either.
+  bank_auto_submit_enabled: boolean;
+  bank_auto_submit_silence_seconds: number;
+  external_auto_submit_enabled: boolean;
+  external_auto_submit_silence_seconds: number;
   model: string; // per-persona Foundry model deployment ("" → global default)
   interviewBrain: string; // "bank" (built-in question bank) | "external" (external interview API)
   tools: ToolConfig[];
@@ -74,6 +81,10 @@ export function emptyPersonaForm(): PersonaFormState {
     proactive_engagement: false,
     voice_temperature: 0.8,
     playback_speed: 1.0,
+    bank_auto_submit_enabled: false,
+    bank_auto_submit_silence_seconds: 3,
+    external_auto_submit_enabled: true,
+    external_auto_submit_silence_seconds: 3,
     model: "",
     interviewBrain: "bank",
     tools: [],
@@ -101,6 +112,10 @@ export function personaToForm(p: PersonaOut): PersonaFormState {
     proactive_engagement: p.proactive_engagement,
     voice_temperature: p.voice_temperature,
     playback_speed: p.playback_speed,
+    bank_auto_submit_enabled: p.bank_auto_submit_enabled ?? false,
+    bank_auto_submit_silence_seconds: p.bank_auto_submit_silence_seconds ?? 3,
+    external_auto_submit_enabled: p.external_auto_submit_enabled ?? true,
+    external_auto_submit_silence_seconds: p.external_auto_submit_silence_seconds ?? 3,
     model: p.model ?? "",
     interviewBrain: p.interview_brain ?? "bank",
     tools: parseToolsConfig(p.tools_config),
@@ -128,6 +143,10 @@ export function formToPayload(form: PersonaFormState): PersonaCreate {
     proactive_engagement: form.proactive_engagement,
     voice_temperature: form.voice_temperature,
     playback_speed: form.playback_speed,
+    bank_auto_submit_enabled: form.bank_auto_submit_enabled,
+    bank_auto_submit_silence_seconds: form.bank_auto_submit_silence_seconds,
+    external_auto_submit_enabled: form.external_auto_submit_enabled,
+    external_auto_submit_silence_seconds: form.external_auto_submit_silence_seconds,
     model: form.model,
     interview_brain: form.interviewBrain,
     tools_config: stringifyToolsConfig(form.tools),
