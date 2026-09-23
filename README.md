@@ -69,7 +69,8 @@ normalized to 100, fully editable:
 ### 6. Admin — Foundry agent persona editor
 
 A portal-faithful editor for the interviewer persona: model deployment, voice, greeting, the full
-Azure avatar roster (video + photo styles), tools, per-persona knowledge — synced to a real
+Azure avatar roster (video + photo styles), tools, per-persona knowledge, and per-engine voice
+answer-submission timing (auto-submit on/off + silence window) — synced to a real
 **Azure AI Foundry agent**, with an inline text/voice playground:
 
 ![Persona editor — avatar roster, model, Foundry agent sync status](docs/images/08-admin-agent-editor.png)
