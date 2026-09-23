@@ -78,3 +78,58 @@ def test_avatar_session_text_audio_only_when_no_character():
     assert not any("avatar" in m for m in modalities)
     with pytest.raises(KeyError):
         _ = session["avatar"]
+
+
+# --- photo vs video avatars (issue #103) --------------------------------------
+
+
+def test_avatar_session_photo_avatar_declares_type_and_model_without_style():
+    # Regression (issue #103): picking a PHOTO avatar (Adrian) made Voice Live reject the session —
+    # Azure only knows a photo avatar when the block carries `type: photo-avatar` + `model: vasa-1`
+    # and NO style. Live-verified 2026-09-23 (agent + model mode): this shape gets session.updated
+    # with `type: photo-avatar` + ice_servers; the old shape got `avatar_verification_failed`.
+    session = build_avatar_session(FakePersona(character="adrian", style=""), locale="en-US")
+    avatar = _as_dict(session["avatar"])
+    assert avatar["type"] == "photo-avatar"
+    assert avatar["model"] == "vasa-1"
+    assert avatar["character"] == "adrian"
+    assert avatar["customized"] is False
+    assert avatar.get("style") is None
+    assert _as_dict(avatar["video"])["codec"] == "h264"
+
+
+def test_avatar_session_photo_avatar_drops_stale_video_style():
+    # A style left over from a previous VIDEO pick must not ride along on a photo avatar.
+    session = build_avatar_session(
+        FakePersona(character="adrian", style="casual-sitting"), locale="en-US"
+    )
+    assert _as_dict(session["avatar"]).get("style") is None
+
+
+def test_avatar_session_video_avatar_keeps_style_and_has_no_photo_fields():
+    session = build_avatar_session(FakePersona(character="lisa", style="graceful"), locale="en-US")
+    avatar = _as_dict(session["avatar"])
+    assert avatar["character"] == "lisa"
+    assert avatar["style"] == "graceful"
+    assert avatar.get("type") is None
+    assert avatar.get("model") is None
+
+
+def test_avatar_session_video_avatar_blank_style_gets_default():
+    # Azure rejects a video avatar with `style: null` AND a slug the character doesn't have
+    # ("casual-sitting" is lisa-only) — fall back to that character's own default.
+    session = build_avatar_session(FakePersona(character="harry", style=""), locale="en-US")
+    assert _as_dict(session["avatar"])["style"] == "business"
+
+
+def test_avatar_session_unknown_character_without_style_is_sent_as_photo():
+    # Roster miss (future Azure character): the style heuristic decides, through the real SDK model.
+    session = build_avatar_session(FakePersona(character="newface", style=""), locale="en-US")
+    avatar = _as_dict(session["avatar"])
+    assert avatar["type"] == "photo-avatar"
+    assert avatar["model"] == "vasa-1"
+    assert avatar.get("style") is None
+    session = build_avatar_session(FakePersona(character="newface", style="formal"), locale="en-US")
+    avatar = _as_dict(session["avatar"])
+    assert avatar.get("type") is None
+    assert avatar["style"] == "formal"

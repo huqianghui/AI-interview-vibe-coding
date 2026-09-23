@@ -8,7 +8,7 @@
  * digital human / orb above the stream, while its transcript flows into the same message list.
  *
  * A not-yet-saved persona has nothing to test → a hint. Backend: /admin/personas/{id}/test-chat
- * (text) + /admin/personas/{id}/voice/session (voice).
+ * (text) + the backend Voice Live WS proxy `/api/voice-live/ws` via useInterviewVoice (voice).
  */
 import { useCallback, useRef, useState } from "react";
 import {

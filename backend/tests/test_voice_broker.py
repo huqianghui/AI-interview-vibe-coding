@@ -201,3 +201,31 @@ async def test_create_voice_session_greeting_follows_locale(db_session):
     await psvc.mark_sync_succeeded(db_session, persona, agent_id="a", agent_version="1")
     vs = await voice_broker.create_voice_session(db_session, locale="en-US")
     assert vs.greeting == "Hello"
+
+
+@pytest.mark.asyncio
+async def test_voice_session_photo_avatar_keeps_photo_shape_after_video_injection(db_session):
+    # Issue #103: the /calls broker session must send the PHOTO shape (type/model, no style) and the
+    # broker's video-codec injection must not disturb it.
+    persona = await psvc.create_persona(
+        db_session,
+        name="Photo Interviewer",
+        character="adrian",
+        style="",
+        voice_map='{"en-US": "en-US-AvaNeural"}',
+        greeting_map='{"en-US": "Hello"}',
+        is_default=True,
+    )
+    await psvc.mark_sync_succeeded(db_session, persona, agent_id="agent-photo", agent_version="1")
+
+    vs = await voice_broker.create_voice_session(db_session, locale="en-US")
+
+    assert vs.avatar_enabled is True
+    assert vs.session_config["modalities"] == ["text", "audio", "avatar"]
+    assert vs.session_config["avatar"] == {
+        "type": "photo-avatar",
+        "model": "vasa-1",
+        "character": "adrian",
+        "customized": False,
+        "video": {"codec": "h264"},
+    }
