@@ -596,15 +596,17 @@ describe("useInterviewVoice commitAnswer", () => {
     vi.unstubAllGlobals();
   });
 
-  // Silence-auto-commit (external voice mode): after the candidate stops speaking and stays silent
-  // ~3s, the hook auto-submits via onSilenceAutoCommit — the same commit-and-advance path the "I'm
-  // done" button uses — so the external-brain interview flows hands-free. New speech resets the
-  // timer; bank mode never arms it.
-  it("external mode: auto-commits after ~3s of silence following an utterance", async () => {
+  // Silence-auto-commit (admin-controlled per persona, OFF by default): when the page passes a
+  // `silenceAutoCommitMs` window, after the candidate stops speaking and stays silent that long the
+  // hook auto-submits via onSilenceAutoCommit — the same commit-and-advance path the "I'm done"
+  // button uses. New speech resets the timer; no window (the default) never arms it — in bank OR
+  // external mode — so a thinking pause can never submit an answer.
+  it("auto-commits after the configured silence window following an utterance", async () => {
     vi.useFakeTimers();
     const onSilenceAutoCommit = vi.fn();
     const { ws, unmount } = await connectHook({
       externalMode: true,
+      silenceAutoCommitMs: 3_000,
       onSilenceAutoCommit,
     });
 
@@ -633,11 +635,12 @@ describe("useInterviewVoice commitAnswer", () => {
     vi.unstubAllGlobals();
   });
 
-  it("external mode: resuming speech resets the silence timer (no premature auto-commit)", async () => {
+  it("resuming speech resets the silence timer (no premature auto-commit)", async () => {
     vi.useFakeTimers();
     const onSilenceAutoCommit = vi.fn();
     const { ws, unmount } = await connectHook({
       externalMode: true,
+      silenceAutoCommitMs: 3_000,
       onSilenceAutoCommit,
     });
 
@@ -674,25 +677,65 @@ describe("useInterviewVoice commitAnswer", () => {
     vi.unstubAllGlobals();
   });
 
-  it("bank mode: never arms the silence timer (turn advances only on the button)", async () => {
+  it("bank mode with a window: arms the same silence timer (the setting is engine-agnostic)", async () => {
     vi.useFakeTimers();
     const onSilenceAutoCommit = vi.fn();
-    // No externalMode → bank session. A completed transcript buffers but must NOT arm the timer.
-    const { ws, unmount } = await connectHook({ onSilenceAutoCommit });
+    // No externalMode → bank session. With the admin window set, silence auto-submits here too.
+    const { ws, unmount } = await connectHook({
+      silenceAutoCommitMs: 10_000,
+      onSilenceAutoCommit,
+    });
 
     await act(async () => {
       ws().receive({
         type: "conversation.item.input_audio_transcription.completed",
         transcript: "A bank-mode answer.",
       });
-      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(9_500);
     });
+    // The admin picked 10s, not the old hardcoded 3s — still thinking time.
     expect(onSilenceAutoCommit).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(onSilenceAutoCommit).toHaveBeenCalledTimes(1);
 
     unmount();
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
+
+  it.each([
+    ["bank mode", {}],
+    ["external mode", { externalMode: true }],
+    ["an explicit 0 window", { externalMode: true, silenceAutoCommitMs: 0 }],
+    ["an explicit null window", { silenceAutoCommitMs: null }],
+    ["a NaN window", { silenceAutoCommitMs: Number.NaN }],
+    ["an Infinity window", { silenceAutoCommitMs: Number.POSITIVE_INFINITY }],
+    ["a negative window", { silenceAutoCommitMs: -3_000 }],
+  ])(
+    "default OFF — %s without a window never arms the silence timer (turn advances only on the button)",
+    async (_label, opts) => {
+      vi.useFakeTimers();
+      const onSilenceAutoCommit = vi.fn();
+      // A completed transcript buffers for the next "I'm done" click but must NOT arm the timer:
+      // a candidate who pauses to think must never have their answer submitted for them.
+      const { ws, unmount } = await connectHook({ ...opts, onSilenceAutoCommit });
+
+      await act(async () => {
+        ws().receive({
+          type: "conversation.item.input_audio_transcription.completed",
+          transcript: "Let me think about that…",
+        });
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(onSilenceAutoCommit).not.toHaveBeenCalled();
+
+      unmount();
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    },
+  );
 });
 
 /**

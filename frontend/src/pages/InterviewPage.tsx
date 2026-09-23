@@ -371,6 +371,15 @@ export function InterviewPage() {
     });
   }, []);
 
+  // Admin-controlled voice silence auto-submit window, latched per session from the start/resume
+  // response (`voice_auto_submit_seconds`: 0 = OFF, N > 0 = seconds). Mutation responses carry
+  // null ("not reported") and must not flip the feature off mid-interview, hence the latch.
+  const [autoSubmitSeconds, setAutoSubmitSeconds] = useState(0);
+  useEffect(() => {
+    const reported = interview?.voice_auto_submit_seconds;
+    if (typeof reported === "number") setAutoSubmitSeconds(reported);
+  }, [interview?.voice_auto_submit_seconds]);
+
   const voice = useInterviewVoice(interview?.interview_session_id ?? "", {
     locale: i18n.language,
     videoRef: avatarVideoRef,
@@ -378,10 +387,14 @@ export function InterviewPage() {
     // bare response.create). `external_phase` is non-null ONLY for external sessions, so it doubles
     // as the flag — read live here; the hook re-syncs options every render.
     externalMode: interview?.external_phase != null,
-    // External voice mode: after the candidate stops speaking and stays silent ~3s, auto-submit the
-    // buffered answer via the SAME commit-and-advance path the "I'm done" button uses, so the
-    // interview flows hands-free (the button stays as an immediate override). `onVoiceDone` is
-    // declared below; the hook re-syncs options every render so this closure always sees the latest.
+    // Silence auto-submit (admin-controlled per persona, OFF by default): when the persona enables
+    // it, after the candidate stops speaking and stays silent for the configured window the hook
+    // auto-submits the buffered answer via the SAME commit-and-advance path the "I'm done" button
+    // uses (the button stays as an immediate override). Latched per session from the start/resume
+    // response (see `autoSubmitSeconds`); OFF ⇒ the timer never arms and a thinking pause can't
+    // submit. `onVoiceDone` is declared below; the hook re-syncs options every render so this
+    // closure always sees the latest.
+    silenceAutoCommitMs: autoSubmitSeconds > 0 ? autoSubmitSeconds * 1000 : null,
     onSilenceAutoCommit: () => {
       void onVoiceDone();
     },
