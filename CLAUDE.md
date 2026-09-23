@@ -2,6 +2,15 @@
 
 For all web browsing, use the `/browse` skill from gstack. Never use `mcp__claude-in-chrome__*` tools.
 
+## Web search (REQUIRED)
+
+The built-in `WebSearch` tool is NOT supported for the model used in this repo (it always fails
+with `API Error: 400 tool type 'web_search_20250305' is not supported`). Never call `WebSearch`
+and never "try it first". For every web lookup (Azure docs, error messages, library docs) use the
+bound Tavily MCP tools directly: `mcp__tavily__tavily_search` (use `search_depth: advanced` for
+docs), `mcp__tavily__tavily_extract` for a known page, `mcp__tavily__tavily_research` for a broad
+question — or webIQ when it is available. `WebFetch` on a known URL is still fine.
+
 Available gstack skills:
 - `/office-hours`
 - `/plan-ceo-review`
