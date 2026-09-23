@@ -32,7 +32,7 @@ from app.models.persona import (
     build_read_directive,
     default_external_reader_prompt,
 )
-from app.services.agents.voice_live_metadata import resolve_voice
+from app.services.agents.voice_live_metadata import build_avatar_config, resolve_voice
 from app.services.azure_auth import COGNITIVE_SERVICES_SCOPE, get_azure_credential_cached
 
 logger = logging.getLogger(__name__)
@@ -191,11 +191,18 @@ def build_avatar_session(persona: InterviewerPersona, *, locale: str | None) -> 
         "input_audio_echo_cancellation": AudioEchoCancellation(type="server_echo_cancellation"),
     }
     if has_avatar:
+        # build_avatar_config owns the PHOTO-vs-VIDEO split (issue #103): a photo avatar (adrian,
+        # amara, …) MUST carry `type: photo-avatar` + `model: vasa-1` and NO style, or Azure
+        # rejects the session (`avatar_verification_failed`) and the digital human never connects.
+        # The SDK model is fed the wire-shape dict so this and the /calls + metadata builders can't
+        # drift; `video` declares the codec so Azure actually starts the video pipeline. NOTE:
+        # azure-ai-voicelive models are MutableMappings that accept ONE positional mapping of
+        # wire-format keys ("type"/"model", not the Python attr `avatar_type`) — this is the
+        # documented azure-core Model pattern, not a hack; don't "fix" it into kwargs.
         session_kwargs["avatar"] = AvatarConfig(
-            character=persona.character,
-            style=persona.style or None,
-            customized=False,
-            video=VideoParams(codec="h264"),
+            build_avatar_config(
+                persona.character, persona.style, video=dict(VideoParams(codec="h264"))
+            )
         )
 
     return RequestSession(**session_kwargs)  # type: ignore[arg-type]

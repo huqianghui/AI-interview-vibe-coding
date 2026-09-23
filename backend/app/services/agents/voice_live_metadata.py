@@ -38,8 +38,44 @@ INTERIM_LATENCY_THRESHOLD_MS = 500
 
 # Persona avatar/voice fallbacks (only used when the persona leaves a field blank).
 DEFAULT_AVATAR_CHARACTER = "lisa"
-# Azure Voice Live expects the real style slug; the persona's style is passed through verbatim.
+# Azure Voice Live expects the real style slug. A VIDEO persona's style is passed through verbatim;
+# PHOTO avatars have no styles and any stored style is dropped (see build_avatar_config).
 DEFAULT_AVATAR_STYLE = "casual-sitting"
+
+# Azure ships TWO kinds of standard avatar, and Voice Live validates the `session.avatar` block
+# differently for each (live-verified 2026-09-23, issue #103):
+#   - VIDEO avatars (lisa/harry/meg/jeff/lori/max) take `character` + `style` (a real style slug).
+#   - PHOTO avatars (VASA-1 talking heads: adrian/amara/…) have NO styles and MUST declare
+#     `"type": "photo-avatar"` + `"model": "vasa-1"`; without them Azure treats the character as
+#     a video avatar and rejects the session with `avatar_verification_failed` ("Avatar with
+#     character [adrian] and style [None] not found") — the digital human never connects. A photo
+#     avatar sent WITH a style (e.g. our video default "casual-sitting") is rejected the same way.
+# Rosters mirror frontend/src/data/avatarCharacters.ts (VIDEO_CHARACTERS / PHOTO_SEEDS) — keep the
+# two files in sync when Azure adds a character. Unknown characters fall back to the style
+# heuristic in `is_photo_avatar`.
+# Each VIDEO avatar's default style — Azure style slugs are PER CHARACTER ("casual-sitting" exists
+# only for lisa; harry's are business/casual/youthful, …). Mirrors `defaultStyle` in the frontend
+# roster. Used when a video persona has a blank style (Azure rejects `style: null` and rejects a
+# slug the character doesn't have — live-verified 2026-09-23).
+VIDEO_AVATAR_DEFAULT_STYLES: dict[str, str] = {
+    "lisa": DEFAULT_AVATAR_STYLE,
+    "harry": "business",
+    "meg": "formal",
+    "jeff": "business",
+    "lori": "casual",
+    "max": "business",
+}
+VIDEO_AVATAR_CHARACTERS = frozenset(VIDEO_AVATAR_DEFAULT_STYLES)
+PHOTO_AVATAR_CHARACTERS = frozenset(
+    {
+        "adrian", "amara", "amira", "anika", "bianca", "camila", "carlos", "clara", "darius",
+        "diego", "elise", "farhan", "faris", "gabrielle", "hyejin", "imran", "isabella", "layla",
+        "liwei", "ling", "marcus", "matteo", "rahul", "rana", "ren", "riya", "sakura", "simone",
+        "zayd", "zoe",
+    }
+)  # fmt: skip
+PHOTO_AVATAR_TYPE = "photo-avatar"
+PHOTO_AVATAR_MODEL = "vasa-1"
 DEFAULT_VOICE_BY_LOCALE = {"zh-CN": "zh-CN-XiaoxiaoNeural", "en-US": "en-US-AvaNeural"}
 FALLBACK_LOCALE = "en-US"
 
@@ -91,6 +127,60 @@ def resolve_voice(voice_map_raw: str | None, locale: str | None) -> tuple[str, s
     )
 
 
+def is_photo_avatar(character: str | None, style: str | None = None) -> bool:
+    """True when ``character`` is an Azure PHOTO (VASA-1) avatar rather than a VIDEO avatar.
+
+    Known rosters decide first. For a character in neither roster (a future Azure addition), a
+    non-empty character with NO style is treated as photo — photo avatars have no style variants
+    and the editor stores ``""`` for them, while a video avatar always carries a style slug.
+    """
+    name = (character or "").strip().lower()
+    if not name:
+        return False
+    if name in VIDEO_AVATAR_CHARACTERS:
+        return False
+    if name in PHOTO_AVATAR_CHARACTERS:
+        return True
+    return not (style or "").strip()
+
+
+def build_avatar_config(
+    character: str | None, style: str | None, *, video: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """The snake_case ``session.avatar`` block for a persona's ``character``/``style``.
+
+    Blank character → the video default (``lisa`` / ``casual-sitting``). Photo avatars get
+    ``type``/``model`` and NO ``style``; video avatars get ``character`` + ``style`` (a blank style
+    falls back to THAT character's default from ``VIDEO_AVATAR_DEFAULT_STYLES``, since Azure
+    rejects both ``style: null`` and a slug the character doesn't have).
+    ``video`` (codec/resolution) is appended verbatim when given. Single source of truth for the
+    WS-proxy session (:mod:`app.services.voice_live_proxy`), the ``/calls`` broker session and the
+    agent metadata below — the photo/video split must never drift between them.
+    """
+    # Azure matches character ids and style slugs as exact lowercase strings ("Adrian" is NOT
+    # "adrian"), and the admin API does not normalize these fields — so normalize the WIRE values
+    # here, not just the roster lookup, or a mixed-case persona hits avatar_verification_failed.
+    name = (character or "").strip().lower() or DEFAULT_AVATAR_CHARACTER
+    clean_style = (style or "").strip().lower()
+    avatar: dict[str, Any]
+    if is_photo_avatar(name, clean_style):
+        avatar = {
+            "type": PHOTO_AVATAR_TYPE,
+            "model": PHOTO_AVATAR_MODEL,
+            "character": name,
+            "customized": False,
+        }
+    else:
+        avatar = {
+            "character": name,
+            "style": clean_style or VIDEO_AVATAR_DEFAULT_STYLES.get(name, DEFAULT_AVATAR_STYLE),
+            "customized": False,
+        }
+    if video is not None:
+        avatar["video"] = video
+    return avatar
+
+
 def build_session(persona: Any, *, locale: str | None = None) -> dict[str, Any]:
     """Build the snake_case Voice Live ``session`` object from a persona.
 
@@ -119,11 +209,7 @@ def build_session(persona: Any, *, locale: str | None = None) -> dict[str, Any]:
         "input_audio_echo_cancellation": (
             {"type": ECHO_CANCELLATION_TYPE} if persona.echo_cancellation else None
         ),
-        "avatar": {
-            "character": persona.character or DEFAULT_AVATAR_CHARACTER,
-            "style": persona.style or DEFAULT_AVATAR_STYLE,
-            "customized": False,
-        },
+        "avatar": build_avatar_config(persona.character, persona.style),
         "proactive_engagement": bool(persona.proactive_engagement),
         "interim_response": (
             {
@@ -166,9 +252,12 @@ def build_agent_metadata_session(persona: Any, *, locale: str | None = None) -> 
             "temperature": persona.voice_temperature,
         },
         "turn_detection": {"type": persona.turn_detection},
+        # Same photo/video split as the runtime session (customized=False is Azure's default and
+        # is dropped here to keep the metadata inside one 512-char value).
         "avatar": {
-            "character": persona.character or DEFAULT_AVATAR_CHARACTER,
-            "style": persona.style or DEFAULT_AVATAR_STYLE,
+            k: v
+            for k, v in build_avatar_config(persona.character, persona.style).items()
+            if k != "customized"
         },
         "proactive_engagement": bool(persona.proactive_engagement),
     }

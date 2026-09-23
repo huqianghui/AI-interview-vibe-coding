@@ -3,8 +3,9 @@
  *
  * `character` + `style` are the two persona fields the backend maps to the Voice Live avatar config
  * (see backend/app/services/agents/voice_live_metadata.py — DEFAULT_AVATAR_CHARACTER="lisa",
- * DEFAULT_AVATAR_STYLE="casual-sitting"). The backend passes `style` through verbatim to Voice Live,
- * so the style ids here MUST be Azure's real slugs (e.g. "casual-sitting", not "casual").
+ * DEFAULT_AVATAR_STYLE="casual-sitting"). For VIDEO avatars the backend passes `style` through verbatim
+ * to Voice Live, so the style ids here MUST be Azure's real slugs (e.g. "casual-sitting", not "casual");
+ * PHOTO avatars have no style and the backend ignores any stored one.
  *
  * Thumbnails are the official Microsoft Learn CDN preview photos (real faces), matching the Azure AI
  * Foundry portal. Each URL was verified to resolve (200) against the CDN. The `swatch` color + the
@@ -15,6 +16,10 @@
  *     live WebRTC H.264 stream during a real interview.
  *   - **Photo avatars**: single character, no style variants, thumbnail `${CDN}/${id}.png` (or, for a
  *     dozen of them, `${CDN}/${id}-avatar.png` — the actual filename on the CDN).
+ *
+ * KEEP IN SYNC with the backend rosters `VIDEO_AVATAR_CHARACTERS` / `PHOTO_AVATAR_CHARACTERS` in
+ * backend/app/services/agents/voice_live_metadata.py — the backend needs the photo/video split to
+ * send Azure the right `session.avatar` shape (photo → `type: photo-avatar` + `model: vasa-1`, #103).
  */
 
 export interface AvatarCharacter {
@@ -66,7 +71,7 @@ interface PhotoSeed {
   gender: "female" | "male";
 }
 
-// 27 photo avatars, in the portal's order.
+// 30 photo avatars, in the portal's order.
 const PHOTO_SEEDS: readonly PhotoSeed[] = [
   { id: "adrian", displayName: "Adrian", gender: "male" },
   { id: "amara", displayName: "Amara", gender: "female" },

@@ -234,3 +234,164 @@ def _all_keys(obj):
     elif isinstance(obj, list):
         for item in obj:
             yield from _all_keys(item)
+
+
+# --- photo vs video avatars (issue #103) --------------------------------------
+# Azure PHOTO avatars (VASA-1: adrian, amara, …) have no styles and MUST be sent as
+# `type: photo-avatar` + `model: vasa-1`; without them (or WITH a style) Voice Live rejects the
+# session with `avatar_verification_failed` and the digital human never connects. Video avatars
+# (lisa, harry, …) keep `character` + `style`. Live-verified 2026-09-23 in agent AND model mode.
+
+from app.services.agents.voice_live_metadata import (  # noqa: E402
+    PHOTO_AVATAR_CHARACTERS,
+    VIDEO_AVATAR_CHARACTERS,
+    build_agent_metadata_session,
+    build_avatar_config,
+    is_photo_avatar,
+)
+
+
+def test_is_photo_avatar_uses_rosters_then_style_heuristic():
+    assert is_photo_avatar("adrian") is True
+    assert is_photo_avatar("Adrian", "") is True  # case-insensitive
+    assert is_photo_avatar("lisa", "") is False  # known VIDEO avatar even with a blank style
+    assert is_photo_avatar("", "") is False
+    # Unknown (future) character: no style → photo, a style slug → video.
+    assert is_photo_avatar("newface", "") is True
+    assert is_photo_avatar("newface", "casual-sitting") is False
+    assert not (PHOTO_AVATAR_CHARACTERS & VIDEO_AVATAR_CHARACTERS)
+    assert len(PHOTO_AVATAR_CHARACTERS) == 30  # mirrors frontend/src/data/avatarCharacters.ts
+
+
+def test_build_avatar_config_photo_has_type_model_and_no_style():
+    assert build_avatar_config("adrian", "") == {
+        "type": "photo-avatar",
+        "model": "vasa-1",
+        "character": "adrian",
+        "customized": False,
+    }
+    # A stale style left over from a video pick must NOT leak onto a photo avatar (Azure rejects
+    # "Avatar with character [adrian] and style [casual-sitting] not found").
+    assert "style" not in build_avatar_config("adrian", "casual-sitting")
+
+
+def test_build_avatar_config_video_keeps_style_and_defaults_blank_style():
+    assert build_avatar_config("lisa", "casual-sitting") == {
+        "character": "lisa",
+        "style": "casual-sitting",
+        "customized": False,
+    }
+    # A video avatar with a blank style gets THAT character's default slug — Azure rejects both
+    # `style: null` and a slug the character doesn't have ("casual-sitting" is lisa-only).
+    assert build_avatar_config("harry", "")["style"] == "business"
+    assert build_avatar_config("meg", "")["style"] == "formal"
+    assert build_avatar_config("lori", None)["style"] == "casual"
+    assert build_avatar_config("lisa", "")["style"] == "casual-sitting"
+    assert build_avatar_config("", "") == {
+        "character": "lisa",
+        "style": "casual-sitting",
+        "customized": False,
+    }
+
+
+def test_build_avatar_config_appends_video_params():
+    cfg = build_avatar_config("adrian", "", video={"codec": "h264"})
+    assert cfg["video"] == {"codec": "h264"}
+    assert cfg["type"] == "photo-avatar"
+
+
+def test_build_session_photo_avatar_wire_shape():
+    session = build_session(FakePersona(character="adrian", style=""))
+    assert session["avatar"] == {
+        "type": "photo-avatar",
+        "model": "vasa-1",
+        "character": "adrian",
+        "customized": False,
+    }
+
+
+def test_agent_metadata_photo_avatar_stays_single_key_without_style():
+    md = build_voice_live_metadata(FakePersona(character="gabrielle", style=""), locale="en-US")
+    config_keys = [k for k in md if k.startswith(VOICE_LIVE_CONFIG_KEY)]
+    assert config_keys == [VOICE_LIVE_CONFIG_KEY]  # still ONE ≤512-char value
+    assert len(md[VOICE_LIVE_CONFIG_KEY]) <= 512
+    avatar = decode_voice_live_metadata(md)["avatar"]
+    assert avatar == {"type": "photo-avatar", "model": "vasa-1", "character": "gabrielle"}
+
+
+def test_agent_metadata_video_avatar_unchanged():
+    avatar = build_agent_metadata_session(FakePersona(character="lisa", style="graceful"))["avatar"]
+    assert avatar == {"character": "lisa", "style": "graceful"}
+
+
+def test_build_avatar_config_handles_none_character_and_style():
+    # ORM/duck-typed personas may carry None rather than "" — same fallback either way.
+    assert build_avatar_config(None, None) == {
+        "character": "lisa",
+        "style": "casual-sitting",
+        "customized": False,
+    }
+    assert is_photo_avatar(None, None) is False
+
+
+def test_avatar_rosters_match_frontend_roster():
+    # The backend rosters MUST mirror frontend/src/data/avatarCharacters.ts (VIDEO_CHARACTERS +
+    # PHOTO_SEEDS): a character added on one side only would regress into exactly the bug this
+    # guards against (avatar_verification_failed on connect). Parse the ids + video defaultStyle
+    # straight out of the TS source so drift fails CI instead of the next demo.
+    import re
+    from pathlib import Path
+
+    from app.services.agents.voice_live_metadata import VIDEO_AVATAR_DEFAULT_STYLES
+
+    ts = (Path(__file__).resolve().parents[2] / "frontend/src/data/avatarCharacters.ts").read_text()
+    ids = set(re.findall(r'id:\s*"([a-z0-9]+)"', ts))
+    assert ids == (VIDEO_AVATAR_CHARACTERS | PHOTO_AVATAR_CHARACTERS)
+    video_defaults = dict(
+        re.findall(r'id:\s*"([a-z0-9]+)",\s*[^}]*?defaultStyle:\s*"([a-z-]+)"', ts)
+    )
+    assert video_defaults == VIDEO_AVATAR_DEFAULT_STYLES
+
+
+def test_build_avatar_config_unknown_character_uses_style_heuristic():
+    # A character Azure adds before either roster is updated: no style → treated as photo (photo
+    # avatars have none); a style slug → treated as video and passed through verbatim.
+    assert build_avatar_config("newface", "") == {
+        "type": "photo-avatar",
+        "model": "vasa-1",
+        "character": "newface",
+        "customized": False,
+    }
+    assert build_avatar_config("newface", "formal") == {
+        "character": "newface",
+        "style": "formal",
+        "customized": False,
+    }
+
+
+def test_agent_metadata_blank_character_falls_back_to_video_default():
+    avatar = build_agent_metadata_session(FakePersona(character="", style=""))["avatar"]
+    assert avatar == {"character": "lisa", "style": "casual-sitting"}
+
+
+def test_build_avatar_config_normalizes_case_and_whitespace_on_the_wire():
+    # Azure matches ids/slugs as exact lowercase strings; the admin API doesn't normalize them.
+    assert build_avatar_config(" Adrian ", None)["character"] == "adrian"
+    assert build_avatar_config(" Adrian ", None)["type"] == "photo-avatar"
+    video = build_avatar_config("LISA", " Casual-Sitting ")
+    assert video == {"character": "lisa", "style": "casual-sitting", "customized": False}
+
+
+def test_agent_metadata_photo_avatar_with_long_voice_name_stays_single_key():
+    # The photo shape is ~14 chars wider than the old video shape; make sure the longest roster id
+    # plus a realistic long Azure voice name still fits ONE 512-char metadata value (a split value
+    # fails agent initialization, see build_agent_metadata_session).
+    longest_photo = max(PHOTO_AVATAR_CHARACTERS, key=len)
+    voice_map = (
+        '{"zh-CN": "zh-CN-XiaochenMultilingualNeural", "en-US": "en-US-AvaMultilingualNeural"}'
+    )
+    md = build_voice_live_metadata(
+        FakePersona(character=longest_photo, style="", voice_map=voice_map), locale="zh-CN"
+    )
+    assert [k for k in md if k.startswith(VOICE_LIVE_CONFIG_KEY)] == [VOICE_LIVE_CONFIG_KEY]
+    assert len(md[VOICE_LIVE_CONFIG_KEY]) <= 512
