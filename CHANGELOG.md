@@ -26,6 +26,16 @@
 - `GET /admin/users` items carry `generated_password` and `password_stale`.
 - Migration `b8c9d0e1f2a3`: `users.password_generation`, `anonymous_candidate_sessions.user_id`
   (both nullable; downgrade-safe).
+- **One live candidate session per account is now enforced by the database** (code review R2).
+  Migration `c9d0e1f2a3b4` adds `anonymous_candidate_sessions.active_user_id` with a UNIQUE index:
+  the live row holds the account's seat, expired/revoked rows release it (NULL), so two simultaneous
+  first logins cannot mint two sessions — the loser reuses the winner's. Backfill claims the seat for
+  rows that are live at upgrade time; downgrade-safe.
+- **Login no longer leaks whether a username exists via response time** (code review R3). An unknown
+  username pays the same bcrypt verify as a wrong password. Matters now that `/auth/login` is reached
+  from the public interview page with well-known usernames (`user1..3`).
+- A failed candidate-account seed at startup is logged with a traceback instead of swallowed silently
+  (it still never blocks startup).
 - E2E specs sign in as `user1` through a shared `e2e/helpers/candidateLogin.ts` (reads the derived
   password via the admin API, never hardcodes it).
 

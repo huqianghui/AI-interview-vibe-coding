@@ -196,3 +196,101 @@ async def test_admin_list_shows_derived_password_only_for_seeded_candidates(
     assert resp.status_code == 200
     user1 = next(u for u in resp.json() if u["username"] == "user1")
     assert user1["generated_password"] is None and user1["password_stale"] is True
+
+
+# ── login timing oracle (review R3) ─────────────────────────────────────────────────────
+
+
+async def test_login_unknown_user_costs_a_bcrypt_verify_too(client, db_session):
+    """Unknown username and wrong password both 401 and both pay one bcrypt check, so response
+    time does not reveal whether an account exists (usernames user1..3 are public)."""
+    import time
+
+    db_session.add(
+        User(username="known", email="known@local", hashed_password=get_password_hash("right"))
+    )
+    await db_session.commit()
+
+    async def timed(username: str) -> tuple[int, float]:
+        t0 = time.perf_counter()
+        r = await client.post("/auth/login", json={"username": username, "password": "wrong"})
+        return r.status_code, time.perf_counter() - t0
+
+    s1, t_known = await timed("known")
+    s2, t_unknown = await timed("nobody-here")
+    assert s1 == s2 == 401
+    # Both paths hash once; the unknown-user path must not be an order of magnitude faster.
+    assert t_unknown > t_known / 4, (t_known, t_unknown)
+
+
+# ── one live session per account, DB-enforced (review R2) ────────────────────────────────
+
+
+async def test_second_live_session_for_one_account_is_refused_by_the_database(db_session):
+    """The unique index on ``active_user_id`` is what makes idempotent creation race-safe."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models.anonymous_session import AnonymousCandidateSession
+    from app.services.anonymous_session_service import create_anonymous_session
+
+    user = User(username="racer", email="racer@local", hashed_password=get_password_hash("pw"))
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+
+    first, _ = await create_anonymous_session(db_session, user_id=user.id)
+    assert first.active_user_id == user.id
+
+    # Simulate the loser of the race: it already passed the "no live session" check, so it tries to
+    # insert a second seat directly. The database must refuse it.
+    db_session.add(
+        AnonymousCandidateSession(
+            ip_address="",
+            expires_at=first.expires_at,
+            last_activity_at=first.last_activity_at,
+            request_count=0,
+            is_revoked=False,
+            user_id=user.id,
+            active_user_id=user.id,
+        )
+    )
+    with pytest.raises(IntegrityError):
+        await db_session.commit()
+    await db_session.rollback()
+
+
+async def test_expired_seat_is_released_so_the_next_login_gets_a_fresh_session(db_session):
+    """An expired row keeps ``active_user_id`` until the next login releases it — otherwise the
+    unique index would turn "one live session" into "one session, ever"."""
+    from app.services.anonymous_session_service import create_anonymous_session
+
+    user = User(username="later", email="later@local", hashed_password=get_password_hash("pw"))
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+
+    first, _ = await create_anonymous_session(db_session, user_id=user.id)
+    first.expires_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=1)
+    await db_session.commit()
+
+    second, _ = await create_anonymous_session(db_session, user_id=user.id)
+    assert second.id != first.id
+    assert second.active_user_id == user.id
+    await db_session.refresh(first)
+    assert first.active_user_id is None
+
+
+async def test_revoking_releases_the_seat(db_session):
+    from app.services.anonymous_session_service import create_anonymous_session, revoke_session
+
+    user = User(username="revoked", email="revoked@local", hashed_password=get_password_hash("pw"))
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+
+    first, _ = await create_anonymous_session(db_session, user_id=user.id)
+    await revoke_session(db_session, first)
+    assert first.active_user_id is None
+
+    second, _ = await create_anonymous_session(db_session, user_id=user.id)
+    assert second.id != first.id and second.active_user_id == user.id

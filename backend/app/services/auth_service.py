@@ -8,6 +8,7 @@ anonymous-session auth.
 import base64
 import hashlib
 import hmac
+import secrets
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
@@ -62,6 +63,11 @@ def derive_candidate_password(username: str, generation: int = 1) -> str:
     return f"{raw[0:4]}-{raw[4:8]}-{raw[8:12]}"
 
 
+# Hash of a random throwaway secret, computed once at import — the "user does not exist" branch of
+# authenticate_user verifies against it so both branches cost one bcrypt check (timing oracle fix).
+_DUMMY_HASH = bcrypt.hashpw(secrets.token_bytes(32), bcrypt.gensalt()).decode("utf-8")
+
+
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     """Create a signed JWT access token (HS256), expiring per settings unless overridden."""
     settings = get_settings()
@@ -77,7 +83,12 @@ async def authenticate_user(db: AsyncSession, username: str, password: str) -> U
     """Return the user if username+password match; else raise 401 (same message for both cases)."""
     result = await db.execute(select(User).where(User.username == username))
     user = result.scalar_one_or_none()
-    if user is None or not verify_password(password, user.hashed_password):
+    # Constant-cost failure path: an unknown username still pays one bcrypt verify (against a
+    # throwaway hash) so response time does not reveal whether the account exists. Matters since
+    # #102 exposed /auth/login to the public interview page with well-known usernames.
+    hashed = user.hashed_password if user is not None else _DUMMY_HASH
+    ok = verify_password(password, hashed)
+    if user is None or not ok:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
