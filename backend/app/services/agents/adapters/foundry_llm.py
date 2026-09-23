@@ -51,7 +51,7 @@ class FoundryLLMAdapter(LLMAdapter):
     name = "azure"
 
     def __init__(
-        self, *, endpoint: str, project: str = "", api_key: str = "", model: str = "gpt-4o"
+        self, *, endpoint: str, project: str = "", api_key: str = "", model: str = "gpt-5-mini"
     ) -> None:
         # Project-scoped endpoint the SDK requires (bare account endpoint 404s), same as agent-sync.
         self._endpoint = project_endpoint(endpoint, project)

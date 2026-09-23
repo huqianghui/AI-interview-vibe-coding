@@ -62,8 +62,8 @@ param clientBundleBlob string = ''
 param azureFoundryEndpoint string
 param foundryProjectEndpoint string
 param azureFoundryDefaultProject string = ''
-param foundryAgentModel string = 'gpt-4o'
-param voiceLiveDefaultModel string = 'gpt-4o'
+param foundryAgentModel string = 'gpt-5-mini'
+param voiceLiveDefaultModel string = 'gpt-5-mini'
 param voiceLiveApiVersion string = '2026-01-01-preview'
 
 // Ephemeral writable paths inside the container (mirrors the Dockerfile ENV defaults).

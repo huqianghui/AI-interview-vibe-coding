@@ -54,7 +54,7 @@
 
 | 模型部署 | SKU | 已验证容量 | 用途 |
 |----------|-----|-----------|------|
-| `gpt-5.4-mini` | GlobalStandard | 200+ K TPM | 面试 Agent 主模型 + Voice Live 对话模型 |
+| `gpt-5-mini` | GlobalStandard | 200+ K TPM | 面试 Agent 主模型 + Voice Live 对话模型（项目默认；第二选项 `gpt-4.1-mini`）|
 | `text-embedding-3-small` | GlobalStandard | ~120 K TPM | 知识库向量化 |
 
 > 容量建议：单并发面试会话对 TPM 要求不高，上表容量可支撑约 5–10 路并发语音面试。
@@ -64,7 +64,7 @@
 
 预算时按"每场 30 分钟语音面试"估算三部分：
 
-1. **模型 token**（gpt-5.4-mini 输入/输出 token）；
+1. **模型 token**（gpt-5-mini 输入/输出 token）；
 2. **Voice Live 语音**（实时 STT/TTS，按音频分钟计费；启用**数字人 Avatar 视频**为更高档位）;
 3. **AI Search**：Basic ~$75/月、Standard S1 ~$250/月（固定月费为主）。
 

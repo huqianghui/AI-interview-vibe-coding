@@ -818,7 +818,7 @@ export function AdminPage() {
             ) : (
               <Input
                 value={cfgModel}
-                placeholder="Model / deployment (e.g. gpt-4o-mini) — or Load options above"
+                placeholder="Model / deployment (e.g. gpt-5-mini) — or Load options above"
                 onChange={(_, d) => setCfgModel(d.value)}
                 data-testid="cfg-model"
               />

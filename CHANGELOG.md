@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.38.0.2 (2026-09-23)
+
+### Changed
+- **Project default model is now `gpt-5-mini` everywhere, with `gpt-4.1-mini` as the documented
+  second choice.** Applies to the interviewer agent chat model (`FOUNDRY_AGENT_MODEL`) and the Voice
+  Live session model (`VOICE_LIVE_DEFAULT_MODEL`): backend code defaults, `backend/.env.example`,
+  the Azure bicep parameter defaults and parameter files (`infra/azure/` and the client
+  `delivery/infra/` package), the delivery README and 手册, `docs/VERIFICATION.md`,
+  `docs/IMPLEMENTATION-STATUS.md`, `docs/azure-resources/README.md`, and the admin config
+  placeholder. The public deployment's Container App env was switched the same day and verified
+  live (voice + Lisa avatar connect on `gpt-5-mini` after a fresh boot).
+- **Why:** the public site's voice had been failing with `Model gpt-5.4-mini is not supported in
+  this region` — since v0.37.4.6 the Voice Live model resolves persona → master config → env, and
+  the first two carried the chat model. Voice Live only accepts models it hosts natively in the
+  resource's region (Learn → Speech regions → Voice Live tab); deployments on your own resource do
+  not count. Live-probed on Sweden Central 2026-09-23: accepted `gpt-5-mini`, `gpt-4.1-mini`,
+  `gpt-5.6-terra`, `gpt-5.4`, `gpt-5.1`, `gpt-5-nano`, `gpt-4.1-nano`, `gpt-4o`, `gpt-4o-mini`,
+  `gpt-realtime-2.1`/`2.1-mini`/`1.5`; rejected `gpt-5.6-luna`, `gpt-5.6-sol`, `gpt-5.4-mini`,
+  `gpt-6-luna`, `gpt-6-sol`, `gpt-6-astra`. Using one model that works for both roles keeps a
+  fresh (ephemeral-SQLite) boot consistent without code changes.
+
 ## 0.38.0.1 (2026-09-23)
 
 ### Fixed

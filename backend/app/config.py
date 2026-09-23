@@ -81,10 +81,9 @@ class Settings(BaseSettings):
     default_agent_sync_provider: str = "mock"
     foundry_project_endpoint: str = ""
     # Model the interviewer Foundry agent runs on. MUST name a deployment that exists on the target
-    # Azure resource. Neutral code default; the real value comes from the DB master config (admin
-    # page) in prod, or FOUNDRY_AGENT_MODEL in .env for dev. NB: `gpt-4o` is NOT deployed on the
-    # demo resource — set a deployed model (e.g. gpt-4o-mini, gpt-5.4-mini) via config or .env.
-    foundry_agent_model: str = "gpt-4o"
+    # Azure resource. Project default is gpt-5-mini (second choice: gpt-4.1-mini); the real value
+    # comes from the DB master config (admin page) in prod, or FOUNDRY_AGENT_MODEL in .env for dev.
+    foundry_agent_model: str = "gpt-5-mini"
     foundry_api_key: str = ""
 
     # Voice Live WebRTC broker (SPEC F9). The candidate's browser connects directly to Azure
@@ -98,9 +97,12 @@ class Settings(BaseSettings):
     azure_foundry_endpoint: str = ""
     azure_foundry_api_key: str = ""
     azure_foundry_default_project: str = ""
-    # Model Voice Live runs the session on. Same deployment constraint + precedence as
-    # foundry_agent_model. Neutral code default; real value from DB master config or .env.
-    voice_live_default_model: str = "gpt-4o"
+    # Model Voice Live runs the session on (MODEL mode). Voice Live only accepts models it hosts
+    # natively in the resource's region (Learn: Speech regions → Voice Live tab) — NOT arbitrary
+    # deployments. Project default gpt-5-mini (second choice gpt-4.1-mini); both live-verified on
+    # Sweden Central 2026-09-23. gpt-5.6-luna/sol, gpt-5.4-mini and gpt-6-* are rejected there
+    # ("Model X is not supported in this region"). Real value: persona.model → DB master → .env.
+    voice_live_default_model: str = "gpt-5-mini"
     # Voice Live realtime api-version. Classic Foundry agents (what agent-sync currently creates)
     # require 2026-01-01-preview or 2025-10-01 — api-version 2026-04-10 and above reject them with
     # "Classic foundry agent is not supported" (live-verified 2026-08-11, swedencentral). The GA

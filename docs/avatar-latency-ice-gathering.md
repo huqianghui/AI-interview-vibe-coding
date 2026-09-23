@@ -161,7 +161,7 @@ Azure 的 relay，**永远不会被选中**，等它们纯属浪费。
 
 **部署给客户时的检查项**：`VOICE_LIVE_DEFAULT_MODEL`（bicep 参数 `voiceLiveDefaultModel`）
 只是 Voice Live 会话的**默认模型**（实际所用模型也可由 persona / 主配置指定）。填一个**你的
-订阅 / 区域已为 Voice Live 开通**的模型即可，不确定就用默认的 `gpt-4o-mini`。代码侧对模型名
+订阅 / 区域已为 Voice Live 开通**的模型即可，默认用 `gpt-5-mini`，第二选项 `gpt-4.1-mini`（Voice Live 只接受它在该区域原生托管的模型，自己部署的不算）。代码侧对模型名
 不做任何硬性限制，是纯透传：若填了当前订阅/区域未开通的模型，Azure 会直接返回
 `Model X is not supported in this region`、语音退化为纯文字——换成该订阅/区域可用的模型即可。
 
