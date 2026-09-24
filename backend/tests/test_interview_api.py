@@ -133,19 +133,23 @@ async def test_scored_report_surfaces_f4_fields(client, db_session):
 
 
 @pytest.mark.asyncio
-async def test_follow_up_visibly_cites_prior_answer(client):
-    # F7 AC #1/#2: the follow-up shown to the candidate cites what they actually said. Uses the
-    # fallback question set (q2 carries a follow-up).
+async def test_submit_on_follow_up_question_advances_without_citation(client):
+    # Until v0.39.1.0 this was F7 AC #1/#2 over HTTP: the fallback q2 (max_follow_ups>0) answered
+    # a template follow-up that quoted the candidate. Owner rule (v0.39.2.0): a submit ALWAYS
+    # advances, so the candidate sees the NEXT question, never a quote of their own words. (The F7
+    # citation helper lives on as the retained provider hook — see test_interview_state_machine.)
+    from app.interview.questions import FALLBACK_QUESTIONS
+
     headers = await _new_candidate_headers(client)
     start = (await client.post("/candidate/interview/start", headers=headers)).json()
     interview_id = start["interview_session_id"]
-    # Answer q1 (no follow-up) to advance to q2.
-    await client.post(
-        f"/candidate/interview/{interview_id}/answer",
-        headers=headers,
-        json={"text": "My relevant experience is in SRE on-call.", "source": "text"},
-    )
-    # Answer q2's main question with a distinctive phrase; the follow-up must quote it.
+    fu_index = next(i for i, q in enumerate(FALLBACK_QUESTIONS) if q.max_follow_ups > 0)
+    for _ in range(fu_index):
+        await client.post(
+            f"/candidate/interview/{interview_id}/answer",
+            headers=headers,
+            json={"text": "My relevant experience is in SRE on-call.", "source": "text"},
+        )
     distinctive = "I double-check the runbook before every deploy."
     body = (
         await client.post(
@@ -154,10 +158,14 @@ async def test_follow_up_visibly_cites_prior_answer(client):
             json={"text": distinctive, "source": "text"},
         )
     ).json()
-    assert body["status"] == "in_progress"
-    assert body["current_question"] is not None
-    # The candidate now sees a follow-up that cites their own words.
-    assert distinctive in body["current_question"]["prompt"]
+    following = FALLBACK_QUESTIONS[fu_index + 1] if fu_index + 1 < len(FALLBACK_QUESTIONS) else None
+    if following is None:
+        assert body["status"] == "completed" and body["current_question"] is None
+    else:
+        assert body["status"] == "in_progress"
+        assert body["current_question"]["is_follow_up"] is False
+        assert body["current_question"]["prompt"] == following.prompt
+        assert distinctive not in body["current_question"]["prompt"]
 
 
 @pytest.mark.asyncio
@@ -1404,7 +1412,8 @@ async def test_judge_is_wait_for_linear_sessions_and_snapshot_holds(
         )
     ).json()
     assert r["verdict"] == "wait" and scripted_judge.prompts == []
-    # Linear sessions keep today's template follow-up at submit.
+    # A linear submit ALWAYS advances — even though Q1 owes a follow-up slot (max_follow_ups=1),
+    # no template follow-up is asked at "I'm done" (owner rule, v0.39.2.0).
     answered = (
         await client.post(
             f"/candidate/interview/{iv}/answer",
@@ -1412,8 +1421,46 @@ async def test_judge_is_wait_for_linear_sessions_and_snapshot_holds(
             json={"text": "a full answer here", "source": "text"},
         )
     ).json()
-    assert answered["current_question"]["is_follow_up"] is True
-    assert answered["current_question"]["prompt"].startswith("You mentioned")
+    assert answered["current_question"]["is_follow_up"] is False
+    assert answered["current_question"]["prompt"] == "How do you close out a site?"
+
+
+@pytest.mark.asyncio
+async def test_linear_submit_always_advances_despite_max_follow_ups(client, db_session):
+    """Regression (2026-09-24): a linear bank session whose question allows follow-ups used to get
+    the authored template follow-up ("You mentioned … Can you walk me through …") at "I'm done"
+    instead of question 2. A submit now advances in every turn mode; ``max_follow_ups`` only budgets
+    the judge's pre-submit follow-ups in judged sessions."""
+    headers, iv, _qid = await _judged_setup(client, db_session, judged=False, max_follow_ups=2)
+    answered = (
+        await client.post(
+            f"/candidate/interview/{iv}/answer",
+            headers=headers,
+            json={"text": "I don't know.", "source": "text"},
+        )
+    ).json()
+    assert answered["status"] == "in_progress"
+    assert answered["current_question"]["is_follow_up"] is False
+    assert answered["current_question"]["prompt"] == "How do you close out a site?"
+    # Second submit completes the two-question interview — no follow-up turn was ever written.
+    done = (
+        await client.post(
+            f"/candidate/interview/{iv}/answer",
+            headers=headers,
+            json={"text": "Reconcile drug accountability and archive.", "source": "text"},
+        )
+    ).json()
+    assert done["status"] == "completed" and done["current_question"] is None
+    from sqlalchemy import select
+
+    from app.models.interview import InterviewTurn
+
+    kinds = (
+        await db_session.execute(
+            select(InterviewTurn.turn_kind).where(InterviewTurn.interview_session_id == iv)
+        )
+    ).scalars()
+    assert "follow_up" not in set(kinds)
 
 
 @pytest.mark.asyncio

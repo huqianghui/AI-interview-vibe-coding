@@ -5,12 +5,14 @@ finalization all converge on ONE event — ``answer_finalized(db, session, text,
 three producers differ only in how they detect end-of-answer (transport); the progression logic
 is shared through this single entry point, not through a forced shared abstraction.
 
-Follow-up hook (F6 AC #4): a question may generate up to ``max_follow_ups`` follow-up turns.
+Follow-up hook (F6 AC #4): a question may carry up to ``max_follow_ups`` follow-up turns.
 The progression ``asking → answering → (follow_up × 0..N) → judged → next`` is derived from the
 turns already recorded — ``current_question_index`` names the question, and the count of
 follow-up interviewer turns for it tells us whether the next answer is a ``main`` or a
-``follow_up`` and whether another follow-up is owed. All follow-up content joins that question's
-answer group for scoring (see ``app.interview.scoring.group_answers``).
+``follow_up``. All follow-up content joins that question's answer group for scoring (see
+``app.interview.scoring.group_answers``). Since v0.39.2.0 ``answer_finalized`` itself never
+originates a follow-up in production (a submit always advances, every turn mode); follow-ups are
+written only by :func:`record_follow_up` — the judge's pre-submit path in ``judged`` sessions.
 
 Status lifecycle enforced: created → in_progress → completed → scored.
 """
@@ -21,7 +23,6 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.interview.memory import build_follow_up_prompt
 from app.interview.questions import Question, question_at, resolve_questions
 from app.interview.scoring import group_answers
 from app.interview.scoring_engine import (
@@ -142,24 +143,15 @@ async def start_interview(
 # --- Follow-up providers (issue #114, review D3) -------------------------------------------------
 # ``(question, answer_text, follow_ups_asked) -> follow-up text | None``. The state machine only
 # RECORDS what a provider returns; it never decides content or calls an LLM itself.
+#
+# Since v0.39.2.0 NO route passes a provider: a submit ("I'm done") ALWAYS advances, in every turn
+# mode (owner rule, 2026-09-24). Follow-ups exist only as the judge's pre-submit
+# :func:`record_follow_up` writes (``judged`` sessions), gated by the question's ``max_follow_ups``.
+# The hook stays so a future provider can be wired in without touching the transaction.
 FollowUpProvider = Callable[[Question, str, int], Awaitable[str | None]]
 
 # Turn contract values snapshotted onto ``InterviewSession.turn_mode`` (see the model).
 TURN_MODES = ("linear", "judged")
-
-
-async def template_follow_up(question: Question, answer_text: str, follow_ups_asked: int) -> str:
-    """Today's deterministic follow-up (bank ``linear`` sessions): the F7 memory moment — cite what
-    the candidate just said, then the question's authored probe. Lead-in language follows the
-    QUESTION's language (review D5), never the candidate's."""
-    return build_follow_up_prompt(question.follow_up_prompt, answer_text, locale=question.language)
-
-
-async def no_follow_up_at_commit(
-    question: Question, answer_text: str, follow_ups_asked: int
-) -> None:
-    """JUDGED sessions: a submit always advances (owner rule); follow-ups happened during pauses."""
-    return None
 
 
 async def follow_ups_asked(db: AsyncSession, session_id: str, question_id: str) -> int:
@@ -215,16 +207,16 @@ async def answer_finalized(
 ) -> InterviewSession:
     """The single channel-agnostic finalization event (P9).
 
-    Records the candidate turn for the current question. Then asks ``follow_up_provider`` (default:
-    :func:`template_follow_up`, today's deterministic lead-in) whether the question still owes a
-    follow-up; if it returns text, records that interviewer turn and stays on the same question
-    (the next answer will be a ``follow_up`` turn joining this question's answer group). Otherwise
-    advances: records the next question's interviewer turn, or marks the interview completed when
-    none remain.
+    Records the candidate turn for the current question, then ADVANCES: records the next question's
+    interviewer turn, or marks the interview completed when none remain. Owner rule (2026-09-24,
+    v0.39.2.0): a submit ("I'm done") always moves to the next question in EVERY turn mode —
+    ``linear`` sessions no longer get the authored template follow-up at submit (the question's
+    ``max_follow_ups`` is consulted only by the judge, during pauses, in ``judged`` sessions via
+    :func:`record_follow_up`). The LLM is never called inside this transaction.
 
-    JUDGED sessions (issue #114) pass :func:`no_follow_up_at_commit`: the owner's rule is that a
-    submit ALWAYS advances — the judge speaks only during pauses, before the submit, via
-    :func:`record_follow_up`. The LLM is therefore never called inside this transaction.
+    ``follow_up_provider`` is the retained hook (no route passes one): if given AND the question
+    still has a follow-up slot, its text is recorded as an interviewer ``follow_up`` turn and the
+    session stays on the same question (the next answer joins this question's answer group).
     """
     if source not in ANSWER_SOURCES:
         raise InterviewStateError(f"Unknown answer source {source!r}")
@@ -263,10 +255,9 @@ async def answer_finalized(
         )
     )
 
-    provider = follow_up_provider or template_follow_up
     follow_up_text = (
-        await provider(current, content, follow_ups_asked)
-        if follow_ups_asked < current.max_follow_ups
+        await follow_up_provider(current, content, follow_ups_asked)
+        if follow_up_provider is not None and follow_ups_asked < current.max_follow_ups
         else None
     )
     if follow_up_text:

@@ -654,16 +654,9 @@ async def answer(
         return _to_interview_out(session, question)
 
     try:
-        # JUDGED sessions: a submit ALWAYS advances (owner rule) — the judge only spoke during
-        # pauses.
-        provider = (
-            state_machine.no_follow_up_at_commit
-            if session.turn_mode == "judged"
-            else state_machine.template_follow_up
-        )
-        session = await state_machine.answer_finalized(
-            db, session, body.text, body.source, follow_up_provider=provider
-        )
+        # A submit ALWAYS advances, in every turn mode (owner rule, v0.39.2.0): linear sessions
+        # never follow up; judged sessions had the judge speak during pauses, before this submit.
+        session = await state_machine.answer_finalized(db, session, body.text, body.source)
     except InterviewStateError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     question = await state_machine.get_current_question(db, session)
