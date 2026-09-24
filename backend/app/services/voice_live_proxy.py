@@ -167,6 +167,57 @@ def is_mouth_persona(persona: InterviewerPersona, *, playground: bool = False) -
     return linear_turns_for_persona(persona, playground=playground)
 
 
+# Mouth-session VAD/EOU tuning (issue #114 PR-1). Constants, not admin knobs: the only per-persona
+# switch is ``eou_detection`` (already on the model, previously honoured only by the /calls metadata
+# builder). ``EOU_MODEL`` is shared with that builder so the two paths can't drift.
+MOUTH_VAD_TYPE = "azure_semantic_vad_multilingual"
+MOUTH_VAD_SILENCE_MS = 800
+MOUTH_VAD_REMOVE_FILLER_WORDS = True
+MOUTH_EOU_THRESHOLD_LEVEL = "medium"
+MOUTH_EOU_TIMEOUT_MS = 1500
+
+
+def build_turn_detection(*, linear_turns: bool, mouth: bool, eou_detection: bool) -> Any:
+    """The ``turn_detection`` block of the Voice Live session.
+
+    Two shapes, decided by WHO owns the turn:
+
+    * Agent sessions (bank model-turn, editor Playground) keep the plain ``azure_semantic_vad`` they
+      always had — the Foundry agent's own turn contract is tuned around it.
+    * MOUTH sessions (external, linear/judged bank) get ``azure_semantic_vad_multilingual`` with
+      end-of-utterance detection (``semantic_detection_v1_multilingual``, medium threshold, 1.5 s
+      timeout), an 800 ms silence window and filler-word removal — cleaner, less fragmented segments
+      for the transcript buffer and for the judge's silence trigger — unless the persona turned
+      ``eou_detection`` off, in which case they keep the plain VAD.
+
+    ``create_response`` is always ``not linear_turns`` (the linear-turns contract; mouth ⇒ False)
+    and barge-in is always on. Pure shaping (SDK import inside so the module stays importable
+    without the azure extra); guarded by test_voice_live_proxy.py.
+    """
+    from azure.ai.voicelive.models import (
+        AzureSemanticDetectionMultilingual,
+        AzureSemanticVad,
+        AzureSemanticVadMultilingual,
+    )
+
+    if mouth and eou_detection:
+        return AzureSemanticVadMultilingual(
+            silence_duration_ms=MOUTH_VAD_SILENCE_MS,
+            remove_filler_words=MOUTH_VAD_REMOVE_FILLER_WORDS,
+            end_of_utterance_detection=AzureSemanticDetectionMultilingual(
+                threshold_level=MOUTH_EOU_THRESHOLD_LEVEL,
+                timeout_ms=MOUTH_EOU_TIMEOUT_MS,
+            ),
+            create_response=not linear_turns,
+            interrupt_response=True,
+        )
+    return AzureSemanticVad(
+        type="azure_semantic_vad",
+        create_response=not linear_turns,
+        interrupt_response=True,
+    )
+
+
 def build_avatar_session(
     persona: InterviewerPersona, *, locale: str | None, playground: bool = False
 ) -> Any:
@@ -188,7 +239,6 @@ def build_avatar_session(
         AudioInputTranscriptionOptions,
         AudioNoiseReduction,
         AvatarConfig,
-        AzureSemanticVad,
         AzureStandardVoice,
         Modality,
         RequestSession,
@@ -236,11 +286,14 @@ def build_avatar_session(
         # also AUTO-generates the model's reply is the linear-turns decision above (model-turn bank
         # personas: True; linear bank + all external: False). The user can always barge in to cut
         # the agent off mid-answer (interrupt_response=True). Set EXPLICITLY rather than relying on
-        # Azure's defaults so behavior can't silently regress.
-        "turn_detection": AzureSemanticVad(
-            type="azure_semantic_vad",
-            create_response=not linear_turns,
-            interrupt_response=True,
+        # Azure's defaults so behavior can't silently regress. MOUTH sessions additionally get the
+        # multilingual VAD + end-of-utterance detection when the persona's ``eou_detection`` knob is
+        # on (see build_turn_detection) — the segment boundaries the upcoming judge (issue #114)
+        # will key off; agent sessions keep the plain VAD they always had.
+        "turn_detection": build_turn_detection(
+            linear_turns=linear_turns,
+            mouth=is_mouth_persona(persona, playground=playground),
+            eou_detection=bool(getattr(persona, "eou_detection", True)),
         ),
         "input_audio_transcription": AudioInputTranscriptionOptions(
             model="azure-speech", language=resolved_locale
@@ -392,6 +445,7 @@ async def run_proxy(
                         # session was built with (the page derives its own copy from the candidate
                         # API's ``voice_linear_turns``, not from here).
                         "linear_turns": linear_turns_for_persona(persona, playground=playground),
+                        "turn_detection": dict(session["turn_detection"]).get("type", ""),
                     }
                 )
             )

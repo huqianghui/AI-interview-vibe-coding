@@ -7,7 +7,8 @@
  *
  *  1. The candidate start response reports `voice_linear_turns: true` for the default bank persona,
  *     the proxy bootstrap frame reports `linear_turns: true`, and Azure's `session.updated` echoes
- *     `turn_detection.create_response: false` — the backend half of linear turns is live.
+ *     `turn_detection.create_response: false` — the backend half of linear turns is live — with the
+ *     multilingual VAD + EOU shape of issue #114 PR-1 (v0.38.4.0).
  *  2. Question 1 is read (exactly ONE `response.created`), the candidate's spoken answer is
  *     transcribed, and 15s later there is STILL exactly one model response: no "Thank you." per
  *     pause any more (the bug this release fixes).
@@ -47,6 +48,7 @@ test.describe("Bank linear turns + Start over (real Azure)", () => {
 
     const proxyConnected: Record<string, unknown>[] = [];
     const createResponseFlags: unknown[] = [];
+    const turnDetectionShapes: Record<string, unknown>[] = [];
     const created: string[] = [];
     const transcripts: { ws: number; text: string }[] = [];
     const userTranscripts: string[] = [];
@@ -68,6 +70,7 @@ test.describe("Bank linear turns + Start over (real Azure)", () => {
               | Record<string, unknown>
               | undefined;
             createResponseFlags.push(td?.create_response);
+            if (td) turnDetectionShapes.push(td);
           }
           if (type === "response.created") {
             created.push(String((msg.response as Record<string, unknown> | undefined)?.id ?? "?"));
@@ -117,6 +120,12 @@ test.describe("Bank linear turns + Start over (real Azure)", () => {
         .poll(() => createResponseFlags.length, { timeout: 30_000, message: "no session.updated" })
         .toBeGreaterThan(0);
       expect(createResponseFlags[0], "Azure must echo create_response=false").toBe(false);
+      // PR-1 (issue #114): a mouth session with the persona's eou_detection on runs the multilingual
+      // VAD + end-of-utterance block — Azure must ACCEPT and echo that shape.
+      expect(turnDetectionShapes[0].type).toBe("azure_semantic_vad_multilingual");
+      expect(turnDetectionShapes[0].end_of_utterance_detection, "EOU block echoed").toBeTruthy();
+      expect(proxyConnected[0].turn_detection).toBe("azure_semantic_vad_multilingual");
+      console.log(`[live] turn_detection echoed: ${JSON.stringify(turnDetectionShapes[0])}`);
 
       // ---- 2. Q1 read once; the spoken answer produces NO model turn ------------------------
       await page.getByRole("button", { name: /我准备好了|i'm ready/i }).click();
