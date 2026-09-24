@@ -15,6 +15,10 @@ tests lock the shape that makes the digital human WORK end-to-end:
   its own turn — else it both duplicates the verbatim read and diverges from the question header.
 - The editor Playground (`playground=True`) keeps the model turn for a bank persona (it is a free
   conversation with the agent, not the interview flow); external stays linear there too.
+- VAD shape (issue #114 PR-1): MOUTH sessions with the persona's `eou_detection` on get the
+  multilingual VAD + end-of-utterance block (800 ms silence, filler removal, medium threshold,
+  1.5 s timeout); agent sessions (model-turn bank, Playground) and eou-off personas keep the plain
+  `azure_semantic_vad`. `create_response`/`interrupt_response` semantics are unchanged either way.
 """
 
 from dataclasses import dataclass
@@ -40,6 +44,7 @@ class FakePersona:
     agent_version: str = "1"
     interview_brain: str = "bank"
     bank_turn_mode: str = "linear"
+    eou_detection: bool = True
 
 
 def _as_dict(obj):
@@ -53,7 +58,7 @@ def test_avatar_session_bank_linear_turns_by_default_disables_auto_response():
     # for transcription; only the auto-reply is suppressed. Barge-in stays EXPLICITLY enabled.
     session = build_avatar_session(FakePersona(), locale="zh-CN")
     td = _as_dict(session["turn_detection"])
-    assert td["type"] == "azure_semantic_vad"
+    assert td["type"] == "azure_semantic_vad_multilingual"  # mouth session, eou on (PR-1)
     assert td["create_response"] is False
     assert td["interrupt_response"] is True
 
@@ -92,7 +97,7 @@ def test_avatar_session_disables_auto_response_for_external_brain_regardless_of_
             FakePersona(interview_brain="external", bank_turn_mode=mode), locale="zh-CN"
         )
         td = _as_dict(session["turn_detection"])
-        assert td["type"] == "azure_semantic_vad"
+        assert td["type"] == "azure_semantic_vad_multilingual"  # external is a mouth session
         assert td["create_response"] is False
         assert td["interrupt_response"] is True
 
@@ -180,3 +185,68 @@ def test_avatar_session_unknown_character_without_style_is_sent_as_photo():
     avatar = _as_dict(session["avatar"])
     assert avatar.get("type") is None
     assert avatar["style"] == "formal"
+
+
+# --- turn_detection shape (issue #114 PR-1): multilingual VAD + EOU for mouth sessions ------------
+
+
+def _td(persona, **kw):
+    return _as_dict(build_avatar_session(persona, locale="en-US", **kw)["turn_detection"])
+
+
+def test_mouth_session_gets_multilingual_vad_with_eou_block():
+    # Bank linear (mouth) with the persona's eou_detection on: the exact constants from the spec.
+    td = _td(FakePersona())
+    assert td["type"] == "azure_semantic_vad_multilingual"
+    assert td["silence_duration_ms"] == 800
+    assert td["remove_filler_words"] is True
+    eou = _as_dict(td["end_of_utterance_detection"])
+    assert eou["model"] == "semantic_detection_v1_multilingual"
+    assert eou["threshold_level"] == "medium"
+    assert eou["timeout_ms"] == 1500
+    assert td["create_response"] is False
+    assert td["interrupt_response"] is True
+
+
+def test_external_mouth_session_gets_the_same_vad_shape():
+    td = _td(FakePersona(interview_brain="external"))
+    assert td["type"] == "azure_semantic_vad_multilingual"
+    eou = _as_dict(td["end_of_utterance_detection"])
+    assert eou["model"] == "semantic_detection_v1_multilingual"
+    assert td["create_response"] is False
+
+
+def test_eou_detection_off_keeps_the_plain_vad_for_mouth_sessions():
+    personas = (
+        FakePersona(eou_detection=False),
+        FakePersona(interview_brain="external", eou_detection=False),
+    )
+    for persona in personas:
+        td = _td(persona)
+        assert td["type"] == "azure_semantic_vad"
+        assert "end_of_utterance_detection" not in td
+        assert "silence_duration_ms" not in td
+        assert td["create_response"] is False
+        assert td["interrupt_response"] is True
+
+
+def test_agent_sessions_keep_the_plain_vad_regardless_of_eou_knob():
+    # Model-turn bank persona and the editor Playground are AGENT sessions: untouched by PR-1.
+    for td in (_td(FakePersona(bank_turn_mode="model")), _td(FakePersona(), playground=True)):
+        assert td["type"] == "azure_semantic_vad"
+        assert "end_of_utterance_detection" not in td
+        assert td["create_response"] is True
+        assert td["interrupt_response"] is True
+
+
+def test_legacy_persona_without_eou_field_defaults_to_eou_on():
+    @dataclass
+    class Legacy:
+        voice_map: str = "{}"
+        character: str = ""
+        style: str = ""
+        agent_id: str = "x:1"
+        agent_version: str = "1"
+        interview_brain: str = "bank"
+
+    assert _td(Legacy())["type"] == "azure_semantic_vad_multilingual"

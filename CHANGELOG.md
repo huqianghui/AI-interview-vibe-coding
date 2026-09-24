@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.38.4.0 (2026-09-24)
+
+### Changed
+- **Mouth voice sessions now run Azure's multilingual semantic VAD with end-of-utterance detection**
+  (issue #114, PR-1 of 2). Every "mouth" session — external personas and linear/judged bank personas
+  — builds `turn_detection` as `azure_semantic_vad_multilingual` with `silence_duration_ms: 800`,
+  `remove_filler_words: true` and `end_of_utterance_detection: {model: semantic_detection_v1_multilingual,
+  threshold_level: medium, timeout_ms: 1500}` when the persona's existing `eou_detection` knob is on
+  (its default). Until now that knob was honoured only by the `/calls` metadata builder; the WS proxy
+  hardcoded the plain `azure_semantic_vad`. Cleaner, less fragmented end-of-utterance segments are the
+  boundary the upcoming judge keys off. Agent sessions (bank *model turn*, the editor Playground) and
+  personas with `eou_detection` off keep the plain VAD; `create_response` / `interrupt_response`
+  semantics are unchanged in every mode. `proxy.connected` additionally reports the `turn_detection`
+  type. Constants, not admin knobs (owner decision D2/D16). Guarded by five new shape tests in
+  `test_voice_live_proxy.py`; the live spec `bank-linear-restart-live.spec.ts` now asserts Azure echoes
+  the multilingual shape.
+
 ## 0.38.3.1 (2026-09-24)
 
 ### Fixed
