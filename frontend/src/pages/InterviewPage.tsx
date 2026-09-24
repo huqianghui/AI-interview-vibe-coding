@@ -21,6 +21,12 @@ import {
   Button,
   Card,
   CardHeader,
+  Dialog,
+  DialogActions,
+  DialogBody,
+  DialogContent,
+  DialogSurface,
+  DialogTitle,
   ProgressBar,
   Spinner,
   Text,
@@ -36,6 +42,7 @@ import {
   getReportStream,
   getReview,
   recoverInterview,
+  restartInterview,
   resumeInterview,
   signOutCandidate,
   startInterview,
@@ -339,6 +346,9 @@ export function InterviewPage() {
   const [channel, setChannel] = useState<Channel>("text");
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
   const [micDialogOpen, setMicDialogOpen] = useState(false);
+  // "Restart interview" confirmation (v0.38.3.0) — abandoning progress is destructive, so the header
+  // button only opens this; the fresh start happens on explicit confirm.
+  const [restartDialogOpen, setRestartDialogOpen] = useState(false);
   const [micRetried, setMicRetried] = useState(false);
   const [voiceUnavailable, setVoiceUnavailable] = useState(false);
   // The REAL Azure Voice Live error (e.g. an invalid_model / quota / region rejection), surfaced
@@ -681,6 +691,29 @@ export function InterviewPage() {
     setCandidateLoginError(null);
   };
 
+  // "重新开始 / Restart interview" (v0.38.3.0): abandon the LIVE interview and start over. Why: an
+  // in-progress session persists in the DB and both /start and resume-on-mount always hand it back,
+  // so without this a candidate who wants a fresh run is stuck on the old session until every
+  // question is answered. Confirmed in a dialog first (destructive). Voice is torn down BEFORE the
+  // old session dies; the fresh session then re-enters orientation like a first start — channel
+  // back to text so the one-attempt auto-voice (keyed on the NEW session id) decides voice again,
+  // the verbatim-read latch cleared so question 1 is spoken, and the transcript/draft emptied.
+  const onRestartConfirmed = () =>
+    guard(async () => {
+      const iv = interviewRef.current;
+      if (!iv) return;
+      setRestartDialogOpen(false);
+      await voice.disconnect().catch(() => undefined);
+      const fresh = await restartInterview(iv.interview_session_id);
+      spokenQuestionId.current = null;
+      setSegments([]);
+      setAnswer("");
+      setError(null);
+      setChannel("text");
+      setInterview(fresh);
+      setPhase("orientation");
+    });
+
   // Tear down the voice connection when the page unmounts (mic + WebRTC + signaling socket).
   useEffect(() => {
     return () => {
@@ -780,6 +813,46 @@ export function InterviewPage() {
     >
       {error}
     </Body1>
+  );
+
+  // Header affordance for the live phases only: an in-progress interview is the only thing that
+  // can be restarted (a finished one is simply followed by a normal Start).
+  const canRestart =
+    interview?.status === "in_progress" && (phase === "orientation" || phase === "interviewing");
+  const restartButton = canRestart ? (
+    <Button
+      size="small"
+      disabled={busy}
+      onClick={() => setRestartDialogOpen(true)}
+      data-testid="candidate-restart"
+    >
+      {t("candidate.restart")}
+    </Button>
+  ) : null;
+  const restartDialog = (
+    <Dialog open={restartDialogOpen} onOpenChange={(_, d) => setRestartDialogOpen(d.open)}>
+      <DialogSurface>
+        <DialogBody>
+          <DialogTitle>{t("candidate.restartTitle")}</DialogTitle>
+          <DialogContent>
+            <Text as="p">{t("candidate.restartBody")}</Text>
+          </DialogContent>
+          <DialogActions>
+            <Button appearance="secondary" onClick={() => setRestartDialogOpen(false)}>
+              {t("candidate.restartCancel")}
+            </Button>
+            <Button
+              appearance="primary"
+              disabled={busy}
+              onClick={onRestartConfirmed}
+              data-testid="candidate-restart-confirm"
+            >
+              {t("candidate.restartConfirm")}
+            </Button>
+          </DialogActions>
+        </DialogBody>
+      </DialogSurface>
+    </Dialog>
   );
 
   const micDialog = (
@@ -961,6 +1034,7 @@ export function InterviewPage() {
             <Title2 as="h1">{t("appTitle")}</Title2>
             <Body1 style={{ opacity: 0.7 }}>{t("tagline")}</Body1>
             <div>
+              {restartButton}
               <Button size="small" onClick={onSignOut} data-testid="candidate-sign-out">
                 {t("candidate.signOut")}
               </Button>
@@ -1058,6 +1132,7 @@ export function InterviewPage() {
           {errorBanner}
         </div>
         {micDialog}
+      {restartDialog}
       </>
     );
   }
@@ -1072,6 +1147,7 @@ export function InterviewPage() {
             {t("tagline")}
           </Body1>
           <div>
+            {restartButton}
             <Button size="small" onClick={onSignOut} data-testid="candidate-sign-out">
               {t("candidate.signOut")}
             </Button>
@@ -1197,6 +1273,7 @@ export function InterviewPage() {
         {errorBanner}
       </div>
       {micDialog}
+      {restartDialog}
     </>
   );
 }

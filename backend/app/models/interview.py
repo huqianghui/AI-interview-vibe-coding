@@ -44,6 +44,9 @@ class InterviewSession(TimestampMixin, Base):
     candidate_session_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("anonymous_candidate_sessions.id"), nullable=False, index=True
     )
+    # created | in_progress | completed | scored | abandoned. ``abandoned`` (v0.38.3.0) is the
+    # candidate's "start over": a terminal status kept for the record, never resumed
+    # (find_resumable_interview matches in_progress only), reviewed, or scored.
     status: Mapped[str] = mapped_column(String(16), default="created", nullable=False)
     current_question_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

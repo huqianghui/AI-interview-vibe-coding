@@ -234,7 +234,15 @@ async def _persona_voice_flags(db: AsyncSession, session: InterviewSession) -> d
 
 
 async def _current_question(db: AsyncSession, session: InterviewSession) -> dict | None:
-    """Dispatch the candidate-safe current-question projection to the right engine (Phase 2)."""
+    """Dispatch the candidate-safe current-question projection to the right engine (Phase 2).
+
+    An ``abandoned`` session (the candidate started over) has no question to answer any more — the
+    bank projection would otherwise keep replaying the pending one, and the page's resume check
+    keys on ``status`` + ``current_question`` (external's own projection already returns None for
+    any non-live session).
+    """
+    if session.status == "abandoned":
+        return None
     if session.brain_mode == "external":
         return await external_runner.current_question(db, session)
     return await state_machine.get_current_question(db, session)
@@ -314,17 +322,58 @@ async def start(
     # different brain after an interview started must not re-interpret that live session (that's why
     # brain_mode is a per-session snapshot). Only a fresh start reads the default persona's engine.
     existing = await state_machine.find_resumable_interview(db, candidate.id)
-    if existing is not None:
-        session = existing
-    else:
-        persona = await persona_service.get_default_persona(db)
-        brain = persona.interview_brain if persona else "bank"
-        if brain == "external":
-            session = await external_runner.start_interview(db, candidate.id)
-        else:
-            session = await state_machine.start_interview(db, candidate.id)
+    session = existing if existing is not None else await _start_fresh(db, candidate.id)
     question = await _current_question(db, session)
     return _to_interview_out(session, question, **(await _persona_voice_flags(db, session)))
+
+
+async def _start_fresh(db: AsyncSession, candidate_session_id: str) -> InterviewSession:
+    """Create a brand-new interview on the default persona's CURRENT engine (never resumes)."""
+    persona = await persona_service.get_default_persona(db)
+    brain = persona.interview_brain if persona else "bank"
+    if brain == "external":
+        return await external_runner.start_interview(db, candidate_session_id)
+    return await state_machine.start_interview(db, candidate_session_id)
+
+
+@router.post("/{interview_id}/restart", response_model=InterviewOut)
+async def restart(
+    interview_id: str,
+    candidate: AnonymousCandidateSession = Depends(get_anonymous_session),
+    db: AsyncSession = Depends(get_db),
+) -> InterviewOut:
+    """Abandon the candidate's LIVE interview and start a fresh one — the "重新开始" button.
+
+    Why this exists: an in-progress session persists in the DB and ``/start`` (plus the page's
+    resume-on-mount) always hands it back, so without this a candidate who wants to start over is
+    stuck on the old session until every question is answered. The old session is marked
+    ``abandoned`` (kept for the record, never resumed/scored — see
+    :func:`state_machine.abandon_interview`); the new one is created exactly like a fresh ``/start``
+    (default persona's current engine) and returned with the same entry-point voice flags.
+
+    Only an ``in_progress`` interview can be restarted (409 otherwise — a completed/scored one is
+    simply followed by a normal ``/start``). External sessions first send the brain its ``end``
+    signal (best-effort: a transport failure still abandons locally; a turn in flight is a 409 like
+    ``/end``) so the vendor conversation is closed rather than orphaned.
+    """
+    session = await _owned_interview(db, interview_id, candidate)
+    if session.status != "in_progress":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Only an in-progress interview can be restarted (status: {session.status})",
+        )
+    if session.brain_mode == "external":
+        try:
+            session = await external_runner.end(db, session)
+        except ExternalTurnConflict as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    try:
+        await state_machine.abandon_interview(db, session)
+    except state_machine.InterviewStateError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    fresh = await _start_fresh(db, candidate.id)
+    question = await _current_question(db, fresh)
+    return _to_interview_out(fresh, question, **(await _persona_voice_flags(db, fresh)))
 
 
 @router.get("/{interview_id}", response_model=InterviewOut)

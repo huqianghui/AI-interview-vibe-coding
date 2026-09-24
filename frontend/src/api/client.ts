@@ -394,6 +394,20 @@ export async function recoverInterview(interviewId: string): Promise<Interview> 
 }
 
 /**
+ * Abandon the candidate's LIVE interview and start a fresh one (the "重新开始 / Restart" button,
+ * v0.38.3.0). The old session persists as `abandoned` (kept for the record, never resumed or
+ * scored); the response IS the new session, whose id replaces the saved one so a reload resumes the
+ * fresh interview. Only an in_progress interview can be restarted (409 otherwise).
+ */
+export async function restartInterview(interviewId: string): Promise<Interview> {
+  const iv = await request<Interview>(`/candidate/interview/${interviewId}/restart`, {
+    method: "POST",
+  });
+  saveInterviewId(iv.interview_session_id);
+  return iv;
+}
+
+/**
  * Signal an external-brain interview to finalize early (candidate chose to stop). Bank sessions
  * return their current state unchanged. External sessions send an "end" turn and complete locally
  * even on transport failure.

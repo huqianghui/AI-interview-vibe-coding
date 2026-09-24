@@ -67,6 +67,26 @@ async def find_resumable_interview(
     )
 
 
+async def abandon_interview(db: AsyncSession, session: InterviewSession) -> InterviewSession:
+    """Mark a live interview ``abandoned`` — the candidate chose to start over (v0.38.3.0).
+
+    ``abandoned`` is a TERMINAL status alongside ``completed``/``scored``: the session and its turns
+    stay in the DB for the record, but it is never resumed (``find_resumable_interview`` matches
+    ``in_progress`` only), never reviewed or scored (those routes require ``completed``), and never
+    offered a voice session. Accepts ``in_progress`` (bank, or an external session whose brain
+    could not be notified) and ``completed`` (an external session that was just sent the ``end``
+    signal by the restart route — it must not linger as a scoreless "finished" interview); anything
+    else is an illegal transition.
+    """
+    if session.status not in ("in_progress", "completed"):
+        raise InterviewStateError(f"Cannot abandon an interview in status {session.status!r}")
+    session.status = "abandoned"
+    session.completed_at = _now()
+    await db.commit()
+    await db.refresh(session)
+    return session
+
+
 async def start_interview(db: AsyncSession, candidate_session_id: str) -> InterviewSession:
     """Start a new interview — or resume the candidate's existing in-progress one.
 

@@ -1013,3 +1013,83 @@ describe("InterviewPage candidate login gate (#102)", () => {
     expect(localStorage.getItem("anon_session_token")).toBeNull();
   });
 });
+
+describe("InterviewPage restart (start over, v0.38.3.0)", () => {
+  // Same signed-in precondition as the main block: the restart button lives behind the #102 gate.
+  beforeEach(() => {
+    sessionStorage.setItem("candidate_access_token", "test-candidate-token");
+  });
+  afterEach(() => {
+    sessionStorage.removeItem("candidate_access_token");
+  });
+  const liveInterview = {
+    interview_session_id: "iv1",
+    status: "in_progress",
+    current_question: { question_id: "q1", prompt: "Question one?", index: 0, total: 2 },
+  };
+
+  it("restart: confirms in a dialog, abandons the live interview, and re-enters orientation on the fresh one", async () => {
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockResolvedValue(liveInterview);
+    const restartSpy = vi.spyOn(client, "restartInterview").mockResolvedValue({
+      interview_session_id: "iv2",
+      status: "in_progress",
+      current_question: { question_id: "q1", prompt: "Question one?", index: 0, total: 2 },
+    });
+    const disconnect = vi.fn(() => Promise.resolve());
+    const voiceModule = await import("../hooks/useInterviewVoice");
+    vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue({
+      connect: () => Promise.resolve(),
+      disconnect,
+      toggleMute: () => undefined,
+      setMuted: () => undefined,
+      commitAnswer: () => Promise.resolve(""),
+      speakQuestion: () => true,
+      isMuted: false,
+      connectionState: "disconnected" as const,
+      audioState: "idle" as const,
+      isAvatarConnected: false,
+    });
+
+    renderPage();
+    // Idle: nothing to restart yet.
+    expect(screen.queryByTestId("candidate-restart")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    // Orientation shows the button too (the session is already live).
+    await user.click(await screen.findByTestId("candidate-restart"));
+    // Dismissing keeps everything as it was.
+    await user.click(await screen.findByRole("button", { name: /keep going/i }));
+    expect(restartSpy).not.toHaveBeenCalled();
+    await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+    await screen.findByText("Question one?");
+    await user.type(screen.getByRole("textbox"), "a partial answer nobody will keep");
+
+    await user.click(screen.getByTestId("candidate-restart"));
+    await user.click(await screen.findByTestId("candidate-restart-confirm"));
+    await waitFor(() => expect(restartSpy).toHaveBeenCalledWith("iv1"));
+    // Voice torn down before the old session died; fresh session lands on orientation, draft gone.
+    expect(disconnect).toHaveBeenCalled();
+    await screen.findByRole("button", { name: /i'm ready/i });
+    await user.click(screen.getByRole("button", { name: /i'm ready/i }));
+    await screen.findByText("Question one?");
+    expect(screen.getByRole("textbox")).toHaveValue("");
+  });
+
+  it("restart: a backend refusal (409) surfaces as the error banner and keeps the live interview", async () => {
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockResolvedValue(liveInterview);
+    vi.spyOn(client, "restartInterview").mockRejectedValue(
+      new Error("Only an in-progress interview can be restarted (status: completed)"),
+    );
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+    await screen.findByText("Question one?");
+    await user.click(screen.getByTestId("candidate-restart"));
+    await user.click(await screen.findByTestId("candidate-restart-confirm"));
+    await screen.findByText(/only an in-progress interview can be restarted/i);
+    expect(screen.getByText("Question one?")).toBeInTheDocument();
+  });
+});
