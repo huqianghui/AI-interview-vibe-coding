@@ -32,6 +32,11 @@ class LLMAdapterError(RuntimeError):
     """Raised when a Foundry LLM completion fails (never silently swallowed)."""
 
 
+# Enough for the judge's JSON: a per-required-item quote check (a few short quotes), the verdict,
+# a ≤ 120-char speech_text and a few-word reason, in en or zh.
+FAST_MAX_OUTPUT_TOKENS = 320
+
+
 def _is_reasoning_model(model: str) -> bool:
     """gpt-5 family / o-series expose ``reasoning.effort`` (and ``text.verbosity`` on gpt-5)."""
     m = (model or "").lower()
@@ -47,20 +52,23 @@ def _build_completion_kwargs(
     chat-completions' ``response_format={"type": "json_object"}`` (which ``responses.create`` does
     not accept). No ``agent_reference`` — scoring is a plain-model judgment, not an agent turn.
 
-    ``fast`` (issue #114 judge): latency-sensitive callers on a reasoning model ask for LOW
-    reasoning effort and low verbosity. Live-measured 2026-09-24 on gpt-5-mini: default effort
-    7–10 s per judge call; ``minimal`` 2–3 s but it mislabelled an off-topic answer as a nudge;
-    ``low`` 2–5 s (median ≈3 s) with all twelve eval verdict classes correct. Non-reasoning models
-    ignore it.
+    ``fast`` (issue #114 judge): latency-sensitive callers on a reasoning model turn reasoning
+    OFF (``minimal`` effort — owner decision 2026-09-24: speed and brevity over the last bit of
+    verdict precision), ask for low verbosity, and cap the output tokens (the judge returns a tiny
+    JSON object; ``max_output_tokens`` stops a rambling completion from eating the pause budget).
+    Live-measured on gpt-5-mini: default effort 7–10 s per call; ``low`` 2–5 s (median ≈3.5 s);
+    ``minimal`` 2–3 s warm. Non-reasoning models ignore the reasoning knob.
     """
     kwargs: dict[str, Any] = {"model": model, "input": [{"role": "user", "content": prompt}]}
     text: dict[str, Any] = {}
     if json_mode:
         text["format"] = {"type": "json_object"}
-    if fast and _is_reasoning_model(model):
-        kwargs["reasoning"] = {"effort": "low"}
-        if model.lower().startswith("gpt-5"):
-            text["verbosity"] = "low"
+    if fast:
+        kwargs["max_output_tokens"] = FAST_MAX_OUTPUT_TOKENS
+        if _is_reasoning_model(model):
+            kwargs["reasoning"] = {"effort": "minimal"}
+            if model.lower().startswith("gpt-5"):
+                text["verbosity"] = "low"
     if text:
         kwargs["text"] = text
     return kwargs

@@ -40,6 +40,7 @@ import {
   CandidateAuthError,
   getReport,
   getReportStream,
+  applyJudge,
   getReview,
   judgeInterview,
   recoverInterview,
@@ -436,6 +437,13 @@ export function InterviewPage() {
   const onJudgeTriggerRef = useRef<(trigger: "voice_silence" | "text_idle", draft: string) => void>(
     () => undefined,
   );
+  // Speculative prefetch (D17): the verdict requested at end-of-utterance, keyed by the draft it
+  // judged and the submit sequence it belongs to. Applied only if the pause lasts the full window.
+  const pendingJudgeRef = useRef<{
+    draft: string;
+    seq: number;
+    promise: Promise<import("../api/client").JudgeOut | null>;
+  } | null>(null);
 
   const voice = useInterviewVoice(interview?.interview_session_id ?? "", {
     locale: i18n.language,
@@ -457,6 +465,9 @@ export function InterviewPage() {
     judgeSilenceMs: channel === "voice" && judgeSeconds > 0 ? judgeSeconds * 1000 : null,
     onSilenceJudge: () => {
       onJudgeTriggerRef.current("voice_silence", voice.peekDraft());
+    },
+    onUtteranceComplete: () => {
+      onPrefetchJudgeRef.current(voice.peekDraft());
     },
     onSilenceAutoCommit: () => {
       // A submit is already in flight (button click or an earlier timer fire): the buffered speech
@@ -502,39 +513,99 @@ export function InterviewPage() {
     }
   }
 
-  // Ask the judge during a pause (issue #114). Best-effort: any failure is silence. One in-flight
-  // call at a time; a response that arrives after a submit was sent is discarded.
-  const onJudgeTrigger = useCallback(
-    async (trigger: "voice_silence" | "text_idle", draft: string) => {
+  // Deliver a verdict to the candidate: nudge ⇒ spoken aside (voice) / bubble (text); follow_up or
+  // redirect ⇒ the returned interview makes it the current question (header switch; in voice the
+  // normal verbatim question read speaks it — linear turns never suppress follow-ups).
+  const deliverVerdict = useCallback(
+    (res: import("../api/client").JudgeOut) => {
+      if (res.verdict === "nudge" && res.speech_text) {
+        if (channel === "voice") voice.speakAside(res.speech_text);
+        else showNudge(res.speech_text);
+      } else if ((res.verdict === "follow_up" || res.verdict === "redirect") && res.interview) {
+        setInterview(res.interview);
+      }
+    },
+    [channel, voice, showNudge],
+  );
+
+  // Speculative prefetch (D17): the moment an utterance ends, ask the judge with `dry_run` so the
+  // LLM round-trip (2–3 s) overlaps the silence window (2 s) instead of following it. The result
+  // is only APPLIED (server-side write + delivery) if the pause lasts — see onJudgeTrigger. A
+  // candidate who keeps talking makes the prefetch worthless (its draft no longer matches) and it
+  // is simply dropped; the backend bounds raw LLM calls per question.
+  const onPrefetchJudge = useCallback(
+    (draft: string) => {
       const iv = interviewRef.current;
       const q = iv?.current_question;
       if (!iv || !q || iv.status !== "in_progress" || judgeSeconds <= 0) return;
       if (!draft.trim() || judgeInFlightRef.current || busyRef.current) return;
       const seq = submitSeqRef.current;
       judgeInFlightRef.current = true;
-      try {
-        const res = await judgeInterview(iv.interview_session_id, {
-          question_id: q.question_id,
-          follow_ups_asked: q.follow_ups_asked ?? (q.is_follow_up ? 1 : 0),
-          draft_text: draft,
-          trigger,
+      const promise = judgeInterview(iv.interview_session_id, {
+        question_id: q.question_id,
+        follow_ups_asked: q.follow_ups_asked ?? (q.is_follow_up ? 1 : 0),
+        draft_text: draft,
+        trigger: "voice_silence",
+        dry_run: true,
+      })
+        .catch(() => null)
+        .finally(() => {
+          judgeInFlightRef.current = false;
         });
-        if (seq !== submitSeqRef.current) return; // the candidate submitted meanwhile
-        if (res.verdict === "nudge" && res.speech_text) {
-          if (channel === "voice") voice.speakAside(res.speech_text);
-          else showNudge(res.speech_text);
-        } else if ((res.verdict === "follow_up" || res.verdict === "redirect") && res.interview) {
-          // The follow-up is now the current question: header switches; in voice the normal
-          // verbatim question read speaks it (linear turns never suppress follow-ups).
-          setInterview(res.interview);
+      pendingJudgeRef.current = { draft, seq, promise };
+    },
+    [judgeSeconds],
+  );
+  const onPrefetchJudgeRef = useRef<(draft: string) => void>(() => undefined);
+  onPrefetchJudgeRef.current = onPrefetchJudge;
+
+  // Ask the judge during a pause (issue #114). Voice: if a prefetch for exactly this draft exists,
+  // wait for it and APPLY it (the server writes the follow-up turn now); otherwise, and for text,
+  // one-step call. Best-effort: any failure is silence. A response that arrives after a submit was
+  // sent is discarded.
+  const onJudgeTrigger = useCallback(
+    async (trigger: "voice_silence" | "text_idle", draft: string) => {
+      const iv = interviewRef.current;
+      const q = iv?.current_question;
+      if (!iv || !q || iv.status !== "in_progress" || judgeSeconds <= 0) return;
+      if (!draft.trim() || busyRef.current) return;
+      const seq = submitSeqRef.current;
+      const followUpsAsked = q.follow_ups_asked ?? (q.is_follow_up ? 1 : 0);
+      const pending = pendingJudgeRef.current;
+      try {
+        if (trigger === "voice_silence" && pending && pending.draft === draft && pending.seq === seq) {
+          pendingJudgeRef.current = null;
+          const pre = await pending.promise;
+          if (seq !== submitSeqRef.current || !pre) return;
+          if (pre.verdict === "wait" || !pre.event_id) return;
+          const res = await applyJudge(iv.interview_session_id, {
+            event_id: pre.event_id,
+            question_id: q.question_id,
+            follow_ups_asked: followUpsAsked,
+          });
+          if (seq !== submitSeqRef.current) return;
+          deliverVerdict(res);
+          return;
+        }
+        if (judgeInFlightRef.current) return;
+        judgeInFlightRef.current = true;
+        try {
+          const res = await judgeInterview(iv.interview_session_id, {
+            question_id: q.question_id,
+            follow_ups_asked: followUpsAsked,
+            draft_text: draft,
+            trigger,
+          });
+          if (seq !== submitSeqRef.current) return; // the candidate submitted meanwhile
+          deliverVerdict(res);
+        } finally {
+          judgeInFlightRef.current = false;
         }
       } catch {
         /* the judge is best-effort — silence is always a valid outcome */
-      } finally {
-        judgeInFlightRef.current = false;
       }
     },
-    [channel, judgeSeconds, voice, showNudge],
+    [judgeSeconds, deliverVerdict],
   );
   onJudgeTriggerRef.current = (trigger, draft) => {
     void onJudgeTrigger(trigger, draft);

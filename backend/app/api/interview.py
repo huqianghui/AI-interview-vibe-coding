@@ -15,7 +15,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, field_validator
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db, get_session_factory
@@ -110,6 +110,9 @@ class JudgeIn(BaseModel):
     follow_ups_asked: int = 0
     draft_text: str = ""
     trigger: str = "voice_silence"
+    # Speculative prefetch (D17): decide now, write nothing; the page calls ``/judge/apply`` with
+    # the returned ``event_id`` once the pause has actually lasted the configured window.
+    dry_run: bool = False
 
     @field_validator("trigger")
     @classmethod
@@ -119,9 +122,18 @@ class JudgeIn(BaseModel):
         return v
 
 
+class JudgeApplyIn(BaseModel):
+    event_id: str
+    question_id: str
+    follow_ups_asked: int = 0
+
+
 class JudgeOut(BaseModel):
     verdict: str  # wait | nudge | follow_up | redirect
     speech_text: str = ""
+    # The ``judge_events`` row behind this verdict (dry runs hand it back so the page can apply
+    # it).
+    event_id: str | None = None
     # Present when a follow-up/redirect turn was written, so the page refreshes the header (the
     # pending follow-up now shows as ``current_question`` with ``is_follow_up``) without a 2nd call.
     interview: InterviewOut | None = None
@@ -461,18 +473,11 @@ async def judge(
 
     persona = await persona_service.get_default_persona(db)
     max_calls = persona.judge_max_calls_per_question if persona else 0
-    used = (
-        await db.execute(
-            select(func.count())
-            .select_from(JudgeEvent)
-            .where(
-                JudgeEvent.interview_session_id == session.id,
-                JudgeEvent.question_id == current.id,
-            )
-        )
-    ).scalar_one()
-    if used >= max_calls:
-        return JudgeOut(verdict="wait")  # budget spent for this question
+    applied_used, llm_used = await _judge_usage(db, session.id, current.id)
+    if applied_used >= max_calls:
+        return JudgeOut(verdict="wait")  # delivered-verdict budget spent for this question
+    if llm_used >= max_calls * JUDGE_LLM_CALLS_PER_APPLIED:
+        return JudgeOut(verdict="wait")  # raw LLM-call bound (speculative prefetch cost guard)
 
     if session.id in _JUDGE_IN_FLIGHT:
         raise HTTPException(
@@ -501,31 +506,108 @@ async def judge(
             max_follow_ups=current.max_follow_ups,
         )
         result = await judge_mod.run_judge(inp, judge_mod.get_judge_adapter())
-        db.add(
-            JudgeEvent(
-                interview_session_id=session.id,
-                question_id=current.id,
-                trigger=body.trigger,
-                verdict=result.event_verdict,
-                speech_text=result.speech_text,
-                reason=(result.reason or result.error or "")[:1000],
-                model=result.model[:100],
-                latency_ms=result.latency_ms,
-            )
+        event = JudgeEvent(
+            interview_session_id=session.id,
+            question_id=current.id,
+            trigger=body.trigger,
+            verdict=result.event_verdict,
+            speech_text=result.speech_text,
+            reason=(result.reason or result.error or "")[:1000],
+            model=result.model[:100],
+            latency_ms=result.latency_ms,
+            # A dry run is applied later (or never); a one-step call is delivered right now. A
+            # silent outcome never consumes budget either way.
+            applied=(not body.dry_run) and result.verdict != "wait",
         )
+        db.add(event)
         await db.commit()
-        if result.verdict in ("follow_up", "redirect"):
-            await state_machine.record_follow_up(db, session, current.id, result.speech_text)
-            await db.refresh(session)
-            question = await _current_question(db, session)
+        await db.refresh(event)
+        if body.dry_run or result.verdict in ("wait", "nudge"):
             return JudgeOut(
-                verdict=result.verdict,
-                speech_text=result.speech_text,
-                interview=_to_interview_out(session, question),
+                verdict=result.verdict, speech_text=result.speech_text, event_id=event.id
             )
-        return JudgeOut(verdict=result.verdict, speech_text=result.speech_text)
+        await state_machine.record_follow_up(db, session, current.id, result.speech_text)
+        await db.refresh(session)
+        question = await _current_question(db, session)
+        return JudgeOut(
+            verdict=result.verdict,
+            speech_text=result.speech_text,
+            event_id=event.id,
+            interview=_to_interview_out(session, question),
+        )
     finally:
         _JUDGE_IN_FLIGHT.discard(session.id)
+
+
+# Raw LLM calls allowed per question = applied budget × this factor (speculative prefetches that get
+# discarded because the candidate kept talking still cost a call; this bounds a very chatty answer).
+JUDGE_LLM_CALLS_PER_APPLIED = 3
+
+
+async def _judge_usage(db: AsyncSession, session_id: str, question_id: str) -> tuple[int, int]:
+    """(applied verdicts, LLM calls) recorded for this question."""
+    rows = (
+        await db.execute(
+            select(JudgeEvent.applied, JudgeEvent.verdict).where(
+                JudgeEvent.interview_session_id == session_id,
+                JudgeEvent.question_id == question_id,
+            )
+        )
+    ).all()
+    applied = sum(1 for a, _v in rows if a)
+    return applied, len(rows)
+
+
+@router.post("/{interview_id}/judge/apply", response_model=JudgeOut)
+async def judge_apply(
+    interview_id: str,
+    body: JudgeApplyIn,
+    candidate: AnonymousCandidateSession = Depends(get_anonymous_session),
+    db: AsyncSession = Depends(get_db),
+) -> JudgeOut:
+    """Deliver a dry-run verdict now that the pause has lasted (D17). Idempotent and stale-safe:
+    an unknown / already-applied event, a question that advanced, a moved follow-up count, or a
+    spent follow-up slot all come back as ``wait`` and write nothing. ``follow_up`` / ``redirect``
+    write the interviewer turn here (and consume the slot); ``nudge`` is just marked delivered."""
+    session = await _owned_interview(db, interview_id, candidate)
+    if session.status != "in_progress":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Interview is not live")
+    event = (
+        await db.execute(
+            select(JudgeEvent).where(
+                JudgeEvent.id == body.event_id, JudgeEvent.interview_session_id == session.id
+            )
+        )
+    ).scalar_one_or_none()
+    if event is None or event.applied or event.verdict not in ("nudge", "follow_up", "redirect"):
+        return JudgeOut(verdict="wait", event_id=body.event_id)
+    questions = await state_machine.resolve_questions(db)
+    current = state_machine.question_at(questions, session.current_question_index)
+    if current is None or current.id != body.question_id or event.question_id != current.id:
+        return JudgeOut(verdict="wait", event_id=event.id)
+    follow_ups_asked = await state_machine.follow_ups_asked(db, session.id, current.id)
+    if follow_ups_asked != body.follow_ups_asked:
+        return JudgeOut(verdict="wait", event_id=event.id)
+    persona = await persona_service.get_default_persona(db)
+    max_calls = persona.judge_max_calls_per_question if persona else 0
+    applied_used, _llm = await _judge_usage(db, session.id, current.id)
+    if applied_used >= max_calls:
+        return JudgeOut(verdict="wait", event_id=event.id)
+    if event.verdict in ("follow_up", "redirect") and follow_ups_asked >= current.max_follow_ups:
+        return JudgeOut(verdict="wait", event_id=event.id)  # slot spent since the dry run
+    event.applied = True
+    await db.commit()
+    if event.verdict == "nudge":
+        return JudgeOut(verdict="nudge", speech_text=event.speech_text, event_id=event.id)
+    await state_machine.record_follow_up(db, session, current.id, event.speech_text)
+    await db.refresh(session)
+    question = await _current_question(db, session)
+    return JudgeOut(
+        verdict=event.verdict,
+        speech_text=event.speech_text,
+        event_id=event.id,
+        interview=_to_interview_out(session, question),
+    )
 
 
 @router.get("/{interview_id}", response_model=InterviewOut)

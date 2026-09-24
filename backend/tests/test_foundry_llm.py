@@ -99,3 +99,26 @@ class TestRegistration:
         registry._LLM_ADAPTERS.pop("azure", None)
         registry._register_foundry_llm()
         assert "azure" not in registry._LLM_ADAPTERS
+
+
+class TestFastCompletionKwargs:
+    def test_fast_on_gpt5_turns_reasoning_off_and_caps_output(self):
+        kwargs = _build_completion_kwargs("gpt-5-mini", "judge", json_mode=True, fast=True)
+        assert kwargs["reasoning"] == {"effort": "minimal"}
+        assert kwargs["text"] == {"format": {"type": "json_object"}, "verbosity": "low"}
+        assert kwargs["max_output_tokens"] == 320
+
+    def test_fast_on_non_reasoning_model_sends_no_reasoning_or_verbosity(self):
+        # gpt-4.1-mini (and any non gpt-5 / o-series model) must not receive reasoning knobs it
+        # would 400 on — only the universal output cap and the JSON format.
+        kwargs = _build_completion_kwargs("gpt-4.1-mini", "judge", json_mode=True, fast=True)
+        assert "reasoning" not in kwargs
+        assert kwargs["text"] == {"format": {"type": "json_object"}}
+        assert kwargs["max_output_tokens"] == 320
+        plain = _build_completion_kwargs("gpt-4o", "judge", json_mode=False, fast=True)
+        assert "reasoning" not in plain and "text" not in plain
+
+    def test_not_fast_is_unchanged(self):
+        kwargs = _build_completion_kwargs("gpt-5-mini", "score", json_mode=True)
+        assert "reasoning" not in kwargs and "max_output_tokens" not in kwargs
+        assert kwargs["text"] == {"format": {"type": "json_object"}}

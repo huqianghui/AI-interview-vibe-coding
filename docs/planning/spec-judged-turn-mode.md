@@ -329,6 +329,15 @@ _No new tasks from Performance review (D11 dropped)._
   `content_filter`) and the leak guard silences a Chinese follow-up that quoted a rubric item verbatim;
   both are counted as correct silence. 12/12 on the real model.
 - `judge_events` also records `error` / `leak_blocked`; blank / stale / capped requests write nothing.
+- **D17 (owner, 2026-09-24, after shipping):** judge reasoning OFF (`minimal`), output capped and
+  shortened; the LLM round-trip is a fixed ≈2–3 s per call regardless of prompt size, so the page now
+  PREFETCHES at end of utterance (`/judge` `dry_run`) and applies at the end of the silence window
+  (`/judge/apply`) — perceived delay ≈1 s. Budget counts delivered verdicts only (`judge_events.applied`);
+  raw LLM calls bounded at 3× the budget. Reasoning-off needed the contract rewritten as an ordered
+  procedure with a per-required-item quote check (the model otherwise read a pause as "still speaking"
+  and stretched sentences to cover missing items); follow-ups must be open questions that never name the
+  rubric's subject. Output cap 320 tokens, timeout 10 s. Eval 12/12; all three live WAV cases pass.
+  Shipped as v0.39.1.0.
 
 ## GSTACK REVIEW REPORT
 

@@ -70,6 +70,8 @@ export interface Interview {
 export interface JudgeOut {
   verdict: "wait" | "nudge" | "follow_up" | "redirect";
   speech_text: string;
+  // The judge_events row behind this verdict; a dry run hands it back for `applyJudge()`.
+  event_id: string | null;
   // Present when a follow-up/redirect turn was written — the refreshed interview (its
   // current_question is now the follow-up, is_follow_up=true) so the page updates the header.
   interview: Interview | null;
@@ -421,9 +423,26 @@ export async function judgeInterview(
     follow_ups_asked: number;
     draft_text: string;
     trigger: "voice_silence" | "text_idle";
+    // Speculative prefetch (D17): decide now, write nothing; apply later with `applyJudge()`.
+    dry_run?: boolean;
   },
 ): Promise<JudgeOut> {
   return request<JudgeOut>(`/candidate/interview/${interviewId}/judge`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * Deliver a dry-run verdict once the pause has actually lasted (D17). Stale-safe and idempotent on
+ * the server: an advanced question, a moved follow-up count, a spent slot, or a re-apply all come
+ * back as `wait` and write nothing.
+ */
+export async function applyJudge(
+  interviewId: string,
+  body: { event_id: string; question_id: string; follow_ups_asked: number },
+): Promise<JudgeOut> {
+  return request<JudgeOut>(`/candidate/interview/${interviewId}/judge/apply`, {
     method: "POST",
     body: JSON.stringify(body),
   });
