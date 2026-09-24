@@ -435,26 +435,37 @@ async def test_knowledge_discovery_delegates_when_configured(client, db_session,
 
 
 async def test_bank_turn_mode_defaults_linear_round_trips_and_validates(client):
-    # Bank-session turn control (the "Thank you. Thank you." fix): linear by default, "model" is the
-    # explicit opt-in, anything else (or an explicit null) is a 422 on both create and update.
+    # Bank-session turn control: linear by default, "judged" is the explicit opt-in (issue #114);
+    # the retired "model" value, anything else, or an explicit null is a 422 on create and update.
     plain = (await client.post("/admin/personas", headers=AUTH, json={"name": "T0"})).json()
     assert plain["bank_turn_mode"] == "linear"
+    assert plain["judge_silence_seconds"] == 2
+    assert plain["judge_max_calls_per_question"] == 2
+    assert "JUDGE CONTRACT" in plain["judge_contract"]
     updated = (
         await client.put(
-            f"/admin/personas/{plain['id']}", headers=AUTH, json={"bank_turn_mode": "model"}
+            f"/admin/personas/{plain['id']}",
+            headers=AUTH,
+            json={
+                "bank_turn_mode": "judged",
+                "judge_silence_seconds": 5,
+                "judge_max_calls_per_question": 0,
+            },
         )
     ).json()
-    assert updated["bank_turn_mode"] == "model"
+    assert updated["bank_turn_mode"] == "judged"
+    assert updated["judge_silence_seconds"] == 5
+    assert updated["judge_max_calls_per_question"] == 0
     # Flipping the engine never touches it (it is a bank-only item, remembered while external).
     ext = (
         await client.put(
             f"/admin/personas/{plain['id']}", headers=AUTH, json={"interview_brain": "external"}
         )
     ).json()
-    assert ext["bank_turn_mode"] == "model"
+    assert ext["bank_turn_mode"] == "judged"
     final = (await client.get(f"/admin/personas/{plain['id']}", headers=AUTH)).json()
-    assert final["bank_turn_mode"] == "model"
-    for bad in ("silent", "LINEAR", "", None):
+    assert final["bank_turn_mode"] == "judged"
+    for bad in ("model", "silent", "LINEAR", "", None):
         assert (
             await client.post(
                 "/admin/personas", headers=AUTH, json={"name": "T1", "bank_turn_mode": bad}
@@ -465,9 +476,36 @@ async def test_bank_turn_mode_defaults_linear_round_trips_and_validates(client):
                 f"/admin/personas/{plain['id']}", headers=AUTH, json={"bank_turn_mode": bad}
             )
         ).status_code == 422
-    created_model = (
+    # Judge knob bounds: seconds 1..30, calls 0..5; explicit null rejected.
+    for field, bad in (
+        ("judge_silence_seconds", 0),
+        ("judge_silence_seconds", 31),
+        ("judge_max_calls_per_question", -1),
+        ("judge_max_calls_per_question", 6),
+        ("judge_silence_seconds", None),
+        ("judge_max_calls_per_question", None),
+    ):
+        assert (
+            await client.put(f"/admin/personas/{plain['id']}", headers=AUTH, json={field: bad})
+        ).status_code == 422
+    created = (
         await client.post(
-            "/admin/personas", headers=AUTH, json={"name": "T2", "bank_turn_mode": "model"}
+            "/admin/personas", headers=AUTH, json={"name": "T2", "bank_turn_mode": "judged"}
         )
     ).json()
-    assert created_model["bank_turn_mode"] == "model"
+    assert created["bank_turn_mode"] == "judged"
+
+
+async def test_create_prefills_the_single_prompt(client):
+    # One prompt per persona (issue #114 D14): a blank prompt_fragment is pre-filled with the
+    # generated default at creation — the admin always edits the prompt actually in force.
+    from app.models.persona import default_instructions
+
+    p = (await client.post("/admin/personas", headers=AUTH, json={"name": "Solo"})).json()
+    assert p["prompt_fragment"] == default_instructions("Solo")
+    custom = (
+        await client.post(
+            "/admin/personas", headers=AUTH, json={"name": "Custom", "prompt_fragment": "be kind"}
+        )
+    ).json()
+    assert custom["prompt_fragment"] == "be kind"

@@ -27,9 +27,7 @@ def upgrade() -> None:
     op.add_column("users", sa.Column("password_generation", sa.Integer(), nullable=True))
     with op.batch_alter_table("anonymous_candidate_sessions") as batch:
         batch.add_column(sa.Column("user_id", sa.String(length=36), nullable=True))
-        batch.create_index(
-            "ix_anonymous_candidate_sessions_user_id", ["user_id"], unique=False
-        )
+        batch.create_index("ix_anonymous_candidate_sessions_user_id", ["user_id"], unique=False)
         batch.create_foreign_key(
             "fk_anonymous_candidate_sessions_user_id_users", "users", ["user_id"], ["id"]
         )

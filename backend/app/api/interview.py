@@ -15,18 +15,20 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, field_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db, get_session_factory
 from app.dependencies import get_anonymous_session
 from app.interview import external_runner, state_machine
+from app.interview import judge as judge_mod
 from app.interview.external_runner import ExternalTurnConflict
 from app.interview.state_machine import ANSWER_SOURCES, InterviewStateError
 from app.models.anonymous_session import AnonymousCandidateSession
 from app.models.interview import InterviewSession
+from app.models.judge_event import JUDGE_TRIGGERS, JudgeEvent
 from app.models.sop import SopDocument
-from app.services import persona_service, question_service, voice_broker
+from app.services import checklist_service, persona_service, question_service, voice_broker
 from app.services.agents.voice_live_metadata import has_configured_voice
 from app.services.storage import get_storage
 from app.services.voice_broker import DEFAULT_LOCALE, VoiceAgentNotSynced, VoiceUnavailable
@@ -44,6 +46,9 @@ class QuestionOut(BaseModel):
     # already voices a clarification, so reading the backend follow-up too speaks it twice (and
     # renders two transcript bubbles). Text channel ignores it and shows the authoritative prompt.
     is_follow_up: bool = False
+    # How many follow-ups have been asked on this question so far (judged mode sends it back with
+    # each ``/judge`` request so the server can drop stale requests — issue #114).
+    follow_ups_asked: int = 0
 
 
 class BankQuestionOut(BaseModel):
@@ -91,6 +96,35 @@ class InterviewOut(BaseModel):
     # admin-set ``bank_turn_mode``. Same reporting contract as ``voice_auto_submit_seconds``: set on
     # the two entry points (start / GET-resume), ``None`` on mutation responses, latched by the UI.
     voice_linear_turns: bool | None = None
+    # JUDGED sessions (issue #114): seconds of silence (voice) / idle (text) after which the page
+    # asks the judge (``POST /{id}/judge``). ``0`` ⇒ the session is not judged (never ask). Same
+    # reporting contract as the two flags above: entry points only, ``None`` on mutations, latched.
+    voice_judge_silence_seconds: int | None = None
+
+
+class JudgeIn(BaseModel):
+    """Pre-submit judge request (issue #114). The ids let the server drop STALE requests (a timer
+    that fired after the question advanced) without spending an LLM call."""
+
+    question_id: str
+    follow_ups_asked: int = 0
+    draft_text: str = ""
+    trigger: str = "voice_silence"
+
+    @field_validator("trigger")
+    @classmethod
+    def _trigger_known(cls, v: str) -> str:
+        if v not in JUDGE_TRIGGERS:
+            raise ValueError(f"trigger must be one of {JUDGE_TRIGGERS}")
+        return v
+
+
+class JudgeOut(BaseModel):
+    verdict: str  # wait | nudge | follow_up | redirect
+    speech_text: str = ""
+    # Present when a follow-up/redirect turn was written, so the page refreshes the header (the
+    # pending follow-up now shows as ``current_question`` with ``is_follow_up``) without a 2nd call.
+    interview: InterviewOut | None = None
 
 
 class AnswerIn(BaseModel):
@@ -189,6 +223,7 @@ def _to_interview_out(
     voice_default: bool = False,
     voice_auto_submit_seconds: int | None = None,
     voice_linear_turns: bool | None = None,
+    voice_judge_silence_seconds: int | None = None,
 ) -> InterviewOut:
     is_external = session.brain_mode == "external"
     return InterviewOut(
@@ -200,6 +235,7 @@ def _to_interview_out(
         voice_default=voice_default,
         voice_auto_submit_seconds=voice_auto_submit_seconds,
         voice_linear_turns=voice_linear_turns,
+        voice_judge_silence_seconds=voice_judge_silence_seconds,
     )
 
 
@@ -220,16 +256,20 @@ async def _persona_voice_flags(db: AsyncSession, session: InterviewSession) -> d
     admin-set ``bank_turn_mode`` (default linear). With no persona the engine alone decides.
     """
     persona = await persona_service.get_default_persona(db)
+    judged = session.turn_mode == "judged"
     if persona is None:
         return {
             "voice_default": False,
             "voice_auto_submit_seconds": 0,
-            "voice_linear_turns": session.brain_mode == "external",
+            "voice_linear_turns": True,
+            "voice_judge_silence_seconds": 0,
         }
     return {
         "voice_default": has_configured_voice(persona.voice_map),
         "voice_auto_submit_seconds": persona.voice_auto_submit_seconds_for(session.brain_mode),
         "voice_linear_turns": persona.linear_turns_for(session.brain_mode),
+        # The judge is a per-session snapshot decision (turn_mode); only its SECONDS are live-read.
+        "voice_judge_silence_seconds": persona.judge_silence_seconds if judged else 0,
     }
 
 
@@ -333,7 +373,10 @@ async def _start_fresh(db: AsyncSession, candidate_session_id: str) -> Interview
     brain = persona.interview_brain if persona else "bank"
     if brain == "external":
         return await external_runner.start_interview(db, candidate_session_id)
-    return await state_machine.start_interview(db, candidate_session_id)
+    # Snapshot the persona's turn contract onto the session (review D6): a later persona edit never
+    # re-interprets this interview.
+    turn_mode = persona.bank_turn_mode if persona else "linear"
+    return await state_machine.start_interview(db, candidate_session_id, turn_mode=turn_mode)
 
 
 @router.post("/{interview_id}/restart", response_model=InterviewOut)
@@ -374,6 +417,115 @@ async def restart(
     fresh = await _start_fresh(db, candidate.id)
     question = await _current_question(db, fresh)
     return _to_interview_out(fresh, question, **(await _persona_voice_flags(db, fresh)))
+
+
+# One in-flight judge per session (single-process guard; a second concurrent request is a 409 the
+# page treats as "wait"). Cleared in a finally block, so a crash can never wedge a session.
+_JUDGE_IN_FLIGHT: set[str] = set()
+
+
+@router.post("/{interview_id}/judge", response_model=JudgeOut)
+async def judge(
+    interview_id: str,
+    body: JudgeIn,
+    candidate: AnonymousCandidateSession = Depends(get_anonymous_session),
+    db: AsyncSession = Depends(get_db),
+) -> JudgeOut:
+    """Ask the judge whether the interviewer should say something DURING the candidate's pause
+    (issue #114). Never blocks or submits anything; "I'm done" is a separate, always-advancing
+    route.
+
+    Cheap exits (no LLM call, no ``judge_events`` row): the session is not ``judged`` (snapshot),
+    not a live bank session, the ids are stale (question advanced / follow-up count moved), the
+    draft is blank, or the per-question call budget is spent — all ⇒ ``wait``. A concurrent judge
+    for the same session is a 409. Otherwise one LLM call; ``follow_up`` / ``redirect`` write an
+    interviewer ``follow_up`` turn (consuming a ``max_follow_ups`` slot) and return the refreshed
+    interview so the header switches; ``nudge`` returns text only. Every LLM call writes one
+    ``judge_events`` row.
+    """
+    session = await _owned_interview(db, interview_id, candidate)
+    if session.status != "in_progress":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Interview is not live")
+    if session.turn_mode != "judged" or session.brain_mode != "bank":
+        return JudgeOut(verdict="wait")
+    if not body.draft_text.strip():
+        return JudgeOut(verdict="wait")
+
+    questions = await state_machine.resolve_questions(db)
+    current = state_machine.question_at(questions, session.current_question_index)
+    if current is None or current.id != body.question_id:
+        return JudgeOut(verdict="wait")  # stale: the question advanced
+    follow_ups_asked = await state_machine.follow_ups_asked(db, session.id, current.id)
+    if follow_ups_asked != body.follow_ups_asked:
+        return JudgeOut(verdict="wait")  # stale: a follow-up landed since the page last synced
+
+    persona = await persona_service.get_default_persona(db)
+    max_calls = persona.judge_max_calls_per_question if persona else 0
+    used = (
+        await db.execute(
+            select(func.count())
+            .select_from(JudgeEvent)
+            .where(
+                JudgeEvent.interview_session_id == session.id,
+                JudgeEvent.question_id == current.id,
+            )
+        )
+    ).scalar_one()
+    if used >= max_calls:
+        return JudgeOut(verdict="wait")  # budget spent for this question
+
+    if session.id in _JUDGE_IN_FLIGHT:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="A judge call is already in flight"
+        )
+    _JUDGE_IN_FLIGHT.add(session.id)
+    try:
+        checklist = await checklist_service.get_default_checklist(db, current.id)
+        items = await checklist_service.list_items(db, checklist.id) if checklist else []
+        prior = await state_machine.follow_up_texts(db, session.id, current.id)
+        inp = judge_mod.JudgeInput(
+            question_text=current.prompt,
+            locale=current.language,
+            persona_prompt=persona.prompt_fragment if persona else "",
+            draft_text=body.draft_text,
+            trigger=body.trigger,
+            expected_points=tuple(current.expected_points),
+            checklist=tuple(
+                judge_mod.RubricItem(
+                    kind=i.kind, text=i.text, weight=i.weight, order_index=i.order_index
+                )
+                for i in items
+            ),
+            prior_follow_ups=tuple(prior),
+            follow_ups_asked=follow_ups_asked,
+            max_follow_ups=current.max_follow_ups,
+        )
+        result = await judge_mod.run_judge(inp, judge_mod.get_judge_adapter())
+        db.add(
+            JudgeEvent(
+                interview_session_id=session.id,
+                question_id=current.id,
+                trigger=body.trigger,
+                verdict=result.event_verdict,
+                speech_text=result.speech_text,
+                reason=(result.reason or result.error or "")[:1000],
+                model=result.model[:100],
+                latency_ms=result.latency_ms,
+            )
+        )
+        await db.commit()
+        if result.verdict in ("follow_up", "redirect"):
+            await state_machine.record_follow_up(db, session, current.id, result.speech_text)
+            await db.refresh(session)
+            question = await _current_question(db, session)
+            return JudgeOut(
+                verdict=result.verdict,
+                speech_text=result.speech_text,
+                interview=_to_interview_out(session, question),
+            )
+        return JudgeOut(verdict=result.verdict, speech_text=result.speech_text)
+    finally:
+        _JUDGE_IN_FLIGHT.discard(session.id)
 
 
 @router.get("/{interview_id}", response_model=InterviewOut)
@@ -420,7 +572,16 @@ async def answer(
         return _to_interview_out(session, question)
 
     try:
-        session = await state_machine.answer_finalized(db, session, body.text, body.source)
+        # JUDGED sessions: a submit ALWAYS advances (owner rule) — the judge only spoke during
+        # pauses.
+        provider = (
+            state_machine.no_follow_up_at_commit
+            if session.turn_mode == "judged"
+            else state_machine.template_follow_up
+        )
+        session = await state_machine.answer_finalized(
+            db, session, body.text, body.source, follow_up_provider=provider
+        )
     except InterviewStateError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     question = await state_machine.get_current_question(db, session)

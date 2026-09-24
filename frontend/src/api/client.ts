@@ -27,6 +27,9 @@ export interface Question {
   // Voice suppresses its verbatim read for follow-ups — the agent's own auto-response already
   // voices a clarification, so reading it too speaks it twice + duplicates the transcript bubble.
   is_follow_up?: boolean;
+  // Follow-ups asked so far on this question — echoed back in `judgeInterview()` so the server can
+  // discard a stale judge request (issue #114).
+  follow_ups_asked?: number;
 }
 
 export interface Interview {
@@ -57,6 +60,19 @@ export interface Interview {
   // Present on start/resume responses; null/absent on mutation responses ("not reported"), so the
   // page latches it per session.
   voice_linear_turns?: boolean | null;
+  // JUDGED sessions (issue #114): seconds of silence (voice) / idle typing (text) after which the
+  // page asks the judge via `judgeInterview()`. 0 ⇒ not a judged session (never ask). Present on
+  // start/resume; null on mutation responses ("not reported"); latched by the page.
+  voice_judge_silence_seconds?: number | null;
+}
+
+/** `POST /judge` result: what the interviewer should say during this pause, if anything. */
+export interface JudgeOut {
+  verdict: "wait" | "nudge" | "follow_up" | "redirect";
+  speech_text: string;
+  // Present when a follow-up/redirect turn was written — the refreshed interview (its
+  // current_question is now the follow-up, is_follow_up=true) so the page updates the header.
+  interview: Interview | null;
 }
 
 /** One rubric item's graded result (F4). Present on scored (non-stub) question entries. */
@@ -391,6 +407,26 @@ export async function submitAnswer(
  */
 export async function recoverInterview(interviewId: string): Promise<Interview> {
   return request<Interview>(`/candidate/interview/${interviewId}/recover`, { method: "POST" });
+}
+
+/**
+ * Ask the judge whether the interviewer should say something DURING the candidate's pause (issue
+ * #114). Never blocks or submits anything. `question_id` / `follow_ups_asked` let the server drop a
+ * stale request (the question advanced meanwhile) without spending an LLM call.
+ */
+export async function judgeInterview(
+  interviewId: string,
+  body: {
+    question_id: string;
+    follow_ups_asked: number;
+    draft_text: string;
+    trigger: "voice_silence" | "text_idle";
+  },
+): Promise<JudgeOut> {
+  return request<JudgeOut>(`/candidate/interview/${interviewId}/judge`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }
 
 /**

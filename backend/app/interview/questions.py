@@ -32,6 +32,10 @@ class Question:
     # Relative weight in the interview-level aggregate (default 1 = equal weighting). Rides here so
     # score_and_finalize can aggregate sum(score*weight)/sum(weight) without a second query.
     weight: int = 1
+    # The interview language for THIS question (row language, falling back to the bank's). Drives
+    # the language of anything the interviewer says about the question (template follow-up lead-in,
+    # judge nudges/follow-ups) — never the candidate's language. Review D5 (issue #114).
+    language: str = "en-US"
 
 
 # Built-in fallback used only when no default bank is seeded — keeps the F6 spine runnable.
@@ -77,6 +81,7 @@ async def resolve_questions(db: AsyncSession) -> tuple[Question, ...]:
             follow_up_prompt=row.follow_up_prompt,
             expected_points=parse_points(row.expected_points),
             weight=row.weight,
+            language=(row.language or bank.language or "en-US"),
         )
         for row in rows
     )

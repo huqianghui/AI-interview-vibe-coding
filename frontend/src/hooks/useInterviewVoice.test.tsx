@@ -636,6 +636,101 @@ describe("useInterviewVoice commitAnswer", () => {
     vi.unstubAllGlobals();
   });
 
+  // Judge window (issue #114): a SECOND silence timer, armed by the same completed utterance and
+  // cleared by the same events, that asks the page to consult the judge. Both timers coexist (judge
+  // 2 s, auto-submit 8 s); a commit clears both; new speech clears both.
+  it("arms the judge window on an utterance, fires once, and coexists with auto-submit", async () => {
+    vi.useFakeTimers();
+    const onSilenceJudge = vi.fn();
+    const onSilenceAutoCommit = vi.fn();
+    const { getHook, ws, unmount } = await connectHook({
+      linearTurns: true,
+      judgeSilenceMs: 2_000,
+      onSilenceJudge,
+      silenceAutoCommitMs: 8_000,
+      onSilenceAutoCommit,
+    });
+    await act(async () => {
+      ws().receive({
+        type: "conversation.item.input_audio_transcription.completed",
+        transcript: "So the first thing I would do is",
+      });
+    });
+    expect(getHook().peekDraft()).toBe("So the first thing I would do is");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_500);
+    });
+    expect(onSilenceJudge).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(onSilenceJudge).toHaveBeenCalledTimes(1);
+    expect(onSilenceAutoCommit).not.toHaveBeenCalled(); // 2.5 s in — auto-submit still waiting
+    // A second utterance re-arms the judge window (one more fire), auto-submit at 8 s after IT.
+    await act(async () => {
+      ws().receive({
+        type: "conversation.item.input_audio_transcription.completed",
+        transcript: "check the log.",
+      });
+      await vi.advanceTimersByTimeAsync(2_100);
+    });
+    expect(onSilenceJudge).toHaveBeenCalledTimes(2);
+    expect(getHook().peekDraft()).toBe("So the first thing I would do is check the log.");
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("new speech and a commit both clear the judge window", async () => {
+    vi.useFakeTimers();
+    const onSilenceJudge = vi.fn();
+    const { getHook, ws, unmount } = await connectHook({
+      linearTurns: true,
+      judgeSilenceMs: 2_000,
+      onSilenceJudge,
+    });
+    await act(async () => {
+      ws().receive({
+        type: "conversation.item.input_audio_transcription.completed",
+        transcript: "part one",
+      });
+      await vi.advanceTimersByTimeAsync(1_500);
+      ws().receive({ type: "input_audio_buffer.speech_started" }); // resumed → cleared
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(onSilenceJudge).not.toHaveBeenCalled();
+    await act(async () => {
+      ws().receive({
+        type: "conversation.item.input_audio_transcription.completed",
+        transcript: "part two",
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+      void getHook().commitAnswer(); // "I'm done" → the pause is over, no judge check for it
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(onSilenceJudge).not.toHaveBeenCalled();
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("speakAside speaks a nudge verbatim, repeats identical text, and is dropped while speaking", async () => {
+    const { getHook, ws, unmount } = await connectHook({ linearTurns: true });
+    expect(getHook().speakAside("Please go on.")).toBe(true);
+    // response.created → the interviewer is speaking; a second aside must be dropped.
+    await act(async () => {
+      ws().receive({ type: "response.created", response: { id: "r1" } });
+    });
+    expect(getHook().speakAside("Please go on.")).toBe(false);
+    await act(async () => {
+      ws().receive({ type: "response.done", response: { id: "r1" } });
+    });
+    expect(getHook().speakAside("Please go on.")).toBe(true); // same text again is fine
+    expect(getHook().speakAside("   ")).toBe(false);
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
   it("resuming speech resets the silence timer (no premature auto-commit)", async () => {
     vi.useFakeTimers();
     const onSilenceAutoCommit = vi.fn();

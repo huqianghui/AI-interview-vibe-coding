@@ -237,9 +237,12 @@ async def test_reconcile_pulls_portal_edited_instructions(db_session, monkeypatc
     assert out.agent_version == "11"
 
 
-async def test_reconcile_ignores_generated_default_instructions(db_session, monkeypatch):
-    # The remote instructions equal the auto-generated fallback this app pushes for an empty
-    # fragment — NOT a Portal edit. The fragment must stay empty (empty MEANS "using the default").
+async def test_reconcile_with_generated_default_instructions_keeps_the_single_prompt(
+    db_session, monkeypatch
+):
+    # One prompt per persona (issue #114 D14): a persona created with a blank fragment now HOLDS the
+    # generated default text, so a remote agent carrying that same text is "matching" — nothing to
+    # pull, and the fragment is the default text (never blank).
     from app.models.persona import default_instructions
 
     p = await _mk(db_session, name="Interviewer")
@@ -255,7 +258,7 @@ async def test_reconcile_ignores_generated_default_instructions(db_session, monk
         },
     )
     out = await svc.reconcile_persona(db_session, p)
-    assert out.prompt_fragment == ""
+    assert out.prompt_fragment == default_instructions("Interviewer")
 
 
 async def test_reconcile_keeps_matching_instructions_untouched(db_session, monkeypatch):

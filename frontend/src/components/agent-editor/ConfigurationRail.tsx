@@ -6,7 +6,7 @@
  * persona fields. Turn-detection + audio-processing knobs live under a collapsible Advanced block
  * (the portal's named controls are the top-level ones; these are secondary).
  */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Accordion,
   AccordionHeader,
@@ -26,7 +26,7 @@ import {
   tokens,
 } from "@fluentui/react-components";
 import { AvatarGrid } from "./AvatarGrid";
-import type { BankTurnMode } from "../../api/personas";
+import { BoundedIntInput } from "../BoundedIntInput";
 import {
   EDITOR_LOCALES,
   normalizeBankTurnMode,
@@ -49,6 +49,11 @@ const VOICE_OPTIONS: Record<EditorLocale, string[]> = {
 // (1s would fire on any breath pause; past a minute is indistinguishable from "off").
 const AUTO_SUBMIT_MIN_SECONDS = 1;
 const AUTO_SUBMIT_MAX_SECONDS = 60;
+// Judge knobs (issue #114) — mirror the backend's JUDGE_SILENCE_* / JUDGE_MAX_CALLS_* bounds.
+const JUDGE_SILENCE_MIN_SECONDS = 1;
+const JUDGE_SILENCE_MAX_SECONDS = 30;
+const JUDGE_MAX_CALLS_MIN = 0;
+const JUDGE_MAX_CALLS_MAX = 5;
 
 const TURN_DETECTION_OPTIONS = [
   "azure_semantic_vad",
@@ -167,7 +172,7 @@ export function ConfigurationRail({
           EVERY pause). "model": the pre-v0.38.2.0 hands-free turn, governed by the instructions.
           External sessions are linear by construction (no brain of their own), so nothing to show. */}
       {form.interviewBrain !== "external" && (
-        <TurnModeControls mode={form.bank_turn_mode} onChange={onChange} />
+        <TurnModeControls form={form} onChange={onChange} />
       )}
 
       <Divider />
@@ -285,22 +290,6 @@ function AutoSubmitControls({ engine, form, onChange }: AutoSubmitControlsProps)
   const fields = AUTO_SUBMIT_FIELDS[engine];
   const enabled = form[fields.enabled];
   const seconds = form[fields.seconds];
-  // The seconds input edits a local DRAFT string and commits (parsed + clamped to 1–60) on blur /
-  // Enter — clamping on every keystroke snapped an emptied field to "1" and fought the next digit.
-  const [draft, setDraft] = useState(String(seconds));
-  useEffect(() => {
-    setDraft(String(seconds));
-  }, [seconds]);
-  const commit = () => {
-    const n = Math.round(Number(draft));
-    if (!Number.isFinite(n) || draft.trim() === "") {
-      setDraft(String(seconds)); // garbage / empty → revert to the saved value
-      return;
-    }
-    const clamped = Math.min(AUTO_SUBMIT_MAX_SECONDS, Math.max(AUTO_SUBMIT_MIN_SECONDS, n));
-    setDraft(String(clamped));
-    if (clamped !== seconds) onChange({ [fields.seconds]: clamped });
-  };
   return (
     <div className={styles.section} data-testid={`config-auto-submit-${engine}`}>
       <Switch
@@ -317,18 +306,12 @@ function AutoSubmitControls({ engine, form, onChange }: AutoSubmitControlsProps)
             : `Off for ${fields.title}: the candidate must click "I'm done" to submit — a thinking pause never ends the answer.`
         }
       >
-        <Input
-          type="number"
-          value={draft}
+        <BoundedIntInput
+          value={seconds}
           min={AUTO_SUBMIT_MIN_SECONDS}
           max={AUTO_SUBMIT_MAX_SECONDS}
-          step={1}
           disabled={!enabled}
-          onChange={(_, d) => setDraft(d.value)}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") commit();
-          }}
+          onCommit={(v) => onChange({ [fields.seconds]: v })}
           data-testid="config-auto-submit-seconds"
         />
       </Field>
@@ -337,21 +320,24 @@ function AutoSubmitControls({ engine, form, onChange }: AutoSubmitControlsProps)
 }
 
 interface TurnModeControlsProps {
-  mode: BankTurnMode;
+  form: PersonaFormState;
   onChange: (patch: Partial<PersonaFormState>) => void;
 }
 
-/** The bank engine's turn contract: linear (silent between questions) vs the model's own turn. */
-function TurnModeControls({ mode, onChange }: TurnModeControlsProps) {
+/** The bank engine's turn contract (issue #114): linear (silent between questions) or judged (a
+ * backend judge may nudge / follow up / redirect DURING the candidate's pauses — never at submit;
+ * "I'm done" always advances). The two judge knobs show only for judged. */
+function TurnModeControls({ form, onChange }: TurnModeControlsProps) {
   const styles = useStyles();
+  const mode = form.bank_turn_mode;
   return (
     <div className={styles.section} data-testid="config-turn-mode">
       <Field
         label="Between questions (question bank)"
         hint={
           mode === "linear"
-            ? "The interviewer only reads each question aloud and stays silent while the candidate answers — no acknowledgments, no follow-ups of its own. The next question starts on \"I'm done\" (or auto-submit)."
-            : "After every pause the model gets a turn of its own and may acknowledge (\"Thank you.\"), say \"please go on\", or follow up — governed by the instructions. It can react once per pause, not once per answer."
+            ? "The interviewer only reads each question aloud and stays silent while the candidate answers — no acknowledgments, no follow-ups. The next question starts on \"I'm done\" (or auto-submit)."
+            : "While the candidate pauses, a backend judge reads the answer so far against the rubric and may say \"please go on\", ask ONE guiding follow-up, or bring an off-topic answer back — never at submit: \"I'm done\" always moves to the next question. Tone and patience come from the Instructions prompt; the format rules are fixed."
         }
       >
         <RadioGroup
@@ -365,12 +351,40 @@ function TurnModeControls({ mode, onChange }: TurnModeControlsProps) {
             data-testid="config-turn-mode-linear"
           />
           <Radio
-            value="model"
-            label="Model has its own turn — may acknowledge or follow up"
-            data-testid="config-turn-mode-model"
+            value="judged"
+            label="Judged turns — nudge, follow up, or redirect when the answer needs it"
+            data-testid="config-turn-mode-judged"
           />
         </RadioGroup>
       </Field>
+      {mode === "judged" ? (
+        <>
+          <Field
+            label="Silence before the judge listens (seconds)"
+            hint="Counted from the end of the candidate's last utterance (voice) or last keystroke (text). Each pause that long is one judge check."
+          >
+            <BoundedIntInput
+              value={form.judge_silence_seconds}
+              min={JUDGE_SILENCE_MIN_SECONDS}
+              max={JUDGE_SILENCE_MAX_SECONDS}
+              onCommit={(v) => onChange({ judge_silence_seconds: v })}
+              data-testid="config-judge-silence"
+            />
+          </Field>
+          <Field
+            label="Max judge checks per question, before submit"
+            hint="Caps how many times the judge is consulted on one question (including checks that decide to stay silent). 0 = never. Follow-ups are additionally capped by the question's own max follow-ups."
+          >
+            <BoundedIntInput
+              value={form.judge_max_calls_per_question}
+              min={JUDGE_MAX_CALLS_MIN}
+              max={JUDGE_MAX_CALLS_MAX}
+              onCommit={(v) => onChange({ judge_max_calls_per_question: v })}
+              data-testid="config-judge-max-calls"
+            />
+          </Field>
+        </>
+      ) : null}
     </div>
   );
 }

@@ -59,6 +59,9 @@ export interface AgentDefinitionPanelProps {
   /** Auto-generated instructions the backend pushes to Foundry when the field is empty — shown as
    * the effective default so the editor matches the Foundry Portal ("" for a new persona). */
   defaultInstructions?: string;
+  /** The fixed, read-only judge contract this persona's Instructions are combined with when a
+   * bank session runs in judged mode (issue #114). Shown for transparency; never editable. */
+  judgeContract?: string;
   /** Auto-generated EXTERNAL-mode reader prompt used when externalReaderPrompt is blank — shown as
    * the placeholder default for the external "mouth" path (parallel to defaultInstructions). */
   defaultExternalReaderPrompt?: string;
@@ -79,6 +82,7 @@ export function AgentDefinitionPanel({
   onToolsChange,
   personaId,
   defaultInstructions,
+  judgeContract,
   defaultExternalReaderPrompt,
 }: AgentDefinitionPanelProps) {
   const styles = useStyles();
@@ -224,7 +228,13 @@ export function AgentDefinitionPanel({
         </div>
       ) : (
         <div className={styles.section}>
-          <Title3>Instructions (Foundry agent)</Title3>
+          <Title3>Instructions</Title3>
+          <Text size={200} className={styles.hint} data-testid="persona-instructions-scope">
+            This is the ONE prompt you edit for this interviewer. It drives the Foundry agent
+            (Playground chat, agent sync) and, when the turn mode is Judged, the judge's tone and
+            patience during the candidate's pauses. It never changes what is read aloud: questions
+            are always read verbatim, and a judged interview follows the fixed contract below.
+          </Text>
           <Field>
             <Textarea
               value={form.prompt_fragment}
@@ -240,6 +250,17 @@ export function AgentDefinitionPanel({
               Using the auto-generated default shown above — it's what the Foundry agent runs (and
               what the Azure Portal displays). Type here to replace it.
             </Text>
+          ) : null}
+          {form.bank_turn_mode === "judged" && judgeContract ? (
+            <Field label="Judge contract (fixed, read-only)">
+              <Textarea
+                value={judgeContract}
+                readOnly
+                resize="vertical"
+                rows={6}
+                data-testid="persona-judge-contract"
+              />
+            </Field>
           ) : null}
         </div>
       )}

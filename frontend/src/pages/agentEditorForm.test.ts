@@ -34,6 +34,9 @@ const persona = (over: Partial<PersonaOut> = {}): PersonaOut => ({
   external_auto_submit_enabled: true,
   external_auto_submit_silence_seconds: 3,
   bank_turn_mode: "linear",
+  judge_silence_seconds: 2,
+  judge_max_calls_per_question: 2,
+  judge_contract: "JUDGE CONTRACT (fixed by the system)",
   model: null,
   interview_brain: "bank",
   agent_id: null,
@@ -165,10 +168,19 @@ describe("agentEditorForm bank turn mode (linear by default, bank-only, never sh
     expect(emptyPersonaForm().bank_turn_mode).toBe("linear");
   });
 
-  it("round-trips the admin's model-turn opt-in", () => {
-    const form = personaToForm(persona({ bank_turn_mode: "model" }));
-    expect(form.bank_turn_mode).toBe("model");
-    expect(formToPayload(form).bank_turn_mode).toBe("model");
+  it("round-trips the admin's judged opt-in and the two judge knobs", () => {
+    const form = personaToForm(
+      persona({ bank_turn_mode: "judged", judge_silence_seconds: 5, judge_max_calls_per_question: 0 }),
+    );
+    expect(form.bank_turn_mode).toBe("judged");
+    expect(form.judge_silence_seconds).toBe(5);
+    expect(form.judge_max_calls_per_question).toBe(0);
+    const payload = formToPayload(form);
+    expect(payload.bank_turn_mode).toBe("judged");
+    expect(payload.judge_silence_seconds).toBe(5);
+    expect(payload.judge_max_calls_per_question).toBe(0);
+    expect(emptyPersonaForm().judge_silence_seconds).toBe(2);
+    expect(emptyPersonaForm().judge_max_calls_per_question).toBe(2);
   });
 
   it("falls back to linear when an older backend omits the field or sends garbage", () => {
@@ -176,13 +188,13 @@ describe("agentEditorForm bank turn mode (linear by default, bank-only, never sh
     delete legacy.bank_turn_mode;
     expect(personaToForm(legacy as unknown as PersonaOut).bank_turn_mode).toBe("linear");
     expect(
-      personaToForm(persona({ bank_turn_mode: "chatty" as unknown as "model" })).bank_turn_mode,
+      personaToForm(persona({ bank_turn_mode: "model" as unknown as "judged" })).bank_turn_mode,
     ).toBe("linear");
   });
 
   it("flipping the interview brain carries the bank turn mode untouched", () => {
-    const form = personaToForm(persona({ interview_brain: "bank", bank_turn_mode: "model" }));
+    const form = personaToForm(persona({ interview_brain: "bank", bank_turn_mode: "judged" }));
     const flipped = { ...form, interviewBrain: "external" };
-    expect(formToPayload(flipped).bank_turn_mode).toBe("model");
+    expect(formToPayload(flipped).bank_turn_mode).toBe("judged");
   });
 });

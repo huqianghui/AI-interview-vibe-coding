@@ -2,6 +2,21 @@
 
 ## Interview (voice)
 
+## Completed
+
+### Fallback interviewer prompt divergence — closed as obsolete, v0.39.0.0
+
+**Outcome:** the premise ("the prompt is the only control over bank-mode voice follow-ups") no longer
+holds. Since v0.38.3.1 bank voice sessions are a MOUTH (model mode + verbatim reads — the Foundry agent's
+instructions never produce a spoken turn), and since v0.39.0.0 follow-ups are decided by the backend
+judge (`judged` mode) or the authored template (`linear` mode), never by the agent prompt. There is
+also only ONE prompt now (issue #114 review D14): a blank `prompt_fragment` is pre-filled with the
+generated default on create and back-filled by migration `f2a3b4c5d6e7`, so the two texts cannot
+diverge for a persona. The editor states what the prompt influences (agent sync, Playground, judge
+tone) and shows the judge contract read-only.
+
+<details><summary>Original item</summary>
+
 ### Fallback interviewer prompt still allows one follow-up (diverges from the seeded persona)
 
 **What:** `backend/app/models/persona.py` `default_instructions()` — the prompt used when a persona
@@ -24,7 +39,7 @@ question — only what the candidate hears.
 **Priority:** P3
 **Depends on:** owner decision
 
-## Completed
+</details>
 
 ### Bank-mode "silent advance" / `linear_turns` — resolved by design, v0.38.1.1
 

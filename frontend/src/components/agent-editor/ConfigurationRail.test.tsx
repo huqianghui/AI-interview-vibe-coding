@@ -104,33 +104,49 @@ describe("ConfigurationRail — voice silence auto-submit (one pair per engine)"
   });
 });
 
-describe("ConfigurationRail — bank turn mode (linear vs the model's own turn)", () => {
-  it("bank persona: shows the turn-mode control with linear selected by default", () => {
+describe("ConfigurationRail — bank turn mode (linear vs judged, issue #114)", () => {
+  it("bank persona: shows the turn-mode control with linear selected and no judge knobs", () => {
     renderRail();
     expect(screen.getByTestId("config-turn-mode")).toBeInTheDocument();
-    const linear = screen.getByRole("radio", { name: /linear turns/i });
-    const model = screen.getByRole("radio", { name: /model has its own turn/i });
-    expect(linear).toBeChecked();
-    expect(model).not.toBeChecked();
+    expect(screen.getByRole("radio", { name: /linear turns/i })).toBeChecked();
+    expect(screen.getByRole("radio", { name: /judged turns/i })).not.toBeChecked();
     expect(screen.getByText(/stays silent while the candidate answers/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("config-judge-silence")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("config-judge-max-calls")).not.toBeInTheDocument();
   });
 
-  it("bank persona: choosing the model turn patches ONLY bank_turn_mode", async () => {
+  it("bank persona: choosing judged patches ONLY bank_turn_mode", async () => {
     const user = userEvent.setup();
     const { onChange } = renderRail();
-    await user.click(screen.getByRole("radio", { name: /model has its own turn/i }));
-    expect(onChange).toHaveBeenCalledWith({ bank_turn_mode: "model" });
+    await user.click(screen.getByRole("radio", { name: /judged turns/i }));
+    expect(onChange).toHaveBeenCalledWith({ bank_turn_mode: "judged" });
     expect(onChange).toHaveBeenCalledTimes(1);
   });
 
-  it("bank persona in model mode: the hint warns it reacts once per pause", () => {
-    renderRail({ bank_turn_mode: "model" });
-    expect(screen.getByRole("radio", { name: /model has its own turn/i })).toBeChecked();
-    expect(screen.getByText(/once per pause, not once per answer/i)).toBeInTheDocument();
+  it("judged persona: shows both knobs with the saved values and commits clamped edits", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderRail({
+      bank_turn_mode: "judged",
+      judge_silence_seconds: 4,
+      judge_max_calls_per_question: 1,
+    });
+    expect(screen.getByRole("radio", { name: /judged turns/i })).toBeChecked();
+    expect(screen.getByText(/never at submit/i)).toBeInTheDocument();
+    const silence = screen.getByTestId("config-judge-silence");
+    const calls = screen.getByTestId("config-judge-max-calls");
+    expect(silence).toHaveValue(4);
+    expect(calls).toHaveValue(1);
+    await user.clear(silence);
+    await user.type(silence, "99");
+    fireEvent.blur(silence);
+    expect(onChange).toHaveBeenCalledWith({ judge_silence_seconds: 30 });
+    await user.clear(calls);
+    await user.type(calls, "0{Enter}");
+    expect(onChange).toHaveBeenCalledWith({ judge_max_calls_per_question: 0 });
   });
 
   it("external persona: the bank-only control is hidden (external is linear by construction)", () => {
-    renderRail({ interviewBrain: "external", bank_turn_mode: "model" });
+    renderRail({ interviewBrain: "external", bank_turn_mode: "judged" });
     expect(screen.queryByTestId("config-turn-mode")).not.toBeInTheDocument();
   });
 });

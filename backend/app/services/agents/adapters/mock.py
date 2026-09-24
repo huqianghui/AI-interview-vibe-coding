@@ -55,7 +55,7 @@ def _mock_scoring_judgments(prompt: str) -> str:
 class MockLLMAdapter(LLMAdapter):
     name = "mock"
 
-    async def complete(self, prompt: str, *, json_mode: bool = False) -> str:
+    async def complete(self, prompt: str, *, json_mode: bool = False, fast: bool = False) -> str:
         if json_mode:
             lowered = prompt.lower()
             # Feature D coverage marker is checked FIRST: its prompt also contains the words

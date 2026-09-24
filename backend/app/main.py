@@ -130,11 +130,16 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
     prewarm_task = asyncio.create_task(_prewarm_azure_credential())
     persona_sync_task = asyncio.create_task(_sync_default_persona())
+    # Issue #114: pre-build the judge/scoring LLM client in the background so the first judge call
+    # after boot doesn't pay the cold credential probe inline (it timed out live at 8 s).
+    from app.interview.judge import warm_adapter
+
+    judge_warm_task = asyncio.create_task(warm_adapter())
     try:
         yield
     finally:
         # Don't leave dangling tasks on shutdown; cancel any that haven't finished.
-        for task in (prewarm_task, persona_sync_task):
+        for task in (prewarm_task, persona_sync_task, judge_warm_task):
             if not task.done():
                 task.cancel()
 

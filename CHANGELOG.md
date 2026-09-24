@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.39.0.0 (2026-09-24)
+
+### Added
+- **Judged turn mode for question-bank interviews** (issue #114, PR-2 of 2; spec + review addendum in
+  `docs/planning/spec-judged-turn-mode.md`). Admins can now switch a bank persona from **Linear turns**
+  (silent between questions) to **Judged turns**: while the candidate PAUSES — voice: end of utterance +
+  `judge_silence_seconds`; text: no keystroke for the same window — the backend asks an LLM judge
+  (persona prompt ⊕ a fixed contract ⊕ the rubric ⊕ the delimited draft) whether the interviewer should
+  say anything: `wait`, `nudge` ("please go on", spoken as an aside / shown as a bubble), `follow_up`
+  (ONE guiding question toward an unaddressed required rubric point, written as an interviewer
+  `follow_up` turn so the header switches and voice reads it), or `redirect` (an off-topic answer is
+  brought back). **"I'm done" always advances** — the judge is never consulted at submit, there is no
+  template fallback, and rubric text is never quoted (n-gram + phrase leak guard; a hit means silence).
+  Caps: `judge_max_calls_per_question` LLM calls per question, and the question's `max_follow_ups` for
+  follow_up/redirect. The retired `model` turn mode (Foundry agent speaking in its own turn) is gone:
+  existing rows become `linear`; nothing changes for any persona until an admin opts into Judged.
+- **One prompt per persona.** A blank `prompt_fragment` is pre-filled with the generated default on
+  create (and back-filled by the migration), so the single Instructions field is the prompt actually in
+  force for agent sync, the Playground, and the judge's tone/patience. The editor states its scope and
+  shows the fixed judge contract read-only.
+- **Admin UI:** Configuration rail — Linear / Judged radios, "Silence before the judge listens" (1–30 s),
+  "Max judge checks per question" (0–5); question editor — inline **Max follow-ups** (0–3) per question
+  (previously only settable via API); shared `BoundedIntInput` (draft → clamp on blur/Enter) now also
+  backs the auto-submit seconds input.
+- **Wire:** `interviewer_personas.judge_silence_seconds` / `judge_max_calls_per_question`;
+  `interview_sessions.turn_mode` **snapshot** (`linear|judged`, copied at start — a persona flip never
+  re-interprets a live interview); `judge_events` (one row per LLM judge call: trigger, verdict,
+  latency, model); `POST /candidate/interview/{id}/judge` (`question_id` + `follow_ups_asked` make stale
+  requests free `wait`s; blank/capped/stale ⇒ no LLM call; a concurrent call ⇒ 409); candidate
+  `start`/`GET` carry `voice_judge_silence_seconds`; `QuestionOut.follow_ups_asked`; `PersonaOut.judge_contract`.
+  Migration `f2a3b4c5d6e7`.
+- **Judge model latency, live-measured and tuned:** gpt-5-mini at default reasoning effort took 7–10 s per
+  judge call (the spec's 3 s timeout failed every real call). The Foundry adapter gained a `fast` mode
+  (reasoning effort `low`, low verbosity — `minimal` was 1 s faster but misjudged off-topic answers)
+  and a cached project client (the cold first call cost ~8 s; the app now pre-warms it at boot).
+  Result: 1.6–7.5 s per call, median ≈3.5 s; judge timeout 10 s. gpt-4.1-mini was tried as a judge
+  and rejected (not faster, two off-topic misjudgements). **Acceptance criterion 3 (p50 < 2.5 s) is
+  therefore NOT met with gpt-5-mini; measured p50 ≈3.5 s — the owner decides whether to accept or
+  revisit the model.**
+- **Tests.** Backend 661 passed (CI fake provider) + `test_judge_eval.py` against the REAL model
+  locally (12 cases + 2 adversarial persona prompts, pass line ≥ 11/12; 12/12 on 2026-09-24 —
+  Azure's jailbreak filter rejecting the injection cases and the leak guard silencing one Chinese
+  follow-up both count as correct silence). Frontend 265 passed. New opt-in live spec
+  `frontend/e2e/bank-judged-live.spec.ts` (three WAV fixtures, one case per run via `JUDGED_CASE`) —
+  **all three passed on real Azure 2026-09-24:** incomplete answer → one guiding follow-up ("Do you
+  notify the sponsor or medical monitor, and how quickly…"), header switched and read aloud, "I'm
+  done" → Q2; complete answer → `wait` only, Q1 read once; mid-thought pause → one spoken "Please go
+  on.", candidate continued, "I'm done" → Q2; no acknowledgment anywhere. The live run also caught a
+  migration bug CI could not (`judge_events.created_at` had no DB default; fixed, and a new
+  `test_migrations_judge_schema.py` runs the real alembic chain in CI). New
+  `test_migrations_judge_schema.py` brings the backend to 662 passed.
+
 ## 0.38.4.0 (2026-09-24)
 
 ### Changed

@@ -237,6 +237,8 @@ describe("InterviewPage", () => {
       connectionState: "connected" as const,
       audioState: "idle" as const,
       isAvatarConnected: false,
+      speakAside: () => true,
+      peekDraft: () => "",
     };
     const voiceModule = await import("../hooks/useInterviewVoice");
     vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(voiceMock);
@@ -289,6 +291,8 @@ describe("InterviewPage", () => {
       connectionState: "connected" as const,
       audioState: "listening" as const,
       isAvatarConnected: false,
+      speakAside: () => true,
+      peekDraft: () => "",
     };
     const voiceModule = await import("../hooks/useInterviewVoice");
     vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(voiceMock);
@@ -339,6 +343,8 @@ describe("InterviewPage", () => {
       connectionState: "disconnected" as const,
       audioState: "idle" as const,
       isAvatarConnected: false,
+      speakAside: () => true,
+      peekDraft: () => "",
     };
     const voiceModule = await import("../hooks/useInterviewVoice");
     const hookSpy = vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(voiceMock);
@@ -391,6 +397,8 @@ describe("InterviewPage", () => {
       connectionState: "connected" as const,
       audioState: "idle" as const,
       isAvatarConnected: false,
+      speakAside: () => true,
+      peekDraft: () => "",
     };
     const voiceModule = await import("../hooks/useInterviewVoice");
     const hookSpy = vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(voiceMock);
@@ -445,6 +453,8 @@ describe("InterviewPage", () => {
       connectionState: "disconnected" as const,
       audioState: "idle" as const,
       isAvatarConnected: false,
+      speakAside: () => true,
+      peekDraft: () => "",
     };
     const voiceModule = await import("../hooks/useInterviewVoice");
     const hookSpy = vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(voiceMock);
@@ -480,6 +490,8 @@ describe("InterviewPage", () => {
       connectionState: "disconnected" as const,
       audioState: "idle" as const,
       isAvatarConnected: false,
+      speakAside: () => true,
+      peekDraft: () => "",
     };
     const voiceModule = await import("../hooks/useInterviewVoice");
     vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(voiceMock);
@@ -521,6 +533,8 @@ describe("InterviewPage", () => {
       connectionState: "connected" as const,
       audioState: "idle" as const,
       isAvatarConnected: false,
+      speakAside: () => true,
+      peekDraft: () => "",
     };
     const voiceModule = await import("../hooks/useInterviewVoice");
     vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(voiceMock);
@@ -584,6 +598,8 @@ describe("InterviewPage", () => {
       connectionState: "connected" as const,
       audioState: "idle" as const,
       isAvatarConnected: false,
+      speakAside: () => true,
+      peekDraft: () => "",
     };
     const voiceModule = await import("../hooks/useInterviewVoice");
     vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(voiceMock);
@@ -644,6 +660,8 @@ describe("InterviewPage", () => {
       connectionState: "connected" as const,
       audioState: "idle" as const,
       isAvatarConnected: false,
+      speakAside: () => true,
+      peekDraft: () => "",
     };
     const voiceModule = await import("../hooks/useInterviewVoice");
     const hookSpy = vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(voiceMock);
@@ -723,6 +741,8 @@ describe("InterviewPage", () => {
       connectionState: "connected" as const,
       audioState: "listening" as const,
       isAvatarConnected: false,
+      speakAside: () => true,
+      peekDraft: () => "",
     };
     const voiceModule = await import("../hooks/useInterviewVoice");
     vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(voiceMock);
@@ -1050,6 +1070,8 @@ describe("InterviewPage restart (start over, v0.38.3.0)", () => {
       connectionState: "disconnected" as const,
       audioState: "idle" as const,
       isAvatarConnected: false,
+      speakAside: () => true,
+      peekDraft: () => "",
     });
 
     renderPage();
@@ -1091,5 +1113,200 @@ describe("InterviewPage restart (start over, v0.38.3.0)", () => {
     await user.click(await screen.findByTestId("candidate-restart-confirm"));
     await screen.findByText(/only an in-progress interview can be restarted/i);
     expect(screen.getByText("Question one?")).toBeInTheDocument();
+  });
+});
+
+describe("InterviewPage judged turns (issue #114)", () => {
+  beforeEach(() => {
+    sessionStorage.setItem("candidate_access_token", "test-candidate-token");
+  });
+  afterEach(() => {
+    sessionStorage.removeItem("candidate_access_token");
+  });
+  const judged = {
+    interview_session_id: "iv1",
+    status: "in_progress",
+    current_question: {
+      question_id: "q1",
+      prompt: "Question one?",
+      index: 0,
+      total: 2,
+      follow_ups_asked: 0,
+    },
+    voice_judge_silence_seconds: 2,
+    voice_linear_turns: true,
+  };
+  function voiceMock(over: Record<string, unknown> = {}) {
+    return {
+      connect: () => Promise.resolve(),
+      disconnect: () => Promise.resolve(),
+      toggleMute: () => undefined,
+      setMuted: () => undefined,
+      commitAnswer: () => Promise.resolve("my spoken answer, long enough"),
+      speakQuestion: vi.fn(() => true),
+      speakAside: vi.fn(() => true),
+      peekDraft: () => "so the first thing I would do is",
+      isMuted: false,
+      connectionState: "connected" as const,
+      audioState: "idle" as const,
+      isAvatarConnected: false,
+      ...over,
+    };
+  }
+
+  it("voice: passes the latched judge window to the hook; a nudge is spoken as an aside", async () => {
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockResolvedValue(judged);
+    const judgeSpy = vi.spyOn(client, "judgeInterview").mockResolvedValue({
+      verdict: "nudge",
+      speech_text: "Please go on.",
+      interview: null,
+    });
+    const vm = voiceMock();
+    const voiceModule = await import("../hooks/useInterviewVoice");
+    const hookSpy = vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(vm);
+    const lastOpts = () => hookSpy.mock.calls.at(-1)?.[1];
+
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+    await screen.findByText("Question one?");
+    // Text channel: no voice judge window.
+    expect(lastOpts()?.judgeSilenceMs).toBeNull();
+    await user.click(screen.getByRole("button", { name: /answer by voice/i }));
+    await waitFor(() => expect(lastOpts()?.judgeSilenceMs).toBe(2_000));
+    // The hook's timer fires → the page asks the judge with the buffered draft and the ids.
+    await act(async () => {
+      lastOpts()?.onSilenceJudge?.();
+    });
+    await waitFor(() =>
+      expect(judgeSpy).toHaveBeenCalledWith("iv1", {
+        question_id: "q1",
+        follow_ups_asked: 0,
+        draft_text: "so the first thing I would do is",
+        trigger: "voice_silence",
+      }),
+    );
+    await waitFor(() => expect(vm.speakAside).toHaveBeenCalledWith("Please go on."));
+    // Nothing was submitted and the header is unchanged.
+    expect(screen.getByText("Question one?")).toBeInTheDocument();
+  });
+
+  it("voice: a follow_up verdict switches the header to the judge's question, which is then read", async () => {
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockResolvedValue(judged);
+    vi.spyOn(client, "judgeInterview").mockResolvedValue({
+      verdict: "follow_up",
+      speech_text: "Who do you notify about it?",
+      interview: {
+        ...judged,
+        current_question: {
+          question_id: "q1",
+          prompt: "Who do you notify about it?",
+          index: 0,
+          total: 2,
+          is_follow_up: true,
+          follow_ups_asked: 1,
+        },
+        voice_judge_silence_seconds: null,
+      },
+    });
+    const vm = voiceMock();
+    const voiceModule = await import("../hooks/useInterviewVoice");
+    const hookSpy = vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(vm);
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+    await user.click(await screen.findByRole("button", { name: /answer by voice/i }));
+    await waitFor(() => expect(hookSpy.mock.calls.at(-1)?.[1]?.judgeSilenceMs).toBe(2_000));
+    await act(async () => {
+      hookSpy.mock.calls.at(-1)?.[1]?.onSilenceJudge?.();
+    });
+    await screen.findByText("Who do you notify about it?");
+    // Read through the normal verbatim question read (linear turns never suppress follow-ups)…
+    await waitFor(() => expect(vm.speakQuestion).toHaveBeenCalledWith("Who do you notify about it?"));
+    // …and the latch survived the null-reporting judge response.
+    expect(hookSpy.mock.calls.at(-1)?.[1]?.judgeSilenceMs).toBe(2_000);
+    expect(vm.speakAside).not.toHaveBeenCalled();
+  });
+
+  it("text: an idle draft asks the judge; a nudge shows as a bubble; submit is never blocked", async () => {
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockResolvedValue({ ...judged, voice_judge_silence_seconds: 1 });
+    const judgeSpy = vi.spyOn(client, "judgeInterview").mockResolvedValue({
+      verdict: "nudge",
+      speech_text: "Please go on.",
+      interview: null,
+    });
+    const submitSpy = vi.spyOn(client, "submitAnswer").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "in_progress",
+      current_question: { question_id: "q2", prompt: "Question two?", index: 1, total: 2 },
+    });
+    const voiceModule = await import("../hooks/useInterviewVoice");
+    vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(voiceMock());
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+    await screen.findByText("Question one?");
+    await user.type(screen.getByRole("textbox"), "so the first thing I would do is");
+    // Idle for the judge window (1 s) → text_idle judge call → bubble.
+    await waitFor(
+      () =>
+        expect(judgeSpy).toHaveBeenCalledWith(
+          "iv1",
+          expect.objectContaining({ trigger: "text_idle", draft_text: "so the first thing I would do is" }),
+        ),
+      { timeout: 3_000 },
+    );
+    await screen.findByTestId("judge-nudge");
+    expect(screen.getByTestId("judge-nudge")).toHaveTextContent("Please go on.");
+    // Typing again clears the bubble; submit always advances.
+    await user.type(screen.getByRole("textbox"), " check the log");
+    await waitFor(() => expect(screen.queryByTestId("judge-nudge")).not.toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /submit answer/i }));
+    await waitFor(() =>
+      expect(submitSpy).toHaveBeenCalledWith("iv1", "so the first thing I would do is check the log", "text"),
+    );
+    await screen.findByText("Question two?");
+  });
+
+  it("a judge reply that lands after a submit is discarded", async () => {
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockResolvedValue(judged);
+    let resolveJudge!: (v: client.JudgeOut) => void;
+    vi.spyOn(client, "judgeInterview").mockReturnValue(
+      new Promise<client.JudgeOut>((r) => {
+        resolveJudge = r;
+      }),
+    );
+    vi.spyOn(client, "submitAnswer").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "in_progress",
+      current_question: { question_id: "q2", prompt: "Question two?", index: 1, total: 2 },
+    });
+    const vm = voiceMock();
+    const voiceModule = await import("../hooks/useInterviewVoice");
+    const hookSpy = vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(vm);
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+    await user.click(await screen.findByRole("button", { name: /answer by voice/i }));
+    await waitFor(() => expect(hookSpy.mock.calls.at(-1)?.[1]?.judgeSilenceMs).toBe(2_000));
+    act(() => {
+      hookSpy.mock.calls.at(-1)?.[1]?.onSilenceJudge?.();
+    });
+    // The candidate submits while the judge is still thinking …
+    await user.click(await screen.findByRole("button", { name: /i'm done answering/i }));
+    await screen.findByText("Question two?");
+    // … and the late nudge must NOT be spoken over the next question.
+    await act(async () => {
+      resolveJudge({ verdict: "nudge", speech_text: "Please go on.", interview: null });
+    });
+    expect(vm.speakAside).not.toHaveBeenCalled();
   });
 });

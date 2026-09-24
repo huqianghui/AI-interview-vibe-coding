@@ -41,6 +41,7 @@ import {
   tokens,
 } from "@fluentui/react-components";
 import * as admin from "../api/admin";
+import { BoundedIntInput } from "../components/BoundedIntInput";
 import type {
   AdminQuestion,
   AdminUser,
@@ -546,6 +547,23 @@ export function AdminPage() {
                       </Text>
                     </div>
                     <div className={styles.actions}>
+                      {/* Max follow-ups (issue #114): how many judge follow-ups / redirects (judged
+                          mode) or template follow-ups (linear mode) this question may get. 0 = none. */}
+                      <Text size={200} title={t("admin.maxFollowUpsHint")}>
+                        {t("admin.maxFollowUps")}
+                      </Text>
+                      <BoundedIntInput
+                        size="small"
+                        value={q.max_follow_ups}
+                        min={0}
+                        max={3}
+                        aria-label={t("admin.maxFollowUps")}
+                        onCommit={async (v) => {
+                          await admin.editQuestion(q.question_id, { max_follow_ups: v });
+                          if (selectedBank) setQuestions(await admin.listBankQuestions(selectedBank));
+                        }}
+                        data-testid={`max-follow-ups-${q.question_id}`}
+                      />
                       <Button
                         size="small"
                         appearance={selectedQuestion === q.question_id ? "primary" : "secondary"}

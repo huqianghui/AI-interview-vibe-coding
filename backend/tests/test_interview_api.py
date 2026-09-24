@@ -805,17 +805,39 @@ async def test_start_bank_voice_linear_turns_true_by_default(client, db_session)
 
 
 @pytest.mark.asyncio
-async def test_start_bank_voice_linear_turns_false_when_admin_opts_into_model_turn(
-    client, db_session
-):
+async def test_start_bank_judged_session_reports_linear_turns_and_judge_seconds(client, db_session):
     from app.services import persona_service as psvc
 
-    await psvc.create_persona(
-        db_session, name="Interviewer", is_default=True, bank_turn_mode="model"
+    # Judged bank sessions are still linear-turn transport (the judge speaks through the backend,
+    # never a model turn) and report the judge silence window; linear sessions report 0.
+    persona = await psvc.create_persona(
+        db_session,
+        name="Interviewer",
+        is_default=True,
+        bank_turn_mode="judged",
+        judge_silence_seconds=4,
     )
     headers = await _new_candidate_headers(client)
     body = (await client.post("/candidate/interview/start", headers=headers)).json()
-    assert body["voice_linear_turns"] is False
+    assert body["voice_linear_turns"] is True
+    assert body["voice_judge_silence_seconds"] == 4
+    iv = body["interview_session_id"]
+    # Snapshot (review D6): flipping the persona back to linear mid-interview changes nothing for
+    # this session — the GET still reports the judge window; a NEW session would be linear.
+    await psvc.update_persona(db_session, persona.id, bank_turn_mode="linear")
+    got = (await client.get(f"/candidate/interview/{iv}", headers=headers)).json()
+    assert got["voice_judge_silence_seconds"] == 4
+    answered = (
+        await client.post(
+            f"/candidate/interview/{iv}/answer",
+            headers=headers,
+            json={"text": "an answer", "source": "voice"},
+        )
+    ).json()
+    assert answered["voice_judge_silence_seconds"] is None  # mutation: not reported
+    other = await _new_candidate_headers(client)
+    fresh = (await client.post("/candidate/interview/start", headers=other)).json()
+    assert fresh["voice_judge_silence_seconds"] == 0
 
 
 @pytest.mark.asyncio
@@ -841,9 +863,10 @@ async def test_external_voice_linear_turns_always_true_regardless_of_bank_mode(c
 async def test_start_voice_linear_turns_without_persona_follows_the_engine(client):
     headers = await _new_candidate_headers(client)
     body = (await client.post("/candidate/interview/start", headers=headers)).json()
-    # No persona ⇒ a bank session with nothing to consult ⇒ not linear (the engine alone decides),
-    # never null on an entry point.
-    assert body["voice_linear_turns"] is False
+    # Every session is linear-turn transport since v0.39.0.0 (judged sessions speak through the
+    # backend, never a model turn) — never null on an entry point.
+    assert body["voice_linear_turns"] is True
+    assert body["voice_judge_silence_seconds"] == 0
 
 
 # --- /restart: abandon the live interview and start over (v0.38.3.0) ---------------------------
@@ -999,3 +1022,287 @@ async def test_restart_external_turn_in_flight_is_a_409_and_abandons_nothing(
     assert (await client.post("/candidate/interview/start", headers=headers)).json()[
         "interview_session_id"
     ] == iv1
+
+
+# --- POST /judge (issue #114): pre-submit judge, budget, staleness, snapshot, follow-up turn -----
+
+
+async def _judged_setup(
+    client, db_session, *, max_follow_ups=1, judged=True, max_calls=2, with_rubric=True
+):
+    """Default JUDGED persona + a default bank whose Q1 owes one follow-up and has a required item."""  # noqa: E501
+    from app.services import checklist_service
+    from app.services import persona_service as psvc
+    from app.services import question_service as qsvc
+
+    await psvc.create_persona(
+        db_session,
+        name="Interviewer",
+        is_default=True,
+        bank_turn_mode="judged" if judged else "linear",
+        judge_max_calls_per_question=max_calls,
+        prompt_fragment="You are a warm, rigorous inspector.",
+    )
+    bank = await qsvc.create_bank(db_session, name="B", is_default=True)
+    q1 = await qsvc.add_question(
+        db_session,
+        bank_id=bank.id,
+        text="How do you handle protocol deviations?",
+        order_index=0,
+        max_follow_ups=max_follow_ups,
+    )
+    await qsvc.add_question(
+        db_session, bank_id=bank.id, text="How do you close out a site?", order_index=1
+    )
+    if with_rubric:
+        await checklist_service.update_items(
+            db_session,
+            (await checklist_service.draft_checklist(db_session, q1.id, llm_provider="mock")).id,
+            [
+                {
+                    "kind": "required",
+                    "text": "Documented every protocol deviation in the log",
+                    "weight": 100,
+                }
+            ],
+        )
+    headers = await _new_candidate_headers(client)
+    body = (await client.post("/candidate/interview/start", headers=headers)).json()
+    return headers, body["interview_session_id"], q1.id
+
+
+def _judge_body(qid, text="I log them the same day and", asked=0, trigger="voice_silence"):
+    return {"question_id": qid, "follow_ups_asked": asked, "draft_text": text, "trigger": trigger}
+
+
+async def _events(db_session, iv):
+    from sqlalchemy import select
+
+    from app.models.judge_event import JudgeEvent
+
+    return (
+        (await db_session.execute(select(JudgeEvent).where(JudgeEvent.interview_session_id == iv)))
+        .scalars()
+        .all()
+    )
+
+
+@pytest.mark.asyncio
+async def test_judge_nudge_returns_text_writes_event_and_no_turn(
+    client, db_session, scripted_judge
+):
+    headers, iv, qid = await _judged_setup(client, db_session)
+    scripted_judge.responses.append(
+        '{"verdict": "nudge", "speech_text": "Please go on.", "reason": "trailed"}'
+    )
+    r = await client.post(
+        f"/candidate/interview/{iv}/judge", headers=headers, json=_judge_body(qid)
+    )
+    assert r.status_code == 200
+    out = r.json()
+    assert out == {"verdict": "nudge", "speech_text": "Please go on.", "interview": None}
+    ev = await _events(db_session, iv)
+    assert [(e.verdict, e.trigger, e.question_id) for e in ev] == [("nudge", "voice_silence", qid)]
+    assert ev[0].latency_ms >= 0 and ev[0].model == "scripted"
+    # The persona prompt and the delimited draft reached the model; the header is unchanged.
+    assert "warm, rigorous inspector" in scripted_judge.prompts[0]
+    got = (await client.get(f"/candidate/interview/{iv}", headers=headers)).json()
+    assert got["current_question"]["is_follow_up"] is False
+
+
+@pytest.mark.asyncio
+async def test_judge_follow_up_writes_turn_switches_header_and_submit_still_advances(
+    client, db_session, scripted_judge
+):
+    headers, iv, qid = await _judged_setup(client, db_session)
+    scripted_judge.responses.append(
+        '{"verdict": "follow_up", "speech_text": "How do you make sure none slip past you?", "reason": "req missing"}'  # noqa: E501
+    )
+    out = (
+        await client.post(
+            f"/candidate/interview/{iv}/judge", headers=headers, json=_judge_body(qid)
+        )
+    ).json()
+    assert out["verdict"] == "follow_up"
+    assert out["interview"]["current_question"]["is_follow_up"] is True
+    assert (
+        out["interview"]["current_question"]["prompt"] == "How do you make sure none slip past you?"
+    )
+    # The slot is consumed: a second judge call is stale on follow_ups_asked=0 → wait, no LLM call…
+    scripted_judge.responses.append('{"verdict": "nudge", "speech_text": "x"}')
+    again = (
+        await client.post(
+            f"/candidate/interview/{iv}/judge", headers=headers, json=_judge_body(qid)
+        )
+    ).json()
+    assert again["verdict"] == "wait"
+    scripted_judge.responses.clear()  # the stale call consumed nothing
+    # …and with the right count only wait/nudge are allowed (a follow_up answer is an error).
+    scripted_judge.responses.append('{"verdict": "follow_up", "speech_text": "More?"}')
+    again = (
+        await client.post(
+            f"/candidate/interview/{iv}/judge", headers=headers, json=_judge_body(qid, asked=1)
+        )
+    ).json()
+    assert again["verdict"] == "wait"
+    assert [e.verdict for e in await _events(db_session, iv)] == ["follow_up", "error"]
+    # "I'm done" ALWAYS advances — no template follow-up, no LLM call, straight to Q2.
+    n_prompts = len(scripted_judge.prompts)
+    answered = (
+        await client.post(
+            f"/candidate/interview/{iv}/answer",
+            headers=headers,
+            json={"text": "a full answer here", "source": "voice"},
+        )
+    ).json()
+    assert answered["current_question"]["prompt"] == "How do you close out a site?"
+    assert answered["current_question"]["is_follow_up"] is False
+    assert len(scripted_judge.prompts) == n_prompts
+
+
+@pytest.mark.asyncio
+async def test_judge_cheap_exits_make_no_llm_call_and_no_event(client, db_session, scripted_judge):
+    headers, iv, qid = await _judged_setup(client, db_session)
+    scripted_judge.responses.extend(['{"verdict": "nudge", "speech_text": "x"}'] * 5)
+    # blank draft, stale question id, stale follow-up count → wait
+    for body in (_judge_body(qid, text="   "), _judge_body("other-q"), _judge_body(qid, asked=3)):
+        r = (
+            await client.post(f"/candidate/interview/{iv}/judge", headers=headers, json=body)
+        ).json()
+        assert r == {"verdict": "wait", "speech_text": "", "interview": None}
+    assert scripted_judge.prompts == [] and await _events(db_session, iv) == []
+    # unknown trigger → 422; another candidate → 404
+    assert (
+        await client.post(
+            f"/candidate/interview/{iv}/judge",
+            headers=headers,
+            json=_judge_body(qid, trigger="mouse"),
+        )
+    ).status_code == 422
+    other = await _new_candidate_headers(client)
+    assert (
+        await client.post(f"/candidate/interview/{iv}/judge", headers=other, json=_judge_body(qid))
+    ).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_judge_budget_caps_llm_calls_per_question(client, db_session, scripted_judge):
+    headers, iv, qid = await _judged_setup(client, db_session, max_calls=2)
+    scripted_judge.responses.extend(['{"verdict": "wait", "speech_text": "", "reason": "r"}'] * 5)
+    for _ in range(4):
+        await client.post(
+            f"/candidate/interview/{iv}/judge", headers=headers, json=_judge_body(qid)
+        )
+    assert len(scripted_judge.prompts) == 2
+    assert len(await _events(db_session, iv)) == 2
+
+
+@pytest.mark.asyncio
+async def test_judge_max_calls_zero_never_calls_the_llm(client, db_session, scripted_judge):
+    headers, iv, qid = await _judged_setup(client, db_session, max_calls=0)
+    scripted_judge.responses.append('{"verdict": "nudge", "speech_text": "x"}')
+    r = (
+        await client.post(
+            f"/candidate/interview/{iv}/judge", headers=headers, json=_judge_body(qid)
+        )
+    ).json()
+    assert r["verdict"] == "wait" and scripted_judge.prompts == []
+
+
+@pytest.mark.asyncio
+async def test_judge_error_and_leak_are_recorded_and_harmless(client, db_session, scripted_judge):
+    headers, iv, qid = await _judged_setup(client, db_session, max_calls=5)
+    scripted_judge.responses.extend(
+        [
+            RuntimeError("gateway down"),
+            "garbage",
+            '{"verdict": "follow_up", "speech_text": "Did you document every protocol deviation in the log?"}',  # noqa: E501
+        ]
+    )
+    for _ in range(3):
+        r = (
+            await client.post(
+                f"/candidate/interview/{iv}/judge", headers=headers, json=_judge_body(qid)
+            )
+        ).json()
+        assert r["verdict"] == "wait"
+    assert [e.verdict for e in await _events(db_session, iv)] == ["error", "error", "leak_blocked"]
+    got = (await client.get(f"/candidate/interview/{iv}", headers=headers)).json()
+    assert got["current_question"]["is_follow_up"] is False  # nothing was written
+
+
+@pytest.mark.asyncio
+async def test_judge_empty_rubric_allows_redirect_but_not_follow_up(
+    client, db_session, scripted_judge
+):
+    headers, iv, qid = await _judged_setup(client, db_session, with_rubric=False, max_calls=5)
+    scripted_judge.responses.append('{"verdict": "follow_up", "speech_text": "Anything else?"}')
+    r = (
+        await client.post(
+            f"/candidate/interview/{iv}/judge", headers=headers, json=_judge_body(qid)
+        )
+    ).json()
+    assert r["verdict"] == "wait"
+    scripted_judge.responses.append(
+        '{"verdict": "redirect", "speech_text": "Let us return to deviations."}'
+    )
+    r = (
+        await client.post(
+            f"/candidate/interview/{iv}/judge", headers=headers, json=_judge_body(qid)
+        )
+    ).json()
+    assert r["verdict"] == "redirect" and r["interview"]["current_question"]["is_follow_up"] is True
+    assert "(no rubric for this question)" in scripted_judge.prompts[0]
+
+
+@pytest.mark.asyncio
+async def test_judge_is_wait_for_linear_sessions_and_snapshot_holds(
+    client, db_session, scripted_judge
+):
+    from app.services import persona_service as psvc
+
+    headers, iv, qid = await _judged_setup(client, db_session, judged=False)
+    scripted_judge.responses.append('{"verdict": "nudge", "speech_text": "x"}')
+    r = (
+        await client.post(
+            f"/candidate/interview/{iv}/judge", headers=headers, json=_judge_body(qid)
+        )
+    ).json()
+    assert r["verdict"] == "wait" and scripted_judge.prompts == []
+    # Flipping the persona to judged now does NOT affect the running (linear-snapshot) session.
+    persona = await psvc.get_default_persona(db_session)
+    await psvc.update_persona(db_session, persona.id, bank_turn_mode="judged")
+    r = (
+        await client.post(
+            f"/candidate/interview/{iv}/judge", headers=headers, json=_judge_body(qid)
+        )
+    ).json()
+    assert r["verdict"] == "wait" and scripted_judge.prompts == []
+    # Linear sessions keep today's template follow-up at submit.
+    answered = (
+        await client.post(
+            f"/candidate/interview/{iv}/answer",
+            headers=headers,
+            json={"text": "a full answer here", "source": "text"},
+        )
+    ).json()
+    assert answered["current_question"]["is_follow_up"] is True
+    assert answered["current_question"]["prompt"].startswith("You mentioned")
+
+
+@pytest.mark.asyncio
+async def test_judge_concurrent_call_is_409(client, db_session, scripted_judge):
+    import asyncio
+
+    headers, iv, qid = await _judged_setup(client, db_session, max_calls=5)
+
+    async def slow(_prompt):
+        await asyncio.sleep(0.3)
+        return '{"verdict": "wait", "speech_text": ""}'
+
+    scripted_judge.responses.extend([slow, '{"verdict": "wait", "speech_text": ""}'])
+    first, second = await asyncio.gather(
+        client.post(f"/candidate/interview/{iv}/judge", headers=headers, json=_judge_body(qid)),
+        client.post(f"/candidate/interview/{iv}/judge", headers=headers, json=_judge_body(qid)),
+    )
+    assert sorted([first.status_code, second.status_code]) == [200, 409]

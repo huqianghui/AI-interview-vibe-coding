@@ -39,7 +39,14 @@ AUTO_SUBMIT_FIELDS = (
     "bank_auto_submit_silence_seconds",
     "external_auto_submit_enabled",
     "external_auto_submit_silence_seconds",
+    "judge_silence_seconds",
+    "judge_max_calls_per_question",
 )
+# Bounds for the judge knobs (issue #114): silence before the judge listens, LLM calls per question.
+JUDGE_SILENCE_MIN_SECONDS = 1
+JUDGE_SILENCE_MAX_SECONDS = 30
+JUDGE_MAX_CALLS_MIN = 0
+JUDGE_MAX_CALLS_MAX = 5
 
 
 class VoiceKnobs(BaseModel):
@@ -63,10 +70,16 @@ class VoiceKnobs(BaseModel):
     external_auto_submit_silence_seconds: int = Field(
         default=3, ge=VOICE_AUTO_SUBMIT_MIN_SECONDS, le=VOICE_AUTO_SUBMIT_MAX_SECONDS
     )
-    # BANK-session turn control: "linear" (default — the model has no turn of its own, only reads
-    # the questions) or "model" (server-VAD opens a model turn on every pause; the prompt governs
-    # it). External sessions are always linear and never consult this. See BANK_TURN_MODES.
+    # BANK-session turn control: "linear" (default — silent between questions) or "judged" (a
+    # backend judge may nudge / follow up / redirect during pauses). External sessions are always
+    # linear and never consult this. See BANK_TURN_MODES. The retired "model" value is a 422.
     bank_turn_mode: str = "linear"
+    judge_silence_seconds: int = Field(
+        default=2, ge=JUDGE_SILENCE_MIN_SECONDS, le=JUDGE_SILENCE_MAX_SECONDS
+    )
+    judge_max_calls_per_question: int = Field(
+        default=2, ge=JUDGE_MAX_CALLS_MIN, le=JUDGE_MAX_CALLS_MAX
+    )
 
     @field_validator("bank_turn_mode")
     @classmethod
@@ -139,6 +152,12 @@ class PersonaUpdate(BaseModel):
     model: str | None = None
     interview_brain: str | None = None
     bank_turn_mode: str | None = None
+    judge_silence_seconds: int | None = Field(
+        default=None, ge=JUDGE_SILENCE_MIN_SECONDS, le=JUDGE_SILENCE_MAX_SECONDS
+    )
+    judge_max_calls_per_question: int | None = Field(
+        default=None, ge=JUDGE_MAX_CALLS_MIN, le=JUDGE_MAX_CALLS_MAX
+    )
 
     @field_validator("interview_brain")
     @classmethod
@@ -192,6 +211,11 @@ class PersonaOut(BaseModel):
     external_auto_submit_enabled: bool
     external_auto_submit_silence_seconds: int
     bank_turn_mode: str
+    judge_silence_seconds: int
+    judge_max_calls_per_question: int
+    # The fixed, read-only part of the judge prompt (issue #114) — surfaced so the editor can show
+    # admins exactly what their prompt_fragment is combined with when a session is judged.
+    judge_contract: str
     model: str | None
     interview_brain: str
     agent_id: str | None

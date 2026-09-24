@@ -32,16 +32,37 @@ class LLMAdapterError(RuntimeError):
     """Raised when a Foundry LLM completion fails (never silently swallowed)."""
 
 
-def _build_completion_kwargs(model: str, prompt: str, json_mode: bool) -> dict[str, Any]:
+def _is_reasoning_model(model: str) -> bool:
+    """gpt-5 family / o-series expose ``reasoning.effort`` (and ``text.verbosity`` on gpt-5)."""
+    m = (model or "").lower()
+    return m.startswith("gpt-5") or m.startswith("o1") or m.startswith("o3") or m.startswith("o4")
+
+
+def _build_completion_kwargs(
+    model: str, prompt: str, json_mode: bool, *, fast: bool = False
+) -> dict[str, Any]:
     """The exact Responses-API kwargs for a plain-model completion (pure, unit-tested).
 
     ``json_mode`` requests a JSON object via ``text.format`` — the Responses-API equivalent of
     chat-completions' ``response_format={"type": "json_object"}`` (which ``responses.create`` does
     not accept). No ``agent_reference`` — scoring is a plain-model judgment, not an agent turn.
+
+    ``fast`` (issue #114 judge): latency-sensitive callers on a reasoning model ask for LOW
+    reasoning effort and low verbosity. Live-measured 2026-09-24 on gpt-5-mini: default effort
+    7–10 s per judge call; ``minimal`` 2–3 s but it mislabelled an off-topic answer as a nudge;
+    ``low`` 2–5 s (median ≈3 s) with all twelve eval verdict classes correct. Non-reasoning models
+    ignore it.
     """
     kwargs: dict[str, Any] = {"model": model, "input": [{"role": "user", "content": prompt}]}
+    text: dict[str, Any] = {}
     if json_mode:
-        kwargs["text"] = {"format": {"type": "json_object"}}
+        text["format"] = {"type": "json_object"}
+    if fast and _is_reasoning_model(model):
+        kwargs["reasoning"] = {"effort": "low"}
+        if model.lower().startswith("gpt-5"):
+            text["verbosity"] = "low"
+    if text:
+        kwargs["text"] = text
     return kwargs
 
 
@@ -57,16 +78,24 @@ class FoundryLLMAdapter(LLMAdapter):
         self._endpoint = project_endpoint(endpoint, project)
         self._api_key = api_key
         self._model = model
+        # Built once, reused: the project client + its OpenAI client. Rebuilding per call re-probed
+        # the credential every time (~1–2 s of a judge call's latency budget).
+        self._openai_client: Any = None
+
+    async def _openai(self) -> Any:  # pragma: no cover — live SDK
+        if self._openai_client is None:
+            # build_project_client is a synchronous SDK call (credential probe) — off the loop.
+            client = await asyncio.to_thread(build_project_client, self._endpoint, self._api_key)
+            self._openai_client = client.get_openai_client()
+        return self._openai_client
 
     async def complete(  # pragma: no cover — the live SDK call needs a real Foundry endpoint
-        self, prompt: str, *, json_mode: bool = False
+        self, prompt: str, *, json_mode: bool = False, fast: bool = False
     ) -> str:
         """Return a single completion string. Raises :class:`LLMAdapterError` on any failure."""
-        kwargs = _build_completion_kwargs(self._model, prompt, json_mode)
+        kwargs = _build_completion_kwargs(self._model, prompt, json_mode, fast=fast)
         try:
-            # build_project_client + responses.create are synchronous SDK calls — off the loop.
-            client = await asyncio.to_thread(build_project_client, self._endpoint, self._api_key)
-            openai_client = client.get_openai_client()
+            openai_client = await self._openai()
             response = await asyncio.to_thread(openai_client.responses.create, **kwargs)
         except Exception as exc:  # noqa: BLE001 — normalize any SDK error, never swallow
             logger.error("FoundryLLMAdapter.complete failed (model=%s): %s", self._model, exc)
