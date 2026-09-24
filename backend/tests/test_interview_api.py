@@ -1542,3 +1542,27 @@ async def test_judge_apply_edges_slot_spent_other_question_and_finished_intervie
     assert (
         await client.post(f"/candidate/interview/{iv}/judge", headers=headers, json=dry)
     ).status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_entry_points_report_the_avatar_character_for_stage_backdrop(client, db_session):
+    # 2026-09-24: the interview stage is painted in the photo avatar's own backdrop colour (the
+    # frontend roster maps character → colour), so the entry points report the persona's character.
+    # Same contract as the other voice flags: start + GET only, null on mutations.
+    from app.services import persona_service as psvc
+
+    await psvc.create_persona(db_session, name="Interviewer", is_default=True, character="Amira")
+    headers = await _new_candidate_headers(client)
+    body = (await client.post("/candidate/interview/start", headers=headers)).json()
+    assert body["voice_avatar_character"] == "amira"  # normalised like the wire value
+    iv = body["interview_session_id"]
+    got = (await client.get(f"/candidate/interview/{iv}", headers=headers)).json()
+    assert got["voice_avatar_character"] == "amira"
+    answered = (
+        await client.post(
+            f"/candidate/interview/{iv}/answer",
+            headers=headers,
+            json={"text": "an answer", "source": "text"},
+        )
+    ).json()
+    assert answered["voice_avatar_character"] is None

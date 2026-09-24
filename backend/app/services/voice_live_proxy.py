@@ -32,11 +32,7 @@ from app.models.persona import (
     build_read_directive,
     default_external_reader_prompt,
 )
-from app.services.agents.voice_live_metadata import (
-    INTERVIEW_STAGE_BACKGROUND_RGBA,
-    build_avatar_config,
-    resolve_voice,
-)
+from app.services.agents.voice_live_metadata import build_avatar_config, resolve_voice
 from app.services.azure_auth import COGNITIVE_SERVICES_SCOPE, get_azure_credential_cached
 
 logger = logging.getLogger(__name__)
@@ -223,7 +219,11 @@ def build_turn_detection(*, linear_turns: bool, mouth: bool, eou_detection: bool
 
 
 def build_avatar_session(
-    persona: InterviewerPersona, *, locale: str | None, playground: bool = False
+    persona: InterviewerPersona,
+    *,
+    locale: str | None,
+    playground: bool = False,
+    background: str | None = None,
 ) -> Any:
     """Build the Azure SDK ``RequestSession`` for a persona's avatar/voice Voice Live session.
 
@@ -318,16 +318,14 @@ def build_avatar_session(
             build_avatar_config(
                 persona.character,
                 persona.style,
-                # Interview sessions: Azure paints the avatar's background in the stage colour so
-                # the frame edge is invisible on the page (issue1 follow-up, 2026-09-24). The editor
-                # Playground keeps the avatar's natural backdrop on its light stage.
+                # ``background`` (6-hex RGB from the page's ``avatar_bg``): Azure paints it behind
+                # the digital human. The page sends the photo avatar's own thumbnail backdrop (the
+                # frontend roster's PHOTO_BACKDROPS) so the live video matches the editor preview
+                # exactly — Azure's live synthesis otherwise uses a different (grey) wall than the
+                # official thumbnail (measured 2026-09-24). None ⇒ Azure's default backdrop.
                 video={
                     **dict(VideoParams(codec="h264")),
-                    **(
-                        {}
-                        if playground
-                        else {"background": {"color": INTERVIEW_STAGE_BACKGROUND_RGBA}}
-                    ),
+                    **({"background": {"color": f"#{background.upper()}FF"}} if background else {}),
                 },
             )
         )
@@ -373,6 +371,7 @@ async def run_proxy(
     api_version: str,
     default_model: str,
     playground: bool = False,
+    avatar_background: str | None = None,
 ) -> None:  # pragma: no cover — live Azure connect + relay, no Azure in CI
     """Hold the Azure Voice Live SDK connection and relay browser <-> Azure.
 
@@ -419,7 +418,9 @@ async def run_proxy(
 
     try:
         async with connect(**connect_kwargs) as conn:
-            session = build_avatar_session(persona, locale=locale, playground=playground)
+            session = build_avatar_session(
+                persona, locale=locale, playground=playground, background=avatar_background
+            )
             await conn.session.update(session=session)
 
             # Pin the session language BEFORE any response can be generated (see

@@ -144,13 +144,6 @@ def is_photo_avatar(character: str | None, style: str | None = None) -> bool:
     return not (style or "").strip()
 
 
-# Painted by Azure BEHIND the digital human on candidate-facing (interview) sessions so the video's
-# own backdrop merges with the interview stage (issue1 follow-up, 2026-09-24). RGBA hex. MUST equal
-# the frontend's flat stage colour `AVATAR_STAGE_COLOR` (frontend/src/components/avatarFit.ts,
-# "#1c1d3a"); the editor Playground keeps its light stage and does NOT send this.
-INTERVIEW_STAGE_BACKGROUND_RGBA = "#1C1D3AFF"
-
-
 def build_avatar_config(
     character: str | None, style: str | None, *, video: dict[str, Any] | None = None
 ) -> dict[str, Any]:
