@@ -33,6 +33,7 @@ const persona = (over: Partial<PersonaOut> = {}): PersonaOut => ({
   bank_auto_submit_silence_seconds: 3,
   external_auto_submit_enabled: true,
   external_auto_submit_silence_seconds: 3,
+  bank_turn_mode: "linear",
   model: null,
   interview_brain: "bank",
   agent_id: null,
@@ -156,5 +157,32 @@ describe("agentEditorForm voice auto-submit pairs (one per engine, never shared)
     expect(payload.bank_auto_submit_silence_seconds).toBe(7);
     expect(payload.external_auto_submit_enabled).toBe(false);
     expect(payload.external_auto_submit_silence_seconds).toBe(15);
+  });
+});
+
+describe("agentEditorForm bank turn mode (linear by default, bank-only, never shared)", () => {
+  it("new persona defaults to linear turns", () => {
+    expect(emptyPersonaForm().bank_turn_mode).toBe("linear");
+  });
+
+  it("round-trips the admin's model-turn opt-in", () => {
+    const form = personaToForm(persona({ bank_turn_mode: "model" }));
+    expect(form.bank_turn_mode).toBe("model");
+    expect(formToPayload(form).bank_turn_mode).toBe("model");
+  });
+
+  it("falls back to linear when an older backend omits the field or sends garbage", () => {
+    const legacy = persona() as unknown as Record<string, unknown>;
+    delete legacy.bank_turn_mode;
+    expect(personaToForm(legacy as unknown as PersonaOut).bank_turn_mode).toBe("linear");
+    expect(
+      personaToForm(persona({ bank_turn_mode: "chatty" as unknown as "model" })).bank_turn_mode,
+    ).toBe("linear");
+  });
+
+  it("flipping the interview brain carries the bank turn mode untouched", () => {
+    const form = personaToForm(persona({ interview_brain: "bank", bank_turn_mode: "model" }));
+    const flipped = { ...form, interviewBrain: "external" };
+    expect(formToPayload(flipped).bank_turn_mode).toBe("model");
   });
 });

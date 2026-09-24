@@ -12,6 +12,10 @@ import { adminRequest } from "./admin";
 /** Agent-sync lifecycle for a persona's Foundry prompt agent (mirrors backend AGENT_SYNC_STATUSES). */
 export type AgentSyncStatus = "none" | "pending" | "synced" | "failed";
 
+/** Bank-session voice turn contract (mirrors backend BANK_TURN_MODES). */
+export type BankTurnMode = "linear" | "model";
+export const BANK_TURN_MODES: readonly BankTurnMode[] = ["linear", "model"];
+
 /** A persona as returned by the backend (matches PersonaOut in app/api/admin_personas.py). */
 export interface PersonaOut {
   id: string;
@@ -45,6 +49,11 @@ export interface PersonaOut {
   bank_auto_submit_silence_seconds: number;
   external_auto_submit_enabled: boolean;
   external_auto_submit_silence_seconds: number;
+  // BANK-session turn control: "linear" (default) — the model gets NO turn of its own between
+  // questions, the digital human only reads each question verbatim and is silent in between (the
+  // "Thank you. Thank you." fix); "model" — server-VAD opens a model turn on every candidate pause
+  // and the prompt governs what it says. External sessions are always linear and never consult it.
+  bank_turn_mode: BankTurnMode;
   model: string | null; // per-persona Foundry model deployment ("" / null → global default)
   // Phase 2: which interview engine drives this persona — "bank" (built-in question bank) or
   // "external" (the client's external interview API/server). Vendor-neutral token, never a product

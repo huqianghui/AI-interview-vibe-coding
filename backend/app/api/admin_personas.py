@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db
 from app.dependencies import require_role
 from app.models.interview import BRAIN_MODES
-from app.models.persona import InterviewerPersona
+from app.models.persona import BANK_TURN_MODES, InterviewerPersona
 from app.models.persona_knowledge import PersonaKnowledgeConfig
 from app.services import config_service
 from app.services import persona_knowledge_service as kb_svc
@@ -63,6 +63,17 @@ class VoiceKnobs(BaseModel):
     external_auto_submit_silence_seconds: int = Field(
         default=3, ge=VOICE_AUTO_SUBMIT_MIN_SECONDS, le=VOICE_AUTO_SUBMIT_MAX_SECONDS
     )
+    # BANK-session turn control: "linear" (default — the model has no turn of its own, only reads
+    # the questions) or "model" (server-VAD opens a model turn on every pause; the prompt governs
+    # it). External sessions are always linear and never consult this. See BANK_TURN_MODES.
+    bank_turn_mode: str = "linear"
+
+    @field_validator("bank_turn_mode")
+    @classmethod
+    def _validate_bank_turn_mode(cls, v: str) -> str:
+        if v not in BANK_TURN_MODES:
+            raise ValueError(f"bank_turn_mode must be one of {BANK_TURN_MODES}")
+        return v
 
 
 class PersonaCreate(VoiceKnobs):
@@ -127,12 +138,22 @@ class PersonaUpdate(BaseModel):
     )
     model: str | None = None
     interview_brain: str | None = None
+    bank_turn_mode: str | None = None
 
     @field_validator("interview_brain")
     @classmethod
     def _validate_brain(cls, v: str | None) -> str | None:
         if v is not None and v not in BRAIN_MODES:
             raise ValueError(f"interview_brain must be one of {BRAIN_MODES}")
+        return v
+
+    @field_validator("bank_turn_mode")
+    @classmethod
+    def _validate_bank_turn_mode(cls, v: str | None) -> str | None:
+        # ``None`` = not sent (exclude_unset drops it); an explicit null is rejected like any other
+        # value outside BANK_TURN_MODES so it can never reach the NOT NULL column.
+        if v not in BANK_TURN_MODES:
+            raise ValueError(f"bank_turn_mode must be one of {BANK_TURN_MODES}")
         return v
 
     @model_validator(mode="after")
@@ -170,6 +191,7 @@ class PersonaOut(BaseModel):
     bank_auto_submit_silence_seconds: int
     external_auto_submit_enabled: bool
     external_auto_submit_silence_seconds: int
+    bank_turn_mode: str
     model: str | None
     interview_brain: str
     agent_id: str | None

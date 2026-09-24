@@ -432,3 +432,42 @@ async def test_knowledge_discovery_delegates_when_configured(client, db_session,
 
     kbs = (await client.get("/admin/personas/knowledge/knowledge-bases", headers=AUTH)).json()
     assert kbs == [{"value": "sop-kb", "label": "SOP KB"}]
+
+
+async def test_bank_turn_mode_defaults_linear_round_trips_and_validates(client):
+    # Bank-session turn control (the "Thank you. Thank you." fix): linear by default, "model" is the
+    # explicit opt-in, anything else (or an explicit null) is a 422 on both create and update.
+    plain = (await client.post("/admin/personas", headers=AUTH, json={"name": "T0"})).json()
+    assert plain["bank_turn_mode"] == "linear"
+    updated = (
+        await client.put(
+            f"/admin/personas/{plain['id']}", headers=AUTH, json={"bank_turn_mode": "model"}
+        )
+    ).json()
+    assert updated["bank_turn_mode"] == "model"
+    # Flipping the engine never touches it (it is a bank-only item, remembered while external).
+    ext = (
+        await client.put(
+            f"/admin/personas/{plain['id']}", headers=AUTH, json={"interview_brain": "external"}
+        )
+    ).json()
+    assert ext["bank_turn_mode"] == "model"
+    final = (await client.get(f"/admin/personas/{plain['id']}", headers=AUTH)).json()
+    assert final["bank_turn_mode"] == "model"
+    for bad in ("silent", "LINEAR", "", None):
+        assert (
+            await client.post(
+                "/admin/personas", headers=AUTH, json={"name": "T1", "bank_turn_mode": bad}
+            )
+        ).status_code == 422
+        assert (
+            await client.put(
+                f"/admin/personas/{plain['id']}", headers=AUTH, json={"bank_turn_mode": bad}
+            )
+        ).status_code == 422
+    created_model = (
+        await client.post(
+            "/admin/personas", headers=AUTH, json={"name": "T2", "bank_turn_mode": "model"}
+        )
+    ).json()
+    assert created_model["bank_turn_mode"] == "model"

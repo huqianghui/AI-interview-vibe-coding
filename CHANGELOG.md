@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.38.2.0 (2026-09-24)
+
+### Fixed
+- **Question-bank voice sessions no longer say "Thank you." after every pause.** Root cause: bank
+  sessions ran Azure server-VAD with `create_response=True`, so *every* end-of-utterance Azure detected
+  opened a full model turn, and the interviewer prompt asks the model to acknowledge the answer in that
+  turn — a candidate who pauses twice mid-answer got two "Thank you."s, the "I'm done" click could nudge
+  a third, and only then was the next question read. The prompt cannot fix this: `create_response` is a
+  single boolean, the model has to say *something* in each turn it is given, and its "Please go on" vs
+  "Thank you" guess per pause is unreliable. Fix: bank sessions now default to **linear turns** — the
+  same contract external sessions always ran — where the model has no turn of its own and the digital
+  human only reads each backend question verbatim, silent in between.
+
+### Added
+- **`bank_turn_mode` — an admin-controlled turn contract for question-bank voice sessions** (owner
+  reversal, 2026-09-24, of the v0.38.1.1 "engine decides, no knob" decision; the two protocol facts
+  recorded there still hold, what changed is the preferred default and that the reaction is now an
+  explicit opt-in). In the `/admin/agent` Configuration rail, bank personas get a **Between questions
+  (question bank)** control: **Linear turns — read the question, then stay silent** (default) or
+  **Model has its own turn — may acknowledge or follow up** (the pre-0.38.2.0 behaviour, governed by
+  the instructions; the hint warns it reacts once per *pause*, not once per answer). Bank-only: the
+  control is hidden for external personas (linear by construction) and the value persists untouched
+  while a persona runs external. Under linear turns the page also reads backend **follow-ups**
+  verbatim (nobody else will voice them), where model-turn sessions keep letting the agent own them.
+  The editor **Playground** keeps the model turn for a bank persona regardless (it is a free
+  conversation with the agent to test its instructions, not the interview flow).
+- Wire: `interviewer_personas.bank_turn_mode` (`String(16)`, migration `e1f2a3b4c5d6`, server default
+  `'linear'` — **existing personas flip to the silent contract on deploy**; switch them back in the
+  editor if you want the acknowledgments), `PersonaOut` / create / update carry it (422 outside
+  `linear|model`, explicit null included), and the candidate `start` / `GET` responses carry
+  `voice_linear_turns` for the session's engine snapshot (external ⇒ always `true`; bank ⇒ the
+  persona's mode; no persona ⇒ the engine alone; `null` on mutation responses, latched by the page
+  like `voice_auto_submit_seconds`). `build_avatar_session` derives `create_response` from
+  `linear_turns_for_persona()`; `proxy.connected` additionally reports `linear_turns` for the live
+  E2E spec. Regression guards: `test_voice_live_proxy.py` (bank linear ⇒ `create_response=False`,
+  bank model ⇒ `True`, external ⇒ `False` in both modes, legacy persona object ⇒ linear, playground
+  ⇒ model turn for bank only), admin + candidate API round-trips, editor form/rail cases, and an
+  `InterviewPage` case proving a linear bank session reads the follow-up and hands the hook
+  `linearTurns: true` across a null-reporting mutation.
+
 ## 0.38.1.1 (2026-09-23)
 
 ### Changed

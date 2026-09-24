@@ -33,6 +33,7 @@ const SAMPLE: personas.PersonaOut = {
   bank_auto_submit_silence_seconds: 3,
   external_auto_submit_enabled: true,
   external_auto_submit_silence_seconds: 3,
+  bank_turn_mode: "linear",
   model: null,
   interview_brain: "bank",
   agent_id: "interviewer-p1",

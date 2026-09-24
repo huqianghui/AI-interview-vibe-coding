@@ -172,6 +172,10 @@ async def voice_live_websocket(ws: WebSocket) -> None:
             api_key=settings.azure_foundry_api_key,
             api_version=settings.voice_live_api_version,
             default_model=resolved_model,
+            # Editor Playground (pinned persona_id) is a free conversation with the agent, so a
+            # linear-turn BANK persona keeps its model turn THERE only (see
+            # linear_turns_for_persona).
+            playground=bool(persona_id),
         )
     except WebSocketDisconnect:
         logger.info("Voice Live WS: client disconnected")
