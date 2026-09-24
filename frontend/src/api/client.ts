@@ -64,6 +64,9 @@ export interface Interview {
   // page asks the judge via `judgeInterview()`. 0 ⇒ not a judged session (never ask). Present on
   // start/resume; null on mutation responses ("not reported"); latched by the page.
   voice_judge_silence_seconds?: number | null;
+  /** Default persona's avatar character id (e.g. "amira"); the stage is painted in that photo's own
+   * backdrop colour. Entry points only, null on mutations, latched per session. "" = no avatar. */
+  voice_avatar_character?: string | null;
 }
 
 /** `POST /judge` result: what the interviewer should say during this pause, if anything. */

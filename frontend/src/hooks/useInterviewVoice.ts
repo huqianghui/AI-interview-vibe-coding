@@ -71,6 +71,10 @@ export interface UseInterviewVoiceOptions {
   /** Pins the WS to a specific persona (editor Playground). Omitted for the candidate interview
    * path, which lets the backend resolve the default enabled persona. */
   personaId?: string;
+  /** 6-hex RGB (no `#`) Azure should paint BEHIND the digital human — the photo avatar's own
+   * thumbnail backdrop (`AvatarCharacter.backdrop`), so the live video matches the editor preview
+   * exactly. Undefined ⇒ Azure's default backdrop (video avatars / unknown character). */
+  avatarBackground?: string;
   /**
    * LINEAR TURNS — the model gets NO generative turn of its own between questions, so it can only
    * utter text the backend hands it verbatim. The page derives it from the candidate API's
@@ -185,10 +189,13 @@ function buildWsUrl(
   token: string,
   personaId: string | undefined,
   locale: string,
+  avatarBackground?: string,
 ): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const params = new URLSearchParams({ token, locale });
   if (personaId) params.set("persona_id", personaId);
+  const bg = avatarBackground?.replace(/^#/, "");
+  if (bg && /^[0-9a-fA-F]{6}$/.test(bg)) params.set("avatar_bg", bg.toLowerCase());
   return `${protocol}//${window.location.host}/api/voice-live/ws?${params.toString()}`;
 }
 
@@ -893,6 +900,7 @@ export function useInterviewVoice(
         token,
         optionsRef.current.personaId,
         effectiveLocale,
+        optionsRef.current.avatarBackground,
       );
       console.info(
         "[voice] opening WS proxy; persona:",

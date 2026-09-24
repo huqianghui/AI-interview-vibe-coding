@@ -19,6 +19,7 @@ proxied SDK session).
 
 import json
 import logging
+import re
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from jose import JWTError, jwt
@@ -100,10 +101,15 @@ async def voice_live_websocket(ws: WebSocket) -> None:
       - ``persona_id`` (optional): editor Playground pins a specific persona; omitted for the
         candidate interview path, which resolves the enabled default persona instead.
       - ``locale`` (optional): defaults to :data:`app.services.voice_broker.DEFAULT_LOCALE`.
+      - ``avatar_bg`` (optional): 6-hex RGB (no ``#``) the page wants Azure to paint BEHIND the
+        digital human — the photo avatar's own thumbnail backdrop from the frontend roster, so the
+        live video matches the editor preview to the pixel. Anything else is ignored.
     """
     token = ws.query_params.get("token")
     persona_id = ws.query_params.get("persona_id")
     locale = ws.query_params.get("locale") or DEFAULT_LOCALE
+    _bg = (ws.query_params.get("avatar_bg") or "").strip().lstrip("#")
+    avatar_background = _bg.lower() if re.fullmatch(r"[0-9a-fA-F]{6}", _bg) else None
 
     await ws.accept()
 
@@ -179,6 +185,7 @@ async def voice_live_websocket(ws: WebSocket) -> None:
             # linear-turn BANK persona keeps its model turn THERE only (see
             # linear_turns_for_persona).
             playground=bool(persona_id),
+            avatar_background=avatar_background,
         )
     except WebSocketDisconnect:
         logger.info("Voice Live WS: client disconnected")

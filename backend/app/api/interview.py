@@ -100,6 +100,11 @@ class InterviewOut(BaseModel):
     # asks the judge (``POST /{id}/judge``). ``0`` ⇒ the session is not judged (never ask). Same
     # reporting contract as the two flags above: entry points only, ``None`` on mutations, latched.
     voice_judge_silence_seconds: int | None = None
+    # The default persona's avatar character id (e.g. ``"amira"``), so the page can paint the stage
+    # in that photo's own backdrop colour (editor parity, 2026-09-24). Candidate-safe: it is the
+    # same public id the avatar picker shows. Same reporting contract: entry points only, ``None``
+    # on mutations, latched by the UI. ``""`` when the persona has no avatar (voice-only / none).
+    voice_avatar_character: str | None = None
 
 
 class JudgeIn(BaseModel):
@@ -236,6 +241,7 @@ def _to_interview_out(
     voice_auto_submit_seconds: int | None = None,
     voice_linear_turns: bool | None = None,
     voice_judge_silence_seconds: int | None = None,
+    voice_avatar_character: str | None = None,
 ) -> InterviewOut:
     is_external = session.brain_mode == "external"
     return InterviewOut(
@@ -248,6 +254,7 @@ def _to_interview_out(
         voice_auto_submit_seconds=voice_auto_submit_seconds,
         voice_linear_turns=voice_linear_turns,
         voice_judge_silence_seconds=voice_judge_silence_seconds,
+        voice_avatar_character=voice_avatar_character,
     )
 
 
@@ -275,6 +282,7 @@ async def _persona_voice_flags(db: AsyncSession, session: InterviewSession) -> d
             "voice_auto_submit_seconds": 0,
             "voice_linear_turns": True,
             "voice_judge_silence_seconds": 0,
+            "voice_avatar_character": "",
         }
     return {
         "voice_default": has_configured_voice(persona.voice_map),
@@ -282,6 +290,7 @@ async def _persona_voice_flags(db: AsyncSession, session: InterviewSession) -> d
         "voice_linear_turns": persona.linear_turns_for(session.brain_mode),
         # The judge is a per-session snapshot decision (turn_mode); only its SECONDS are live-read.
         "voice_judge_silence_seconds": persona.judge_silence_seconds if judged else 0,
+        "voice_avatar_character": ((persona.character or "").strip().lower()),
     }
 
 

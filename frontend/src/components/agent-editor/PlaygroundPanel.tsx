@@ -23,6 +23,7 @@ import {
 import { Mic24Regular, MicOff24Regular } from "@fluentui/react-icons";
 import { AvatarView } from "../AvatarView";
 import { AvatarPreview } from "./AvatarPreview";
+import { AVATAR_CHARACTER_MAP } from "../../data/avatarCharacters";
 import { useInterviewVoice, MicAccessError } from "../../hooks/useInterviewVoice";
 import { testChat } from "../../api/personaKnowledge";
 import { getAdminToken } from "../../api/admin";
@@ -119,6 +120,9 @@ export interface PlaygroundPanelProps {
 
 export function PlaygroundPanel({ personaId, character, style, locale }: PlaygroundPanelProps) {
   const styles = useStyles();
+  // Photo avatars: Azure paints the live video's background in the thumbnail's own backdrop colour
+  // (WS `avatar_bg`), so the live face and the static preview are the same picture.
+  const avatarBackground = AVATAR_CHARACTER_MAP.get(character)?.backdrop;
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -157,6 +161,7 @@ export function PlaygroundPanel({ personaId, character, style, locale }: Playgro
     // with the admin token (the candidate anon token is only for /interview).
     tokenProvider: getAdminToken,
     personaId: personaId ?? undefined,
+    avatarBackground,
     onError: (err) => {
       if (err instanceof MicAccessError) setError("需要麦克风权限 / Microphone access needed.");
       else setError(err.message);

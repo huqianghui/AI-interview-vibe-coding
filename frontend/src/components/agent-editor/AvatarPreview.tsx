@@ -25,7 +25,9 @@ const useStyles = makeStyles({
     minHeight: "480px",
     height: "100%",
     width: "100%",
-    background: `linear-gradient(180deg, ${tokens.colorNeutralBackground2} 0%, ${tokens.colorNeutralBackground3} 100%)`,
+    // No panel behind the photo (owner rule 2026-09-24: no outer frame) — the photo itself, with
+    // its own backdrop, is the only surface; the page background shows around it.
+    background: "none",
     borderRadius: tokens.borderRadiusLarge,
   },
   img: {
@@ -35,6 +37,7 @@ const useStyles = makeStyles({
     maxWidth: "100%",
     width: "auto",
     objectFit: "contain",
+    borderRadius: tokens.borderRadiusLarge,
     filter: "drop-shadow(0 6px 16px rgba(0,0,0,0.18))",
   },
   swatch: {

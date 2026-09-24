@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.39.2.2 (2026-09-24)
+
+### Fixed
+- **One colour, no frame: the digital human is the only surface on screen.** The interview stage
+  and the editor's preview panel no longer draw a coloured box around the avatar. The avatar box
+  sizes itself to the stream's exact aspect (a 512×512 photo avatar is a square, a 16:9 video avatar
+  is 16:9), so there is no letterbox band and no outer frame — smaller when the space is narrow,
+  never cropped. The live video is also painted by Azure in the photo's own thumbnail backdrop
+  colour (measured once per character and kept in the avatar roster, passed to the voice proxy as
+  `avatar_bg`), because Azure's live synthesis otherwise uses a different grey wall than the
+  official thumbnail; now the live face and the editor preview are the same picture.
+
 ## 0.39.2.1 (2026-09-24)
 
 ### Fixed

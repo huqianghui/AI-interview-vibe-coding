@@ -5,7 +5,7 @@ import { act, render, screen } from "@testing-library/react";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import "../i18n";
 import { AVATAR_PORTRAIT_STORAGE_KEY, AvatarView } from "./AvatarView";
-import { fitFor } from "./avatarFit";
+import { fitBox, fitFor } from "./avatarFit";
 
 function renderView(isAvatarConnected: boolean) {
   const ref = createRef<HTMLVideoElement>();
@@ -112,5 +112,14 @@ describe("AvatarView", () => {
     } finally {
       localStorage.removeItem(AVATAR_PORTRAIT_STORAGE_KEY);
     }
+  });
+
+  it("hug box: the largest box of the media's exact aspect that fits the stage (no letterbox)", () => {
+    // Owner rule (2026-09-24): no outer frame. A 512×512 stream in a 900×600 stage → 600×600; a 16:9
+    // stream in a 600×900 stage → 600×338; degenerate inputs → null (root falls back to filling).
+    expect(fitBox(900, 600, 1)).toEqual({ width: 600, height: 600 });
+    expect(fitBox(600, 900, 16 / 9)).toEqual({ width: 600, height: 338 });
+    expect(fitBox(0, 600, 1)).toBeNull();
+    expect(fitBox(600, 600, 0)).toBeNull();
   });
 });
