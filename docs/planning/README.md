@@ -184,3 +184,11 @@ and `CHANGELOG.md`.
 
 - [`spec-candidate-login.md`](spec-candidate-login.md) — candidate login for `/interview` + admin-managed
   interview accounts (`user1/2/3`, HMAC-derived passwords viewable by admin, Users tab). Filed as #102.
+
+- [`spec-judged-turn-mode.md`](spec-judged-turn-mode.md) — **judged turn mode** (issue #114, 2026-09-24,
+  spec only): a backend LLM judge decides `wait|nudge` before submit and `accept|follow_up|redirect`
+  at submit for question-bank interviews, replacing the retired Foundry-agent voice turn
+  (`bank_turn_mode` becomes `linear|judged`, existing `model` rows → `linear`). Adds `judge_events`,
+  admin knobs for judge silence/cap, EOU multilingual VAD for mouth sessions, and an admin input for
+  `max_follow_ups`. Owner decisions: no template fallback on judge failure, submit never blocked,
+  no judge auto-advance in v1. Follows v0.38.2.0/v0.38.3.1 (PRs #111, #113).
