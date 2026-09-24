@@ -60,6 +60,7 @@ import { useExternalMicAutoPause } from "../hooks/useExternalMicAutoPause";
 import { MicAccessError, useInterviewVoice } from "../hooks/useInterviewVoice";
 import type { AudioState, TranscriptSegment } from "../types/voice";
 import { AvatarView } from "../components/AvatarView";
+import { AVATAR_STAGE_COLOR } from "../components/avatarFit";
 import { LoginCard } from "../components/LoginCard";
 import { QuestionProgress } from "../components/QuestionProgress";
 import { MicPermissionDialog } from "../components/MicPermissionDialog";
@@ -226,11 +227,12 @@ const useStyles = makeStyles({
     // standing 40px taller than the right column. With border-box it matches the column exactly.
     boxSizing: "border-box",
     borderRadius: tokens.borderRadiusXLarge,
-    // Layered deep-violet: a soft radial spotlight on top of a diagonal night gradient, so the
-    // digital human sits in a pool of light rather than a flat panel.
-    background:
-      "radial-gradient(120% 90% at 50% 18%, rgba(124,58,237,0.28) 0%, rgba(124,58,237,0) 55%), " +
-      "linear-gradient(160deg, #121327 0%, #1c1d3a 55%, #291a44 100%)",
+    // FLAT deep-navy, the same colour Azure is asked to paint behind the digital human
+    // (INTERVIEW_STAGE_BACKGROUND_RGBA in backend voice_live_metadata.py). Photo avatars stream a
+    // square with their own background; a flat stage in that exact colour makes the frame edge
+    // vanish, where the earlier violet spotlight gradient left a visible square seam. Keep the two
+    // values in lockstep.
+    background: AVATAR_STAGE_COLOR,
     boxShadow:
       "inset 0 1px 0 rgba(255,255,255,0.05), 0 18px 48px -24px rgba(41,26,68,0.8)",
     overflow: "hidden",
@@ -1271,9 +1273,9 @@ export function InterviewPage() {
           <div className={styles.grid}>
             {/* Left: the stage — digital human / orb, dominant. Fills the full grid height so the
                 stage + right column stay bottom-aligned and use the whole viewport. The avatar
-                video inside is `cover`-fit (see AvatarView) so a 16:9 stream fills a tall stage
-                without dark letterbox bands — the surrounding white margin is what gets cropped,
-                not the centered figure. */}
+                video inside is `contain`-fit (see AvatarView): photo avatars stream a 512×512
+                square, so the full head-and-shoulders framing is kept whatever the stage's shape
+                and the stage gradient fills the letterbox. */}
             <div className={styles.stage} data-testid="interview-stage">
               <div className={styles.stageAvatar}>
                 {/* Once the digital human is streaming, keep it visible — do NOT gate on the
