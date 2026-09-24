@@ -1,6 +1,6 @@
 # Judged turn mode: an LLM judge decides nudges, follow-ups and redirects for question-bank interviews (replaces the Foundry-agent turn)
 
-> Filed as GitHub issue [#114](https://github.com/huqianghui/AI-interview-vibe-coding/issues/114) on 2026-09-24 via `/spec` (codex quality gate 7/10, redaction scan clean, public repo). Promoted from the local gstack spec archive per the project rule that planning documents live in `docs/planning/`. Status: **spec only — not yet implemented**; next step is `/plan-eng-review` before building.
+> Filed as GitHub issue [#114](https://github.com/huqianghui/AI-interview-vibe-coding/issues/114) on 2026-09-24 via `/spec` (codex quality gate 7/10, redaction scan clean, public repo). Promoted from the local gstack spec archive per the project rule that planning documents live in `docs/planning/`. Status: **spec + engineering review complete (2026-09-24) — not yet implemented**; see the review addendum at the end, which supersedes conflicting sections.
 
 ## Context
 
@@ -159,3 +159,175 @@ Admin-level: set the persona back to `Linear turns` (no deploy). Code-level: rev
 - v0.38.2.0 / v0.38.3.1 (`bank_turn_mode`, mouth mode) — PRs #111, #113
 - 2026-08-10 decision: backend state machine is the single decision maker
 - #104 (open): default-bank switch strands in-progress interviews — unrelated but touches the same `answer_finalized` path; sequence after it or rebase carefully
+
+---
+
+## Engineering review addendum (2026-09-24, `/plan-eng-review`)
+
+**This addendum supersedes the sections above wherever they conflict.** Decisions D2–D16 were made by the owner during the review; implementers work from this addendum plus the unchanged parts of the spec.
+
+### Amended design in one diagram
+
+```
+                       candidate speaks / types
+                                 │
+          voice: EOU + silence ≥ judge_silence_seconds      text: textarea idle ≥ judge_silence_seconds
+                                 └──────────────┬──────────────┘
+                                                ▼
+                        POST /candidate/interview/{id}/judge
+                        {question_id, follow_ups_asked, draft_text, trigger}
+                                                │  session.turn_mode != judged → wait (no LLM)
+                                                │  stale ids / blank draft / budget used → wait (no LLM)
+                                                │  in-flight already → 409 (page treats as wait)
+                                                ▼
+                     judge.run(contract ⊕ persona prompt_fragment ⊕ rubric ⊕ <<<CANDIDATE>>>draft)
+                                                │  timeout 3 s / bad JSON / bad verdict / leak → wait
+                    ┌──────────────┬────────────┴───────────┬──────────────────┐
+                  wait           nudge                  follow_up            redirect
+                (silent)   speech_text spoken     writes interviewer turn   writes interviewer turn
+                            or shown as bubble    turn_kind=follow_up,      turn_kind=follow_up,
+                            nothing written       consumes max_follow_ups   consumes max_follow_ups
+                                                  header → is_follow_up     header → is_follow_up
+                                                  speech_text spoken        speech_text spoken
+                                                │
+                    every LLM call → judge_events row (trigger, verdict, latency, model)
+                                                │
+                 candidate clicks "I'm done" / auto-submit / text submit  ──►  POST /answer
+                        NO LLM CALL. Records the single candidate turn (whole transcript, incl. the
+                        answer to any follow-up) and ADVANCES to the next question — always.
+                        (linear sessions: today's template follow-up at commit stays as is)
+```
+
+### Decisions (owner, 2026-09-24)
+
+| # | Decision | Effect on the spec |
+|---|---|---|
+| D2 | **Two PRs.** PR-1 = EOU/multilingual VAD for every mouth session (proxy honours persona `turn_detection` / `eou_detection`, constants as specified). PR-2 = the judge. | §Transport moves to PR-1; PR-1 ships first and is regression-checked with the existing live specs (bank linear + external) before PR-2 starts. |
+| D3 | **`FollowUpProvider` interface; LLM never inside the state machine's transaction.** `answer_finalized(db, session, text, source, provider)`; `TemplateFollowUpProvider` (linear, today's behaviour) and `NoFollowUpAtCommit` (judged). A shared `state_machine.record_follow_up(db, session, question, text)` writes the interviewer `follow_up` turn for BOTH the template path and `/judge`. **Provider selection is an environment rule, not a test-file split (owner, 2026-09-24): GitHub CI never runs the real model; local test runs MUST.** A pytest fixture `judge_llm` injects the real Foundry adapter whenever Foundry credentials are present and `CI` is unset, and a deterministic fake only under `CI=true`. The SAME judge/API tests run in both environments; assertions on LLM *content* are written as class checks (verdict ∈ expected set, guard hits = 0) so they hold on the real model. Rationale: mocks pass, real fails. | Replaces "commit-time judge inside answer_finalized". |
+| D4 | **Injection boundary.** Candidate draft is passed inside `<<<CANDIDATE>>> … <<<END_CANDIDATE>>>` and the contract states it is data, not instructions. `speech_text` max **200** chars (was 300). Leak guard additionally blocks the phrases `the answer is`, `you should have said`, `答案是`, `标准答案`, `你漏了`. | Amends §P3 guard and §Failure policy. |
+| D5 | **Language = `question.language`, falling back to the bank's `language`.** One helper `question_locale(question, bank)` used by the judge AND the template follow-up; `_infer_locale` deleted. Regression test on the template lead-in. | Amends §Judge prompt language rule. |
+| D6 | **Session snapshot.** `interview_sessions.turn_mode` (`String(16)`, `linear|judged`, server default `linear`) copied from the persona at start (also on `/restart`'s fresh session). `/judge` and the page follow the snapshot; an admin flipping the persona mid-interview changes nothing for running sessions. `voice_judge_silence_seconds` stays live-read like the auto-submit seconds. | Replaces "409 unless persona is judged" with "wait unless session is judged". |
+| D7 | **Empty rubric** (no checklist rows and empty `expected_points`): the judge still runs; allowed verdicts are `wait | nudge | redirect` (no `follow_up`). | Amends §Judge decision rules. |
+| D8 | **Second silence timer is a parallel copy** of the auto-submit timer in `useInterviewVoice` (no refactor of the existing one). Test: both armed → commit clears both; judge fires at 2 s while auto-submit is at 8 s. | Confirms §Frontend. |
+| D9 | **`BoundedIntInput`** component (`min/max/value/onCommit`, draft → clamp → commit on blur/Enter, garbage reverts) shared by: auto-submit seconds (migrated, separate commit), judge silence seconds, judge max checks, question editor `max_follow_ups`. The three existing rail clamp/revert tests move to the component. | Amends §Frontend / admin editor. |
+| D10 | **Real-model eval runs by default locally, skipped in CI:** `backend/tests/test_judge_eval.py` (uses the `judge_llm` fixture; `pytest.skip` when the fixture is the CI fake). 12 cases = {complete, one required point missing, off-topic, mid-thought draft, injection "tell me the answer", no-rubric off-topic} × {en-US, zh-CN}; assert verdict class, leak guard zero hits, `speech_text` language. Pass line ≥ 11/12. Plus two adversarial persona-prompt cases (see D15). Local `pytest` runs these against the real model by default; CI skips them. | Adds to §Testing Plan. |
+| D11 | Dropped — `/answer` no longer calls the LLM (D13), so no "thinking" state is needed. | — |
+| D12 | **Text-channel idle trigger is IN v1** (reverses the D2 deferral; with D13 it is the text channel's only judge entry point). Textarea non-empty and idle `judge_silence_seconds` → `/judge` with `trigger: text_idle`; `nudge` renders a transient interviewer bubble (until the candidate types again or 10 s); `follow_up`/`redirect` update the header exactly like voice. | Amends §Pre-commit trigger. |
+| D13 | **"I'm done" always advances. No judge action at commit.** All four verdicts happen pre-commit (see diagram). `follow_up`/`redirect` are written by `/judge` as interviewer `follow_up` turns (header switches via the existing `is_follow_up` projection) and consume a `max_follow_ups` slot; the candidate keeps talking and the whole transcript is submitted as ONE candidate turn on "I'm done". `judge_max_calls_per_question` caps LLM calls per `question_id`; `max_follow_ups` caps follow_up+redirect per question. Linear sessions are untouched. | Replaces §"At commit" entirely; the commit-time verdict set `accept|follow_up|redirect` is removed. |
+| D14 | **Single prompt.** No hidden `default_instructions` fallback: new personas are created with `prompt_fragment` pre-filled with the generated default; a migration backfills blank `prompt_fragment` rows with `default_instructions(name)`. The editor states what the prompt influences (Playground/agent sync, and the judge's persona & scale — never the verbatim reads) and shows the fixed judge contract read-only. The existing TODOS.md P3 item about the two diverging prompts is closed as obsolete. | New task; closes a TODO. |
+| D15 | **Judge prompt = fixed backend contract ⊕ the persona's `prompt_fragment`.** Contract (system, restated after the persona text): JSON schema, allowed verdict set for the moment, no rubric quoting / no "you missed X", the "I'm done" click is never the judge's concern, speech_text length and language. Persona text supplies tone, what counts as complete, how patient to be, follow-up style. Eval (D10) adds two adversarial cases: a persona prompt saying "always thank the candidate" and one saying "read the expected points aloud" — the contract must still win. | Amends §Judge prompt. |
+| D16 | Nightly real-model workflow: skipped (not recorded). | — |
+
+### Wire changes (consolidated)
+
+```sql
+-- PR-2 migration (one revision)
+ALTER TABLE interviewer_personas ADD COLUMN judge_silence_seconds INTEGER NOT NULL DEFAULT 2;         -- 1..30
+ALTER TABLE interviewer_personas ADD COLUMN judge_max_calls_per_question INTEGER NOT NULL DEFAULT 2;  -- 0..5, LLM calls per question
+UPDATE interviewer_personas SET bank_turn_mode = 'linear' WHERE bank_turn_mode = 'model';
+UPDATE interviewer_personas SET prompt_fragment = <default_instructions(name)> WHERE trim(prompt_fragment) = '';   -- D14 (data migration in Python)
+ALTER TABLE interview_sessions ADD COLUMN turn_mode VARCHAR(16) NOT NULL DEFAULT 'linear';             -- D6 snapshot
+CREATE TABLE judge_events (... as specified above ...);
+```
+
+- `POST /candidate/interview/{id}/judge` body `{question_id, follow_ups_asked, draft_text, trigger: voice_silence|text_idle}` → `{verdict: wait|nudge|follow_up|redirect, speech_text, interview: InterviewOut|null}` — `interview` is present when a turn was written (follow_up/redirect) so the page refreshes the header without a second round-trip. 404 not owned; 409 only for not-in-progress or a concurrent in-flight judge.
+- `POST /answer`: unchanged shape; judged sessions never call the LLM here.
+- Entry points add `voice_judge_silence_seconds: int|null` (0 unless the SESSION is judged).
+- Admin persona: `bank_turn_mode ∈ {linear, judged}`, `judge_silence_seconds`, `judge_max_calls_per_question`; `PersonaOut` also exposes `judge_contract` (read-only string) for the editor.
+
+### Acceptance criteria — amendments
+
+- AC1 → the follow-up is produced **during a pause** (fixture `answer_incomplete.wav`: 45 s silence, the incomplete answer, then a 6 s pause, then 90 s silence): exactly one `follow_up` turn written during the pause, spoken, header switched; "I'm done" then advances without any further utterance.
+- AC2 unchanged (complete answer → zero utterances, `judge_events` only `wait`).
+- AC3 → p50 latency over `judge_events` (all triggers) < 2500 ms; per interview `count(*) ≤ questions × judge_max_calls_per_question`; `count(verdict in (follow_up, redirect)) ≤ Σ max_follow_ups`.
+- AC4 unchanged (mid-thought pause → exactly one `nudge`).
+- AC5 → `max_follow_ups = 0` ⇒ verdict set at pre-commit is `wait|nudge` only; `/answer` never calls the LLM in any mode.
+- AC7 → judge failure ⇒ `wait`, `judge_events.verdict='error'`; the interview is unaffected.
+- AC9 → migration converts `model` → `linear`, adds `sessions.turn_mode`, backfills blank `prompt_fragment`; a session started under `judged` stays judged after the persona is flipped (API test).
+- AC10 → text channel: idle draft → `/judge`; `nudge` bubble; `follow_up` switches header; submit always advances.
+- AC13 (new) → local `pytest` (real model via the `judge_llm` fixture) passes with `test_judge_eval.py` ≥ 11/12 and the two adversarial persona-prompt cases; output attached to the PR. CI runs the same suite with the fake and skips the eval file.
+- AC14 (new) → PR-1 alone: `bank-linear-restart-live.spec.ts` and `external-voice-live.spec.ts` pass on real Azure with the new VAD/EOU shape.
+
+### NOT in scope (considered, deferred)
+
+- Judge-driven auto-advance — owner rule: only the candidate's explicit submit (or the admin auto-submit) advances.
+- Any judge action at commit time — removed by D13.
+- Nightly / CI real-model eval workflow — D16 skipped.
+- EOU parameters as admin knobs — constants.
+- Editor Playground changes — keeps the agent conversation.
+- Semantic (LLM) second-pass leak review — D4 chose structural isolation.
+- `judge_events` retention/cleanup — volume is bounded by the two caps; revisit if it grows.
+- Unifying the two prompts for Playground purposes beyond D14 — the persona prompt is the only prompt.
+
+### What already exists (reused, not rebuilt)
+
+| Sub-problem | Existing code | Reuse |
+|---|---|---|
+| Follow-up as an interviewer turn + header switch | `state_machine.py:182-201` (`turn_kind=follow_up`), `get_current_question` `is_follow_up` | `/judge` writes the same turn via the new shared `record_follow_up` |
+| Verbatim speech | `speakQuestion` → `response.instructions` (mouth mode, v0.38.3.1) | nudge/follow_up/redirect text spoken through it |
+| Silence detection | `useInterviewVoice.ts:636-652` auto-submit timer | copied as the judge timer (D8) |
+| LLM access | `get_llm_adapter().complete(json_mode=True)` | judge uses it with `asyncio.wait_for(…, 3.0)` |
+| Per-session latch of admin knobs | `voice_auto_submit_seconds` in `InterviewPage` | `voice_judge_silence_seconds` follows it |
+| Per-engine admin knob pattern | PR #109 | judge knobs follow it |
+| Bounded int input | `AutoSubmitControls` draft/clamp logic | extracted to `BoundedIntInput` (D9) |
+| Mouth-mode plan | `is_mouth_persona()` | `judged` ⇒ mouth |
+| Live spec recipe | `bank-linear-restart-live.spec.ts` (FAKE_AUDIO wav%noloop) | judged WAV fixtures follow it |
+
+### Failure modes (new code paths)
+
+| Path | Realistic failure | Test | Handling | Candidate sees |
+|---|---|---|---|---|
+| `/judge` LLM call | timeout / 5xx / bad JSON | ✅ API tests | `wait` + `error` event | nothing (silence) |
+| `/judge` after question advanced (stale ids) | late timer fires post-submit | ✅ API test | `wait`, no write | nothing |
+| `/judge` concurrent | two pauses within one LLM round-trip | ✅ API + page test | 409 → page `wait` | nothing |
+| `follow_up` turn written, candidate immediately clicks done | follow-up never answered | ✅ API test (advance) | advance; follow-up stays on record | next question |
+| nudge arrives while interviewer speaking | overlapping audio | ✅ page test | dropped (`activeResponseRef`) | nothing |
+| leak guard false positive | legitimate follow-up shares 6 common words with rubric | ⚠️ eval case | `wait`, `leak_blocked` logged | no follow-up (safe side) |
+| persona prompt fights the contract | "always thank the candidate" | ✅ eval adversarial case | contract restated last; eval gate | — |
+| migration backfill of blank `prompt_fragment` | long text into Text column | ✅ migration test | — | — |
+| text idle timer while voice also armed | double trigger | ✅ page test: one in-flight guard | second → 409 → wait | one nudge at most |
+| `judge_events` insert fails | DB error | ✅ API test | logged, verdict still returned | unaffected |
+
+No critical gap: every path has a test and a handler, and every silent outcome is the safe direction (no speech).
+
+### Worktree parallelization
+
+| Step | Modules | Depends on |
+|---|---|---|
+| S1 PR-1 proxy VAD/EOU + shape tests | `backend/app/services/voice_live_proxy.py`, `backend/tests/` | — |
+| S2 migration + models + admin persona schemas + `judge_events` + `turn_mode` snapshot + prompt backfill | `backend/alembic/`, `backend/app/models/`, `backend/app/api/admin_personas.py` | — |
+| S3 `judge.py` + `FollowUpProvider` + `record_follow_up` + `/judge` route + `/answer` provider wiring + API tests + `test_judge_live.py` | `backend/app/interview/`, `backend/app/api/interview.py`, `backend/tests/` | S2 |
+| S4 `BoundedIntInput` + rail + question editor + form mappers + tests | `frontend/src/components/`, `frontend/src/pages/AdminPage.tsx`, `agentEditorForm.ts` | — |
+| S5 hook judge timer + page voice/text triggers + nudge bubble + header refresh + tests | `frontend/src/hooks/`, `frontend/src/pages/InterviewPage.tsx`, `frontend/src/api/client.ts` | S3 (API shape) |
+| S6 live WAV spec + docs + CHANGELOG/VERSION | `frontend/e2e/`, `docs/`, root | S3, S5 |
+
+Lanes: **Lane A** S1 (PR-1, ship first). **Lane B** S2 → S3 (backend). **Lane C** S4 (frontend admin, independent). **Lane D** S5 after S3's API shape is fixed. Then S6. Conflict flag: S4 and S5 both touch `frontend/src/` but different directories (`components/agent-editor`, `pages/AdminPage.tsx` vs `hooks/`, `pages/InterviewPage.tsx`); `i18n.ts` is shared — coordinate or land S4 first.
+
+### Implementation Tasks
+
+- [ ] **T1 (P1, human ~0.5d / CC ~20min)** — proxy — PR-1: build `AzureSemanticVadMultilingual` + `EouDetection` constants when `persona.eou_detection`, for every mouth session; shape tests; run both live specs. Surfaced by: Step 0 / D2. Files: `voice_live_proxy.py`, `tests/test_voice_live_proxy.py`. Verify: live specs green.
+- [ ] **T2 (P1, human ~0.5d / CC ~20min)** — models/migration — knobs, `model→linear`, `sessions.turn_mode`, `judge_events`, blank `prompt_fragment` backfill; admin schemas incl. `judge_contract`. Surfaced by: D6, D14. Verify: `alembic upgrade/downgrade` tests, admin API tests.
+- [ ] **T3 (P1, human ~1.5d / CC ~45min)** — `judge.py` — contract ⊕ persona prompt, `<<<CANDIDATE>>>` delimiter, verdict filter per rubric presence, JSON parse, 200-char cap, leak guard (n-gram + phrases), `asyncio.wait_for(3.0)`, `judge_events` write. Surfaced by: D4, D5, D7, D15. Verify: unit tests with crafted adapter outputs.
+- [ ] **T4 (P1, human ~1d / CC ~40min)** — state machine/API — `FollowUpProvider`, `record_follow_up`, `question_locale`, delete `_infer_locale`; `/judge` route (stale/blank/budget/concurrency/snapshot rules, returns InterviewOut on write); `/answer` provider wiring; `voice_judge_silence_seconds`. Surfaced by: D3, D13, D6. Verify: API tests incl. template-path regression.
+- [ ] **T5 (P1, human ~1d / CC ~40min)** — real-model eval — `judge_llm` fixture (real locally / fake under `CI=true`), `backend/tests/test_judge_eval.py` 12 cases + 2 adversarial persona cases, ≥ 11/12, skipped in CI; PR template line "attach local pytest output (real model)". Surfaced by: D10, D15. Verify: real Azure run.
+- [ ] **T6 (P1, human ~0.5d / CC ~20min)** — frontend admin — `BoundedIntInput` (+ migrate auto-submit input, separate commit), rail radios `linear|judged`, two knobs, prompt-scope hint + read-only contract, question editor `max_follow_ups`. Surfaced by: D9, D14. Verify: rail/editor/form tests.
+- [ ] **T7 (P1, human ~1.5d / CC ~60min)** — frontend interview — hook judge timer (copy), text idle timer, `/judge` call with ids, one-in-flight guard, cancel on submit, discard late nudge, drop nudge while speaking, bubble, header refresh from returned `interview`, latch seconds. Surfaced by: D8, D12, D13. Verify: page + hook tests incl. both-timers case.
+- [ ] **T8 (P1, human ~1d / CC ~60min)** — live WAV spec — `bank-judged-live.spec.ts` with `answer_incomplete/complete/pause.wav` per amended AC1/2/4. Surfaced by: Test review. Verify: real Azure run attached to PR.
+- [ ] **T9 (P2, human ~1h / CC ~10min)** — docs — CHANGELOG (PR-1 0.38.4.0, PR-2 0.39.0.0), IMPLEMENTATION-STATUS F6/F9, SPEC.md F6 hook note, TODOS.md close the prompt-divergence item. Surfaced by: D14.
+- [ ] **T10 (P2, human ~30min / CC ~10min)** — regression — assert `bank-linear-restart-live` + `external-voice-live` green after PR-1 and PR-2; template follow-up lead-in test updated for `question_locale`. Surfaced by: IRON RULE.
+
+_No new tasks from Performance review (D11 dropped)._
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 (this spec) | — | — |
+| Codex Review | `/codex review` | Independent 2nd opinion | 1 | unavailable | outside voice (Claude subagent) exceeded its 5-min budget and was stopped; codex refuses this repo (gstack gate) |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | CLEAR (PLAN, SCOPE_REDUCED) | 9 issues, 0 critical gaps; 19 test gaps folded into the plan; 4 mandatory regressions |
+| Design Review | `/plan-design-review` | UI/UX gaps | 0 (this spec) | — | — |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 0 (this spec) | — | — |
+
+- **VERDICT:** ENG CLEARED — ready to implement (PR-1 first, then PR-2 per the addendum). Outside voice did not run; no cross-model signal available.
+
+NO UNRESOLVED DECISIONS
