@@ -321,9 +321,12 @@ export function useInterviewVoice(
   const awaitingReadResponseRef = useRef(false);
   const readResponseIdRef = useRef<string | null>(null);
   // EXTERNAL (MODEL) mode only: the per-turn read-directive template from `proxy.connected` (the
-  // admin-configurable reader prompt + a `{text}` placeholder). Present ⟺ external mode; emitSpeak
+  // admin-configurable reader prompt + a `{text}` placeholder). Present ⟺ MOUTH mode (external, or
+  // linear-turns bank since v0.38.3.1 — see is_mouth_persona in voice_live_proxy.py); emitSpeak
   // fills `{text}` and sends it as `response.instructions` (the only delivery gpt-4o reads verbatim
-  // as a dumb "mouth"). Null in bank/agent mode → emitSpeak keeps the assistant-item delivery.
+  // as a dumb "mouth"). Null in bank MODEL-turn (agent) mode → emitSpeak keeps the assistant-item
+  // delivery, which only the agent's own turn contract tolerates (live 2026-09-24: under linear
+  // turns the agent turned that read into "Thank you." — hence mouth mode for linear bank too).
   const readDirectiveRef = useRef<string | null>(null);
   // A question read that was still UNCONFIRMED when the session tore down (reconnect): re-spoken
   // once the next session reaches `session.updated`. Without this, a drop-during-reconnect is

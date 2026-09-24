@@ -30,7 +30,7 @@ from app.models.user import User
 from app.services import config_service, persona_service
 from app.services.anonymous_session_service import AnonymousSessionError, verify_anonymous_token
 from app.services.voice_broker import DEFAULT_LOCALE
-from app.services.voice_live_proxy import run_proxy
+from app.services.voice_live_proxy import is_mouth_persona, run_proxy
 
 logger = logging.getLogger(__name__)
 
@@ -135,10 +135,13 @@ async def voice_live_websocket(ws: WebSocket) -> None:
                 return
 
         # P5 gate: reject, never silently degrade (same invariant as voice_broker).
-        # EXCEPTION: external-brain personas ignore the hosted agent (run_proxy forces MODEL mode
-        # for them), so requiring the agent to be synced is nonsensical — skip the gate. (v0.37.1.9)
-        _is_external_persona = (getattr(persona, "interview_brain", "bank") or "bank") == "external"
-        if not _is_external_persona and persona.agent_sync_status != "synced":
+        # EXCEPTION: MOUTH personas (external, or linear-turns bank — see is_mouth_persona) ignore
+        # the hosted agent (run_proxy forces MODEL mode for them), so requiring the agent to be
+        # synced is nonsensical — skip the gate. Playground pins keep the agent, so they stay gated.
+        if (
+            not is_mouth_persona(persona, playground=bool(persona_id))
+            and persona.agent_sync_status != "synced"
+        ):
             await _send_error_and_close(
                 ws,
                 f"Interviewer agent not ready (sync status: {persona.agent_sync_status})",

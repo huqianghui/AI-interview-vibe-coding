@@ -150,6 +150,23 @@ def linear_turns_for_persona(persona: InterviewerPersona, *, playground: bool = 
     return (getattr(persona, "bank_turn_mode", "linear") or "linear") != "model"
 
 
+def is_mouth_persona(persona: InterviewerPersona, *, playground: bool = False) -> bool:
+    """Whether this voice session is a pure "MOUTH": MODEL mode + reader prompt, no Foundry agent.
+
+    A mouth only reads the text the backend hands it each turn (carried in ``response.instructions``
+    via the read directive) and never generates a turn of its own. That is every EXTERNAL persona
+    (the external workflow is the brain) AND every LINEAR-TURNS bank persona (v0.38.3.1): under
+    linear turns the agent's brain has no turn left to use, and keeping the agent attached is
+    actively harmful — live-verified 2026-09-24: with the question riding as an assistant item, the
+    agent's own instructions ("acknowledge when the candidate finishes") won over the item and the
+    response meant to read question 2 said "Thank you." instead, so the question was never spoken.
+    MODEL mode + ``response.instructions`` is the delivery that reads verbatim (the external path,
+    live-verified since v0.37.x). Bank MODEL-turn personas keep their agent (it owns the reaction
+    between questions), as does the editor Playground for any bank persona (free conversation).
+    """
+    return linear_turns_for_persona(persona, playground=playground)
+
+
 def build_avatar_session(
     persona: InterviewerPersona, *, locale: str | None, playground: bool = False
 ) -> Any:
@@ -303,14 +320,15 @@ async def run_proxy(
 
     credential, _is_entra = await _resolve_voice_live_credential(api_key)
 
-    # External-brain personas are a pure "mouth": the EXTERNAL workflow is the interviewer brain and
-    # the backend injects each turn's speech_text for a verbatim read. Attaching a hosted Foundry
-    # agent here would be a SECOND brain — it improvises its own questions/follow-ups (and leaks
-    # re-prompt meta-instructions), whose spoken audio diverges from the external-workflow
-    # display_text that drives the header. So even when an external persona still carries an
-    # agent_id, connect in MODEL mode (dumb mouth), never agent mode. (v0.37.1.9)
-    is_external = (getattr(persona, "interview_brain", "bank") or "bank") == "external"
-    is_agent = bool((persona.agent_id or "").strip()) and not is_external
+    # MOUTH personas (see is_mouth_persona: every external persona + every linear-turns bank
+    # persona) connect in MODEL mode, never agent mode, even when they carry an agent_id. The
+    # backend injects each turn's text for a verbatim read; a hosted Foundry agent attached here
+    # would be a SECOND brain — external: it improvises its own questions/follow-ups whose audio
+    # diverges from the external-workflow header (v0.37.1.9); linear bank: its instructions hijack
+    # the read response into an acknowledgment so the question is never spoken (v0.38.3.1,
+    # live-verified).
+    is_mouth = is_mouth_persona(persona, playground=playground)
+    is_agent = bool((persona.agent_id or "").strip()) and not is_mouth
     agent_name = (persona.agent_id or "").split(":", 1)[0] if is_agent else None
 
     # certifi CA-bundle SSL context (see _certifi_ssl_context) handed to the SDK's vendor_options
@@ -340,21 +358,24 @@ async def run_proxy(
             # _forward_client_to_azure uses for browser frames.
             await conn.send(build_language_pin_item(locale))
 
-            # External mode = a pure "mouth" with no agent instructions: inject the reader prompt
-            # as a session-scoped system item shaping the read (verbatim, no improvising).
-            # Ordering: language pin first (session-wide), reader prompt second (behavioral), both
-            # BEFORE any response. Bank mode injects none — its Foundry agent carries instructions.
+            # Mouth mode (external, or linear-turns bank) = MODEL mode with no agent instructions:
+            # inject the reader prompt as a session-scoped system item shaping the read (verbatim,
+            # no improvising). Ordering: language pin first (session-wide), reader prompt second
+            # (behavioral), both BEFORE any response. Bank MODEL-turn mode injects none — its
+            # Foundry agent carries the instructions. The reader prompt is the persona's
+            # ``external_reader_prompt`` (admin-editable) or the generated default — one reading
+            # contract for every mouth session, whichever engine drives the questions.
             read_directive = ""
-            if is_external:
+            if is_mouth:
                 reader_prompt = (persona.external_reader_prompt or "").strip() or (
                     default_external_reader_prompt(persona.name)
                 )
                 await conn.send(build_reader_prompt_item(reader_prompt))
-                # The same configurable reader prompt, as the per-turn read-directive template the
-                # frontend fills with each speech_text and sends as response.instructions (the only
-                # delivery gpt-4o reads verbatim in MODEL mode — see build_read_directive). Bank/
-                # agent mode omits it (Azure rejects instructions overrides there; the frontend then
-                # rides the text as an assistant item).
+                # The same reader prompt, as the per-turn read-directive template the frontend fills
+                # with each question/speech_text and sends as response.instructions (the only
+                # delivery that reads verbatim in MODEL mode — see build_read_directive). Agent mode
+                # omits it (Azure rejects instructions overrides there; the frontend then rides the
+                # text as an assistant item, which only the agent's own turn contract tolerates).
                 read_directive = build_read_directive(reader_prompt)
 
             await ws.send_text(
