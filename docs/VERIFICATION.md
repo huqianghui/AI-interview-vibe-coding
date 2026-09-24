@@ -58,12 +58,17 @@ providers, known admin token) on :8100 and the vite dev server on :5273, then dr
 
 | Spec | SPEC coverage | What it proves |
 |---|---|---|
-| Candidate text interview | F6/F7/F8/F9 | land → orientation → answer → **F7 follow-up quoting the candidate's own words** → report reveal. |
+| Candidate text interview | F6/F7/F8/F9 | land → orientation → answer → submit always advances to the next question in every turn mode (the deterministic quoting follow-up at submit was retired in v0.39.2.0) → report reveal. |
 | Candidate resumes after reload | F6 edge b | an in-progress interview survives a page reload (GET resume endpoint + client persistence). |
 | P3 boundary | P3 | candidate page never leaks `checklist`/`rubric`/`expected_points`/`weight`/`source_quote`. |
 | Admin authors bank + checklist → scored report | F2b/F3b/F3/F4/F8 | admin sign-in → default bank → question → checklist draft (weights = 100) → candidate reaches a **scored** exec report (grade gauge + SOP-source-beside-answer) + per-item detail. |
 | Voice, no mic | F9 AC#4 | voice with no microphone surfaces the permission / unavailable notice — never hangs. |
 | Voice Live agent-mode (real Azure) | F9/F5 | opt-in only: skipped unless `LIVE_VOICE=1` is set, since it drives the real Foundry Voice Live agent over WebRTC. |
+
+> **Known gap (v0.39.2.0):** `frontend/e2e/candidate-interview.spec.ts` still hard-asserts the
+> retired quoting follow-up (`expect(sawFollowUpCitation).toBe(true)`, keyed on `/You mentioned|你刚才提到/`
+> in the page text) and will fail once this runs in CI, since that mechanic no longer exists in any
+> turn mode. Not yet updated on this branch — tracked as a follow-up fix to the spec file itself.
 
 **If all of Layer 1 passes, every one of the 9 features + both admin editors is verified against
 its acceptance criteria on mocks.** See the SPEC↔feature map in `IMPLEMENTATION-STATUS.md`.
@@ -92,7 +97,11 @@ Open **http://localhost:5173**. Routes: `/interview` (candidate) and `/admin` (e
 1. **Admin** (`/admin`): sign in with `dev-admin` → create a question bank, set it default → add a
    question → **Draft from SOP** and confirm the checklist weights total **100**.
 2. **Candidate** (`/interview`): Start → orientation → answer the question in text.
-3. **Memory (F7):** a follow-up appears **quoting your earlier answer** ("You mentioned…").
+3. **Submit advances (F6/F7):** answer and submit — the interview advances straight to the next
+   question in every turn mode (the old deterministic "quotes your earlier answer" follow-up at
+   submit was retired in v0.39.2.0). In **Judged** turn mode a backend judge may nudge, follow up,
+   or redirect live during the candidate's pauses, before submit — never by quoting or naming a
+   rubric item (see `SPEC.md` F7).
 4. **Report (F8):** finish → executive report with an **A–F grade gauge**, strength/gap narrative,
    and **SOP source shown beside your answer** (the P14 evidence). Toggle detail for per-item
    judgments (met / partial / not-met / violated).
