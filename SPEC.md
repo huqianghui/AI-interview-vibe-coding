@@ -221,17 +221,23 @@ detection.
   (`turn_detection.end_of_utterance_detection`, `semantic_detection_v1_multilingual`) + verbal cue
   fallback (candidate says "我答完了"/"done" → detected in transcript). Silence threshold configurable.
 - **Follow-up hook:** per-question `max_follow_ups` config (demo default 0 or 1); when >0, an
-  optional follow-up turn is generated and its content joins the answer group for scoring.
+  optional follow-up turn may be recorded and its content joins the answer group for scoring.
   **v0.39.0.0:** follow-ups come from a `FollowUpProvider` — the authored template at submit for
   `linear` sessions, or the backend LLM judge DURING the candidate's pauses for `judged` sessions
   (the submit itself always advances; see `docs/planning/spec-judged-turn-mode.md`, issue #114).
+  **v0.39.2.0 (owner rule 2026-09-24): a submit ("I'm done") ALWAYS advances in EVERY turn
+  mode.** `linear` sessions never follow up (the template-at-submit path is retired — no route
+  passes a provider any more); `max_follow_ups` is consulted only by the judge in `judged`
+  sessions, as the per-question budget for its pre-submit `follow_up`/`redirect` turns. The
+  question-level knob and the persona-level `bank_turn_mode` are not an override chain: the
+  persona decides WHETHER anyone may follow up, the question decides HOW MANY times.
 - **Two follow-up generators (by channel), one scoring rule.** Follow-ups are produced differently
   on the two transports, but the scoring semantics are identical:
-  - **Text channel — deterministic, non-LLM.** `build_follow_up_prompt` (F7,
-    `interview/memory.py`) quotes a snippet (≤80 chars) of the candidate's just-given answer and
-    appends the question's fixed `follow_up_prompt` probe. Gated by `max_follow_ups` (default `0`);
-    triggered in `answer_finalized` when `follow_ups_asked < max_follow_ups`, which stays on the
-    same question. Because it is pure string composition, it never drifts off-topic.
+  - **Text channel — deterministic, non-LLM (RETIRED from the submit path in v0.39.2.0).**
+    `build_follow_up_prompt` (F7, `interview/memory.py`) quotes a snippet (≤80 chars) of the
+    candidate's just-given answer and appends the question's fixed `follow_up_prompt` probe. It
+    remains a pure helper behind the retained `FollowUpProvider` hook (exercised in unit tests) but
+    is no longer wired to `answer_finalized` by any route: a submit always advances.
   - **Voice channel — LLM, Foundry persona.** The digital-human agent probes on its own per the
     persona contract (`persona.default_instructions`). These follow-ups are free-form model output;
     left unbounded they can wander and self-correct ("you're right, I changed topics — let's stay

@@ -547,8 +547,9 @@ export function AdminPage() {
                       </Text>
                     </div>
                     <div className={styles.actions}>
-                      {/* Max follow-ups (issue #114): how many judge follow-ups / redirects (judged
-                          mode) or template follow-ups (linear mode) this question may get. 0 = none. */}
+                      {/* Max follow-ups (issue #114): how many judge follow-ups / redirects this
+                          question may get during pauses in JUDGED mode. 0 = none. Linear mode never
+                          follows up (a submit always advances, v0.39.2.0). */}
                       <Text size={200} title={t("admin.maxFollowUpsHint")}>
                         {t("admin.maxFollowUps")}
                       </Text>

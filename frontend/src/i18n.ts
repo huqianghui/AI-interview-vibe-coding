@@ -166,7 +166,7 @@ export const resources = {
         addQuestion: "Add question",
         maxFollowUps: "Max follow-ups",
         maxFollowUpsHint:
-          "How many follow-up questions the interviewer may ask on this question (0 = none). In Judged turn mode the judge asks them during the candidate's pauses; in Linear mode the authored template follow-up is used at submit.",
+          "How many follow-up questions the judge may ask on this question during the candidate's pauses (0 = none). Only applies in Judged turn mode — in Linear mode the interviewer never follows up, and \"I'm done\" always moves to the next question.",
         selectBankHint: "Select a bank to view its questions.",
         rubricTitle: "Scoring rubric",
         weightsTotal: "Weights total: {{sum}} — {{count}} items",
@@ -366,7 +366,7 @@ export const resources = {
         newQuestionPlaceholder: "新题目",
         addQuestion: "添加题目",
         maxFollowUps: "最多追问",
-        maxFollowUpsHint: "这道题最多允许面试官追问几次（0 = 不追问）。Judged 模式下由 judge 在候选人停顿时追问；Linear 模式下在提交时使用题目自带的追问模板。",
+        maxFollowUpsHint: "这道题最多允许 judge 在候选人停顿时追问几次（0 = 不追问）。仅在 Judged 模式生效；Linear 模式下面试官从不追问，点击「我答完了」一定进入下一题。",
         selectBankHint: "选择一个题库以查看题目。",
         rubricTitle: "评分标准",
         weightsTotal: "权重合计: {{sum}} — {{count}} 项",

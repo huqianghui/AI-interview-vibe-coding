@@ -2,6 +2,27 @@
 
 ## Interview (voice)
 
+### Interview mutation routes race on a stale session snapshot (judge/apply vs submit)
+
+**What:** `backend/app/api/interview.py` — `answer`, `judge`, `judge/apply`, `restart` and `end`
+each load the `InterviewSession` once via `_owned_interview` and later write against that snapshot;
+no row lock or optimistic-concurrency token. If `judge/apply` and a `/answer` submit interleave, the
+apply passes its staleness checks against the cached `current_question_index` and writes an
+orphaned interviewer `follow_up` turn for a question the candidate already left (out-of-order
+`turn_index`), silently consuming a `max_follow_ups` slot and a judge-budget slot. Same class of
+TOCTOU for concurrent `/answer` + `/restart`.
+
+**Why it is not urgent:** scoring is unaffected (`group_answers` reads candidate turns by
+question_id only) and the page delivers `res.interview.current_question`, so nothing is spoken
+twice; the damage is a wasted slot and a confusing turn ordering, scoped to one candidate's own
+session. Surfaced by the v0.39.2.0 adversarial review; pre-existing, not introduced there.
+
+**Fix shape:** re-read the session (or `SELECT … FOR UPDATE` / a version column) inside the
+mutating transaction and re-run the staleness check before writing.
+
+**Effort:** S
+**Priority:** P2
+
 ## Completed
 
 ### Fallback interviewer prompt divergence — closed as obsolete, v0.39.0.0

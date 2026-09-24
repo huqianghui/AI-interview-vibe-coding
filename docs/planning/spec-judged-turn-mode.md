@@ -68,7 +68,7 @@ CREATE INDEX ix_judge_events_session ON judge_events(interview_session_id);
 ### API
 
 - `POST /candidate/interview/{id}/judge` body `{ "draft_text": str, "trigger": "voice_silence" | "text_idle" }` → `{ "verdict": "wait" | "nudge", "speech_text": str }`. Owned (404 otherwise), 409 unless an `in_progress` bank session whose persona is in `judged` mode; enforces `judge_max_calls_per_question` (returns `wait` silently once exhausted); blank `draft_text` ⇒ `wait` without an LLM call.
-- `POST /candidate/interview/{id}/answer` unchanged in shape; when the persona is `judged` and a follow-up is owed, the follow-up prompt comes from the judge (or the answer is accepted). `current_question.is_follow_up` semantics unchanged. `linear` keeps today's template follow-up.
+- `POST /candidate/interview/{id}/answer` unchanged in shape; when the persona is `judged` and a follow-up is owed, the follow-up prompt comes from the judge (or the answer is accepted). `current_question.is_follow_up` semantics unchanged. ~~`linear` keeps today's template follow-up.~~ **Amended v0.39.2.0 (owner rule 2026-09-24):** a submit ALWAYS advances in every turn mode; the linear template-follow-up-at-submit path is retired (no route passes a `FollowUpProvider`), and `max_follow_ups` only budgets the judge's pre-submit follow-ups in `judged` sessions.
 - Entry points (`start` / `GET`) add `voice_judge_silence_seconds: int | null` (0 when not `judged`; `null` on mutation responses; latched by the page like `voice_auto_submit_seconds`). `voice_linear_turns` is `true` for both `linear` and `judged`.
 - Admin: `PersonaOut/Create/Update` carry `bank_turn_mode ∈ {linear, judged}` (422 otherwise, incl. legacy `model` on write), `judge_silence_seconds`, `judge_max_calls_per_question` (bounds above, explicit null 422).
 
@@ -195,7 +195,7 @@ Admin-level: set the persona back to `Linear turns` (no deploy). Code-level: rev
                  candidate clicks "I'm done" / auto-submit / text submit  ──►  POST /answer
                         NO LLM CALL. Records the single candidate turn (whole transcript, incl. the
                         answer to any follow-up) and ADVANCES to the next question — always.
-                        (linear sessions: today's template follow-up at commit stays as is)
+                        (v0.39.2.0: linear sessions advance the same way — no template follow-up at commit)
 ```
 
 ### Decisions (owner, 2026-09-24)
@@ -338,6 +338,11 @@ _No new tasks from Performance review (D11 dropped)._
   and stretched sentences to cover missing items); follow-ups must be open questions that never name the
   rubric's subject. Output cap 320 tokens, timeout 10 s. Eval 12/12; all three live WAV cases pass.
   Shipped as v0.39.1.0.
+- **v0.39.2.0 amendment:** linear sessions no longer receive the authored template follow-up at
+  submit. A question with `max_follow_ups > 0` under a linear persona used to hand the candidate a
+  "You mentioned … Can you walk me through …" probe instead of question 2, contradicting the
+  editor's "no follow-ups" promise. `answer_finalized` now advances unconditionally unless a
+  provider is explicitly passed (none is); `max_follow_ups` is judged-only.
 
 ## GSTACK REVIEW REPORT
 
