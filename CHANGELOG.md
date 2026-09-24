@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.38.3.1 (2026-09-24)
+
+### Fixed
+- **Linear-turns bank sessions now read every question — live-verified on real Azure.** The
+  v0.38.2.0 default had a gap the unit tests could not see: a linear bank session still connected in
+  **agent** mode, and the only way to hand an agent text to read is an assistant conversation item.
+  Live run (fake mic speaking a real answer): question 1 read once, the spoken answer produced NO
+  extra turn (the "Thank you." per pause is gone), but the response meant to read question 2 said
+  **"Thank you."** — the agent's own instructions ("acknowledge when the candidate finishes") won over
+  the assistant item, so question 2 showed in the header and was never spoken. Fix: a linear-turns
+  bank persona is now a **mouth** exactly like an external persona — MODEL mode + the reader prompt
+  (`external_reader_prompt` or its generated default) as a system item, the question carried in
+  `response.instructions` via the read directive (the delivery that reads verbatim, live-verified since
+  v0.37.x). `is_mouth_persona()` in `voice_live_proxy.py` decides it (external always; bank when
+  `bank_turn_mode` is linear; the editor Playground keeps the agent), the WS route skips the
+  agent-sync gate for mouth personas, and `proxy.connected.mode` reports `model` for them. Bank
+  MODEL-turn personas are unchanged (agent mode, assistant-item read, agent-owned reaction). New
+  azure-free `test_voice_live_plan.py` locks the plan; the new opt-in live spec
+  `bank-linear-restart-live.spec.ts` (real Azure + a spoken-answer WAV on the fake mic) proves the
+  whole loop: linear flags on start/proxy/session, one read per question, no acknowledgment after the
+  spoken answer, "I'm done" advances and reads question 2, "Start over" abandons + reconnects + re-reads
+  question 1.
+
 ## 0.38.3.0 (2026-09-24)
 
 ### Added
