@@ -219,6 +219,52 @@ describe("AdminPage", () => {
     expect(screen.getByTestId("cfg-status")).toHaveTextContent(/cleared/i);
   });
 
+  it("edits a question's max follow-ups inline (issue #114), committing on Enter", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    vi.spyOn(admin, "getAiFoundryConfig").mockResolvedValue(EMPTY_CFG);
+    vi.spyOn(admin, "listBanks").mockResolvedValue([
+      {
+        bank_id: "b1",
+        name: "Demo Bank",
+        description: "",
+        language: "zh-CN",
+        enabled: true,
+        is_default: true,
+      },
+    ]);
+    vi.spyOn(admin, "listBankQuestions").mockResolvedValue([
+      {
+        question_id: "q1",
+        text: "How are you?",
+        language: "zh-CN",
+        order_index: 0,
+        enabled: true,
+        expected_points: [],
+        max_follow_ups: 0,
+        checklist_item_count: 2,
+      },
+    ]);
+    const edit = vi.spyOn(admin, "editQuestion").mockResolvedValue({
+      question_id: "q1",
+      text: "How are you?",
+      language: "zh-CN",
+      order_index: 0,
+      enabled: true,
+      expected_points: [],
+      max_follow_ups: 2,
+      checklist_item_count: 2,
+    });
+    renderPage();
+    await signIn(user);
+    await user.click(await screen.findByText("Demo Bank"));
+    const input = await screen.findByTestId("max-follow-ups-q1");
+    expect(input).toHaveValue(0);
+    await user.clear(input);
+    await user.type(input, "7{Enter}"); // clamped to the 0–3 range
+    await waitFor(() => expect(edit).toHaveBeenCalledWith("q1", { max_follow_ups: 3 }));
+  });
+
   it("edits and saves a question's checklist (rubric), round-tripping the normalized result", async () => {
     const user = userEvent.setup();
     mockAdminLogin();

@@ -51,9 +51,17 @@ async def create_persona(
     is_default: bool = False,
     **voice_knobs: object,
 ) -> InterviewerPersona:
-    """Create a persona; if ``is_default`` (and enabled), demote any current enabled default."""
+    """Create a persona; if ``is_default`` (and enabled), demote any current enabled default.
+
+    ONE prompt per persona (issue #114, review D14): a blank ``prompt_fragment`` is pre-filled with
+    the generated default text at creation, so the admin always edits the prompt that is actually in
+    force (agent sync, Playground, and the judge's persona/tone section) — there is no hidden
+    fallback any more.
+    """
     # ``external_reader_prompt`` is persisted as-is (NOT coerced None→""): NULL is the "use the
     # generated default" sentinel, and it is independent of ``prompt_fragment`` — see the model.
+    if not (prompt_fragment or "").strip():
+        prompt_fragment = default_instructions(name)
     persona = InterviewerPersona(
         name=name,
         character=character,
@@ -215,9 +223,7 @@ async def reconcile_persona(db: AsyncSession, persona: InterviewerPersona) -> In
     # would have pushed itself: the stored fragment, or (for an empty fragment) the generated
     # default. Equal-to-default stays out of the DB — empty fragment MEANS "using the default".
     instructions_changed = (
-        bool(remote_instructions)
-        and remote_instructions != persona.prompt_fragment
-        and remote_instructions != default_instructions(persona.name)
+        bool(remote_instructions) and remote_instructions != persona.prompt_fragment
     )
     # Pull when the version drifted OR we have no per-persona model yet (backfill on first open)
     # OR the Portal's instructions differ from ours.

@@ -13,8 +13,8 @@ import { adminRequest } from "./admin";
 export type AgentSyncStatus = "none" | "pending" | "synced" | "failed";
 
 /** Bank-session voice turn contract (mirrors backend BANK_TURN_MODES). */
-export type BankTurnMode = "linear" | "model";
-export const BANK_TURN_MODES: readonly BankTurnMode[] = ["linear", "model"];
+export type BankTurnMode = "linear" | "judged";
+export const BANK_TURN_MODES: readonly BankTurnMode[] = ["linear", "judged"];
 
 /** A persona as returned by the backend (matches PersonaOut in app/api/admin_personas.py). */
 export interface PersonaOut {
@@ -49,11 +49,18 @@ export interface PersonaOut {
   bank_auto_submit_silence_seconds: number;
   external_auto_submit_enabled: boolean;
   external_auto_submit_silence_seconds: number;
-  // BANK-session turn control: "linear" (default) — the model gets NO turn of its own between
-  // questions, the digital human only reads each question verbatim and is silent in between (the
-  // "Thank you. Thank you." fix); "model" — server-VAD opens a model turn on every candidate pause
-  // and the prompt governs what it says. External sessions are always linear and never consult it.
+  // BANK-session turn control (issue #114): "linear" (default) — silent between questions; "judged"
+  // — a backend judge may nudge / follow up / redirect DURING the candidate's pauses (never at
+  // submit). External sessions are always linear and never consult it. The pre-0.39 "model" value
+  // (Foundry agent speaking in its own turn) is retired — the backend maps it to "linear".
   bank_turn_mode: BankTurnMode;
+  // Judge knobs (judged mode only): pause length before a judge check (1–30 s) and the cap on
+  // judge checks per question (0–5; 0 = never).
+  judge_silence_seconds: number;
+  judge_max_calls_per_question: number;
+  // The fixed, read-only part of the judge prompt the persona's Instructions are combined with —
+  // shown in the editor for transparency (never editable).
+  judge_contract: string;
   model: string | null; // per-persona Foundry model deployment ("" / null → global default)
   // Phase 2: which interview engine drives this persona — "bank" (built-in question bank) or
   // "external" (the client's external interview API/server). Vendor-neutral token, never a product
@@ -81,6 +88,7 @@ export type PersonaCreate = Omit<
   | "agent_sync_error"
   | "default_instructions"
   | "default_external_reader_prompt"
+  | "judge_contract"
 >;
 
 /** All fields optional on update (backend PersonaUpdate). */

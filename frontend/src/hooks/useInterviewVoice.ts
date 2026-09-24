@@ -106,6 +106,14 @@ export interface UseInterviewVoiceOptions {
    * commit-and-advance path the button uses. Never called while `silenceAutoCommitMs` is unset/0.
    */
   onSilenceAutoCommit?: () => void;
+  /**
+   * JUDGED sessions (issue #114): a SECOND silence window, armed on every completed utterance and
+   * cleared by new speech / commit / disconnect exactly like the auto-submit one (a deliberate
+   * parallel copy — review D8). When it elapses the hook calls `onSilenceJudge`; the page then asks
+   * the backend judge with `peekDraft()`. `undefined` / `null` / `0` ⇒ never.
+   */
+  judgeSilenceMs?: number | null;
+  onSilenceJudge?: () => void;
 }
 
 const MAX_RECONNECT = 3;
@@ -281,6 +289,14 @@ export function useInterviewVoice(
       silenceAutoCommitTimerRef.current = null;
     }
   }, []);
+  // Judge silence timer (issue #114) — parallel to the auto-submit one, same arm/clear points.
+  const judgeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearJudgeTimer = useCallback(() => {
+    if (judgeTimerRef.current) {
+      clearTimeout(judgeTimerRef.current);
+      judgeTimerRef.current = null;
+    }
+  }, []);
   // Live (partial) user-transcript accumulator, keyed by the Azure conversation item id. The
   // `input_audio_transcription.delta` events carry INCREMENTAL text for the utterance the user is
   // still speaking; we accumulate per item and emit the running text as a non-final segment under
@@ -412,13 +428,14 @@ export function useInterviewVoice(
     userSegmentsSinceCommitRef.current = [];
     // Disarm the silence-auto-commit timer — its fire would target a dead session's turn.
     clearSilenceAutoCommit();
+    clearJudgeTimer();
     // Drop live partial accumulators too — their item ids belong to the dead Azure session.
     userLiveTranscriptRef.current.clear();
     assistantLiveTranscriptRef.current.clear();
     // Settle a commit still waiting on a transcript that will never arrive now that the WS is
     // going away — otherwise `await commitAnswer()` hangs forever on disconnect/reconnect/unmount.
     settlePendingCommit();
-  }, [audio, avatarStream, settlePendingCommit, clearSilenceAutoCommit]);
+  }, [audio, avatarStream, settlePendingCommit, clearSilenceAutoCommit, clearJudgeTimer]);
 
   /** WS message handler — Azure Voice Live realtime events, relayed near-verbatim by the backend
    * proxy (plus its own `proxy.connected` bootstrap frame). */
@@ -581,8 +598,10 @@ export function useInterviewVoice(
         case "input_audio_buffer.speech_started":
           setAudio("listening");
           // The candidate resumed speaking — they haven't finished the answer yet, so cancel any
-          // pending silence-auto-commit. It re-arms when the next utterance completes.
+          // pending silence-auto-commit (and the judge window). Both re-arm when the next
+          // utterance completes.
           clearSilenceAutoCommit();
+          clearJudgeTimer();
           break;
         case "input_audio_buffer.speech_stopped":
           setAudio("idle");
@@ -649,6 +668,15 @@ export function useInterviewVoice(
                 silenceAutoCommitTimerRef.current = null;
                 optionsRef.current.onSilenceAutoCommit?.();
               }, delay);
+            }
+            // Judged sessions: the same end-of-utterance arms the judge window (issue #114).
+            const judgeDelay = silenceAutoCommitDelay(optionsRef.current.judgeSilenceMs);
+            if (judgeDelay !== null) {
+              clearJudgeTimer();
+              judgeTimerRef.current = setTimeout(() => {
+                judgeTimerRef.current = null;
+                optionsRef.current.onSilenceJudge?.();
+              }, judgeDelay);
             }
           }
           break;
@@ -808,6 +836,7 @@ export function useInterviewVoice(
       setConn,
       settlePendingCommit,
       clearSilenceAutoCommit,
+      clearJudgeTimer,
     ],
   );
 
@@ -1009,6 +1038,7 @@ export function useInterviewVoice(
     // This turn is being committed (via the "I'm done" button OR the silence auto-commit),
     // so disarm the silence timer — it must not fire a second commit for a turn already submitted.
     clearSilenceAutoCommit();
+    clearJudgeTimer(); // a submit ends the pause — no judge check may fire for the old answer
     // Defensively settle any prior armed commit (e.g. a double-click) before arming a fresh one.
     settlePendingCommit();
 
@@ -1055,7 +1085,7 @@ export function useInterviewVoice(
       if (!activeResponseRef.current && !optionsRef.current.linearTurns)
         send({ type: "response.create" });
     });
-  }, [send, settlePendingCommit, clearSilenceAutoCommit]);
+  }, [send, settlePendingCommit, clearSilenceAutoCommit, clearJudgeTimer]);
 
   // Emit the assistant-item + response.create pair that makes Voice Live read `text` verbatim.
   // Assumes no response is currently active (checked by the callers). Records the attempt so a
@@ -1109,6 +1139,26 @@ export function useInterviewVoice(
     },
     [send],
   );
+
+  /**
+   * Speak a short interviewer aside (a judge nudge) verbatim, right now. Unlike `speakQuestion` it
+   * is NOT deduplicated per text (the same "please go on" may legitimately recur) and it is DROPPED
+   * when the interviewer is already speaking (never talk over a question read). Returns whether it
+   * was emitted. Judge follow-ups/redirects do NOT use this: they arrive as the new current question
+   * (header switch) and go through the normal verbatim question read.
+   */
+  const speakAside = useCallback(
+    (text: string): boolean => {
+      if (!text.trim() || activeResponseRef.current) return false;
+      spokenTextRef.current = null;
+      emitSpeak(text);
+      return true;
+    },
+    [emitSpeak],
+  );
+
+  /** The candidate's buffered, not-yet-committed transcript (what the judge reads). */
+  const peekDraft = useCallback(() => userSegmentsSinceCommitRef.current.join(" ").trim(), []);
 
   /** Speak the backend-provided question text verbatim (SPEC Phase 4 voice→turn sub-design).
    *
@@ -1281,6 +1331,8 @@ export function useInterviewVoice(
     setMuted,
     commitAnswer,
     speakQuestion,
+    speakAside,
+    peekDraft,
     isMuted,
     connectionState,
     audioState,

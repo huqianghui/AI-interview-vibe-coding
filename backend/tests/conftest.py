@@ -172,3 +172,83 @@ async def candidate_auth(db_session):
     from tests.candidate_helpers import new_candidate_bearer
 
     return await new_candidate_bearer(db_session, username="test-candidate")
+
+
+# --- Judge LLM fixtures (issue #114) -----------------------------------------------------------
+# Owner rule: GitHub CI never calls the real model; LOCAL runs MUST. ``judge_llm`` injects the real
+# Foundry adapter when Foundry credentials exist in backend/.env and ``CI`` is unset, otherwise the
+# deterministic scripted fake. ``scripted_judge`` is ALWAYS the fake — for tests of OUR code paths
+# (parsing, guards, budgets, staleness) whose assertions need exact LLM output.
+import pytest  # noqa: E402
+
+from app.interview import judge as _judge  # noqa: E402
+
+
+class ScriptedJudgeAdapter:
+    """LLMAdapter stand-in: returns queued raw strings (or raises) in order; records prompts."""
+
+    name = "scripted-judge"
+    _model = "scripted"
+
+    def __init__(self, *responses):
+        self.responses = list(responses)
+        self.prompts: list[str] = []
+
+    async def complete(self, prompt: str, *, json_mode: bool = False, fast: bool = False) -> str:
+        self.prompts.append(prompt)
+        if not self.responses:
+            return '{"verdict": "wait", "speech_text": "", "reason": "default"}'
+        nxt = self.responses.pop(0)
+        if isinstance(nxt, BaseException):
+            raise nxt
+        if callable(nxt):
+            return await nxt(prompt)
+        return nxt
+
+    async def stream(self, prompt: str):  # pragma: no cover — protocol completeness
+        yield await self.complete(prompt)
+
+
+@pytest.fixture
+def scripted_judge():
+    """Always the fake. Use ``scripted_judge.responses.extend([...])`` to queue outputs."""
+    adapter = ScriptedJudgeAdapter()
+    _judge.set_adapter_override(adapter)
+    yield adapter
+    _judge.set_adapter_override(None)
+
+
+def _real_judge_adapter():
+    """The real Foundry LLM adapter built from backend/.env — or None when unavailable."""
+    if os.environ.get("CI"):
+        return None
+    try:
+        from dotenv import dotenv_values
+    except ImportError:  # pragma: no cover
+        return None
+    env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+    vals = dotenv_values(env_path) if os.path.exists(env_path) else {}
+    endpoint = vals.get("AZURE_FOUNDRY_ENDPOINT") or ""
+    if not endpoint:
+        return None
+    try:
+        from app.services.agents.adapters.foundry_llm import FoundryLLMAdapter
+    except Exception:  # pragma: no cover — azure extra missing
+        return None
+    return FoundryLLMAdapter(
+        endpoint=endpoint,
+        project=vals.get("AZURE_FOUNDRY_DEFAULT_PROJECT") or "",
+        api_key=vals.get("AZURE_FOUNDRY_API_KEY") or "",
+        model=vals.get("FOUNDRY_AGENT_MODEL") or "gpt-5-mini",
+    )
+
+
+@pytest.fixture
+def judge_llm():
+    """Real model locally, scripted fake under CI. ``judge_llm.is_real`` tells tests which."""
+    real = _real_judge_adapter()
+    adapter = real if real is not None else ScriptedJudgeAdapter()
+    adapter.is_real = real is not None  # type: ignore[attr-defined]
+    _judge.set_adapter_override(adapter)
+    yield adapter
+    _judge.set_adapter_override(None)

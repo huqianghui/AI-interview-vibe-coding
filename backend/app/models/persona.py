@@ -132,11 +132,12 @@ def build_read_directive(reader_prompt: str) -> str:
     return reader_prompt + READ_DIRECTIVE_SEPARATOR
 
 
-# Bank-session turn control (see ``InterviewerPersona.bank_turn_mode``): "linear" = the model gets
-# no turn of its own and only reads the backend's questions; "model" = server-VAD opens a model turn
-# on every candidate pause and the prompt governs it. Vendor-neutral tokens, never Azure field
-# names.
-BANK_TURN_MODES = ("linear", "model")
+# Bank-session turn control (see ``InterviewerPersona.bank_turn_mode``): "linear" = the interviewer
+# only reads the backend's questions and is silent in between; "judged" = the same silent transport,
+# plus a backend LLM judge that may nudge / follow up / redirect DURING the candidate's pauses
+# (issue #114). The pre-v0.39 "model" value (Foundry agent speaking in its own server-VAD turn) is
+# retired — the migration maps it to "linear". Vendor-neutral tokens, never Azure field names.
+BANK_TURN_MODES = ("linear", "judged")
 
 
 class InterviewerPersona(TimestampMixin, Base):
@@ -252,13 +253,29 @@ class InterviewerPersona(TimestampMixin, Base):
     def linear_turns_for(self, brain_mode: str) -> bool:
         """Whether a session on ``brain_mode`` runs LINEAR TURNS (the model has no turn of its own).
 
-        External sessions are always linear (no brain of their own); bank sessions follow the
-        admin's :attr:`bank_turn_mode`. Unknown/legacy values fall back to linear (the safe, silent
-        contract) rather than to a chatty model turn.
+        Since v0.39.0.0 this is True for EVERY session: external (no brain of its own), bank
+        ``linear`` and bank ``judged`` (the judge speaks through the backend, never through a model
+        turn). The retired ``model`` value is treated as linear too — the migration rewrites it.
         """
-        if brain_mode == "external":
-            return True
-        return (self.bank_turn_mode or "linear") != "model"
+        return True
+
+    # Judge knobs (bank ``judged`` mode only; issue #114). ``judge_silence_seconds``: how long the
+    # candidate must stay silent (voice) / idle (text) after an utterance before the judge is asked;
+    # ``judge_max_calls_per_question``: cap on LLM judge calls per question (0 = never ask). Both
+    # admin-editable, bounded in the API. Server defaults mirror the migration's.
+    judge_silence_seconds: Mapped[int] = mapped_column(
+        Integer, default=2, server_default="2", nullable=False
+    )
+    judge_max_calls_per_question: Mapped[int] = mapped_column(
+        Integer, default=2, server_default="2", nullable=False
+    )
+
+    @property
+    def judge_contract(self) -> str:
+        """The fixed, read-only part of the judge prompt (shown in the editor for transparency)."""
+        from app.interview.judge import JUDGE_CONTRACT
+
+        return JUDGE_CONTRACT
 
     # Per-persona agent tools (SPEC F5) — JSON array of tool dicts synced into the Foundry prompt
     # agent's `tools`. Executed by the Foundry runtime, not here; this app only carries the config.

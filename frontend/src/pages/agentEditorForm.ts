@@ -60,6 +60,8 @@ export interface PersonaFormState {
   // Bank-session turn contract ("linear" default / "model"). Bank-only: the rail shows it for the
   // bank engine and it persists untouched while the persona runs external.
   bank_turn_mode: BankTurnMode;
+  judge_silence_seconds: number;
+  judge_max_calls_per_question: number;
   model: string; // per-persona Foundry model deployment ("" → global default)
   interviewBrain: string; // "bank" (built-in question bank) | "external" (external interview API)
   tools: ToolConfig[];
@@ -91,6 +93,8 @@ export function emptyPersonaForm(): PersonaFormState {
     external_auto_submit_enabled: true,
     external_auto_submit_silence_seconds: 3,
     bank_turn_mode: "linear",
+    judge_silence_seconds: 2,
+    judge_max_calls_per_question: 2,
     model: "",
     interviewBrain: "bank",
     tools: [],
@@ -130,6 +134,8 @@ export function personaToForm(p: PersonaOut): PersonaFormState {
     external_auto_submit_enabled: p.external_auto_submit_enabled ?? true,
     external_auto_submit_silence_seconds: p.external_auto_submit_silence_seconds ?? 3,
     bank_turn_mode: normalizeBankTurnMode(p.bank_turn_mode),
+    judge_silence_seconds: p.judge_silence_seconds ?? 2,
+    judge_max_calls_per_question: p.judge_max_calls_per_question ?? 2,
     model: p.model ?? "",
     interviewBrain: p.interview_brain ?? "bank",
     tools: parseToolsConfig(p.tools_config),
@@ -162,6 +168,8 @@ export function formToPayload(form: PersonaFormState): PersonaCreate {
     external_auto_submit_enabled: form.external_auto_submit_enabled,
     external_auto_submit_silence_seconds: form.external_auto_submit_silence_seconds,
     bank_turn_mode: form.bank_turn_mode,
+    judge_silence_seconds: form.judge_silence_seconds,
+    judge_max_calls_per_question: form.judge_max_calls_per_question,
     model: form.model,
     interview_brain: form.interviewBrain,
     tools_config: stringifyToolsConfig(form.tools),

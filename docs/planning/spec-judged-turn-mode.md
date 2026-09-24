@@ -318,6 +318,18 @@ Lanes: **Lane A** S1 (PR-1, ship first). **Lane B** S2 → S3 (backend). **Lane 
 
 _No new tasks from Performance review (D11 dropped)._
 
+### Implementation notes (v0.39.0.0, 2026-09-24)
+
+- Shipped as PR-1 v0.38.4.0 (EOU/multilingual VAD) and PR-2 v0.39.0.0 (judge). Tasks T1–T10 done.
+- **AC3 revised by measurement:** gpt-5-mini needs `reasoning.effort=low` + a warm client to reach
+  1.6–7.5 s per judge call (median ≈3.5 s); the 2.5 s p50 target is not met and the judge timeout is
+  10 s. `minimal` effort was faster but misjudged off-topic answers; gpt-4.1-mini was no faster and
+  misjudged two cases. Owner decision pending: accept ≈3.5 s, or revisit the model.
+- **Eval acceptance:** Azure's jailbreak prompt filter rejects injection attempts outright (400
+  `content_filter`) and the leak guard silences a Chinese follow-up that quoted a rubric item verbatim;
+  both are counted as correct silence. 12/12 on the real model.
+- `judge_events` also records `error` / `leak_blocked`; blank / stale / capped requests write nothing.
+
 ## GSTACK REVIEW REPORT
 
 | Review | Trigger | Why | Runs | Status | Findings |

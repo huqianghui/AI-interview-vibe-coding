@@ -41,6 +41,7 @@ import {
   getReport,
   getReportStream,
   getReview,
+  judgeInterview,
   recoverInterview,
   restartInterview,
   resumeInterview,
@@ -409,6 +410,33 @@ export function InterviewPage() {
   }, [interview?.voice_linear_turns]);
   const linearTurns = linearTurnsReported ?? interview?.external_phase != null;
 
+  // JUDGED sessions (issue #114). `voice_judge_silence_seconds` (0 ⇒ not judged) is latched per
+  // session like the two flags above. During a pause of that length — voice: after an utterance
+  // (hook timer); text: after the last keystroke — the page asks the backend judge with the draft so
+  // far. Verdicts: `nudge` ⇒ one spoken aside (voice) / a transient interviewer bubble (text);
+  // `follow_up` / `redirect` ⇒ the backend already wrote the interviewer turn, the returned interview
+  // makes it the current question (header switch; voice reads it through the normal question read);
+  // `wait` ⇒ nothing. The judge NEVER submits: "I'm done" / submit always advances, and any judge
+  // response that lands after a submit was sent is discarded (`submitSeqRef`).
+  const [judgeSecondsReported, setJudgeSecondsReported] = useState<number | null>(null);
+  useEffect(() => {
+    const reported = interview?.voice_judge_silence_seconds;
+    if (typeof reported === "number") setJudgeSecondsReported(reported);
+  }, [interview?.voice_judge_silence_seconds]);
+  const judgeSeconds = judgeSecondsReported ?? 0;
+  const judgeInFlightRef = useRef(false);
+  const submitSeqRef = useRef(0);
+  const [nudgeText, setNudgeText] = useState<string | null>(null);
+  const nudgeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showNudge = useCallback((text: string) => {
+    setNudgeText(text);
+    if (nudgeTimerRef.current) clearTimeout(nudgeTimerRef.current);
+    nudgeTimerRef.current = setTimeout(() => setNudgeText(null), 10_000);
+  }, []);
+  const onJudgeTriggerRef = useRef<(trigger: "voice_silence" | "text_idle", draft: string) => void>(
+    () => undefined,
+  );
+
   const voice = useInterviewVoice(interview?.interview_session_id ?? "", {
     locale: i18n.language,
     videoRef: avatarVideoRef,
@@ -424,6 +452,12 @@ export function InterviewPage() {
     // submit. `onVoiceDone` is declared below; the hook re-syncs options every render so this
     // closure always sees the latest.
     silenceAutoCommitMs: autoSubmitSeconds > 0 ? autoSubmitSeconds * 1000 : null,
+    // Judge window (voice): the hook re-syncs options every render, so this always sees the latest
+    // latched seconds; the fire reads the buffered draft and asks the judge.
+    judgeSilenceMs: channel === "voice" && judgeSeconds > 0 ? judgeSeconds * 1000 : null,
+    onSilenceJudge: () => {
+      onJudgeTriggerRef.current("voice_silence", voice.peekDraft());
+    },
     onSilenceAutoCommit: () => {
       // A submit is already in flight (button click or an earlier timer fire): the buffered speech
       // is being committed by THAT call — a second commit would misattribute the next transcript.
@@ -467,6 +501,58 @@ export function InterviewPage() {
       setBusy(false);
     }
   }
+
+  // Ask the judge during a pause (issue #114). Best-effort: any failure is silence. One in-flight
+  // call at a time; a response that arrives after a submit was sent is discarded.
+  const onJudgeTrigger = useCallback(
+    async (trigger: "voice_silence" | "text_idle", draft: string) => {
+      const iv = interviewRef.current;
+      const q = iv?.current_question;
+      if (!iv || !q || iv.status !== "in_progress" || judgeSeconds <= 0) return;
+      if (!draft.trim() || judgeInFlightRef.current || busyRef.current) return;
+      const seq = submitSeqRef.current;
+      judgeInFlightRef.current = true;
+      try {
+        const res = await judgeInterview(iv.interview_session_id, {
+          question_id: q.question_id,
+          follow_ups_asked: q.follow_ups_asked ?? (q.is_follow_up ? 1 : 0),
+          draft_text: draft,
+          trigger,
+        });
+        if (seq !== submitSeqRef.current) return; // the candidate submitted meanwhile
+        if (res.verdict === "nudge" && res.speech_text) {
+          if (channel === "voice") voice.speakAside(res.speech_text);
+          else showNudge(res.speech_text);
+        } else if ((res.verdict === "follow_up" || res.verdict === "redirect") && res.interview) {
+          // The follow-up is now the current question: header switches; in voice the normal
+          // verbatim question read speaks it (linear turns never suppress follow-ups).
+          setInterview(res.interview);
+        }
+      } catch {
+        /* the judge is best-effort — silence is always a valid outcome */
+      } finally {
+        judgeInFlightRef.current = false;
+      }
+    },
+    [channel, judgeSeconds, voice, showNudge],
+  );
+  onJudgeTriggerRef.current = (trigger, draft) => {
+    void onJudgeTrigger(trigger, draft);
+  };
+
+  // Text channel: the "pause" is the candidate not typing for `judgeSeconds` with a non-empty
+  // draft. Typing again clears any nudge bubble and re-arms.
+  useEffect(() => {
+    setNudgeText(null);
+    if (phase !== "interviewing" || channel !== "text" || judgeSeconds <= 0 || !answer.trim()) {
+      return;
+    }
+    const draft = answer;
+    const timer = setTimeout(() => {
+      onJudgeTriggerRef.current("text_idle", draft);
+    }, judgeSeconds * 1000);
+    return () => clearTimeout(timer);
+  }, [answer, channel, judgeSeconds, phase]);
 
   const onStart = () =>
     guard(async () => {
@@ -513,6 +599,8 @@ export function InterviewPage() {
     guard(async () => {
       const iv = interviewRef.current;
       if (!iv) return;
+      submitSeqRef.current += 1; // a submit always advances — a late judge reply is discarded
+      setNudgeText(null);
       const updated = await submitAnswer(
         iv.interview_session_id,
         answer,
@@ -529,6 +617,7 @@ export function InterviewPage() {
     guard(async () => {
       const iv = interviewRef.current;
       if (!iv) return;
+      submitSeqRef.current += 1; // a submit always advances — a late judge reply is discarded
       const spoken = await voice.commitAnswer();
       if (!spoken.trim()) {
         // Requirement 3: an empty answer cannot pass. Don't advance — let the candidate speak again.
@@ -703,6 +792,8 @@ export function InterviewPage() {
       const iv = interviewRef.current;
       if (!iv) return;
       setRestartDialogOpen(false);
+      submitSeqRef.current += 1;
+      setNudgeText(null);
       await voice.disconnect().catch(() => undefined);
       const fresh = await restartInterview(iv.interview_session_id);
       spokenQuestionId.current = null;
@@ -952,6 +1043,11 @@ export function InterviewPage() {
       {/* Answer inputs — hidden while an external turn is thinking or stalled (nothing to answer). */}
       {!(isExternal && (busy || externalStalled)) && channel === "text" && (
         <>
+          {nudgeText ? (
+            <Text data-testid="judge-nudge" style={{ opacity: 0.85 }}>
+              {t("voice.roleInterviewer")}: {nudgeText}
+            </Text>
+          ) : null}
           <Textarea
             value={answer}
             placeholder={t("answerPlaceholder")}

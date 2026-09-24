@@ -18,7 +18,7 @@ class LLMAdapter(Protocol):
 
     name: str
 
-    async def complete(self, prompt: str, *, json_mode: bool = False) -> str:
+    async def complete(self, prompt: str, *, json_mode: bool = False, fast: bool = False) -> str:
         """Return a single completion string (non-streaming)."""
         ...
 

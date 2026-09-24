@@ -55,6 +55,13 @@ class InterviewSession(TimestampMixin, Base):
     # --- Phase 2: external interview brain (all NULL/default for bank sessions) --------------
     # The engine driving this session, snapshotted from the persona at start (see BRAIN_MODES).
     brain_mode: Mapped[str] = mapped_column(String(16), default="bank", nullable=False)
+    # Turn contract SNAPSHOT (issue #114, review D6): copied from the persona's ``bank_turn_mode``
+    # at start — ``linear`` (silent between questions) or ``judged`` (backend judge may speak during
+    # pauses). Like ``brain_mode`` it never changes for a live session, so an admin flipping the
+    # persona mid-interview cannot re-interpret it. External sessions are always ``linear``.
+    turn_mode: Mapped[str] = mapped_column(
+        String(16), default="linear", server_default="linear", nullable=False
+    )
     # The external API's opaque conversation label (echoed back each turn). Never authoritative on
     # its own — the state blob below is what actually carries the interview's position.
     external_conversation_id: Mapped[str | None] = mapped_column(String(255), nullable=True)

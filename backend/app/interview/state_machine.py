@@ -15,13 +15,14 @@ answer group for scoring (see ``app.interview.scoring.group_answers``).
 Status lifecycle enforced: created → in_progress → completed → scored.
 """
 
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.interview.memory import build_follow_up_prompt
-from app.interview.questions import question_at, resolve_questions
+from app.interview.questions import Question, question_at, resolve_questions
 from app.interview.scoring import group_answers
 from app.interview.scoring_engine import (
     build_narrative,
@@ -87,8 +88,13 @@ async def abandon_interview(db: AsyncSession, session: InterviewSession) -> Inte
     return session
 
 
-async def start_interview(db: AsyncSession, candidate_session_id: str) -> InterviewSession:
+async def start_interview(
+    db: AsyncSession, candidate_session_id: str, *, turn_mode: str = "linear"
+) -> InterviewSession:
     """Start a new interview — or resume the candidate's existing in-progress one.
+
+    ``turn_mode`` (issue #114, review D6) is the persona's ``bank_turn_mode`` at this moment,
+    SNAPSHOTTED onto the session so later persona edits never re-interpret a live interview.
 
     Resuming (edge case b) prevents a reload from stranding a live interview behind a second,
     disconnected session. Only a fresh start records the first interviewer turn (asking question 1);
@@ -102,6 +108,7 @@ async def start_interview(db: AsyncSession, candidate_session_id: str) -> Interv
         candidate_session_id=candidate_session_id,
         status="in_progress",
         current_question_index=0,
+        turn_mode=turn_mode if turn_mode in TURN_MODES else "linear",
     )
     session.started_at = _now()
     db.add(session)
@@ -132,15 +139,92 @@ async def start_interview(db: AsyncSession, candidate_session_id: str) -> Interv
     return session
 
 
+# --- Follow-up providers (issue #114, review D3) -------------------------------------------------
+# ``(question, answer_text, follow_ups_asked) -> follow-up text | None``. The state machine only
+# RECORDS what a provider returns; it never decides content or calls an LLM itself.
+FollowUpProvider = Callable[[Question, str, int], Awaitable[str | None]]
+
+# Turn contract values snapshotted onto ``InterviewSession.turn_mode`` (see the model).
+TURN_MODES = ("linear", "judged")
+
+
+async def template_follow_up(question: Question, answer_text: str, follow_ups_asked: int) -> str:
+    """Today's deterministic follow-up (bank ``linear`` sessions): the F7 memory moment — cite what
+    the candidate just said, then the question's authored probe. Lead-in language follows the
+    QUESTION's language (review D5), never the candidate's."""
+    return build_follow_up_prompt(question.follow_up_prompt, answer_text, locale=question.language)
+
+
+async def no_follow_up_at_commit(
+    question: Question, answer_text: str, follow_ups_asked: int
+) -> None:
+    """JUDGED sessions: a submit always advances (owner rule); follow-ups happened during pauses."""
+    return None
+
+
+async def follow_ups_asked(db: AsyncSession, session_id: str, question_id: str) -> int:
+    """Public alias of the follow-up counter (used by the /judge route's stale-id check)."""
+    return await _follow_ups_asked(db, session_id, question_id)
+
+
+async def follow_up_texts(db: AsyncSession, session_id: str, question_id: str) -> list[str]:
+    """The interviewer follow-up texts already asked on ``question_id`` (judge context)."""
+    rows = (
+        await db.execute(
+            select(InterviewTurn.content)
+            .where(
+                InterviewTurn.interview_session_id == session_id,
+                InterviewTurn.question_id == question_id,
+                InterviewTurn.role == "interviewer",
+                InterviewTurn.turn_kind == "follow_up",
+            )
+            .order_by(InterviewTurn.turn_index)
+        )
+    ).scalars()
+    return list(rows)
+
+
+async def record_follow_up(
+    db: AsyncSession, session: InterviewSession, question_id: str, text: str
+) -> InterviewTurn:
+    """Write an interviewer ``follow_up`` turn for the current question WITHOUT a candidate turn —
+    the judge's pre-submit follow-up / redirect (issue #114). The pending follow-up then shows in
+    ``get_current_question`` (``is_follow_up``) exactly like a template one, and the candidate's
+    eventual single submit joins this question's answer group as a ``follow_up`` answer."""
+    turn = InterviewTurn(
+        interview_session_id=session.id,
+        question_id=question_id,
+        turn_index=await _next_turn_index(db, session.id),
+        role="interviewer",
+        turn_kind="follow_up",
+        source="text",
+        content=text,
+    )
+    db.add(turn)
+    await db.commit()
+    await db.refresh(turn)
+    return turn
+
+
 async def answer_finalized(
-    db: AsyncSession, session: InterviewSession, text: str, source: str = "text"
+    db: AsyncSession,
+    session: InterviewSession,
+    text: str,
+    source: str = "text",
+    follow_up_provider: FollowUpProvider | None = None,
 ) -> InterviewSession:
     """The single channel-agnostic finalization event (P9).
 
-    Records the candidate turn for the current question. If the question still owes a follow-up,
-    records the follow-up interviewer turn and stays on the same question (the next answer will be
-    a ``follow_up`` turn joining this question's answer group). Otherwise advances: records the
-    next question's interviewer turn, or marks the interview completed when none remain.
+    Records the candidate turn for the current question. Then asks ``follow_up_provider`` (default:
+    :func:`template_follow_up`, today's deterministic lead-in) whether the question still owes a
+    follow-up; if it returns text, records that interviewer turn and stays on the same question
+    (the next answer will be a ``follow_up`` turn joining this question's answer group). Otherwise
+    advances: records the next question's interviewer turn, or marks the interview completed when
+    none remain.
+
+    JUDGED sessions (issue #114) pass :func:`no_follow_up_at_commit`: the owner's rule is that a
+    submit ALWAYS advances — the judge speaks only during pauses, before the submit, via
+    :func:`record_follow_up`. The LLM is therefore never called inside this transaction.
     """
     if source not in ANSWER_SOURCES:
         raise InterviewStateError(f"Unknown answer source {source!r}")
@@ -179,17 +263,14 @@ async def answer_finalized(
         )
     )
 
-    if follow_ups_asked < current.max_follow_ups:
-        # Owe another follow-up: ask it and stay on this question. F7 memory moment — the follow-up
-        # references what the candidate just said (from this turn's content), so the interviewer
-        # visibly remembers across turns rather than asking a canned probe.
-        # Follow-up lead-in language follows the SESSION language, i.e. the language of the
-        # system-served question — not the candidate's answer. A candidate who replies in another
-        # language must not flip the interview language (matches the persona's verbatim-language
-        # directive and the "follow session locale" strategy).
-        follow_up_text = build_follow_up_prompt(
-            current.follow_up_prompt, content, locale=_infer_locale(current.prompt)
-        )
+    provider = follow_up_provider or template_follow_up
+    follow_up_text = (
+        await provider(current, content, follow_ups_asked)
+        if follow_ups_asked < current.max_follow_ups
+        else None
+    )
+    if follow_up_text:
+        # Owe another follow-up: ask it and stay on this question.
         db.add(
             InterviewTurn(
                 interview_session_id=session.id,
@@ -431,6 +512,7 @@ async def get_current_question(db: AsyncSession, session: InterviewSession) -> d
         # Voice must NOT verbatim-read a follow-up: the agent's own server-VAD auto-response already
         # voices a clarification, so reading this too would speak it twice + duplicate the bubble.
         "is_follow_up": follow_up is not None,
+        "follow_ups_asked": await _follow_ups_asked(db, session.id, q.id),
     }
 
 
@@ -572,16 +654,3 @@ async def review_answers(db: AsyncSession, session: InterviewSession) -> list[di
 
 def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
-
-
-def _infer_locale(text: str) -> str:
-    """Rough locale for the follow-up lead-in: zh-CN if ``text`` is mostly CJK, else en-US.
-
-    Fed the system-served QUESTION prompt (the session language), not the candidate's answer, so
-    the lead-in follows the interview language rather than flipping to whatever the candidate
-    happened to type. A text heuristic avoids threading bank/persona locale through the finalize
-    path for what is a cosmetic lead-in.
-    """
-    cjk = sum(1 for ch in text if "一" <= ch <= "鿿")
-    letters = sum(1 for ch in text if ch.isalpha())
-    return "zh-CN" if cjk and cjk >= letters else "en-US"

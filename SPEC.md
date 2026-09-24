@@ -222,6 +222,9 @@ detection.
   fallback (candidate says "我答完了"/"done" → detected in transcript). Silence threshold configurable.
 - **Follow-up hook:** per-question `max_follow_ups` config (demo default 0 or 1); when >0, an
   optional follow-up turn is generated and its content joins the answer group for scoring.
+  **v0.39.0.0:** follow-ups come from a `FollowUpProvider` — the authored template at submit for
+  `linear` sessions, or the backend LLM judge DURING the candidate's pauses for `judged` sessions
+  (the submit itself always advances; see `docs/planning/spec-judged-turn-mode.md`, issue #114).
 - **Two follow-up generators (by channel), one scoring rule.** Follow-ups are produced differently
   on the two transports, but the scoring semantics are identical:
   - **Text channel — deterministic, non-LLM.** `build_follow_up_prompt` (F7,
