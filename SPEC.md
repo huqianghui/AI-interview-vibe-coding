@@ -205,7 +205,9 @@ Channel-agnostic (text + voice share progression logic); follow-up hooks reserve
 detection.
 
 - **Model `interview_session`** (id, candidate_session_id FK, question_bank_id FK, status ENUM
-  `created|in_progress|completed|scored`, current_question_index, started_at, completed_at). State
+  `created|in_progress|completed|scored|abandoned` (`abandoned` = the candidate's explicit
+  "start over", v0.38.3.0: terminal, kept for the record, never resumed or scored),
+  current_question_index, started_at, completed_at). State
   machine ported from reference session lifecycle.
 - **Model `interview_turn`** (id, interview_session_id FK, question_id FK, turn_index, role
   `interviewer|candidate`, turn_kind `main|follow_up`, content, audio_ref, created_at). An

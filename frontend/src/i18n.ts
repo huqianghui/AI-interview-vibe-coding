@@ -202,6 +202,16 @@ export const resources = {
         loginBody: "Sign in with the username and password your organizer gave you to start your interview.",
         wrongCredentials: "Incorrect username or password.",
         signOut: "Sign out",
+        // "Start over" (v0.38.3.0): abandon the live interview and begin a fresh one. Destructive,
+        // so it is confirmed in a dialog first.
+        // Label deliberately avoids the substring "start interview": the e2e reload spec asserts
+        // that no /start interview/i button remains once an interview is live.
+        restart: "Start over",
+        restartTitle: "Start over?",
+        restartBody:
+          "Your answers so far will be discarded and a new interview will start from the first question. This cannot be undone.",
+        restartConfirm: "Yes, start over",
+        restartCancel: "Keep going",
       },
     },
   },
@@ -389,6 +399,12 @@ export const resources = {
         loginBody: "请使用主办方提供的用户名和密码登录,开始你的面试。",
         wrongCredentials: "用户名或密码错误。",
         signOut: "退出登录",
+        // 「重新开始」(v0.38.3.0):放弃当前进行中的面试,从第一题重新开始。不可撤销,先弹窗确认。
+        restart: "重新开始",
+        restartTitle: "确定重新开始面试?",
+        restartBody: "目前已作答的内容将被放弃,并从第一题开始一场新的面试。此操作无法撤销。",
+        restartConfirm: "确定重新开始",
+        restartCancel: "继续作答",
       },
     },
   },

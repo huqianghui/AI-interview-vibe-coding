@@ -844,3 +844,158 @@ async def test_start_voice_linear_turns_without_persona_follows_the_engine(clien
     # No persona ⇒ a bank session with nothing to consult ⇒ not linear (the engine alone decides),
     # never null on an entry point.
     assert body["voice_linear_turns"] is False
+
+
+# --- /restart: abandon the live interview and start over (v0.38.3.0) ---------------------------
+
+
+async def _seed_bank(db_session, n: int = 3) -> None:
+    from app.services import persona_service as psvc
+
+    await psvc.create_persona(db_session, name="Interviewer", is_default=True)
+
+
+@pytest.mark.asyncio
+async def test_restart_abandons_the_live_interview_and_starts_a_fresh_one(client, db_session):
+    await _seed_bank(db_session)
+    headers = await _new_candidate_headers(client)
+    first = (await client.post("/candidate/interview/start", headers=headers)).json()
+    iv1 = first["interview_session_id"]
+    # Answer one question so the old session has real progress to abandon.
+    await client.post(
+        f"/candidate/interview/{iv1}/answer",
+        headers=headers,
+        json={"text": "a first answer", "source": "text"},
+    )
+    resp = await client.post(f"/candidate/interview/{iv1}/restart", headers=headers)
+    assert resp.status_code == 200
+    fresh = resp.json()
+    iv2 = fresh["interview_session_id"]
+    assert iv2 != iv1
+    assert fresh["status"] == "in_progress"
+    assert fresh["current_question"]["index"] == 0
+    # Entry-point voice flags ride along, exactly like /start.
+    assert fresh["voice_auto_submit_seconds"] == 0
+    assert fresh["voice_linear_turns"] is True
+    # The old session is kept for the record as ``abandoned``…
+    old = (await client.get(f"/candidate/interview/{iv1}", headers=headers)).json()
+    assert old["status"] == "abandoned"
+    assert old["current_question"] is None
+    # …is never resumed by /start (which now returns the fresh one)…
+    again = (await client.post("/candidate/interview/start", headers=headers)).json()
+    assert again["interview_session_id"] == iv2
+    # …and can neither be reviewed, scored, restarted again, nor answered.
+    assert (
+        await client.get(f"/candidate/interview/{iv1}/review", headers=headers)
+    ).status_code == 409
+    assert (
+        await client.post(f"/candidate/interview/{iv1}/report", headers=headers)
+    ).status_code == 409
+    assert (
+        await client.post(f"/candidate/interview/{iv1}/restart", headers=headers)
+    ).status_code == 409
+    assert (
+        await client.post(
+            f"/candidate/interview/{iv1}/answer",
+            headers=headers,
+            json={"text": "too late", "source": "text"},
+        )
+    ).status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_restart_requires_ownership_and_an_in_progress_interview(client, db_session):
+    await _seed_bank(db_session)
+    headers = await _new_candidate_headers(client)
+    iv = (await client.post("/candidate/interview/start", headers=headers)).json()[
+        "interview_session_id"
+    ]
+    # Another candidate cannot restart (or even see) it — 404, same as every owned route.
+    other = await _new_candidate_headers(client)
+    assert (
+        await client.post(f"/candidate/interview/{iv}/restart", headers=other)
+    ).status_code == 404
+    # No auth at all → 401.
+    assert (await client.post(f"/candidate/interview/{iv}/restart")).status_code == 401
+    # Drive the interview to completion, then restart is a 409: a finished interview is simply
+    # followed by a normal /start (nothing to abandon).
+    body = (await client.get(f"/candidate/interview/{iv}", headers=headers)).json()
+    while body["status"] == "in_progress":
+        body = (
+            await client.post(
+                f"/candidate/interview/{iv}/answer",
+                headers=headers,
+                json={"text": "a sufficiently long answer", "source": "text"},
+            )
+        ).json()
+    assert body["status"] == "completed"
+    assert (
+        await client.post(f"/candidate/interview/{iv}/restart", headers=headers)
+    ).status_code == 409
+    fresh = (await client.post("/candidate/interview/start", headers=headers)).json()
+    assert fresh["interview_session_id"] != iv
+    assert fresh["status"] == "in_progress"
+
+
+@pytest.mark.asyncio
+async def test_restart_external_sends_the_brain_its_end_signal_then_abandons(
+    client, db_session, monkeypatch
+):
+    from app.api import interview as interview_api
+    from app.services import persona_service as psvc
+
+    await psvc.create_persona(
+        db_session, name="Interviewer", is_default=True, interview_brain="external"
+    )
+    headers = await _new_candidate_headers(client)
+    first = (await client.post("/candidate/interview/start", headers=headers)).json()
+    assert first["external_phase"] is not None
+    iv1 = first["interview_session_id"]
+
+    ended: list[str] = []
+
+    async def fake_end(db, session):
+        # Stand-in for external_runner.end: the brain got its ``end`` and the session is completed
+        # locally — restart must still turn that into ``abandoned``, never a scoreless "completed".
+        ended.append(session.id)
+        session.status = "completed"
+        await db.commit()
+        await db.refresh(session)
+        return session
+
+    monkeypatch.setattr(interview_api.external_runner, "end", fake_end)
+    fresh = (await client.post(f"/candidate/interview/{iv1}/restart", headers=headers)).json()
+    assert ended == [iv1]
+    assert fresh["interview_session_id"] != iv1
+    assert fresh["status"] == "in_progress"
+    assert fresh["external_phase"] is not None  # the fresh session follows the CURRENT engine
+    old = (await client.get(f"/candidate/interview/{iv1}", headers=headers)).json()
+    assert old["status"] == "abandoned"
+
+
+@pytest.mark.asyncio
+async def test_restart_external_turn_in_flight_is_a_409_and_abandons_nothing(
+    client, db_session, monkeypatch
+):
+    from app.api import interview as interview_api
+    from app.interview.external_runner import ExternalTurnConflict
+    from app.services import persona_service as psvc
+
+    await psvc.create_persona(
+        db_session, name="Interviewer", is_default=True, interview_brain="external"
+    )
+    headers = await _new_candidate_headers(client)
+    iv1 = (await client.post("/candidate/interview/start", headers=headers)).json()[
+        "interview_session_id"
+    ]
+
+    async def conflicting_end(db, session):
+        raise ExternalTurnConflict("A turn is already being processed")
+
+    monkeypatch.setattr(interview_api.external_runner, "end", conflicting_end)
+    resp = await client.post(f"/candidate/interview/{iv1}/restart", headers=headers)
+    assert resp.status_code == 409
+    # Nothing changed: the live session is still the resumable one.
+    assert (await client.post("/candidate/interview/start", headers=headers)).json()[
+        "interview_session_id"
+    ] == iv1

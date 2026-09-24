@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.38.3.0 (2026-09-24)
+
+### Added
+- **"Start over" (重新开始) for candidates.** An in-progress interview session persists in the
+  DB, and both `/start` and the page's resume-on-mount always hand it back — so a candidate who wanted
+  a fresh run was stuck on the old session until every question was answered (client request). The
+  interview page now shows a **Start over** button in the header during orientation and the
+  live Q&A. It is destructive, so a dialog confirms first ("Your answers so far will be discarded…");
+  on confirm the page tears down voice, calls the new endpoint, and re-enters orientation on the fresh
+  session exactly like a first start (transcript and draft cleared, question 1 read again, the
+  voice-default auto-connect re-armed for the new session).
+- Wire: `POST /candidate/interview/{id}/restart` marks the owned live session **`abandoned`** (a new
+  terminal status alongside `completed`/`scored`: kept for the record, never resumed, reviewed, or
+  scored — every later route on it is a 409 and its `current_question` is null) and returns a brand-new
+  `in_progress` session on the default persona's *current* engine with the usual entry-point voice
+  flags; the client saves the new id so a reload resumes the fresh interview. Only `in_progress` can be
+  restarted (409 otherwise; a finished interview is simply followed by a normal `/start`); another
+  candidate's interview is a 404. External sessions first send the brain its `end` signal (a turn in
+  flight is a 409 like `/end`, and abandons nothing) so the vendor conversation is closed rather than
+  orphaned. No migration (status is a free string column). Tests: 4 backend API cases (abandon +
+  fresh start + old-session 409s, ownership/auth/completed, external end-then-abandon, external
+  conflict) and 2 `InterviewPage` cases (dialog cancel/confirm flow, backend refusal banner).
+
 ## 0.38.2.0 (2026-09-24)
 
 ### Fixed
