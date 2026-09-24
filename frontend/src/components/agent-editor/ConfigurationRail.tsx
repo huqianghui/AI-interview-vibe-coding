@@ -17,6 +17,8 @@ import {
   Field,
   Input,
   Option,
+  Radio,
+  RadioGroup,
   Subtitle2,
   Switch,
   Textarea,
@@ -24,7 +26,13 @@ import {
   tokens,
 } from "@fluentui/react-components";
 import { AvatarGrid } from "./AvatarGrid";
-import { EDITOR_LOCALES, type EditorLocale, type PersonaFormState } from "../../pages/agentEditorForm";
+import type { BankTurnMode } from "../../api/personas";
+import {
+  EDITOR_LOCALES,
+  normalizeBankTurnMode,
+  type EditorLocale,
+  type PersonaFormState,
+} from "../../pages/agentEditorForm";
 
 const useStyles = makeStyles({
   root: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalM, minWidth: "300px" },
@@ -152,6 +160,15 @@ export function ConfigurationRail({
         form={form}
         onChange={onChange}
       />
+
+      {/* Turn control — BANK engine only. Does the model get a generative turn of its own between
+          questions? "linear" (default): no — the digital human only reads each question and is
+          silent in between (the "Thank you. Thank you." fix: server-VAD used to open a model turn on
+          EVERY pause). "model": the pre-v0.38.2.0 hands-free turn, governed by the instructions.
+          External sessions are linear by construction (no brain of their own), so nothing to show. */}
+      {form.interviewBrain !== "external" && (
+        <TurnModeControls mode={form.bank_turn_mode} onChange={onChange} />
+      )}
 
       <Divider />
       <Subtitle2>Avatar</Subtitle2>
@@ -314,6 +331,45 @@ function AutoSubmitControls({ engine, form, onChange }: AutoSubmitControlsProps)
           }}
           data-testid="config-auto-submit-seconds"
         />
+      </Field>
+    </div>
+  );
+}
+
+interface TurnModeControlsProps {
+  mode: BankTurnMode;
+  onChange: (patch: Partial<PersonaFormState>) => void;
+}
+
+/** The bank engine's turn contract: linear (silent between questions) vs the model's own turn. */
+function TurnModeControls({ mode, onChange }: TurnModeControlsProps) {
+  const styles = useStyles();
+  return (
+    <div className={styles.section} data-testid="config-turn-mode">
+      <Field
+        label="Between questions (question bank)"
+        hint={
+          mode === "linear"
+            ? "The interviewer only reads each question aloud and stays silent while the candidate answers — no acknowledgments, no follow-ups of its own. The next question starts on \"I'm done\" (or auto-submit)."
+            : "After every pause the model gets a turn of its own and may acknowledge (\"Thank you.\"), say \"please go on\", or follow up — governed by the instructions. It can react once per pause, not once per answer."
+        }
+      >
+        <RadioGroup
+          value={mode}
+          onChange={(_, d) => onChange({ bank_turn_mode: normalizeBankTurnMode(d.value) })}
+          aria-label="Between questions (question bank)"
+        >
+          <Radio
+            value="linear"
+            label="Linear turns — read the question, then stay silent"
+            data-testid="config-turn-mode-linear"
+          />
+          <Radio
+            value="model"
+            label="Model has its own turn — may acknowledge or follow up"
+            data-testid="config-turn-mode-model"
+          />
+        </RadioGroup>
       </Field>
     </div>
   );

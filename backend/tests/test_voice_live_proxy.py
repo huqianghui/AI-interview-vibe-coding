@@ -5,12 +5,16 @@
 tests lock the shape that makes the digital human WORK end-to-end:
 
 - AVATAR modality present (+ h264 video) only when the persona has a character.
-- Server VAD drives a hands-free turn for BANK personas: `create_response`/`interrupt_response`
-  EXPLICITLY True, so Azure auto-generates the agent's spoken reply when the user stops speaking and
-  lets the user barge in — the fix for "the interviewer transcribes me but never replies".
-- EXTERNAL personas set `create_response=False`: the agent is purely the external brain's mouth
-  (reads the injected `speech_text` only) and must never improvise its own turn — else it both
-  duplicates the verbatim read (two Interviewer bubbles) and diverges from the question header.
+- LINEAR TURNS decide `create_response` (whether server-VAD opens a MODEL turn on every candidate
+  pause). BANK personas follow the admin's `bank_turn_mode`: "linear" (default since v0.38.2.0) ⇒
+  False — the digital human only reads the backend's questions and never says "Thank you." per
+  pause; "model" ⇒ True — the pre-v0.38.2.0 hands-free turn where the prompt governs the reaction.
+  `interrupt_response` (barge-in) stays EXPLICITLY True in every mode.
+- EXTERNAL personas are ALWAYS `create_response=False` regardless of `bank_turn_mode`: the agent is
+  purely the external brain's mouth (reads the injected `speech_text` only) and must never improvise
+  its own turn — else it both duplicates the verbatim read and diverges from the question header.
+- The editor Playground (`playground=True`) keeps the model turn for a bank persona (it is a free
+  conversation with the agent, not the interview flow); external stays linear there too.
 """
 
 from dataclasses import dataclass
@@ -35,6 +39,7 @@ class FakePersona:
     agent_id: str = "interviewer-x:1"
     agent_version: str = "1"
     interview_brain: str = "bank"
+    bank_turn_mode: str = "linear"
 
 
 def _as_dict(obj):
@@ -42,24 +47,66 @@ def _as_dict(obj):
     return dict(obj)
 
 
-def test_avatar_session_enables_hands_free_vad_auto_response():
+def test_avatar_session_bank_linear_turns_by_default_disables_auto_response():
+    # The "Thank you. Thank you. Thank you." fix: a bank persona that never touched the knob runs
+    # LINEAR TURNS — server-VAD must NOT open a model turn on every candidate pause. VAD stays on
+    # for transcription; only the auto-reply is suppressed. Barge-in stays EXPLICITLY enabled.
     session = build_avatar_session(FakePersona(), locale="zh-CN")
-    td = _as_dict(session["turn_detection"])
-    assert td["type"] == "azure_semantic_vad"
-    # Bank persona: both EXPLICITLY set — hands-free auto-reply + barge-in (not Azure defaults).
-    assert td["create_response"] is True
-    assert td["interrupt_response"] is True
-
-
-def test_avatar_session_disables_auto_response_for_external_brain():
-    # External persona is the external brain's mouth only: it must NEVER auto-generate a turn (that
-    # both duplicates the injected verbatim read and desyncs from the question header). VAD stays on
-    # for transcription; only the auto-reply is suppressed. Barge-in stays enabled.
-    session = build_avatar_session(FakePersona(interview_brain="external"), locale="zh-CN")
     td = _as_dict(session["turn_detection"])
     assert td["type"] == "azure_semantic_vad"
     assert td["create_response"] is False
     assert td["interrupt_response"] is True
+
+
+def test_avatar_session_bank_model_turn_mode_enables_hands_free_vad_auto_response():
+    # Admin opt-in "model" mode = the pre-v0.38.2.0 behaviour: both EXPLICITLY set — hands-free
+    # auto-reply (the prompt governs what the model says) + barge-in (not Azure defaults).
+    session = build_avatar_session(FakePersona(bank_turn_mode="model"), locale="zh-CN")
+    td = _as_dict(session["turn_detection"])
+    assert td["create_response"] is True
+    assert td["interrupt_response"] is True
+
+
+def test_avatar_session_bank_persona_without_the_field_is_linear():
+    # A duck-typed / legacy persona object with no bank_turn_mode attribute at all falls back to the
+    # safe silent contract, never to a chatty model turn.
+    @dataclass
+    class LegacyPersona:
+        voice_map: str = "{}"
+        character: str = ""
+        style: str = ""
+        agent_id: str = "x:1"
+        agent_version: str = "1"
+        interview_brain: str = "bank"
+
+    td = _as_dict(build_avatar_session(LegacyPersona(), locale="en-US")["turn_detection"])
+    assert td["create_response"] is False
+
+
+def test_avatar_session_disables_auto_response_for_external_brain_regardless_of_bank_mode():
+    # External persona is the external brain's mouth only: it must NEVER auto-generate a turn (that
+    # both duplicates the injected verbatim read and desyncs from the question header) — even when
+    # the bank-only knob is set to "model". Barge-in stays enabled.
+    for mode in ("linear", "model"):
+        session = build_avatar_session(
+            FakePersona(interview_brain="external", bank_turn_mode=mode), locale="zh-CN"
+        )
+        td = _as_dict(session["turn_detection"])
+        assert td["type"] == "azure_semantic_vad"
+        assert td["create_response"] is False
+        assert td["interrupt_response"] is True
+
+
+def test_avatar_session_playground_keeps_model_turn_for_bank_only():
+    # Editor Playground = free conversation with the agent to test its instructions, so a linear
+    # bank persona keeps its model turn THERE (else the Playground would just be mute). External
+    # has no agent to converse with and stays linear.
+    bank = _as_dict(build_avatar_session(FakePersona(), locale="zh-CN", playground=True))
+    assert _as_dict(bank["turn_detection"])["create_response"] is True
+    ext = build_avatar_session(
+        FakePersona(interview_brain="external"), locale="zh-CN", playground=True
+    )
+    assert _as_dict(ext["turn_detection"])["create_response"] is False
 
 
 def test_avatar_session_includes_avatar_video_when_character_set():

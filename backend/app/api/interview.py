@@ -84,6 +84,13 @@ class InterviewOut(BaseModel):
     # ``voice_default`` it is populated only on the two entry points (start / GET-resume) and the
     # UI latches it per session, so a mutation response never turns the feature off mid-interview.
     voice_auto_submit_seconds: int | None = None
+    # LINEAR TURNS for THIS session's voice channel: ``True`` ⇒ the model gets no generative turn of
+    # its own between questions (the digital human only reads what the backend hands it; the page
+    # never nudges a bare ``response.create``); ``False`` ⇒ the model keeps its turn and the prompt
+    # governs it. External sessions are always ``True``; bank sessions follow the default persona's
+    # admin-set ``bank_turn_mode``. Same reporting contract as ``voice_auto_submit_seconds``: set on
+    # the two entry points (start / GET-resume), ``None`` on mutation responses, latched by the UI.
+    voice_linear_turns: bool | None = None
 
 
 class AnswerIn(BaseModel):
@@ -181,6 +188,7 @@ def _to_interview_out(
     *,
     voice_default: bool = False,
     voice_auto_submit_seconds: int | None = None,
+    voice_linear_turns: bool | None = None,
 ) -> InterviewOut:
     is_external = session.brain_mode == "external"
     return InterviewOut(
@@ -191,6 +199,7 @@ def _to_interview_out(
         speech_text=external_runner.speech_text_for(session) if is_external else None,
         voice_default=voice_default,
         voice_auto_submit_seconds=voice_auto_submit_seconds,
+        voice_linear_turns=voice_linear_turns,
     )
 
 
@@ -205,13 +214,22 @@ async def _persona_voice_flags(db: AsyncSession, session: InterviewSession) -> d
     THIS session runs on (``session.brain_mode`` — the per-session snapshot, so a persona flipped
     mid-interview never re-interprets a live session): ``0`` when that engine's pair is OFF or
     there is no persona, else its configured seconds.
+
+    ``voice_linear_turns``: whether the voice channel runs LINEAR TURNS for this session's engine —
+    always ``True`` for external sessions (no brain of their own); for bank sessions the persona's
+    admin-set ``bank_turn_mode`` (default linear). With no persona the engine alone decides.
     """
     persona = await persona_service.get_default_persona(db)
     if persona is None:
-        return {"voice_default": False, "voice_auto_submit_seconds": 0}
+        return {
+            "voice_default": False,
+            "voice_auto_submit_seconds": 0,
+            "voice_linear_turns": session.brain_mode == "external",
+        }
     return {
         "voice_default": has_configured_voice(persona.voice_map),
         "voice_auto_submit_seconds": persona.voice_auto_submit_seconds_for(session.brain_mode),
+        "voice_linear_turns": persona.linear_turns_for(session.brain_mode),
     }
 
 

@@ -127,7 +127,32 @@ def _certifi_ssl_context() -> Any:  # pragma: no cover — trivial cache around 
     return _ssl_ctx_cache
 
 
-def build_avatar_session(persona: InterviewerPersona, *, locale: str | None) -> Any:
+def linear_turns_for_persona(persona: InterviewerPersona, *, playground: bool = False) -> bool:
+    """Whether this persona's voice session runs LINEAR TURNS (no model turn of its own).
+
+    External personas: always linear (they supply no brain; see ``build_avatar_session``). Bank
+    personas: the admin's ``bank_turn_mode`` (``"linear"`` default / ``"model"``), via
+    :meth:`InterviewerPersona.linear_turns_for`. Duck-typed on purpose (the pure builder is
+    unit-tested with a dataclass stand-in): a persona object without the field is treated as the
+    default, linear. ``playground=True`` (editor Playground, pinned ``persona_id``) keeps the model
+    turn for a BANK persona — that surface is a free conversation with the agent to test its
+    instructions, not the candidate interview flow, so the linear contract would just mute it;
+    external stays linear there too (it has no agent to converse with).
+    """
+    is_external = (getattr(persona, "interview_brain", "bank") or "bank") == "external"
+    if is_external:
+        return True
+    if playground:
+        return False
+    method = getattr(persona, "linear_turns_for", None)
+    if callable(method):
+        return bool(method("bank"))
+    return (getattr(persona, "bank_turn_mode", "linear") or "linear") != "model"
+
+
+def build_avatar_session(
+    persona: InterviewerPersona, *, locale: str | None, playground: bool = False
+) -> Any:
     """Build the Azure SDK ``RequestSession`` for a persona's avatar/voice Voice Live session.
 
     Pure shaping, no network: this only constructs SDK model objects from the persona's fields, so
@@ -160,46 +185,44 @@ def build_avatar_session(persona: InterviewerPersona, *, locale: str | None) -> 
     if has_avatar:
         modalities.append(Modality.AVATAR)
 
-    # An external-brain persona has NO interview logic of its own — it is purely the "mouth" for the
-    # external workflow, reading exactly the ``speech_text`` the backend injects (via an explicit
-    # ``response.create``) and NOTHING else. So its VAD must NOT auto-generate a reply: with
-    # ``create_response=True`` the agent improvises its own turns the moment the candidate pauses,
-    # which (a) duplicates/competes with the injected verbatim read (two Azure responses → two
-    # Interviewer bubbles) and (b) diverges from the external-brain-driven question header, so the
-    # top question and the spoken question no longer match. Bank personas keep auto-response (their
-    # agent DOES drive the turn). VAD still detects end-of-utterance and transcribes in both modes —
-    # only the auto-REPLY is suppressed — so candidate-answer capture is unaffected (external mode
-    # advances via the "I'm done answering" / commitAnswer path, not the auto-response).
+    # LINEAR TURNS (backend half). ``create_response`` decides whether Azure's server-VAD opens a
+    # MODEL turn every time the candidate stops speaking. Under linear turns it must NOT: the model
+    # would improvise its own turn (a "Thank you." per PAUSE — not per answer — or an off-script
+    # follow-up), which duplicates/competes with the verbatim question read (two Azure responses →
+    # two Interviewer bubbles) and, for external sessions, diverges from the external-brain-driven
+    # question header. VAD still detects end-of-utterance and transcribes in both modes — only the
+    # auto-REPLY is suppressed — so candidate-answer capture is unaffected; the interview advances
+    # via the "I'm done" / commitAnswer path + the backend's next question.
     #
-    # This flag IS the backend half of "linear turns" (the frontend half is `linearTurns` in
-    # useInterviewVoice, which suppresses the turn-advancing bare ``response.create``; either half
-    # alone still leaves the model a way to speak). It is deliberately derived from the ENGINE and
-    # is NOT an admin knob — decided 2026-09-23 after the question "can bank mode acknowledge the
-    # answer but never follow up?" was explored and found unreachable:
-    #   1. ``create_response`` is a SINGLE boolean. The turn Azure auto-creates when the candidate
-    #      stops speaking is both the source of a "Thank you." acknowledgment AND of an unwanted
-    #      follow-up — there is no protocol-level way to allow one and forbid the other.
-    #   2. In agent mode Azure REJECTS overriding ``instructions`` inside ``response.create`` (live
-    #      verified; see useInterviewVoice's emitSpeak branch), so a scoped one-off "acknowledge
-    #      only, ask nothing" turn cannot be constructed for a bank persona either.
-    #   3. Owner decision: bank mode stays under MODEL + PROMPT control (``prompt_fragment``), since
-    #      turning linear turns on there would buy structural silence at the price of ALL reaction
-    #      between questions. External mode is linear because it supplies no brain at all.
-    # So: do not "add a linear_turns toggle" here — for bank it would be a blunt mute, and for
-    # external the behavior already is linear. Guarded by test_voice_live_proxy.py (bank ⇒ True,
-    # external ⇒ False).
-    is_external = (getattr(persona, "interview_brain", "bank") or "bank") == "external"
+    # Who is linear (see linear_turns_for_persona): EXTERNAL personas always — they are purely the
+    # external workflow's "mouth" and supply no brain. BANK personas follow the admin-set
+    # ``bank_turn_mode`` — "linear" (default since v0.38.2.0) or "model" (the pre-v0.38.2.0
+    # behaviour: the model keeps its turn and ``prompt_fragment`` governs what it says in it).
+    #
+    # History: v0.38.1.1 closed this as "engine decides, no knob" because ``create_response`` is a
+    # SINGLE boolean (the acknowledgment turn and the follow-up turn are the same turn —
+    # "acknowledge but never follow up" is unreachable) and agent mode rejects overriding
+    # ``instructions`` inside
+    # ``response.create``. Both facts still hold; what changed (owner, 2026-09-24) is the preferred
+    # default: in practice the model turn produced a "Thank you." on every pause, so bank sessions
+    # now default to the silent linear contract and the model turn is an explicit opt-in. The
+    # frontend half is `linearTurns` in useInterviewVoice (suppresses the turn-advancing bare
+    # ``response.create``); both halves must agree, since either alone still leaves the model a way
+    # to speak — the page derives it from the same persona field via ``voice_linear_turns``.
+    # Guarded by test_voice_live_proxy.py (bank linear ⇒ False, bank model ⇒ True, external ⇒
+    # False).
+    linear_turns = linear_turns_for_persona(persona, playground=playground)
     session_kwargs: dict[str, Any] = {
         "modalities": modalities,
         "voice": AzureStandardVoice(name=voice_name, type="azure-standard"),
-        # Server VAD drives a fully hands-free turn (AI Foundry portal parity): Azure detects when
-        # the user stops speaking and — for BANK personas — AUTO-generates the agent's reply
-        # (create_response=True); external personas set it False (see above). The user can always
-        # barge in to cut the agent off mid-answer (interrupt_response=True). Set EXPLICITLY rather
-        # than relying on Azure's defaults so behavior can't silently regress.
+        # Server VAD detects when the user stops speaking (AI Foundry portal parity). Whether it
+        # also AUTO-generates the model's reply is the linear-turns decision above (model-turn bank
+        # personas: True; linear bank + all external: False). The user can always barge in to cut
+        # the agent off mid-answer (interrupt_response=True). Set EXPLICITLY rather than relying on
+        # Azure's defaults so behavior can't silently regress.
         "turn_detection": AzureSemanticVad(
             type="azure_semantic_vad",
-            create_response=not is_external,
+            create_response=not linear_turns,
             interrupt_response=True,
         ),
         "input_audio_transcription": AudioInputTranscriptionOptions(
@@ -263,6 +286,7 @@ async def run_proxy(
     api_key: str,
     api_version: str,
     default_model: str,
+    playground: bool = False,
 ) -> None:  # pragma: no cover — live Azure connect + relay, no Azure in CI
     """Hold the Azure Voice Live SDK connection and relay browser <-> Azure.
 
@@ -308,7 +332,7 @@ async def run_proxy(
 
     try:
         async with connect(**connect_kwargs) as conn:
-            session = build_avatar_session(persona, locale=locale)
+            session = build_avatar_session(persona, locale=locale, playground=playground)
             await conn.session.update(session=session)
 
             # Pin the session language BEFORE any response can be generated (see
@@ -343,6 +367,10 @@ async def run_proxy(
                         "avatar_enabled": bool((persona.character or "").strip()),
                         "persona_id": persona.id,
                         "read_directive": read_directive,
+                        # Observability for the live E2E spec / console: the turn contract this
+                        # session was built with (the page derives its own copy from the candidate
+                        # API's ``voice_linear_turns``, not from here).
+                        "linear_turns": linear_turns_for_persona(persona, playground=playground),
                     }
                 )
             )

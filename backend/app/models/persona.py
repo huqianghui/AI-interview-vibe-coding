@@ -132,6 +132,13 @@ def build_read_directive(reader_prompt: str) -> str:
     return reader_prompt + READ_DIRECTIVE_SEPARATOR
 
 
+# Bank-session turn control (see ``InterviewerPersona.bank_turn_mode``): "linear" = the model gets
+# no turn of its own and only reads the backend's questions; "model" = server-VAD opens a model turn
+# on every candidate pause and the prompt governs it. Vendor-neutral tokens, never Azure field
+# names.
+BANK_TURN_MODES = ("linear", "model")
+
+
 class InterviewerPersona(TimestampMixin, Base):
     __tablename__ = "interviewer_personas"
 
@@ -223,6 +230,35 @@ class InterviewerPersona(TimestampMixin, Base):
         else:
             enabled, seconds = self.bank_auto_submit_enabled, self.bank_auto_submit_silence_seconds
         return seconds if enabled else 0
+
+    # Turn control for BANK voice sessions — does the model get a generative turn of its own between
+    # questions? ``"linear"`` (default): no turn at all — the digital human only reads each backend
+    # question verbatim and is silent in between (Azure ``create_response=False`` + the page never
+    # nudges a bare ``response.create``), the same contract EXTERNAL sessions always run.
+    # ``"model"``: the previous behaviour — server-VAD opens a model turn every time the candidate
+    # pauses and ``prompt_fragment`` governs what it says ("Thank you." / "Please go on." / a
+    # follow-up).
+    #
+    # Owner reversal (2026-09-24) of the 2026-09-23 "engine decides, no knob" call (v0.38.1.1): in
+    # practice the model-turn contract said "Thank you." once per PAUSE, not once per answer — the
+    # prompt cannot make a single boolean turn selective — and the owner prefers a silent
+    # interviewer with the reaction available as an explicit opt-in. Bank sessions only: external
+    # sessions are linear by construction (they supply no brain), so the flag is never consulted
+    # for them (see :meth:`linear_turns_for`). Server default mirrors the migration's.
+    bank_turn_mode: Mapped[str] = mapped_column(
+        String(16), default="linear", server_default="linear", nullable=False
+    )
+
+    def linear_turns_for(self, brain_mode: str) -> bool:
+        """Whether a session on ``brain_mode`` runs LINEAR TURNS (the model has no turn of its own).
+
+        External sessions are always linear (no brain of their own); bank sessions follow the
+        admin's :attr:`bank_turn_mode`. Unknown/legacy values fall back to linear (the safe, silent
+        contract) rather than to a chatty model turn.
+        """
+        if brain_mode == "external":
+            return True
+        return (self.bank_turn_mode or "linear") != "model"
 
     # Per-persona agent tools (SPEC F5) — JSON array of tool dicts synced into the Foundry prompt
     # agent's `tools`. Executed by the Foundry runtime, not here; this app only carries the config.

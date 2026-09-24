@@ -386,16 +386,26 @@ export function InterviewPage() {
     if (typeof reported === "number") setAutoSubmitSeconds(reported);
   }, [interview?.voice_auto_submit_seconds]);
 
+  // LINEAR TURNS — does the model get a generative turn of its own between questions? Latched per
+  // session from the start/resume response (`voice_linear_turns`; mutation responses carry null and
+  // must not flip it mid-interview, same latch as `autoSubmitSeconds`). External sessions are always
+  // linear (they supply no brain); bank sessions follow the persona's admin-set `bank_turn_mode`
+  // (default linear — the "Thank you. Thank you." fix). Until reported, fall back to the engine:
+  // `external_phase` is non-null ONLY for external sessions, so it doubles as the flag.
+  const [linearTurnsReported, setLinearTurnsReported] = useState<boolean | null>(null);
+  useEffect(() => {
+    const reported = interview?.voice_linear_turns;
+    if (typeof reported === "boolean") setLinearTurnsReported(reported);
+  }, [interview?.voice_linear_turns]);
+  const linearTurns = linearTurnsReported ?? interview?.external_phase != null;
+
   const voice = useInterviewVoice(interview?.interview_session_id ?? "", {
     locale: i18n.language,
     videoRef: avatarVideoRef,
-    // LINEAR TURNS — on for external-brain sessions only: the external workflow supplies the brain,
-    // so the digital human gets no generative turn of its own and only reads what the backend
-    // injects (commitAnswer skips its bare response.create). Bank sessions keep their turn and let
-    // the PROMPT govern it — an engine decision, not an admin knob (see `linearTurns` in
-    // useInterviewVoice). `external_phase` is non-null ONLY for external sessions, so it doubles as
-    // the flag — read live here; the hook re-syncs options every render.
-    linearTurns: interview?.external_phase != null,
+    // Under linear turns the digital human only reads what the backend hands it (commitAnswer skips
+    // its bare response.create — see `linearTurns` in useInterviewVoice); read live here, the hook
+    // re-syncs options every render.
+    linearTurns,
     // Silence auto-submit (admin-controlled per persona, OFF by default): when the persona enables
     // it, after the candidate stops speaking and stays silent for the configured window the hook
     // auto-submits the buffered answer via the SAME commit-and-advance path the "I'm done" button
@@ -695,11 +705,14 @@ export function InterviewPage() {
   // than let the agent autonomously generate — the backend keeps the question pointer. Keyed on the
   // prompt TEXT, not question_id, so a NEW main question is spoken even if same id.
   //
-  // Follow-ups are DELIBERATELY not verbatim-read: server-VAD (`create_response=True`) has the
-  // agent voice its own clarification the moment the candidate stops speaking, so reading the
-  // backend `build_follow_up_prompt` text on top of it spoke the follow-up twice AND rendered two
-  // identical Interviewer bubbles (each a distinct Azure response_id). The backend follow-up text
-  // stays authoritative for the text channel + CI; in voice the agent owns follow-ups.
+  // Follow-ups are NOT verbatim-read when the model has its own turn: server-VAD
+  // (`create_response=True`) has the agent voice its own clarification the moment the candidate
+  // stops speaking, so reading the backend `build_follow_up_prompt` text on top of it spoke the
+  // follow-up twice AND rendered two identical Interviewer bubbles (each a distinct Azure
+  // response_id). The backend follow-up text stays authoritative for the text channel + CI; in
+  // voice the agent owns follow-ups THERE. Under LINEAR TURNS the agent never speaks on its own, so
+  // the backend follow-up is read verbatim like a main question — otherwise it would show in the
+  // header and never be heard.
   const currentPrompt = interview?.current_question?.prompt ?? "";
   const currentIsFollowUp = interview?.current_question?.is_follow_up ?? false;
   // Phase 2 external-brain derived state. `external_phase` is non-null ONLY for external sessions
@@ -715,8 +728,9 @@ export function InterviewPage() {
   const speakText = isExternal
     ? (interview?.speech_text ?? currentPrompt)
     : currentPrompt;
-  // Follow-ups are agent-owned in voice (see below); external turns are never bank "follow-ups".
-  const suppressVerbatimRead = !isExternal && currentIsFollowUp;
+  // Follow-ups are agent-owned in voice ONLY when the model has its own turn (see above); under
+  // linear turns they are read verbatim. External turns are never bank "follow-ups".
+  const suppressVerbatimRead = !isExternal && currentIsFollowUp && !linearTurns;
   useEffect(() => {
     if (
       phase === "interviewing" && // a prewarmed session must not read Q1 over the orientation screen

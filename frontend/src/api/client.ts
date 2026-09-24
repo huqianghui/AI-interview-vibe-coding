@@ -49,6 +49,14 @@ export interface Interview {
   // voice answer after N seconds of silence. Present on start/resume responses; null/absent on
   // mutation responses ("not reported"), so the page latches it per session.
   voice_auto_submit_seconds?: number | null;
+  // LINEAR TURNS for this session's voice channel (see `linearTurns` in useInterviewVoice): true ⇒
+  // the model gets no generative turn of its own between questions (the digital human only reads
+  // the backend's questions; the page never nudges a bare `response.create`, and reads follow-ups
+  // verbatim too since nobody else will voice them); false ⇒ the model keeps its turn. External
+  // sessions are always true; bank sessions follow the persona's admin-set `bank_turn_mode`.
+  // Present on start/resume responses; null/absent on mutation responses ("not reported"), so the
+  // page latches it per session.
+  voice_linear_turns?: boolean | null;
 }
 
 /** One rubric item's graded result (F4). Present on scored (non-stub) question entries. */

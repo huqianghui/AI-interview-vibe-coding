@@ -73,24 +73,23 @@ export interface UseInterviewVoiceOptions {
   personaId?: string;
   /**
    * LINEAR TURNS — the model gets NO generative turn of its own between questions, so it can only
-   * utter text the backend hands it verbatim. Not an admin knob: the ENGINE decides it.
+   * utter text the backend hands it verbatim. The page derives it from the candidate API's
+   * `voice_linear_turns` (see InterviewPage), which the backend computes from the same persona
+   * field that sets Azure's `create_response` (`voice_live_proxy.py`) — both halves must agree,
+   * since either one alone still leaves the model a way to speak.
    *
-   * true for EXTERNAL-brain sessions (Phase 2), because the external workflow supplies the brain —
-   * the digital human is a pure "mouth" that reads exactly what the backend injects. When true,
-   * `commitAnswer` skips its turn-advancing bare `response.create`: in agent mode a bare
-   * response.create makes the Foundry agent autonomously produce a turn from its generic
-   * instructions (an off-script follow-up the external brain never sees, never scores, and that
-   * desyncs from the question header). Pairs with the backend's `create_response=False`
-   * (`voice_live_proxy.py`) — both halves must agree, since either one alone still leaves the
-   * model a way to speak.
+   * true for EXTERNAL-brain sessions always (Phase 2): the external workflow supplies the brain, the
+   * digital human is a pure "mouth". true for BANK sessions by default since v0.38.2.0
+   * (`bank_turn_mode: "linear"`): the model turn used to say "Thank you." once per PAUSE, not once
+   * per answer — `create_response` is a single boolean, so the acknowledgment turn and the follow-up
+   * turn are the same turn, and agent mode rejects overriding `instructions` per `response.create`
+   * (see the emitSpeak branch below), so it cannot be made selective by prompt. When true,
+   * `commitAnswer` skips its turn-advancing bare `response.create` (in agent mode that makes the
+   * Foundry agent autonomously produce an off-script turn) and the page reads follow-ups verbatim.
    *
-   * false for BANK sessions, deliberately (owner decision 2026-09-23): there the model keeps its
-   * turn and the PROMPT governs what it says in it. It could not be made selective anyway —
-   * Azure's `create_response` is a single boolean, so the turn that produces a "Thank you."
-   * acknowledgment is the same turn that could produce an unwanted follow-up; and agent mode
-   * rejects overriding `instructions` per `response.create` (see the emitSpeak branch below), so a
-   * scoped "acknowledge only, ask nothing" turn is unreachable. Enabling this for bank mode would
-   * buy structural silence at the price of ALL reaction between questions. */
+   * false when an admin opts a bank persona into `bank_turn_mode: "model"`: the model keeps its turn
+   * and the PROMPT governs what it says in it — all reaction between questions, at the price of a
+   * possible reaction per pause. */
   linearTurns?: boolean;
   /**
    * Silence auto-submit window in ms (admin-controlled per persona; the page derives it from the

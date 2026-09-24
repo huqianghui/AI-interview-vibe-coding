@@ -103,3 +103,34 @@ describe("ConfigurationRail — voice silence auto-submit (one pair per engine)"
     expect(onChange).not.toHaveBeenCalled();
   });
 });
+
+describe("ConfigurationRail — bank turn mode (linear vs the model's own turn)", () => {
+  it("bank persona: shows the turn-mode control with linear selected by default", () => {
+    renderRail();
+    expect(screen.getByTestId("config-turn-mode")).toBeInTheDocument();
+    const linear = screen.getByRole("radio", { name: /linear turns/i });
+    const model = screen.getByRole("radio", { name: /model has its own turn/i });
+    expect(linear).toBeChecked();
+    expect(model).not.toBeChecked();
+    expect(screen.getByText(/stays silent while the candidate answers/i)).toBeInTheDocument();
+  });
+
+  it("bank persona: choosing the model turn patches ONLY bank_turn_mode", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderRail();
+    await user.click(screen.getByRole("radio", { name: /model has its own turn/i }));
+    expect(onChange).toHaveBeenCalledWith({ bank_turn_mode: "model" });
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("bank persona in model mode: the hint warns it reacts once per pause", () => {
+    renderRail({ bank_turn_mode: "model" });
+    expect(screen.getByRole("radio", { name: /model has its own turn/i })).toBeChecked();
+    expect(screen.getByText(/once per pause, not once per answer/i)).toBeInTheDocument();
+  });
+
+  it("external persona: the bank-only control is hidden (external is linear by construction)", () => {
+    renderRail({ interviewBrain: "external", bank_turn_mode: "model" });
+    expect(screen.queryByTestId("config-turn-mode")).not.toBeInTheDocument();
+  });
+});

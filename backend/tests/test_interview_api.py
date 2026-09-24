@@ -772,3 +772,75 @@ async def test_external_voice_auto_submit_follows_the_session_engine_snapshot(cl
     iv = body["interview_session_id"]
     got = (await client.get(f"/candidate/interview/{iv}", headers=headers)).json()
     assert got["voice_auto_submit_seconds"] == 0  # still the external session → still off
+
+
+# --- voice_linear_turns (bank_turn_mode: does the model get a turn of its own between questions) --
+
+
+@pytest.mark.asyncio
+async def test_start_bank_voice_linear_turns_true_by_default(client, db_session):
+    from app.services import persona_service as psvc
+
+    # A bank persona that never touched the knob runs LINEAR TURNS: the page must never nudge a bare
+    # response.create, so the digital human only reads the questions (no "Thank you." per pause).
+    await psvc.create_persona(db_session, name="Interviewer", is_default=True)
+    headers = await _new_candidate_headers(client)
+    body = (await client.post("/candidate/interview/start", headers=headers)).json()
+    assert body["voice_linear_turns"] is True
+    # Reported on both entry points; a mutation response leaves it null (not reported) so the UI's
+    # per-session latch is never flipped mid-interview — same contract as voice_auto_submit_seconds.
+    iv = body["interview_session_id"]
+    got = (await client.get(f"/candidate/interview/{iv}", headers=headers)).json()
+    assert got["voice_linear_turns"] is True
+    answered = (
+        await client.post(
+            f"/candidate/interview/{iv}/answer",
+            headers=headers,
+            json={"text": "an answer", "source": "voice"},
+        )
+    ).json()
+    assert answered["voice_linear_turns"] is None
+    ended = (await client.post(f"/candidate/interview/{iv}/end", headers=headers)).json()
+    assert ended["voice_linear_turns"] is None
+
+
+@pytest.mark.asyncio
+async def test_start_bank_voice_linear_turns_false_when_admin_opts_into_model_turn(
+    client, db_session
+):
+    from app.services import persona_service as psvc
+
+    await psvc.create_persona(
+        db_session, name="Interviewer", is_default=True, bank_turn_mode="model"
+    )
+    headers = await _new_candidate_headers(client)
+    body = (await client.post("/candidate/interview/start", headers=headers)).json()
+    assert body["voice_linear_turns"] is False
+
+
+@pytest.mark.asyncio
+async def test_external_voice_linear_turns_always_true_regardless_of_bank_mode(client, db_session):
+    from app.services import persona_service as psvc
+
+    # External sessions supply no brain of their own and are linear by construction; the bank-only
+    # knob is never consulted for them.
+    await psvc.create_persona(
+        db_session,
+        name="Interviewer",
+        is_default=True,
+        interview_brain="external",
+        bank_turn_mode="model",
+    )
+    headers = await _new_candidate_headers(client)
+    body = (await client.post("/candidate/interview/start", headers=headers)).json()
+    assert body["external_phase"] is not None
+    assert body["voice_linear_turns"] is True
+
+
+@pytest.mark.asyncio
+async def test_start_voice_linear_turns_without_persona_follows_the_engine(client):
+    headers = await _new_candidate_headers(client)
+    body = (await client.post("/candidate/interview/start", headers=headers)).json()
+    # No persona ⇒ a bank session with nothing to consult ⇒ not linear (the engine alone decides),
+    # never null on an entry point.
+    assert body["voice_linear_turns"] is False

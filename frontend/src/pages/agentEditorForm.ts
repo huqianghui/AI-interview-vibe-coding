@@ -6,8 +6,10 @@
  * at the edges (load: PersonaOut → form; save: form → PersonaCreate/PersonaUpdate).
  */
 import {
+  BANK_TURN_MODES,
   parseLocaleMap,
   stringifyLocaleMap,
+  type BankTurnMode,
   type PersonaCreate,
   type PersonaOut,
 } from "../api/personas";
@@ -55,6 +57,9 @@ export interface PersonaFormState {
   bank_auto_submit_silence_seconds: number;
   external_auto_submit_enabled: boolean;
   external_auto_submit_silence_seconds: number;
+  // Bank-session turn contract ("linear" default / "model"). Bank-only: the rail shows it for the
+  // bank engine and it persists untouched while the persona runs external.
+  bank_turn_mode: BankTurnMode;
   model: string; // per-persona Foundry model deployment ("" → global default)
   interviewBrain: string; // "bank" (built-in question bank) | "external" (external interview API)
   tools: ToolConfig[];
@@ -85,10 +90,18 @@ export function emptyPersonaForm(): PersonaFormState {
     bank_auto_submit_silence_seconds: 3,
     external_auto_submit_enabled: true,
     external_auto_submit_silence_seconds: 3,
+    bank_turn_mode: "linear",
     model: "",
     interviewBrain: "bank",
     tools: [],
   };
+}
+
+/** Coerce a stored turn mode to a known BankTurnMode; unknown/missing (older backend) ⇒ linear. */
+export function normalizeBankTurnMode(value: string | null | undefined): BankTurnMode {
+  return (BANK_TURN_MODES as readonly string[]).includes(value ?? "")
+    ? (value as BankTurnMode)
+    : "linear";
 }
 
 /** Load a persona into editable form state (parses the two JSON-string maps). */
@@ -116,6 +129,7 @@ export function personaToForm(p: PersonaOut): PersonaFormState {
     bank_auto_submit_silence_seconds: p.bank_auto_submit_silence_seconds ?? 3,
     external_auto_submit_enabled: p.external_auto_submit_enabled ?? true,
     external_auto_submit_silence_seconds: p.external_auto_submit_silence_seconds ?? 3,
+    bank_turn_mode: normalizeBankTurnMode(p.bank_turn_mode),
     model: p.model ?? "",
     interviewBrain: p.interview_brain ?? "bank",
     tools: parseToolsConfig(p.tools_config),
@@ -147,6 +161,7 @@ export function formToPayload(form: PersonaFormState): PersonaCreate {
     bank_auto_submit_silence_seconds: form.bank_auto_submit_silence_seconds,
     external_auto_submit_enabled: form.external_auto_submit_enabled,
     external_auto_submit_silence_seconds: form.external_auto_submit_silence_seconds,
+    bank_turn_mode: form.bank_turn_mode,
     model: form.model,
     interview_brain: form.interviewBrain,
     tools_config: stringifyToolsConfig(form.tools),

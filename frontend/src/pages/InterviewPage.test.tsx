@@ -604,6 +604,70 @@ describe("InterviewPage", () => {
     expect(spoken).toEqual(["Main question?"]);
   });
 
+  it("linear-turns bank session: verbatim-reads the follow-up too and tells the hook linearTurns", async () => {
+    // Under `voice_linear_turns: true` (bank_turn_mode "linear", the default since v0.38.2.0) the
+    // agent never speaks on its own, so a backend follow-up would show in the header but never be
+    // heard unless the page reads it — and commitAnswer must know to skip its bare response.create.
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "in_progress",
+      current_question: { question_id: "q1", prompt: "Main question?", index: 0, total: 2 },
+      voice_linear_turns: true,
+    });
+    // The mutation response leaves it null ("not reported") — the latch must keep linear turns on.
+    vi.spyOn(client, "submitAnswer").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "in_progress",
+      current_question: {
+        question_id: "q1",
+        prompt: "You mentioned X — can you clarify?",
+        index: 0,
+        total: 2,
+        is_follow_up: true,
+      },
+      voice_linear_turns: null,
+    });
+    const spoken: string[] = [];
+    const voiceMock = {
+      connect: () => Promise.resolve(),
+      disconnect: () => Promise.resolve(),
+      toggleMute: () => undefined,
+      setMuted: () => undefined,
+      commitAnswer: () => Promise.resolve("my main answer, long enough"),
+      speakQuestion: (text: string) => {
+        spoken.push(text);
+        return true;
+      },
+      isMuted: false,
+      connectionState: "connected" as const,
+      audioState: "idle" as const,
+      isAvatarConnected: false,
+    };
+    const voiceModule = await import("../hooks/useInterviewVoice");
+    const hookSpy = vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(voiceMock);
+    const lastLinear = () => hookSpy.mock.calls.at(-1)?.[1]?.linearTurns;
+
+    renderPage();
+    // Before any interview exists: a bank session with nothing reported ⇒ not linear.
+    expect(lastLinear()).toBe(false);
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+    await screen.findByText("Main question?");
+    await waitFor(() => expect(lastLinear()).toBe(true));
+
+    await user.click(screen.getByRole("button", { name: /answer by voice/i }));
+    await waitFor(() => expect(spoken).toContain("Main question?"));
+
+    await user.click(await screen.findByRole("button", { name: /i'm done answering/i }));
+    await screen.findByText("You mentioned X — can you clarify?");
+    // The follow-up IS read verbatim here (nobody else will voice it) and the latch held.
+    await waitFor(() => expect(spoken).toContain("You mentioned X — can you clarify?"));
+    expect(spoken).toEqual(["Main question?", "You mentioned X — can you clarify?"]);
+    expect(lastLinear()).toBe(true);
+  });
+
   it("resumes an in-progress interview on mount (edge b)", async () => {
     await i18n.changeLanguage("en-US");
     vi.spyOn(client, "resumeInterview").mockResolvedValue({
