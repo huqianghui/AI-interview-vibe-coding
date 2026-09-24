@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.39.2.1 (2026-09-24)
+
+### Fixed
+- **Digital human is no longer cropped on the interview page, and sits flush on the stage.** Photo
+  avatars (the `vasa-1` characters such as amira / adrian) stream a 512×512 square, but the
+  interview stage fitted every stream with `object-fit: cover` (tuned for 16:9 video avatars), which
+  on a wider-than-square stage scaled by width and cut the shoulders (and chin) off the bottom,
+  while the persona editor's photo preview showed the full head-and-shoulders framing. The fit now
+  follows the stream's own aspect ratio: 16:9 video avatars keep filling the stage, square/portrait
+  photo avatars show the whole frame. The photo avatar's own light-grey backdrop no longer floats as
+  a box inside the dark stage: Azure is asked to paint the avatar background in the stage colour and
+  the stage is that same flat colour, so the frame edge disappears (interview sessions only; the
+  editor Playground keeps its light stage). Verified live: the stream reports 512×512 and renders
+  on the navy background.
+
 ## 0.39.2.0 (2026-09-24)
 
 ### Fixed
