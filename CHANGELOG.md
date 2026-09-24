@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.39.2.0 (2026-09-24)
+
+### Fixed
+- **Linear turn mode: "I'm done" now always moves to the next question.** A linear bank session
+  whose current question allowed follow-ups (`max_follow_ups > 0`) still received the authored
+  template follow-up ("You mentioned "…" — Can you walk me through that in a bit more detail?") at
+  submit, so the candidate saw a probe instead of question 2 — contradicting the editor's own
+  "Linear turns — read the question, then stay silent — no follow-ups" promise. `answer_finalized`
+  now advances unconditionally unless a `FollowUpProvider` is explicitly passed, and no route passes
+  one any more (the judged branch already advanced). The per-question **Max follow-ups** is therefore
+  judged-only: it budgets how many pre-submit follow-ups / redirects the judge may write for that
+  question. Editor hint text (en/zh) and SPEC F6/F7 updated to match; the F7 citing helper
+  (`build_follow_up_prompt`) stays as a pure, unit-tested helper behind the retained hook.
+
 ## 0.39.1.0 (2026-09-24)
 
 ### Changed
