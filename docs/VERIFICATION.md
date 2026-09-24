@@ -65,10 +65,11 @@ providers, known admin token) on :8100 and the vite dev server on :5273, then dr
 | Voice, no mic | F9 AC#4 | voice with no microphone surfaces the permission / unavailable notice — never hangs. |
 | Voice Live agent-mode (real Azure) | F9/F5 | opt-in only: skipped unless `LIVE_VOICE=1` is set, since it drives the real Foundry Voice Live agent over WebRTC. |
 
-> **Known gap (v0.39.2.0):** `frontend/e2e/candidate-interview.spec.ts` still hard-asserts the
-> retired quoting follow-up (`expect(sawFollowUpCitation).toBe(true)`, keyed on `/You mentioned|你刚才提到/`
-> in the page text) and will fail once this runs in CI, since that mechanic no longer exists in any
-> turn mode. Not yet updated on this branch — tracked as a follow-up fix to the spec file itself.
+> **v0.39.2.0:** `frontend/e2e/candidate-interview.spec.ts` now asserts the opposite of the retired
+> mechanic — its single follow-up-eligible question (`max_follow_ups: 1`) is answered with exactly ONE
+> submit and no quoting follow-up (`/You mentioned|你刚才提到/`) ever appears. The opt-in
+> `readme-screenshots.spec.ts` capture of `03-follow-up-memory.png` can no longer fire (screenshot
+> pending regeneration).
 
 **If all of Layer 1 passes, every one of the 9 features + both admin editors is verified against
 its acceptance criteria on mocks.** See the SPEC↔feature map in `IMPLEMENTATION-STATUS.md`.
