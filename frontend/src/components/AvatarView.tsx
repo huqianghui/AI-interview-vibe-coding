@@ -25,6 +25,7 @@ import { forwardRef, useCallback, useEffect, useRef, useState } from "react";
 import { makeStyles, mergeClasses, Text } from "@fluentui/react-components";
 import { useTranslation } from "react-i18next";
 import { AudioOrb } from "./AudioOrb";
+import { fitFor } from "./avatarFit";
 import type { AudioState } from "../types/voice";
 
 /** Single-slot portrait cache. This deployment runs ONE default interviewer persona, so the slot
@@ -53,15 +54,20 @@ const useStyles = makeStyles({
     inset: "0",
     width: "100%",
     height: "100%",
-    // `cover` (not `contain`): fill the full stage so a 16:9 stream uses the whole (taller) panel
-    // instead of leaving dark letterbox bands above/below the figure. The avatar frame is a
-    // centered person on wide white margins, so `cover` crops those side margins — never the
-    // figure. Anchored to the top so the head is the last thing sacrificed if the crop is tight.
-    objectFit: "cover",
-    objectPosition: "center top",
+    // The fit is chosen PER STREAM (see `fitFor`): `fitCover` for 16:9 video avatars, `fitContain`
+    // for square/portrait photo avatars. Default (before metadata) is contain — never crop blind.
     borderRadius: "12px",
     transition: "opacity 300ms ease",
   },
+  // 16:9 VIDEO avatars (lisa, …): fill the stage; the frame is a centred person on wide white
+  // margins, so `cover` crops those margins, never the figure — anchored top so the head is the
+  // last thing sacrificed.
+  fitCover: { objectFit: "cover", objectPosition: "center top" },
+  // Square / portrait PHOTO avatars (vasa-1: amira, adrian, …) stream 512×512 (live-verified). On
+  // the interview page's wider-than-square stage `cover` scaled by width and cut the shoulders and
+  // chin off the bottom (issue1, 2026-09-24), so these keep the WHOLE frame — the same head-and-
+  // shoulders framing the editor's photo preview shows.
+  fitContain: { objectFit: "contain", objectPosition: "center center" },
   hidden: { opacity: 0, zIndex: 0, pointerEvents: "none" },
   shown: { opacity: 1, zIndex: 10 },
   // The still portrait sits UNDER the video layer (z-index 5 < shown 10) so the live stream fades
@@ -71,8 +77,6 @@ const useStyles = makeStyles({
     inset: "0",
     width: "100%",
     height: "100%",
-    objectFit: "cover",
-    objectPosition: "center top",
     borderRadius: "12px",
     zIndex: 5,
     // Slightly dimmed so "not live yet" is perceptible without hiding the person.
@@ -132,6 +136,22 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
   const { t } = useTranslation();
   const [portrait, setPortrait] = useState<string | null>(readCachedPortrait);
   const innerRef = useRef<HTMLVideoElement | null>(null);
+  // Per-stream fit, read from the element's intrinsic size (the voice hook assigns the element's
+  // own on* handlers, so listen with addEventListener to coexist). Contain until metadata arrives.
+  const [videoFit, setVideoFit] = useState<"cover" | "contain">("contain");
+  const [portraitFit, setPortraitFit] = useState<"cover" | "contain">("contain");
+  useEffect(() => {
+    const video = innerRef.current;
+    if (!video) return;
+    const reflect = () => setVideoFit(fitFor(video.videoWidth, video.videoHeight));
+    reflect();
+    video.addEventListener("loadedmetadata", reflect);
+    video.addEventListener("resize", reflect);
+    return () => {
+      video.removeEventListener("loadedmetadata", reflect);
+      video.removeEventListener("resize", reflect);
+    };
+  }, []);
 
   // Merge the forwarded ref (the voice hook's stream target) with a local one (frame capture).
   const setVideoRef = useCallback(
@@ -177,7 +197,12 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
         autoPlay
         playsInline
         muted
-        className={mergeClasses(styles.video, isAvatarConnected ? styles.shown : styles.hidden)}
+        className={mergeClasses(
+          styles.video,
+          videoFit === "cover" ? styles.fitCover : styles.fitContain,
+          isAvatarConnected ? styles.shown : styles.hidden,
+        )}
+        data-fit={videoFit}
         data-testid="avatar-video"
       />
       {showPortrait && (
@@ -185,7 +210,12 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
           <img
             src={portrait}
             alt=""
-            className={styles.portrait}
+            className={mergeClasses(
+              styles.portrait,
+              portraitFit === "cover" ? styles.fitCover : styles.fitContain,
+            )}
+            onLoad={(e) => setPortraitFit(fitFor(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight))}
+            data-fit={portraitFit}
             data-testid="avatar-portrait"
           />
           <div className={styles.connectingHint} data-testid="avatar-connecting-hint">

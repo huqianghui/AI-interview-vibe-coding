@@ -1,10 +1,11 @@
 /** AvatarView (SPEC F5/F9): shows the avatar video when connected, the audio orb otherwise. */
 import { createRef } from "react";
 import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import "../i18n";
 import { AVATAR_PORTRAIT_STORAGE_KEY, AvatarView } from "./AvatarView";
+import { fitFor } from "./avatarFit";
 
 function renderView(isAvatarConnected: boolean) {
   const ref = createRef<HTMLVideoElement>();
@@ -23,6 +24,32 @@ describe("AvatarView", () => {
     // The video element is always present (so ontrack can attach a stream at any time).
     expect(screen.getByTestId("avatar-video")).toBeInTheDocument();
     expect(screen.getByTestId("avatar-view")).toHaveAttribute("data-avatar-connected", "false");
+  });
+
+  it("fits the stream by its own aspect: square photo avatars contain, 16:9 video avatars cover", () => {
+    // issue1 (2026-09-24): photo avatars (vasa-1) stream 512×512; with `cover` on the interview
+    // page's wider-than-square stage the shoulders were cut off. Video avatars stream 16:9 and
+    // still fill the stage. Unknown size (no metadata yet) never crops.
+    expect(fitFor(512, 512)).toBe("contain");
+    expect(fitFor(1080, 1920)).toBe("contain");
+    expect(fitFor(1920, 1080)).toBe("cover");
+    expect(fitFor(0, 0)).toBe("contain");
+    localStorage.setItem(AVATAR_PORTRAIT_STORAGE_KEY, "data:image/jpeg;base64,AAAA");
+    const ref = renderView(false);
+    // Before metadata: contain (never crop blind), on both the live video and the cached still.
+    expect(getComputedStyle(screen.getByTestId("avatar-video")).objectFit).toBe("contain");
+    expect(getComputedStyle(screen.getByTestId("avatar-portrait")).objectFit).toBe("contain");
+    // A 16:9 stream arrives → the video switches to cover.
+    Object.defineProperty(ref.current!, "videoWidth", { value: 1920, configurable: true });
+    Object.defineProperty(ref.current!, "videoHeight", { value: 1080, configurable: true });
+    act(() => ref.current!.dispatchEvent(new Event("loadedmetadata")));
+    expect(getComputedStyle(screen.getByTestId("avatar-video")).objectFit).toBe("cover");
+    // A square stream (photo avatar) → back to contain.
+    Object.defineProperty(ref.current!, "videoWidth", { value: 512, configurable: true });
+    Object.defineProperty(ref.current!, "videoHeight", { value: 512, configurable: true });
+    act(() => ref.current!.dispatchEvent(new Event("resize")));
+    expect(getComputedStyle(screen.getByTestId("avatar-video")).objectFit).toBe("contain");
+    localStorage.removeItem(AVATAR_PORTRAIT_STORAGE_KEY);
   });
 
   it("keeps the <video> muted so autoplay from ontrack is allowed (avatar audio is separate)", () => {

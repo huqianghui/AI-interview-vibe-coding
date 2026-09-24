@@ -30,6 +30,7 @@ import pytest
 # design — so skip cleanly there rather than error, mirroring test_foundry_client's importorskip.
 pytest.importorskip("azure.ai.voicelive.models")
 
+from app.services.agents.voice_live_metadata import INTERVIEW_STAGE_BACKGROUND_RGBA  # noqa: E402
 from app.services.voice_live_proxy import build_avatar_session  # noqa: E402
 
 
@@ -250,3 +251,16 @@ def test_legacy_persona_without_eou_field_defaults_to_eou_on():
         interview_brain: str = "bank"
 
     assert _td(Legacy())["type"] == "azure_semantic_vad_multilingual"
+
+
+def test_avatar_session_interview_paints_stage_background_but_playground_does_not():
+    # issue1 follow-up (2026-09-24): photo avatars stream a 512x512 square with their own light
+    # backdrop, which floated as a grey box inside the dark interview stage. Interview sessions
+    # ask Azure to paint the backdrop in the stage colour (live-verified on amira); the editor
+    # Playground keeps the natural backdrop on its light stage.
+    persona = FakePersona(character="amira", style="")
+    interview = _as_dict(build_avatar_session(persona, locale="en-US")["avatar"])
+    assert _as_dict(interview["video"])["background"] == {"color": INTERVIEW_STAGE_BACKGROUND_RGBA}
+    playground = _as_dict(build_avatar_session(persona, locale="en-US", playground=True)["avatar"])
+    assert "background" not in _as_dict(playground["video"])
+    assert _as_dict(playground["video"])["codec"] == "h264"

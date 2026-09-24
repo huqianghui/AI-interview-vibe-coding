@@ -32,7 +32,11 @@ from app.models.persona import (
     build_read_directive,
     default_external_reader_prompt,
 )
-from app.services.agents.voice_live_metadata import build_avatar_config, resolve_voice
+from app.services.agents.voice_live_metadata import (
+    INTERVIEW_STAGE_BACKGROUND_RGBA,
+    build_avatar_config,
+    resolve_voice,
+)
 from app.services.azure_auth import COGNITIVE_SERVICES_SCOPE, get_azure_credential_cached
 
 logger = logging.getLogger(__name__)
@@ -312,7 +316,19 @@ def build_avatar_session(
         # documented azure-core Model pattern, not a hack; don't "fix" it into kwargs.
         session_kwargs["avatar"] = AvatarConfig(
             build_avatar_config(
-                persona.character, persona.style, video=dict(VideoParams(codec="h264"))
+                persona.character,
+                persona.style,
+                # Interview sessions: Azure paints the avatar's background in the stage colour so
+                # the frame edge is invisible on the page (issue1 follow-up, 2026-09-24). The editor
+                # Playground keeps the avatar's natural backdrop on its light stage.
+                video={
+                    **dict(VideoParams(codec="h264")),
+                    **(
+                        {}
+                        if playground
+                        else {"background": {"color": INTERVIEW_STAGE_BACKGROUND_RGBA}}
+                    ),
+                },
             )
         )
 
