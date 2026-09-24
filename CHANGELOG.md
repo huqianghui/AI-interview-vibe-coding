@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.39.1.0 (2026-09-24)
+
+### Changed
+- **Judge: reasoning off, shorter output, and the LLM round-trip now overlaps the silence window
+  (owner decisions D17).** Live measurement showed the judge's ~2–3 s is the fixed cost of one gpt-5-mini
+  round-trip regardless of prompt size (a 61-character prompt takes as long as the full one; network is
+  ~250 ms), so: the Foundry adapter's `fast` mode now turns reasoning OFF (`reasoning.effort=minimal`),
+  keeps `verbosity=low`, and caps `max_output_tokens` at 320; the contract asks for one sentence of at
+  most 15 words / 30 Chinese characters; `speech_text` is capped at 120 characters; timeout 10 s (the
+  prefetch below means it no longer sets the perceived delay). Non-reasoning models (gpt-4.1-mini,
+  gpt-4o-mini) receive no reasoning knobs — live-verified no 400.
+- **Judge contract rewritten as a step-by-step procedure (needed once reasoning is off).** Without
+  reasoning the model called a pause "still speaking" and stretched an unrelated sentence to cover a
+  missing required item (live: the incomplete answer got `wait` every time). The contract now makes it
+  (1) quote the candidate's own words for EVERY required rubric item (≤ 8 words; no quote = missing),
+  (2) apply rules in a fixed order — off-topic → redirect, mid-sentence → nudge, complete sentence with a
+  missing required item → follow_up, else wait — and (3) phrase a follow-up as an open question ("who
+  else", "what happens next") that never names the rubric's person/document/action. Live: the
+  incomplete case now yields a follow-up 5/5 on the seeded persona prompt.
+- **Speculative prefetch.** The page asks the judge the moment an utterance ends (`POST /judge` with
+  `dry_run: true` — decide, write nothing) and, only if the pause lasts the configured window, calls the
+  new `POST /judge/apply` (writes the follow-up turn / delivers the nudge). Perceived delay drops from
+  ≈ 2 s silence + 2–3 s LLM to ≈ 1 s. A candidate who keeps talking invalidates the prefetch (its draft
+  no longer matches) and the timer falls back to a one-step call. Text channel stays one-step.
+- **Budget semantics.** `judge_max_calls_per_question` now counts DELIVERED verdicts (`judge_events.applied`);
+  `wait` never consumes it; raw LLM calls per question are bounded at 3× the budget so discarded
+  prefetches cannot run away. Migration `a3b4c5d6e7f8` adds `judge_events.applied` (existing rows → applied).
+- Eval on the real model with reasoning off: 12/12 (off-topic answers — with or without a rubric — are
+  now usually steered back via a "please continue" nudge rather than a `redirect`; accepted as the same steer;
+  one leak-guard silence and Azure's jailbreak filter count as correct silence). gpt-4.1-mini and
+  gpt-4o-mini confirmed error-free on the fast parameters.
+
 ## 0.39.0.0 (2026-09-24)
 
 ### Added

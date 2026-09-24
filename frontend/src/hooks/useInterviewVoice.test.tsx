@@ -681,6 +681,33 @@ describe("useInterviewVoice commitAnswer", () => {
     vi.unstubAllGlobals();
   });
 
+  it("fires onUtteranceComplete immediately at end of utterance (judge prefetch, D17)", async () => {
+    vi.useFakeTimers();
+    const onUtteranceComplete = vi.fn();
+    const onSilenceJudge = vi.fn();
+    const { ws, unmount } = await connectHook({
+      linearTurns: true,
+      judgeSilenceMs: 2_000,
+      onSilenceJudge,
+      onUtteranceComplete,
+    });
+    await act(async () => {
+      ws().receive({
+        type: "conversation.item.input_audio_transcription.completed",
+        transcript: "so the first thing",
+      });
+    });
+    expect(onUtteranceComplete).toHaveBeenCalledTimes(1); // right away, before the window
+    expect(onSilenceJudge).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_100);
+    });
+    expect(onSilenceJudge).toHaveBeenCalledTimes(1);
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
   it("new speech and a commit both clear the judge window", async () => {
     vi.useFakeTimers();
     const onSilenceJudge = vi.fn();

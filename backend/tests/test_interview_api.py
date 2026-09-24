@@ -1100,7 +1100,12 @@ async def test_judge_nudge_returns_text_writes_event_and_no_turn(
     )
     assert r.status_code == 200
     out = r.json()
-    assert out == {"verdict": "nudge", "speech_text": "Please go on.", "interview": None}
+    assert (out["verdict"], out["speech_text"], out["interview"]) == (
+        "nudge",
+        "Please go on.",
+        None,
+    )
+    assert out["event_id"]
     ev = await _events(db_session, iv)
     assert [(e.verdict, e.trigger, e.question_id) for e in ev] == [("nudge", "voice_silence", qid)]
     assert ev[0].latency_ms >= 0 and ev[0].model == "scripted"
@@ -1169,7 +1174,12 @@ async def test_judge_cheap_exits_make_no_llm_call_and_no_event(client, db_sessio
         r = (
             await client.post(f"/candidate/interview/{iv}/judge", headers=headers, json=body)
         ).json()
-        assert r == {"verdict": "wait", "speech_text": "", "interview": None}
+        assert (r["verdict"], r["speech_text"], r["interview"], r["event_id"]) == (
+            "wait",
+            "",
+            None,
+            None,
+        )
     assert scripted_judge.prompts == [] and await _events(db_session, iv) == []
     # unknown trigger → 422; another candidate → 404
     assert (
@@ -1186,15 +1196,131 @@ async def test_judge_cheap_exits_make_no_llm_call_and_no_event(client, db_sessio
 
 
 @pytest.mark.asyncio
-async def test_judge_budget_caps_llm_calls_per_question(client, db_session, scripted_judge):
+async def test_judge_budget_counts_delivered_verdicts_and_bounds_raw_llm_calls(
+    client, db_session, scripted_judge
+):
+    # Budget = DELIVERED verdicts per question (wait never consumes it); raw LLM calls are bounded at  # noqa: E501
+    # 3× the budget so a chatty answer's discarded prefetches can't run away (D17).
     headers, iv, qid = await _judged_setup(client, db_session, max_calls=2)
-    scripted_judge.responses.extend(['{"verdict": "wait", "speech_text": "", "reason": "r"}'] * 5)
-    for _ in range(4):
+    scripted_judge.responses.extend(['{"verdict": "wait", "speech_text": "", "reason": "r"}'] * 10)
+    for _ in range(8):
         await client.post(
             f"/candidate/interview/{iv}/judge", headers=headers, json=_judge_body(qid)
         )
+    assert len(scripted_judge.prompts) == 6  # 2 × 3 raw-call bound
+    scripted_judge.prompts.clear()
+    # Delivered verdicts: two nudges spend the budget; the third pause is silent with no LLM call.
+    headers2, iv2, qid2 = await _judged_setup(client, db_session, max_calls=2)
+    scripted_judge.responses.clear()
+    scripted_judge.responses.extend(['{"verdict": "nudge", "speech_text": "Go on."}'] * 3)
+    verdicts = []
+    for _ in range(3):
+        r = (
+            await client.post(
+                f"/candidate/interview/{iv2}/judge", headers=headers2, json=_judge_body(qid2)
+            )
+        ).json()
+        verdicts.append(r["verdict"])
+    assert verdicts == ["nudge", "nudge", "wait"]
     assert len(scripted_judge.prompts) == 2
-    assert len(await _events(db_session, iv)) == 2
+
+
+@pytest.mark.asyncio
+async def test_judge_dry_run_then_apply_writes_the_follow_up_only_on_apply(
+    client, db_session, scripted_judge
+):
+    headers, iv, qid = await _judged_setup(client, db_session, max_calls=2)
+    scripted_judge.responses.append(
+        '{"verdict": "follow_up", "speech_text": "Who do you notify?", "reason": "req missing"}'
+    )
+    dry = (
+        await client.post(
+            f"/candidate/interview/{iv}/judge",
+            headers=headers,
+            json={**_judge_body(qid), "dry_run": True},
+        )
+    ).json()
+    assert dry["verdict"] == "follow_up" and dry["interview"] is None and dry["event_id"]
+    # Nothing written yet: header unchanged, event not applied, budget untouched.
+    got = (await client.get(f"/candidate/interview/{iv}", headers=headers)).json()
+    assert got["current_question"]["is_follow_up"] is False
+    ev = await _events(db_session, iv)
+    assert [(e.verdict, e.applied) for e in ev] == [("follow_up", False)]
+    # The pause lasted → apply: the turn is written, the header switches, the event is applied.
+    applied = (
+        await client.post(
+            f"/candidate/interview/{iv}/judge/apply",
+            headers=headers,
+            json={"event_id": dry["event_id"], "question_id": qid, "follow_ups_asked": 0},
+        )
+    ).json()
+    assert applied["verdict"] == "follow_up"
+    assert applied["interview"]["current_question"]["prompt"] == "Who do you notify?"
+    assert applied["interview"]["current_question"]["is_follow_up"] is True
+    await db_session.refresh(ev[0])
+    assert ev[0].applied is True
+    # Idempotent + stale-safe: applying again, or with the old follow-up count, is a silent wait.
+    for body in (
+        {"event_id": dry["event_id"], "question_id": qid, "follow_ups_asked": 1},
+        {"event_id": dry["event_id"], "question_id": qid, "follow_ups_asked": 0},
+        {"event_id": "nope", "question_id": qid, "follow_ups_asked": 1},
+    ):
+        again = (
+            await client.post(f"/candidate/interview/{iv}/judge/apply", headers=headers, json=body)
+        ).json()
+        assert again["verdict"] == "wait"
+    assert len(await _events(db_session, iv)) == 1
+
+
+@pytest.mark.asyncio
+async def test_judge_dry_run_nudge_and_wait_apply_semantics(client, db_session, scripted_judge):
+    headers, iv, qid = await _judged_setup(client, db_session, max_calls=1)
+    scripted_judge.responses.extend(
+        [
+            '{"verdict": "wait", "speech_text": ""}',
+            '{"verdict": "nudge", "speech_text": "Please go on."}',
+        ]
+    )
+    dry = {**_judge_body(qid), "dry_run": True}
+    w = (await client.post(f"/candidate/interview/{iv}/judge", headers=headers, json=dry)).json()
+    # A wait can be "applied" — it stays silent and never consumes budget.
+    r = (
+        await client.post(
+            f"/candidate/interview/{iv}/judge/apply",
+            headers=headers,
+            json={"event_id": w["event_id"], "question_id": qid, "follow_ups_asked": 0},
+        )
+    ).json()
+    assert r["verdict"] == "wait"
+    n = (await client.post(f"/candidate/interview/{iv}/judge", headers=headers, json=dry)).json()
+    assert n["verdict"] == "nudge"
+    r = (
+        await client.post(
+            f"/candidate/interview/{iv}/judge/apply",
+            headers=headers,
+            json={"event_id": n["event_id"], "question_id": qid, "follow_ups_asked": 0},
+        )
+    ).json()
+    assert r["verdict"] == "nudge" and r["speech_text"] == "Please go on."
+    assert r["interview"] is None
+    ev = await _events(db_session, iv)
+    assert sorted((e.verdict, e.applied) for e in ev) == [("nudge", True), ("wait", False)]
+    # Budget (1) is now spent: another dry run is a wait without an LLM call.
+    before = len(scripted_judge.prompts)
+    scripted_judge.responses.append('{"verdict": "nudge", "speech_text": "x"}')
+    again = (
+        await client.post(f"/candidate/interview/{iv}/judge", headers=headers, json=dry)
+    ).json()
+    assert again["verdict"] == "wait" and len(scripted_judge.prompts) == before
+    # Other candidates cannot apply this session's events.
+    other = await _new_candidate_headers(client)
+    assert (
+        await client.post(
+            f"/candidate/interview/{iv}/judge/apply",
+            headers=other,
+            json={"event_id": n["event_id"], "question_id": qid, "follow_ups_asked": 0},
+        )
+    ).status_code == 404
 
 
 @pytest.mark.asyncio
@@ -1306,3 +1432,66 @@ async def test_judge_concurrent_call_is_409(client, db_session, scripted_judge):
         client.post(f"/candidate/interview/{iv}/judge", headers=headers, json=_judge_body(qid)),
     )
     assert sorted([first.status_code, second.status_code]) == [200, 409]
+
+
+@pytest.mark.asyncio
+async def test_judge_apply_edges_slot_spent_other_question_and_finished_interview(
+    client, db_session, scripted_judge
+):
+    headers, iv, qid = await _judged_setup(client, db_session, max_calls=3)
+    dry = {**_judge_body(qid), "dry_run": True}
+    scripted_judge.responses.extend(
+        [
+            '{"verdict": "follow_up", "speech_text": "First probe?"}',
+            '{"verdict": "redirect", "speech_text": "Back to the question."}',
+        ]
+    )
+    a = (await client.post(f"/candidate/interview/{iv}/judge", headers=headers, json=dry)).json()
+    b = (await client.post(f"/candidate/interview/{iv}/judge", headers=headers, json=dry)).json()
+    # Apply the first → the single follow-up slot is spent; the second (still count 0 on the page)
+    # is stale, and even with the right count the slot is gone → wait, nothing written.
+    ok = (
+        await client.post(
+            f"/candidate/interview/{iv}/judge/apply",
+            headers=headers,
+            json={"event_id": a["event_id"], "question_id": qid, "follow_ups_asked": 0},
+        )
+    ).json()
+    assert ok["verdict"] == "follow_up"
+    for asked in (0, 1):
+        r = (
+            await client.post(
+                f"/candidate/interview/{iv}/judge/apply",
+                headers=headers,
+                json={"event_id": b["event_id"], "question_id": qid, "follow_ups_asked": asked},
+            )
+        ).json()
+        assert r["verdict"] == "wait"
+    # Wrong question id → wait; after the interview finishes → 409.
+    r = (
+        await client.post(
+            f"/candidate/interview/{iv}/judge/apply",
+            headers=headers,
+            json={"event_id": b["event_id"], "question_id": "other", "follow_ups_asked": 1},
+        )
+    ).json()
+    assert r["verdict"] == "wait"
+    body = (await client.get(f"/candidate/interview/{iv}", headers=headers)).json()
+    while body["status"] == "in_progress":
+        body = (
+            await client.post(
+                f"/candidate/interview/{iv}/answer",
+                headers=headers,
+                json={"text": "a sufficiently long answer", "source": "text"},
+            )
+        ).json()
+    assert (
+        await client.post(
+            f"/candidate/interview/{iv}/judge/apply",
+            headers=headers,
+            json={"event_id": b["event_id"], "question_id": qid, "follow_ups_asked": 1},
+        )
+    ).status_code == 409
+    assert (
+        await client.post(f"/candidate/interview/{iv}/judge", headers=headers, json=dry)
+    ).status_code == 409

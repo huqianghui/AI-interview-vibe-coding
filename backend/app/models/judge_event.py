@@ -7,7 +7,7 @@ candidate. Read by the acceptance metrics (latency p50, calls per question) and 
 "why did it interject".
 """
 
-from sqlalchemy import ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -31,5 +31,12 @@ class JudgeEvent(TimestampMixin, Base):
     reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
     model: Mapped[str] = mapped_column(String(100), default="", nullable=False)
     latency_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Speculative prefetch (issue #114 follow-up, owner decision D17): the page asks the judge the
+    # moment an utterance ends (``dry_run``) and APPLIES the verdict only if the silence lasts. Only
+    # applied verdicts count against ``judge_max_calls_per_question``; the raw LLM-call count is
+    # bounded separately (see the /judge route).
+    applied: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0", nullable=False
+    )
 
     __table_args__ = (Index("ix_judge_events_session", "interview_session_id"),)

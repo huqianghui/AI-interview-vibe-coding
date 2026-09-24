@@ -1160,6 +1160,7 @@ describe("InterviewPage judged turns (issue #114)", () => {
     vi.spyOn(client, "startInterview").mockResolvedValue(judged);
     const judgeSpy = vi.spyOn(client, "judgeInterview").mockResolvedValue({
       verdict: "nudge",
+      event_id: "e1",
       speech_text: "Please go on.",
       interview: null,
     });
@@ -1199,6 +1200,7 @@ describe("InterviewPage judged turns (issue #114)", () => {
     vi.spyOn(client, "startInterview").mockResolvedValue(judged);
     vi.spyOn(client, "judgeInterview").mockResolvedValue({
       verdict: "follow_up",
+      event_id: "e1",
       speech_text: "Who do you notify about it?",
       interview: {
         ...judged,
@@ -1238,6 +1240,7 @@ describe("InterviewPage judged turns (issue #114)", () => {
     vi.spyOn(client, "startInterview").mockResolvedValue({ ...judged, voice_judge_silence_seconds: 1 });
     const judgeSpy = vi.spyOn(client, "judgeInterview").mockResolvedValue({
       verdict: "nudge",
+      event_id: "e1",
       speech_text: "Please go on.",
       interview: null,
     });
@@ -1274,6 +1277,95 @@ describe("InterviewPage judged turns (issue #114)", () => {
     await screen.findByText("Question two?");
   });
 
+  it("voice: prefetches the verdict at end of utterance and applies it only when the pause lasts (D17)", async () => {
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockResolvedValue(judged);
+    const judgeSpy = vi.spyOn(client, "judgeInterview").mockResolvedValue({
+      verdict: "nudge",
+      speech_text: "Please go on.",
+      event_id: "ev-1",
+      interview: null,
+    });
+    const applySpy = vi.spyOn(client, "applyJudge").mockResolvedValue({
+      verdict: "nudge",
+      speech_text: "Please go on.",
+      event_id: "ev-1",
+      interview: null,
+    });
+    const vm = voiceMock();
+    const voiceModule = await import("../hooks/useInterviewVoice");
+    const hookSpy = vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(vm);
+    const opts = () => hookSpy.mock.calls.at(-1)?.[1];
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+    await user.click(await screen.findByRole("button", { name: /answer by voice/i }));
+    await waitFor(() => expect(opts()?.judgeSilenceMs).toBe(2_000));
+    // End of utterance → dry-run prefetch; nothing is spoken yet.
+    await act(async () => {
+      opts()?.onUtteranceComplete?.();
+    });
+    await waitFor(() =>
+      expect(judgeSpy).toHaveBeenCalledWith("iv1", expect.objectContaining({ dry_run: true })),
+    );
+    expect(vm.speakAside).not.toHaveBeenCalled();
+    expect(applySpy).not.toHaveBeenCalled();
+    // The silence window elapses with the SAME draft → apply → spoken.
+    await act(async () => {
+      opts()?.onSilenceJudge?.();
+    });
+    await waitFor(() =>
+      expect(applySpy).toHaveBeenCalledWith("iv1", {
+        event_id: "ev-1",
+        question_id: "q1",
+        follow_ups_asked: 0,
+      }),
+    );
+    await waitFor(() => expect(vm.speakAside).toHaveBeenCalledWith("Please go on."));
+    expect(judgeSpy).toHaveBeenCalledTimes(1); // no second one-step call
+  });
+
+  it("voice: a prefetch for a draft the candidate then extended is dropped in favour of a fresh call", async () => {
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockResolvedValue(judged);
+    const judgeSpy = vi.spyOn(client, "judgeInterview").mockResolvedValue({
+      verdict: "wait",
+      speech_text: "",
+      event_id: "ev-1",
+      interview: null,
+    });
+    const applySpy = vi.spyOn(client, "applyJudge");
+    let draft = "so the first thing";
+    const vm = voiceMock({ peekDraft: () => draft });
+    const voiceModule = await import("../hooks/useInterviewVoice");
+    const hookSpy = vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(vm);
+    const opts = () => hookSpy.mock.calls.at(-1)?.[1];
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+    await user.click(await screen.findByRole("button", { name: /answer by voice/i }));
+    await waitFor(() => expect(opts()?.judgeSilenceMs).toBe(2_000));
+    await act(async () => {
+      opts()?.onUtteranceComplete?.();
+    });
+    await waitFor(() => expect(judgeSpy).toHaveBeenCalledTimes(1));
+    draft = "so the first thing I would do is check the log"; // the candidate kept talking
+    await act(async () => {
+      opts()?.onSilenceJudge?.();
+    });
+    // Stale prefetch ignored → a fresh one-step call with the full draft; nothing applied.
+    await waitFor(() =>
+      expect(judgeSpy).toHaveBeenLastCalledWith(
+        "iv1",
+        expect.objectContaining({ draft_text: draft, trigger: "voice_silence" }),
+      ),
+    );
+    expect(judgeSpy.mock.calls.at(-1)?.[1]).not.toHaveProperty("dry_run");
+    expect(applySpy).not.toHaveBeenCalled();
+  });
+
   it("a judge reply that lands after a submit is discarded", async () => {
     await i18n.changeLanguage("en-US");
     const user = userEvent.setup();
@@ -1305,7 +1397,7 @@ describe("InterviewPage judged turns (issue #114)", () => {
     await screen.findByText("Question two?");
     // … and the late nudge must NOT be spoken over the next question.
     await act(async () => {
-      resolveJudge({ verdict: "nudge", speech_text: "Please go on.", interview: null });
+      resolveJudge({ verdict: "nudge", speech_text: "Please go on.", event_id: "e1", interview: null });
     });
     expect(vm.speakAside).not.toHaveBeenCalled();
   });

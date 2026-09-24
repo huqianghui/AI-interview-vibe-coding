@@ -114,6 +114,12 @@ export interface UseInterviewVoiceOptions {
    */
   judgeSilenceMs?: number | null;
   onSilenceJudge?: () => void;
+  /**
+   * Fired the moment a candidate utterance is transcribed (end of utterance), BEFORE any silence
+   * window. The page uses it to prefetch the judge's verdict (dry run) so the LLM round-trip
+   * overlaps the silence window instead of following it (D17).
+   */
+  onUtteranceComplete?: () => void;
 }
 
 const MAX_RECONNECT = 3;
@@ -669,8 +675,10 @@ export function useInterviewVoice(
                 optionsRef.current.onSilenceAutoCommit?.();
               }, delay);
             }
-            // Judged sessions: the same end-of-utterance arms the judge window (issue #114).
+            // Judged sessions: the same end-of-utterance arms the judge window (issue #114) and,
+            // first, lets the page prefetch the verdict so the LLM runs DURING the window (D17).
             const judgeDelay = silenceAutoCommitDelay(optionsRef.current.judgeSilenceMs);
+            if (judgeDelay !== null) optionsRef.current.onUtteranceComplete?.();
             if (judgeDelay !== null) {
               clearJudgeTimer();
               judgeTimerRef.current = setTimeout(() => {

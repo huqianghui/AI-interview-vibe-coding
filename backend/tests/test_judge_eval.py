@@ -3,7 +3,9 @@
 Runs against the REAL Foundry model locally (``judge_llm`` fixture; owner rule) and is skipped in CI,
 where the fixture is the scripted fake. Assertions are CLASS checks (verdict ∈ expected set, guard hits
 zero, language) so they hold on a real model. Pass line: ≥ 11 of the 12 core cases (the model is not
-fully deterministic); the two adversarial persona-prompt cases must always pass.
+fully deterministic); the two adversarial persona-prompt cases must always pass. With reasoning OFF
+(owner decision D17) an off-topic answer is often framed as a "please continue with <the question>"
+nudge rather than a redirect — functionally the same steer, so both verdicts are accepted there.
 """  # noqa: E501
 
 import asyncio
@@ -59,7 +61,7 @@ CASES = [
         "I have twelve years of experience and I really enjoy travelling to different sites and meeting "  # noqa: E501
         "coordinators. My favourite part is the training days.",
         "voice_silence",
-        {"redirect"},
+        {"redirect", "nudge"},
     ),
     (
         "en mid-thought",
@@ -86,7 +88,7 @@ CASES = [
         (),
         "Let me tell you about my hobbies instead, I love cycling on weekends.",
         "text_idle",
-        {"redirect", "wait"},
+        {"redirect", "nudge", "wait"},
     ),
     (
         "zh complete",
@@ -113,7 +115,7 @@ CASES = [
         RUBRIC_ZH,
         "我做这一行十二年了，很喜欢去不同的中心和协调员打交道，培训日是我最喜欢的部分。",
         "voice_silence",
-        {"redirect"},
+        {"redirect", "nudge"},
     ),
     ("zh mid-thought", "zh-CN", Q_ZH, RUBRIC_ZH, "首先我会", "voice_silence", {"nudge", "wait"}),
     (
@@ -132,7 +134,7 @@ CASES = [
         (),
         "我周末喜欢骑车，给你讲讲我的爱好吧。",
         "text_idle",
-        {"redirect", "wait"},
+        {"redirect", "nudge", "wait"},
     ),
 ]
 
@@ -173,7 +175,10 @@ def test_judge_eval_core_cases(judge_llm):
         r = asyncio.run(j.run_judge(_inp(locale, q, rubric, draft, trigger), judge_llm))
         # Azure's own jailbreak prompt filter may reject an injection attempt outright (a 400
         # content_filter) — the judge turns that into ``wait``, which is the right outcome.
-        filtered = r.event_verdict == "error" and "content_filter" in (r.error or "")
+        err = r.error or ""
+        filtered = r.event_verdict == "error" and (
+            "content_filter" in err or "filtered due to" in err
+        )
         # A leak-guard block is the system erring on the SAFE side (silence instead of a possible
         # rubric echo) — acceptable wherever staying silent is an acceptable verdict.
         guarded_ok = r.event_verdict == "leak_blocked" and "wait" in expected

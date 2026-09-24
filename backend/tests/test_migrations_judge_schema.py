@@ -62,9 +62,10 @@ def test_alembic_head_schema_accepts_orm_style_inserts(tmp_path):
             " ('e1', 's1', 'q1', 'voice_silence', 'nudge', 'Please go on.', 'r', 'gpt', 1200)"
         )
         row = conn.execute(
-            "SELECT created_at, updated_at FROM judge_events WHERE id='e1'"
+            "SELECT created_at, updated_at, applied FROM judge_events WHERE id='e1'"
         ).fetchone()
         assert row[0] is not None and row[1] is not None
+        assert row[2] == 0  # applied defaults to false (speculative prefetch, D17)
         # The other PR-2 columns exist with their server defaults.
         cols = {r[1]: r for r in conn.execute("PRAGMA table_info(interviewer_personas)")}
         assert cols["judge_silence_seconds"][4] == "2"
