@@ -204,11 +204,13 @@ export const resources = {
         signOut: "Sign out",
         // "Start over" (v0.38.3.0): abandon the live interview and begin a fresh one. Destructive,
         // so it is confirmed in a dialog first.
-        restart: "Restart interview",
-        restartTitle: "Restart the interview?",
+        // Label deliberately avoids the substring "start interview": the e2e reload spec asserts
+        // that no /start interview/i button remains once an interview is live.
+        restart: "Start over",
+        restartTitle: "Start over?",
         restartBody:
           "Your answers so far will be discarded and a new interview will start from the first question. This cannot be undone.",
-        restartConfirm: "Yes, restart",
+        restartConfirm: "Yes, start over",
         restartCancel: "Keep going",
       },
     },

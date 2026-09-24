@@ -3,10 +3,10 @@
 ## 0.38.3.0 (2026-09-24)
 
 ### Added
-- **"Restart interview" (重新开始) for candidates.** An in-progress interview session persists in the
+- **"Start over" (重新开始) for candidates.** An in-progress interview session persists in the
   DB, and both `/start` and the page's resume-on-mount always hand it back — so a candidate who wanted
   a fresh run was stuck on the old session until every question was answered (client request). The
-  interview page now shows a **Restart interview** button in the header during orientation and the
+  interview page now shows a **Start over** button in the header during orientation and the
   live Q&A. It is destructive, so a dialog confirms first ("Your answers so far will be discarded…");
   on confirm the page tears down voice, calls the new endpoint, and re-enters orientation on the fresh
   session exactly like a first start (transcript and draft cleared, question 1 read again, the
