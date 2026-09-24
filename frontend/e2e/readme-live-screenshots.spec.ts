@@ -26,6 +26,9 @@ test.describe("README live avatar screenshots (real Azure)", () => {
     await page.goto(`${BASE}/interview`);
     await page.getByRole("button", { name: /开始面试|start interview/i }).click();
     await page.getByRole("button", { name: /我准备好了|i'm ready/i }).click();
+    // Log every WebSocket the page opens (the voice proxy URL carries locale / avatar_bg), so a
+    // capture run doubles as a check of what the page actually asked Azure for.
+    page.on("websocket", (ws) => console.log(`[ws] ${ws.url().replace(/token=[^&]+/, "token=<redacted>")}`));
     await waitForInterviewStage(page); // bank or external brain, text or voice channel
 
     await enterVoiceChannel(page); // auto-voice persona: only clicks when still in text mode

@@ -19,7 +19,15 @@ export function fitFor(width: number, height: number): AvatarFit {
   return width / height >= COVER_FIT_MIN_ASPECT ? "cover" : "contain";
 }
 
-/** The interview stage's flat background. MUST equal the RGB of the backend's
- * `INTERVIEW_STAGE_BACKGROUND_RGBA` (voice_live_metadata.py), which Azure paints behind the avatar
- * so the video edge is invisible on the stage. */
+/** The interview stage's FALLBACK flat background (video avatars / no avatar). Photo avatars paint
+ * the stage in their own measured backdrop instead (`AvatarCharacter.backdrop`). */
 export const AVATAR_STAGE_COLOR = "#1c1d3a";
+
+/** Largest box of aspect `ratio` (w/h) that fits inside `parentW × parentH` — the "hug" size the
+ * avatar box takes so the media fills it exactly (no letterbox band, no frame). Null on degenerate
+ * input (the box then just fills its parent). */
+export function fitBox(parentW: number, parentH: number, ratio: number) {
+  if (parentW <= 0 || parentH <= 0 || !(ratio > 0)) return null;
+  const width = Math.min(parentW, parentH * ratio);
+  return { width: Math.round(width), height: Math.round(width / ratio) };
+}

@@ -60,7 +60,7 @@ import { useExternalMicAutoPause } from "../hooks/useExternalMicAutoPause";
 import { MicAccessError, useInterviewVoice } from "../hooks/useInterviewVoice";
 import type { AudioState, TranscriptSegment } from "../types/voice";
 import { AvatarView } from "../components/AvatarView";
-import { AVATAR_STAGE_COLOR } from "../components/avatarFit";
+import { AVATAR_CHARACTER_MAP } from "../data/avatarCharacters";
 import { LoginCard } from "../components/LoginCard";
 import { QuestionProgress } from "../components/QuestionProgress";
 import { MicPermissionDialog } from "../components/MicPermissionDialog";
@@ -226,17 +226,12 @@ const useStyles = makeStyles({
     // (row height + 40px padding), overflowing the viewport (cropping the figure's legs) and
     // standing 40px taller than the right column. With border-box it matches the column exactly.
     boxSizing: "border-box",
-    borderRadius: tokens.borderRadiusXLarge,
-    // FLAT deep-navy, the same colour Azure is asked to paint behind the digital human
-    // (INTERVIEW_STAGE_BACKGROUND_RGBA in backend voice_live_metadata.py). Photo avatars stream a
-    // square with their own background; a flat stage in that exact colour makes the frame edge
-    // vanish, where the earlier violet spotlight gradient left a visible square seam. Keep the two
-    // values in lockstep.
-    background: AVATAR_STAGE_COLOR,
-    boxShadow:
-      "inset 0 1px 0 rgba(255,255,255,0.05), 0 18px 48px -24px rgba(41,26,68,0.8)",
+    // NO frame (owner rule 2026-09-24: "inner and outer frame one colour, or no outer frame"): the
+    // stage is a transparent layout box; AvatarView sizes ITSELF to the stream's exact aspect and
+    // carries the rounded corners + shadow, so the digital human is the only surface on screen.
+    background: "transparent",
     overflow: "hidden",
-    padding: tokens.spacingVerticalXL,
+    padding: 0,
     "@media (max-width: 900px)": { minHeight: "360px" },
   },
   stageAvatar: {
@@ -427,6 +422,23 @@ export function InterviewPage() {
     if (typeof reported === "number") setJudgeSecondsReported(reported);
   }, [interview?.voice_judge_silence_seconds]);
   const judgeSeconds = judgeSecondsReported ?? 0;
+
+  // Stage backdrop: the default persona's avatar character (entry points only, latched like the
+  // flags above) → the photo's measured backdrop colour, so the stage and the live video are ONE
+  // colour and the editor preview shows the same one. Video avatars / no avatar: navy fallback.
+  // Latched SYNCHRONOUSLY during render (a ref, not an effect): the voice hook may open the WS in
+  // the same commit that delivers the start/resume payload, and it reads its options at connect
+  // time — an effect-based latch would arrive one render too late and the URL would miss `avatar_bg`.
+  const avatarCharacterRef = useRef<string | null>(null);
+  if (typeof interview?.voice_avatar_character === "string") {
+    avatarCharacterRef.current = interview.voice_avatar_character;
+  }
+  const avatarCharacter = avatarCharacterRef.current;
+  // Photo avatars: Azure paints THIS colour behind the digital human (WS `avatar_bg`), the same
+  // value the editor preview uses — so the live video IS the thumbnail's colour, and since the
+  // stage hugs the video (no frame around it) there is exactly one colour on screen.
+  const avatarBackground =
+    (avatarCharacter && AVATAR_CHARACTER_MAP.get(avatarCharacter)?.backdrop) || undefined;
   const judgeInFlightRef = useRef(false);
   const submitSeqRef = useRef(0);
   const [nudgeText, setNudgeText] = useState<string | null>(null);
@@ -454,6 +466,7 @@ export function InterviewPage() {
     // its bare response.create — see `linearTurns` in useInterviewVoice); read live here, the hook
     // re-syncs options every render.
     linearTurns,
+    avatarBackground,
     // Silence auto-submit (admin-controlled per persona, OFF by default): when the persona enables
     // it, after the candidate stops speaking and stays silent for the configured window the hook
     // auto-submits the buffered answer via the SAME commit-and-advance path the "I'm done" button

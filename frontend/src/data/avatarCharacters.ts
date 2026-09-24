@@ -37,6 +37,10 @@ export interface AvatarCharacter {
   thumbnailUrl: string;
   /** Fluent palette color used for the fallback swatch when the thumbnail fails to load. */
   swatch: string;
+  /** Photo avatars only: the thumbnail's own backdrop colour (the photo is shot on a plain studio
+   * wall), so a panel showing the photo can be painted the same colour and the square edge melts
+   * into the UI instead of floating as a box. Undefined for video avatars (transparent PNGs). */
+  backdrop?: string;
 }
 
 /** CDN base URL for official Azure avatar preview images. */
@@ -109,6 +113,44 @@ function photoThumbnailUrl(id: string): string {
   return PHOTO_AVATAR_SUFFIXED.has(id) ? `${CDN_BASE}/${id}-avatar.png` : `${CDN_BASE}/${id}.png`;
 }
 
+/** Backdrop colour of each photo avatar's CDN thumbnail: the per-channel median of the LEFT and
+ * RIGHT edge columns (outer 3 %, top 65 % of the height — the seams that meet the panel; below that
+ * a shoulder may touch the edge) — measured 2026-09-24. The CDN sends no CORS
+ * header, so the browser cannot sample these at runtime (a canvas of the image is tainted); they
+ * are baked in instead. Re-measure if Microsoft replaces the portraits. */
+const PHOTO_BACKDROPS: Readonly<Record<string, string>> = {
+  adrian: "#fbfbfb",
+  amara: "#bfb5ab",
+  amira: "#c09d75",
+  anika: "#c7bfb3",
+  bianca: "#e8c490",
+  camila: "#c7ae8f",
+  carlos: "#bd9a78",
+  clara: "#c6bdae",
+  darius: "#c7b8a0",
+  diego: "#baac9d",
+  elise: "#fbc97e",
+  farhan: "#ccbda9",
+  faris: "#d4bfa9",
+  gabrielle: "#a65429",
+  hyejin: "#cbc3b3",
+  imran: "#ded3c1",
+  isabella: "#deb87d",
+  layla: "#b2967c",
+  liwei: "#e3e4e6",
+  ling: "#336183",
+  marcus: "#ffeac5",
+  matteo: "#a9a293",
+  rahul: "#52028e",
+  rana: "#c4ae8f",
+  ren: "#d49f62",
+  riya: "#f4ab00",
+  sakura: "#bbad9c",
+  simone: "#ccc0b1",
+  zayd: "#f3daaf",
+  zoe: "#f6bcb1",
+};
+
 const PHOTO_CHARACTERS: readonly AvatarCharacter[] = PHOTO_SEEDS.map((seed, i) => ({
   id: seed.id,
   displayName: seed.displayName,
@@ -118,6 +160,7 @@ const PHOTO_CHARACTERS: readonly AvatarCharacter[] = PHOTO_SEEDS.map((seed, i) =
   defaultStyle: "",
   thumbnailUrl: photoThumbnailUrl(seed.id),
   swatch: photoSwatch(i),
+  backdrop: PHOTO_BACKDROPS[seed.id],
 }));
 
 // 6 video avatars (multiple styles each), in the portal's order.

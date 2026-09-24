@@ -25,7 +25,7 @@ import { forwardRef, useCallback, useEffect, useRef, useState } from "react";
 import { makeStyles, mergeClasses, Text } from "@fluentui/react-components";
 import { useTranslation } from "react-i18next";
 import { AudioOrb } from "./AudioOrb";
-import { fitFor } from "./avatarFit";
+import { fitBox, fitFor } from "./avatarFit";
 import type { AudioState } from "../types/voice";
 
 /** Single-slot portrait cache. This deployment runs ONE default interviewer persona, so the slot
@@ -43,11 +43,17 @@ const useStyles = makeStyles({
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    // Fill the (flex-grown) stage so the avatar video is as large as the space allows, rather than a
-    // fixed small box. minHeight:0 so it never forces the bounded stage to overflow the viewport.
+    // Fills the stage until the media's aspect is known; then `hugBox` sizes it to the largest box
+    // of EXACTLY the stream's aspect that fits the parent (see `useHugBox`), so there is no
+    // letterbox band and no frame around the digital human — the media is the whole surface.
     width: "100%",
     height: "100%",
     minHeight: 0,
+    borderRadius: "12px",
+    overflow: "hidden",
+  },
+  hugBox: {
+    boxShadow: "0 18px 48px -24px rgba(0,0,0,0.45)",
   },
   video: {
     position: "absolute",
@@ -112,6 +118,22 @@ const useStyles = makeStyles({
   },
 });
 
+/** Observe the element's PARENT size and return the hug box for the given media aspect (null until
+ * both are known, or when ResizeObserver is unavailable — then the root just fills the parent). */
+function useHugBox(el: HTMLElement | null, ratio: number | null) {
+  const [parent, setParent] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    const target = el?.parentElement;
+    if (!target || typeof ResizeObserver === "undefined") return;
+    const measure = () => setParent({ w: target.clientWidth, h: target.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(target);
+    return () => ro.disconnect();
+  }, [el]);
+  return parent && ratio ? fitBox(parent.w, parent.h, ratio) : null;
+}
+
 function readCachedPortrait(): string | null {
   try {
     const v = localStorage.getItem(AVATAR_PORTRAIT_STORAGE_KEY);
@@ -140,10 +162,18 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
   // own on* handlers, so listen with addEventListener to coexist). Contain until metadata arrives.
   const [videoFit, setVideoFit] = useState<"cover" | "contain">("contain");
   const [portraitFit, setPortraitFit] = useState<"cover" | "contain">("contain");
+  // Media aspect (w/h) of whatever is showing — the live stream once it has frames, else the cached
+  // still — drives the hug box below so the root is exactly the media's shape.
+  const [videoRatio, setVideoRatio] = useState<number | null>(null);
+  const [portraitRatio, setPortraitRatio] = useState<number | null>(null);
+  const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     const video = innerRef.current;
     if (!video) return;
-    const reflect = () => setVideoFit(fitFor(video.videoWidth, video.videoHeight));
+    const reflect = () => {
+      setVideoFit(fitFor(video.videoWidth, video.videoHeight));
+      setVideoRatio(video.videoWidth > 0 && video.videoHeight > 0 ? video.videoWidth / video.videoHeight : null);
+    };
     reflect();
     video.addEventListener("loadedmetadata", reflect);
     video.addEventListener("resize", reflect);
@@ -190,8 +220,16 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
   }, [isAvatarConnected]);
 
   const showPortrait = !isAvatarConnected && portrait !== null;
+  const mediaRatio = isAvatarConnected ? videoRatio : showPortrait ? portraitRatio : null;
+  const hug = useHugBox(rootEl, mediaRatio);
   return (
-    <div className={styles.root} data-testid="avatar-view" data-avatar-connected={isAvatarConnected}>
+    <div
+      ref={setRootEl}
+      className={mergeClasses(styles.root, hug ? styles.hugBox : undefined)}
+      style={hug ? { width: hug.width, height: hug.height } : undefined}
+      data-testid="avatar-view"
+      data-avatar-connected={isAvatarConnected}
+    >
       <video
         ref={setVideoRef}
         autoPlay
@@ -214,7 +252,11 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
               styles.portrait,
               portraitFit === "cover" ? styles.fitCover : styles.fitContain,
             )}
-            onLoad={(e) => setPortraitFit(fitFor(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight))}
+            onLoad={(e) => {
+              const { naturalWidth: w, naturalHeight: h } = e.currentTarget;
+              setPortraitFit(fitFor(w, h));
+              setPortraitRatio(w > 0 && h > 0 ? w / h : null);
+            }}
             data-fit={portraitFit}
             data-testid="avatar-portrait"
           />
