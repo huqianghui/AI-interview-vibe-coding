@@ -467,7 +467,16 @@ export function useInterviewVoice(
     // Disarm the silence-auto-commit timer — its fire would target a dead session's turn.
     clearSilenceAutoCommit();
     clearJudgeTimer();
-    // Drop live partial accumulators too — their item ids belong to the dead Azure session.
+    // Drop live partial accumulators too — their item ids belong to the dead Azure session. Under
+    // `keepDraft` an utterance whose `.completed` will now never arrive is folded into the draft
+    // from its last partial first, so the words the candidate saw streaming are not lost from what
+    // "I'm done" submits (adversarial review).
+    if (opts?.keepDraft) {
+      for (const partial of userLiveTranscriptRef.current.values()) {
+        const text = partial.trim();
+        if (text) userSegmentsSinceCommitRef.current.push(text);
+      }
+    }
     userLiveTranscriptRef.current.clear();
     assistantLiveTranscriptRef.current.clear();
     // Settle a commit still waiting on a transcript that will never arrive now that the WS is
@@ -925,6 +934,10 @@ export function useInterviewVoice(
       if (!isReconnect) {
         reconnectAttemptRef.current = 0;
         fatalErrorRef.current = false;
+        // A manual (re)connect starts from a clean slate: whatever the previous session left
+        // (a draft, a phantom in-flight mark, a pending commit) belongs to a turn that is over.
+        // Idempotent after cleanup(); protects the path where no cleanup ran.
+        resetTurnState();
       }
       intentionalCloseRef.current = false;
       setConn("connecting");
@@ -1016,7 +1029,11 @@ export function useInterviewVoice(
               RECONNECT_DELAYS[reconnectAttemptRef.current - 1] ?? 4000;
             setConn("reconnecting");
             avatarStream.disconnect();
-            audio.stopRecording();
+            // Release the mic fully: connect() re-acquires it (initMic — permission is already
+            // granted, so no prompt; it runs in parallel with the WS handshake). Only stopping the
+            // recorder left the old MediaStream + AudioContext orphaned on every reconnect (tracks
+            // never .stop()ped → the browser kept the hardware captured) — adversarial review.
+            audio.cleanupMic();
             // Reset the per-session guards so the NEW session's `session.updated` re-fires the
             // avatar handshake — without this the guard stayed true across reconnects and the
             // digital human never came back (orb forever after any WS drop).
@@ -1024,14 +1041,17 @@ export function useInterviewVoice(
             sessionLiveRef.current = false;
             // …and the turn/read bookkeeping (see resetTurnState): drops the dead session's
             // in-flight marks and watchdog, stashes an unconfirmed question read so the new
-            // session's `session.updated` re-speaks it. The mic is only paused here (not torn
-            // down) so the candidate's capture resumes seamlessly, and the answer transcribed so
-            // far is kept — they are still on the same question.
+            // session's `session.updated` re-speaks it. The answer transcribed so far is KEPT —
+            // the candidate is still on the same question.
             resetTurnState({ keepDraft: true });
             reconnectTimerRef.current = setTimeout(() => {
               void connect(lastLocaleRef.current, true).catch(() => undefined);
             }, delay);
           } else {
+            // Terminal: release everything (mic, avatar, turn/read bookkeeping) exactly like an
+            // explicit disconnect — otherwise the mic stayed captured and a stale draft rode into
+            // whatever the candidate connected to next (adversarial review).
+            cleanup();
             setConn("error");
             optionsRef.current.onError?.(
               new Error("Voice connection failed after 3 attempts"),

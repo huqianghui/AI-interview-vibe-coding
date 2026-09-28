@@ -2466,4 +2466,99 @@ describe("useInterviewVoice automatic reconnect resets turn state", () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
+
+  it("each automatic reconnect releases the mic (cleanupMic) so connect() re-acquires it — no orphaned capture", async () => {
+    vi.useFakeTimers();
+    const { reconnect, unmount } = await connectFor({});
+    cleanupMicSpy.mockClear();
+    await reconnect();
+    // Before: only STOP_RECORDING was posted and initMic() then opened a SECOND MediaStream +
+    // AudioContext, leaving the first captured forever (browser mic indicator stuck on).
+    expect(cleanupMicSpy).toHaveBeenCalledTimes(1);
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("the partial user transcript of an interrupted utterance is folded into the kept draft", async () => {
+    vi.useFakeTimers();
+    const { getHook, ws, reconnect, unmount } = await connectFor({});
+    await act(async () => {
+      ws().receive({ type: "conversation.item.input_audio_transcription.completed", transcript: "First I log it," });
+      ws().receive({ type: "conversation.item.input_audio_transcription.delta", item_id: "u2", delta: "then I notify " });
+      ws().receive({ type: "conversation.item.input_audio_transcription.delta", item_id: "u2", delta: "the sponsor" });
+    });
+    await reconnect(); // u2's `.completed` will never arrive on the dead session
+    expect(getHook().peekDraft()).toBe("First I log it, then I notify the sponsor");
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("after the third failed reconnect everything is released like a disconnect: mic, draft, in-flight marks", async () => {
+    vi.useFakeTimers();
+    const onError = vi.fn();
+    const { getHook, ws, reconnect, unmount } = await connectFor({ onError });
+    await act(async () => {
+      ws().receive({ type: "conversation.item.input_audio_transcription.completed", transcript: "stale words" });
+    });
+    act(() => {
+      expect(getHook().speakQuestion("Unconfirmed?")).toBe(true); // optimistic in-flight mark
+    });
+    // Three drops of LIVE sessions → three reconnect attempts (1s/2s/4s; the counter is never
+    // reset by a successful reconnect); the 4th drop is terminal. A pre-connect close is a
+    // different path (connect() rejects), so each attempt is brought live first.
+    const live = (w: FakeWebSocket) => w.receive({ type: "session.updated", session: {} });
+    await reconnect();
+    await act(async () => {
+      live(FakeWebSocket.last!);
+      FakeWebSocket.last!.close();
+      await vi.advanceTimersByTimeAsync(2100);
+    });
+    await act(async () => {
+      live(FakeWebSocket.last!);
+      FakeWebSocket.last!.close();
+      await vi.advanceTimersByTimeAsync(4100);
+    });
+    cleanupMicSpy.mockClear();
+    await act(async () => {
+      live(FakeWebSocket.last!);
+      FakeWebSocket.last!.close();
+    });
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: "Voice connection failed after 3 attempts" }));
+    expect(cleanupMicSpy).toHaveBeenCalledTimes(1);
+    expect(getHook().peekDraft()).toBe("");
+    // A later manual connect starts clean: the first question read goes straight out, no cancel.
+    let connectP!: Promise<void>;
+    act(() => {
+      connectP = getHook().connect("en-US");
+    });
+    await act(async () => {
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+      FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
+      await connectP;
+    });
+    const fresh = FakeWebSocket.last!;
+    // The question left unconfirmed by the dead session is re-spoken first (the page latched it
+    // as spoken, nobody else will) — a REAL read in flight, not a phantom …
+    const itemTexts = () =>
+      fresh.sent
+        .map((f) => JSON.parse(f) as { type?: string; item?: { content?: { text?: string }[] } })
+        .filter((f) => f.type === "conversation.item.create")
+        .map((f) => f.item?.content?.[0]?.text);
+    expect(itemTexts()).toEqual(["Unconfirmed?"]);
+    await act(async () => {
+      fresh.receive({ type: "response.created", response: { id: "r-resume" } });
+      fresh.receive({ type: "response.done" });
+    });
+    // … after which the next question goes straight out: no cancel, no queue.
+    act(() => {
+      expect(getHook().speakQuestion("Fresh question?")).toBe(true);
+    });
+    expect(itemTexts()).toEqual(["Unconfirmed?", "Fresh question?"]);
+    expect(types(fresh)).not.toContain("response.cancel");
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 });
