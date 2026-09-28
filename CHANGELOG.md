@@ -13,6 +13,9 @@
   the judge at all (a nudge needs none, and a rubric the model never sees cannot leak), which also
   makes each judge call cheaper. The question-level "Max follow-ups" field stays for existing banks
   but has no effect; the editor says so.
+- **A nudge can never be a question in disguise.** "Never asks a question" is no longer just an
+  instruction to the model: a would-be nudge containing a question mark or opening with an
+  interrogative (in English or Chinese) is silenced server-side and logged as `probe_blocked`.
 - Editor wording follows: the judged-turns option reads "a gentle nudge when the candidate trails off;
   never a follow-up", and the hint no longer promises follow-ups or redirects.
 

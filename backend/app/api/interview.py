@@ -134,13 +134,13 @@ class JudgeApplyIn(BaseModel):
 
 
 class JudgeOut(BaseModel):
-    verdict: str  # wait | nudge | follow_up | redirect
+    verdict: str  # wait | nudge (follow_up / redirect retired 2026-09-28 — never returned)
     speech_text: str = ""
     # The ``judge_events`` row behind this verdict (dry runs hand it back so the page can apply
     # it).
     event_id: str | None = None
-    # Present when a follow-up/redirect turn was written, so the page refreshes the header (the
-    # pending follow-up now shows as ``current_question`` with ``is_follow_up``) without a 2nd call.
+    # Always ``None`` since 2026-09-28: the judge never writes a turn, so there is no refreshed
+    # interview to hand back. Kept in the schema so older clients keep parsing the response.
     interview: InterviewOut | None = None
 
 

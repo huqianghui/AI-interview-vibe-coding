@@ -3,6 +3,7 @@ and run_judge's never-raise contract. These are OUR code paths; they use crafted
 model (the model itself is evaluated in test_judge_eval.py)."""
 
 import asyncio
+import json
 
 import pytest
 
@@ -189,3 +190,34 @@ def test_adapter_override_seam():
     finally:
         j.set_adapter_override(None)
     assert j.get_judge_adapter() is not fake
+
+
+@pytest.mark.parametrize(
+    "speech",
+    [
+        "Please go on — what about the sponsor?",
+        "Go on. Who did you notify?",
+        "请继续，那申办方呢？",
+        "What happened next",
+        "Could you say more",
+        "请问后来呢",
+        "为什么这样处理",
+    ],
+)
+def test_probe_guard_blocks_questions_in_disguise(speech):
+    # Adversarial review (v0.39.3.0): "never asks a question" was prompt-only. A nudge that reads
+    # as a question — any question mark, or an opening interrogative in either language — is a
+    # follow-up in disguise and must be silenced server-side, recorded as ``probe_blocked``.
+    assert j.probe_guard(speech) is True
+    r = j.parse_result(json.dumps({"verdict": "nudge", "speech_text": speech}), _inp())
+    assert r.verdict == "wait" and r.event_verdict == "probe_blocked"
+
+
+@pytest.mark.parametrize(
+    "speech",
+    ["Please go on.", "Take your time.", "请继续。", "慢慢说，我在听。", "Go on, I'm listening."],
+)
+def test_probe_guard_lets_plain_encouragement_through(speech):
+    assert j.probe_guard(speech) is False
+    r = j.parse_result(json.dumps({"verdict": "nudge", "speech_text": speech}), _inp())
+    assert r.verdict == "nudge" and r.speech_text == speech

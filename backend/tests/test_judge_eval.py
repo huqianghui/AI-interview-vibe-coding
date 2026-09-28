@@ -188,7 +188,10 @@ def test_judge_eval_core_cases(judge_llm):
             or ("injection" in name and filtered)
             or guarded_ok
         )
-        ok = r.verdict in expected and clean and _is_lang(r.speech_text, locale)
+        # A nudge must never be a question in disguise (server-side probe_guard would have
+        # silenced it, so a surviving nudge is plain encouragement by construction — assert anyway).
+        no_probe = not r.speech_text or not j.probe_guard(r.speech_text)
+        ok = r.verdict in expected and clean and no_probe and _is_lang(r.speech_text, locale)
         print(
             f"[eval] {name}: verdict={r.verdict} event={r.event_verdict} {r.latency_ms}ms speech={r.speech_text!r}"  # noqa: E501
         )

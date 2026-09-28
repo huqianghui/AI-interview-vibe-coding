@@ -234,6 +234,61 @@ def leak_guard(speech_text: str, rubric_strings: tuple[str, ...]) -> bool:
     return False
 
 
+# A nudge must not be a question in disguise ("Please go on — what about the sponsor?"). The
+# contract forbids it, but that is prompt-only; this is the server-side backstop (adversarial
+# review, v0.39.3.0). Any question mark, or an opening interrogative in either language, ⇒ wait.
+_QUESTION_MARKS = ("?", "？")
+_INTERROGATIVE_OPENERS = (
+    "what",
+    "who",
+    "whom",
+    "whose",
+    "which",
+    "when",
+    "where",
+    "why",
+    "how",
+    "could you",
+    "can you",
+    "would you",
+    "do you",
+    "did you",
+    "have you",
+    "is there",
+    "are there",
+    "请问",
+    "什么",
+    "为什么",
+    "怎么",
+    "怎样",
+    "如何",
+    "哪些",
+    "哪个",
+    "谁",
+    "能否",
+    "能不能",
+    "可以说说",
+    "是否",
+)
+
+
+def probe_guard(speech_text: str) -> bool:
+    """True when a would-be nudge reads as a question (a follow-up in disguise)."""
+    text = speech_text.strip()
+    if not text:
+        return False
+    if any(m in text for m in _QUESTION_MARKS):
+        return True
+    lowered = _normalize(text)
+    for op in _INTERROGATIVE_OPENERS:
+        if op.isascii():
+            if lowered == op or lowered.startswith(op + " "):
+                return True
+        elif lowered.startswith(op):
+            return True
+    return False
+
+
 def parse_result(raw: str, inp: JudgeInput) -> JudgeResult:
     """Strict parse + policy filter. Anything off ⇒ ``wait`` (with ``error`` / ``leak_blocked``)."""
     allowed = allowed_verdicts(inp)
@@ -271,6 +326,10 @@ def parse_result(raw: str, inp: JudgeInput) -> JudgeResult:
     if leak_guard(speech, inp.rubric_strings):
         return JudgeResult(
             "wait", reason=reason, error="rubric leak blocked", event_verdict="leak_blocked"
+        )
+    if probe_guard(speech):
+        return JudgeResult(
+            "wait", reason=reason, error="nudge was a question", event_verdict="probe_blocked"
         )
     return JudgeResult(verdict, speech_text=speech, reason=reason)
 
@@ -348,6 +407,7 @@ __all__ = [
     "get_judge_adapter",
     "leak_guard",
     "parse_result",
+    "probe_guard",
     "run_judge",
     "set_adapter_override",
     "warm_adapter",

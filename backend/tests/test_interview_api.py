@@ -1559,3 +1559,68 @@ async def test_entry_points_report_the_avatar_character_for_stage_backdrop(clien
         )
     ).json()
     assert answered["voice_avatar_character"] is None
+
+
+@pytest.mark.asyncio
+async def test_judge_dry_run_retired_verdict_is_never_applicable(
+    client, db_session, scripted_judge
+):
+    # Coverage audit (v0.39.3.0): a prefetch (dry_run) that comes back as a retired verdict must be
+    # stored as an error event that /judge/apply can never deliver.
+    headers, iv, qid = await _judged_setup(client, db_session, max_calls=3)
+    scripted_judge.responses.append('{"verdict": "follow_up", "speech_text": "Who else knows?"}')
+    dry = (
+        await client.post(
+            f"/candidate/interview/{iv}/judge",
+            headers=headers,
+            json={**_judge_body(qid), "dry_run": True},
+        )
+    ).json()
+    assert dry["verdict"] == "wait" and dry["interview"] is None
+    ev = await _events(db_session, iv)
+    assert [(e.verdict, e.applied) for e in ev] == [("error", False)]
+    applied = (
+        await client.post(
+            f"/candidate/interview/{iv}/judge/apply",
+            headers=headers,
+            json={"event_id": ev[0].id, "question_id": qid, "follow_ups_asked": 0},
+        )
+    ).json()
+    assert applied["verdict"] == "wait"
+    await db_session.refresh(ev[0])
+    assert ev[0].applied is False
+    got = (await client.get(f"/candidate/interview/{iv}", headers=headers)).json()
+    assert got["current_question"]["is_follow_up"] is False
+
+
+@pytest.mark.asyncio
+async def test_judge_apply_rejects_error_leak_and_probe_events(client, db_session, scripted_judge):
+    # Events stored as error / leak_blocked / probe_blocked are never deliverable — only a stored
+    # nudge is. (probe_blocked: a nudge that was a question in disguise, v0.39.3.0.)
+    headers, iv, qid = await _judged_setup(client, db_session, max_calls=5)
+    scripted_judge.responses.extend(
+        [
+            "garbage",
+            '{"verdict": "nudge", "speech_text": "Go on — did you document every protocol deviation in the log?"}',  # noqa: E501
+            '{"verdict": "nudge", "speech_text": "Please go on — what about the sponsor?"}',
+        ]
+    )
+    dry = {**_judge_body(qid), "dry_run": True}
+    for _ in range(3):
+        r = (
+            await client.post(f"/candidate/interview/{iv}/judge", headers=headers, json=dry)
+        ).json()
+        assert r["verdict"] == "wait"
+    ev = await _events(db_session, iv)
+    assert [e.verdict for e in ev] == ["error", "leak_blocked", "probe_blocked"]
+    for e in ev:
+        r = (
+            await client.post(
+                f"/candidate/interview/{iv}/judge/apply",
+                headers=headers,
+                json={"event_id": e.id, "question_id": qid, "follow_ups_asked": 0},
+            )
+        ).json()
+        assert r["verdict"] == "wait"
+        await db_session.refresh(e)
+        assert e.applied is False
