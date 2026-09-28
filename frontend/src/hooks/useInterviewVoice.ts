@@ -135,6 +135,23 @@ const CONNECT_TIMEOUT_MS = 30_000;
 // fail closed to "" so the UI never hangs — the caller rejects an empty answer and lets the user
 // retry.
 const COMMIT_TRANSCRIPT_TIMEOUT_MS = 8_000;
+/**
+ * Whether what the interviewer SAID is the text it was asked to read, ignoring case, punctuation
+ * and whitespace. The mouth-mode read is server-side TTS of the exact text, so any mismatch here is
+ * a delivery regression worth a loud console warning (and a failed live spec) — the 2026-09-28
+ * card/voice mismatch was invisible precisely because delivery was confirmed by response id only.
+ * Exported for the unit test.
+ */
+export function speechMatchesText(spoken: string, wanted: string): boolean {
+  const norm = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  return norm(spoken) === norm(wanted);
+}
+
 // Watchdog for the verbatim question read (speakQuestion): if the read hasn't actually STARTED
 // (no `response.created` for our injected item) within this window, re-attempt. The queue/cancel/
 // flush machinery has several routes that can silently drop a queued question (teardown clears the
@@ -349,13 +366,17 @@ export function useInterviewVoice(
   // (the "读两遍" regression, live-observed twice).
   const awaitingReadResponseRef = useRef(false);
   const readResponseIdRef = useRef<string | null>(null);
-  // EXTERNAL (MODEL) mode only: the per-turn read-directive template from `proxy.connected` (the
-  // admin-configurable reader prompt + a `{text}` placeholder). Present ⟺ MOUTH mode (external, or
-  // linear-turns bank since v0.38.3.1 — see is_mouth_persona in voice_live_proxy.py); emitSpeak
-  // fills `{text}` and sends it as `response.instructions` (the only delivery gpt-4o reads verbatim
-  // as a dumb "mouth"). Null in bank MODEL-turn (agent) mode → emitSpeak keeps the assistant-item
-  // delivery, which only the agent's own turn contract tolerates (live 2026-09-24: under linear
-  // turns the agent turned that read into "Thank you." — hence mouth mode for linear bank too).
+  // MOUTH-mode marker from `proxy.connected`: the backend sends a non-empty read-directive template
+  // (the admin-configurable reader prompt + a `{text}` placeholder) for every MOUTH session
+  // (external, or linear/judged bank since v0.38.3.1 — see is_mouth_persona in
+  // voice_live_proxy.py), "" / absent for the agent-driven Playground. Present ⟺ emitSpeak reads via
+  // `pre_generated_assistant_message` (server-side TTS of the exact text, no model inference — see
+  // emitSpeak). The directive TEXT itself is no longer sent per turn: filling it into
+  // `response.instructions` was still a model turn ("read this verbatim") and gpt-5-mini drifted on
+  // it mid-interview — on 2026-09-28 it paraphrased Q4 and fabricated Q7 outright while the card
+  // showed the bank question. Null → agent mode → emitSpeak keeps the assistant-item delivery,
+  // which only the agent's own turn contract tolerates (live 2026-09-24: under linear turns the
+  // agent turned that read into "Thank you." — hence mouth mode for linear bank too).
   const readDirectiveRef = useRef<string | null>(null);
   // A question read that was still UNCONFIRMED when the session tore down (reconnect): re-spoken
   // once the next session reaches `session.updated`. Without this, a drop-during-reconnect is
@@ -761,6 +782,22 @@ export function useInterviewVoice(
                 clearTimeout(watch.timer);
                 speakWatchRef.current = null;
               }
+              // Verbatim guard (MOUTH mode only): OUR read response finished — its transcript must
+              // BE the text we handed to emitSpeak, since the read is server-side TTS of exactly that
+              // text. Delivery is confirmed by id (above) so a drift never retried; this makes it
+              // visible instead of silent (see speechMatchesText). Agent mode is exempt: there the
+              // agent's own turn contract may paraphrase the assistant item and that is tolerated.
+              const wanted = spokenTextRef.current;
+              if (
+                readDirectiveRef.current &&
+                wanted &&
+                !speechMatchesText(msg.transcript as string, wanted)
+              ) {
+                console.warn(
+                  "[voice] question read deviated from the question text",
+                  { wanted, spoken: msg.transcript },
+                );
+              }
             } else {
               confirmSpeakWatch(msg.transcript as string);
             }
@@ -816,6 +853,16 @@ export function useInterviewVoice(
                 }
                 lastSpokenAttemptRef.current = null;
               }
+            } else if (awaitingReadResponseRef.current) {
+              // Any OTHER rejection of OUR read attempt (no `response.created` has claimed it yet —
+              // e.g. an api-version that lacks `pre_generated_assistant_message`): nothing of ours
+              // is in flight, so release the optimistic in-flight marks emitSpeak set. Otherwise
+              // `activeResponseRef` stays true with no `response.done` ever coming, and the next
+              // speakQuestion cancels-and-queues behind a phantom response (silent interview). The
+              // read watchdog still owns the retry.
+              awaitingReadResponseRef.current = false;
+              readResponseIdRef.current = null;
+              activeResponseRef.current = false;
             }
             break;
           }
@@ -1125,18 +1172,25 @@ export function useInterviewVoice(
       // Optimistically mark active so a rapid second speakQuestion (or a commit nudge) defers
       // instead of colliding; the real `response.created` confirms it, `response.done` clears it.
       activeResponseRef.current = true;
-      const directive = readDirectiveRef.current;
-      if (directive) {
-        // EXTERNAL (MODEL) mode: the persona is a dumb "mouth". Carrying the text as an assistant
-        // item makes gpt-4o treat it as already-said and reply with an acknowledgment
-        // ("Understood.") or fabricate a different question; a user item makes it ANSWER the text
-        // as if the candidate asked. Only carrying the text inside `response.instructions` (the
-        // admin-configurable reader prompt with `{text}` filled here) makes it read the text
-        // verbatim (live-verified on gpt-4o). Function replacement so a `$`-sequence in the text
-        // (`$&`, `$1`) is inserted literally, not treated as a replacement pattern.
+      if (readDirectiveRef.current) {
+        // MOUTH (MODEL) mode: the persona is a dumb "mouth", so the read must not be a model turn at
+        // all. Voice Live's `pre_generated_assistant_message` makes the server synthesize EXACTLY
+        // this text ("bypassing model inference for text generation" — API ref, present in
+        // 2026-01-01-preview) and adds it to the conversation as the assistant's message. Every
+        // model-mediated delivery drifted: an assistant item is treated as already-said (acknowledged
+        // or replaced by a fabricated question), a user item is answered, and `response.instructions`
+        // ("say ONLY this, verbatim") — reliable on gpt-4o — still let gpt-5-mini continue the
+        // interview on its own by Q4/Q7 of a 9-question bank (2026-09-28: the card showed the bank
+        // question while the avatar asked a different one). TTS of the given text cannot deviate.
         send({
           type: "response.create",
-          response: { instructions: directive.replace("{text}", () => text) },
+          response: {
+            pre_generated_assistant_message: {
+              type: "message",
+              role: "assistant",
+              content: [{ type: "text", text }],
+            },
+          },
         });
       } else {
         // BANK (AGENT) mode: Azure rejects overriding `instructions` in `response.create`
@@ -1180,13 +1234,13 @@ export function useInterviewVoice(
    *
    * The backend keeps the question pointer authoritative, so voice must SPEAK its text, not let
    * the model/agent generate its own. HOW the text is delivered differs by mode (see emitSpeak):
-   * BANK (AGENT) mode rides the text as an assistant conversation item + a bare `response.create`
-   * (agent mode rejects overriding `instructions` in `response.create` — "Overriding instructions
-   * in response.create is not supported", live-verified). EXTERNAL (MODEL) mode instead carries the
-   * text inside `response.instructions` (built from the configurable reader prompt): as a dumb
-   * "mouth", gpt-4o treats an assistant item as already-said (acknowledges — "Understood." — or
-   * fabricates a question) and a user item as the candidate speaking (answers it); only the
-   * instructions form makes it read verbatim (live-verified on gpt-4o).
+   * MOUTH (MODEL) mode — external and linear/judged bank — sends `response.create` with a
+   * `pre_generated_assistant_message`: server-side TTS of the exact text, no model inference, so the
+   * spoken question can never differ from the card (the earlier `response.instructions` read was
+   * still a model turn and gpt-5-mini drifted on it mid-interview). AGENT mode (editor Playground)
+   * rides the text as an assistant conversation item + a bare `response.create` (agent mode rejects
+   * overriding `instructions` in `response.create` — "Overriding instructions in response.create is
+   * not supported", live-verified).
    *
    * CANCEL-THEN-SPEAK (the "数字人不说话" fix): under server-VAD (create_response=True, production)
    * Azure AUTO-creates a response when the user stops speaking, so at the moment the page wants to
@@ -1249,8 +1303,16 @@ export function useInterviewVoice(
       if (prior) clearTimeout(prior.timer);
       const attempts = prior?.text === text ? prior.attempts + 1 : 1;
       if (attempts > SPEAK_MAX_ATTEMPTS) {
-        // Retries exhausted — stop; the question card remains the fallback.
+        // Retries exhausted — stop; the question card remains the fallback. Also drop the
+        // optimistic in-flight marks the failed attempts left behind: every attempt set
+        // `activeResponseRef` before sending and nothing ever cleared it (no `response.created`,
+        // no `response.done`). Left `true`, EVERY later speakQuestion would see a phantom active
+        // response, send `response.cancel` and queue on a `response.done` that never comes — the
+        // rest of the interview silent with no user-facing signal (adversarial review, v0.39.2.3).
         speakWatchRef.current = null;
+        activeResponseRef.current = false;
+        awaitingReadResponseRef.current = false;
+        readResponseIdRef.current = null;
         console.warn(
           "[voice] question read retries exhausted; giving up on voice read",
         );

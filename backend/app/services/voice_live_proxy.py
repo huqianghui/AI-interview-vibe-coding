@@ -153,16 +153,18 @@ def linear_turns_for_persona(persona: InterviewerPersona, *, playground: bool = 
 def is_mouth_persona(persona: InterviewerPersona, *, playground: bool = False) -> bool:
     """Whether this voice session is a pure "MOUTH": MODEL mode + reader prompt, no Foundry agent.
 
-    A mouth only reads the text the backend hands it each turn (carried in ``response.instructions``
-    via the read directive) and never generates a turn of its own. That is every EXTERNAL persona
-    (the external workflow is the brain) AND every LINEAR-TURNS bank persona (v0.38.3.1): under
-    linear turns the agent's brain has no turn left to use, and keeping the agent attached is
-    actively harmful — live-verified 2026-09-24: with the question riding as an assistant item, the
-    agent's own instructions ("acknowledge when the candidate finishes") won over the item and the
-    response meant to read question 2 said "Thank you." instead, so the question was never spoken.
-    MODEL mode + ``response.instructions`` is the delivery that reads verbatim (the external path,
-    live-verified since v0.37.x). Bank MODEL-turn personas keep their agent (it owns the reaction
-    between questions), as does the editor Playground for any bank persona (free conversation).
+    A mouth only reads the text the backend hands it each turn and never generates a turn of its
+    own. That is every EXTERNAL persona (the external workflow is the brain) AND every LINEAR-TURNS
+    bank persona (v0.38.3.1): under linear turns the agent's brain has no turn left to use, and
+    keeping the agent attached is actively harmful — live-verified 2026-09-24: with the question
+    riding as an assistant item, the agent's own instructions ("acknowledge when the candidate
+    finishes") won over the item and the response meant to read question 2 said "Thank you."
+    instead, so the question was never spoken. The read itself is ``response.create`` +
+    ``pre_generated_assistant_message`` (server-side TTS of the exact text, no model inference —
+    v0.39.2.3); the earlier ``response.instructions`` read was still a model turn and gpt-5-mini
+    drifted on it mid-interview (2026-09-28: card said one bank question, the avatar asked another).
+    Bank MODEL-turn personas keep their agent (it owns the reaction between questions), as does the
+    editor Playground for any bank persona (free conversation).
     """
     return linear_turns_for_persona(persona, playground=playground)
 
@@ -441,11 +443,13 @@ async def run_proxy(
                     default_external_reader_prompt(persona.name)
                 )
                 await conn.send(build_reader_prompt_item(reader_prompt))
-                # The same reader prompt, as the per-turn read-directive template the frontend fills
-                # with each question/speech_text and sends as response.instructions (the only
-                # delivery that reads verbatim in MODEL mode — see build_read_directive). Agent mode
-                # omits it (Azure rejects instructions overrides there; the frontend then rides the
-                # text as an assistant item, which only the agent's own turn contract tolerates).
+                # The same reader prompt as the read directive: non-empty on proxy.connected ⟺ MOUTH
+                # mode for the frontend, which then reads each question/speech_text with
+                # response.create + pre_generated_assistant_message (server-side TTS of the exact
+                # text — see build_read_directive for why the template is no longer filled into
+                # response.instructions). Agent mode omits it (Azure rejects instructions overrides
+                # there; the frontend then rides the text as an assistant item, which only the
+                # agent's own turn contract tolerates).
                 read_directive = build_read_directive(reader_prompt)
 
             await ws.send_text(

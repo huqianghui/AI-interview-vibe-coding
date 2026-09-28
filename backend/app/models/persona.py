@@ -110,23 +110,26 @@ def default_external_reader_prompt(name: str) -> str:
     )
 
 
-# The per-turn text-to-read is appended to the reading contract with this English separator, and the
-# whole thing is sent to Azure as ``response.instructions`` (EXTERNAL/MODEL mode only). Why not a
-# conversation item: gpt-4o treats an ``assistant`` item as already-said (it replies with an
-# acknowledgment — "Understood." — or fabricates a different question) and a ``user`` item as the
-# candidate speaking (it answers the text); only carrying the text inside ``response.instructions``
-# makes the "mouth" read it verbatim (live-verified on gpt-4o). ``{text}`` is a literal placeholder
-# the frontend fills each turn (never .format()-ed here — the reader prompt contains no braces).
+# The reading contract + this English separator form the ``read_directive`` the proxy hands the
+# frontend on ``proxy.connected`` for every MOUTH session. Since v0.39.2.3 the frontend does NOT
+# fill ``{text}`` into ``response.instructions`` any more: that was still a MODEL turn asked to
+# "read this verbatim", and while gpt-4o honoured it, gpt-5-mini drifted mid-interview (2026-09-28:
+# by Q4/Q7 of a 9-question bank it paraphrased one question and fabricated another while the card
+# showed the bank text). The read is now Voice Live's ``response.create`` +
+# ``pre_generated_assistant_message`` — server-side TTS of the exact text, no model inference. The
+# directive stays on the wire as the mouth-mode marker (non-empty ⟺ mouth) and as the documented
+# wording should a model-mediated fallback ever be needed; the reader prompt itself is still
+# injected as a session-scoped system item so any stray model turn keeps the reading contract.
 READ_DIRECTIVE_SEPARATOR = "\n\nText to read this turn — say ONLY this, verbatim:\n\n{text}"
 
 
 def build_read_directive(reader_prompt: str) -> str:
-    """The per-turn ``response.instructions`` template for the EXTERNAL-mode "mouth".
+    """The MOUTH-mode read directive sent on ``proxy.connected`` (see READ_DIRECTIVE_SEPARATOR).
 
-    Combines the (admin-configurable) ``reader_prompt`` with :data:`READ_DIRECTIVE_SEPARATOR`, whose
-    ``{text}`` placeholder the frontend replaces with the ``speech_text`` to read. All wording lives
-    here or in ``reader_prompt`` — the frontend carries no read-directive text of its own. Pure
-    string shaping so it's unit-testable in the zero-Azure CI (parallel to
+    Combines the (admin-configurable) ``reader_prompt`` with the separator, whose ``{text}``
+    placeholder marks where a per-turn text would go. Non-empty on the wire ⟺ the frontend is in
+    mouth mode and reads via ``pre_generated_assistant_message`` (the template text is no longer
+    sent per turn). Pure string shaping so it's unit-testable in the zero-Azure CI (parallel to
     :func:`app.services.voice_live_proxy.build_reader_prompt_item`).
     """
     return reader_prompt + READ_DIRECTIVE_SEPARATOR
