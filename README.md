@@ -2,8 +2,9 @@
 
 An SOP-based interview web app with an **AI digital-human interviewer** — built as a sales PoC to
 production standard. A candidate is interviewed by a live avatar (Azure Voice Live + Azure AI
-Foundry agent), answers by voice or text, gets adaptive follow-ups from a real-time backend judge
-(**Judged** turn mode), and receives an on-the-spot report where every judgment traces back to the
+Foundry agent), answers by voice or text, gets a real-time nudge from a backend judge when an
+answer trails off mid-thought (**Judged** turn mode), and receives an on-the-spot report where
+every judgment traces back to the
 client's own SOP document — **document name + page, item by item**.
 
 > This repo is public: it contains no client names, no real SOP content, and no candidate data.
@@ -32,15 +33,18 @@ audio orb, so the whole flow runs with zero Azure:
 
 ![Interview page in text mode — question, orb fallback, progress rail](docs/images/02-interview-question.png)
 
-### 2. Judged turn mode — the interviewer follows up in real time
+### 2. Judged turn mode — a real-time nudge when an answer trails off
 
-In **Judged** turn mode a backend LLM judge listens during the candidate's pauses and can nudge,
-ask a genuine follow-up, or redirect — live, before the candidate submits, never by quoting the
-candidate's own words or naming a rubric item. (Retired in v0.39.2.0: the linear-mode template
-follow-up that quoted the candidate at submit — a submit now always advances to the next question,
-in every turn mode; per-question **Max follow-ups** budgets only the judge's pre-submit follow-ups.)
+In **Judged** turn mode a backend LLM judge listens during the candidate's pauses and, if the
+answer trails off mid-thought, speaks or shows one short nudge ("please go on" class) — live,
+before the candidate submits, never by quoting the candidate's own words or naming a rubric item.
+(v0.39.3.0, owner directive 2026-09-28: the judge is **nudge-only** — the earlier "genuine
+follow-up" and "redirect" verdicts are retired, and the judge never writes an interviewer turn.
+Also retired, in v0.39.2.0: the linear-mode template follow-up that quoted the candidate at
+submit — a submit now always advances to the next question, in every turn mode; per-question
+**Max follow-ups** is kept for compatibility but is now inert.)
 
-![Judged turn mode follow-up (screenshot predates v0.39.2.0; pending regeneration)](docs/images/03-follow-up-memory.png)
+![Judged turn mode nudge (screenshot predates v0.39.3.0; pending regeneration)](docs/images/03-follow-up-memory.png)
 
 ### 3. Review before scoring — explicit submit
 

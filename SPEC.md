@@ -223,14 +223,17 @@ detection.
 - **Follow-up hook:** per-question `max_follow_ups` config (demo default 0 or 1); when >0, an
   optional follow-up turn may be recorded and its content joins the answer group for scoring.
   **v0.39.0.0:** follow-ups come from a `FollowUpProvider` — the authored template at submit for
-  `linear` sessions, or the backend LLM judge DURING the candidate's pauses for `judged` sessions
-  (the submit itself always advances; see `docs/planning/spec-judged-turn-mode.md`, issue #114).
-  **v0.39.2.0 (owner rule 2026-09-24): a submit ("I'm done") ALWAYS advances in EVERY turn
-  mode.** `linear` sessions never follow up (the template-at-submit path is retired — no route
-  passes a provider any more); `max_follow_ups` is consulted only by the judge in `judged`
-  sessions, as the per-question budget for its pre-submit `follow_up`/`redirect` turns. The
-  question-level knob and the persona-level `bank_turn_mode` are not an override chain: the
-  persona decides WHETHER anyone may follow up, the question decides HOW MANY times.
+  `linear` sessions, or (through v0.39.1.0) the backend LLM judge DURING the candidate's pauses for
+  `judged` sessions (the submit itself always advances; see `docs/planning/spec-judged-turn-mode.md`,
+  issue #114). **v0.39.2.0 (owner rule 2026-09-24): a submit ("I'm done") ALWAYS advances in EVERY
+  turn mode.** `linear` sessions never follow up (the template-at-submit path is retired — no route
+  passes a provider any more). **v0.39.3.0 (owner directive 2026-09-28): the judge is
+  nudge-only.** `follow_up` and `redirect` are RETIRED (`VERDICTS = (wait, nudge)`); a `judged`
+  session's judge only speaks a short "please go on"-class nudge during a pause and never writes an
+  interviewer turn — there is no judge-produced follow-up content to join the answer group.
+  `max_follow_ups` is kept on the question model for compatibility but is now **inert** for judged
+  sessions (the editor hint says so). The persona-level `bank_turn_mode` still decides whether the
+  judge runs at all.
 - **Two follow-up generators (by channel), one scoring rule.** Follow-ups are produced differently
   on the two transports, but the scoring semantics are identical:
   - **Text channel — deterministic, non-LLM (RETIRED from the submit path in v0.39.2.0).**
