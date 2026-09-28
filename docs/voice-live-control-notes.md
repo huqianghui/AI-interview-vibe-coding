@@ -1,0 +1,229 @@
+# 精确控制 Azure Voice Live：让数字人"照稿朗读"，把智能留给后端
+
+> 2026-09-28。起因是一场真实面试里的现场 bug：题目卡片显示 "Question 7 of 9 — How do you
+> oversee safety reporting across EMEA?"，数字人却问出 "What methods do you use to gather feedback
+> from local teams?"（题库里根本没有这句）。排查、修复（v0.39.2.3–v0.39.3.2，PR #123–#126）之后，
+> 把 Voice Live API 的控制方式梳理成这篇笔记，回答三个问题：
+>
+> 1. 怎么让 Voice Live 直接 TTS，而不是让模型"回复"？
+> 2. 直接 TTS 之后已经不走 LLM 了，为什么建连还必须配模型？能不配吗？
+> 3. 既要精确控制读题，又要保留一部分 LLM 生成（judge、Playground），代码和 prompt 怎么分工？
+>
+> 代码指向：`frontend/src/hooks/useInterviewVoice.ts`（前端协议层）、
+> `backend/app/services/voice_live_proxy.py`（会话构建 + 中继）、`backend/app/interview/judge.py`。
+
+---
+
+## 0. 先搞清 Voice Live 里"一句话是怎么被说出来的"
+
+Voice Live 一个会话 = 一条 WebSocket，上面跑着五件事：
+
+| 环节 | 谁在做 | 我们能控制的开关 |
+|---|---|---|
+| 听（VAD + STT） | Azure `turn_detection` + `input_audio_transcription` | VAD 类型、`create_response`、EOU 检测 |
+| 想（决定说什么） | 会话绑定的 **模型**（`model=` 或 Foundry agent） | `response.create` 发不发、带什么 |
+| 说（TTS） | Azure 语音（`voice`） | 文本从哪来 |
+| 脸（avatar） | Azure avatar 管线（WebRTC 视频） | `avatar` 配置 |
+| 记（对话历史） | 会话里的 conversation items | `conversation.item.create/delete` |
+
+关键认识：**每一次 `response.create` 都是一次"想"**。默认情况下（`create_response=true`）候选人一停
+顿，Azure 就自动替你发一次；即便关掉自动回复，你手动发的 `response.create` 仍然是一次模型推理——
+模型看着整段对话历史，决定说什么，然后 TTS。
+
+我们的面试是"题库驱动"的：问哪题由后端定，数字人只是嘴。所以"想"这一步在读题环节是多余的，也
+正是它出的错。
+
+---
+
+## 1. 怎么直接 TTS，不让模型"回复"
+
+### 1.1 我们走过的三种读法
+
+| 版本 | 读题方式 | 结果 |
+|---|---|---|
+| 最早 | `conversation.item.create(role=assistant, text=题目)` + 裸 `response.create` | gpt-4o 把 assistant item 当"我已经说过了"，回一句 "Understood." 或**自己编一道题** |
+| v0.37.x–v0.39.2.2 | `response.create { response: { instructions: 阅读契约 + "say ONLY this, verbatim: 题目" } }` | gpt-4o 上可靠；prod 切 gpt-5-mini 后，第 4/7 题起对话历史像一场面试，模型按惯性"出下一题" |
+| **v0.39.2.3 起** | `response.create { response: { pre_generated_assistant_message: {...} } }` | 服务端直接 TTS 给定文本，**不经过模型**，不可能改写 |
+
+前两种都是**prompt 约束**——你在求模型照读；第三种是**机制约束**——文本根本不进模型。
+
+### 1.2 `pre_generated_assistant_message` 的用法
+
+```json
+{
+  "type": "response.create",
+  "response": {
+    "pre_generated_assistant_message": {
+      "type": "message",
+      "role": "assistant",
+      "content": [{ "type": "text", "text": "How do you oversee safety reporting across EMEA?" }]
+    }
+  }
+}
+```
+
+官方文档原话："generates an audio response for the predefined text, **bypassing model inference for
+text generation**. The message is added to the conversation context history."
+在我们用的 `2026-01-01-preview` 版本里就有（`2026-04-10` GA、`2026-06-01-preview` 同样有）。
+
+实测（真 Azure，照片数字人 amira + gpt-5-mini）要点：
+
+- 事件流和普通 response 一样：`response.created → response.audio_transcript.delta/done →
+  response.audio.delta（avatar 模式下音频走 WebRTC，WS 上没有）→ response.done`。所以现有的
+  "Interviewer 气泡"和"按 response id 确认送达"逻辑一行没改。
+- `response.done.usage`：`input_tokens: 0`，只有 output 音频 token（TTS 本身）。候选人说话的
+  音频仍计 input audio token。也就是说读题环节的模型输入成本归零；会话/音频计费照常，以定价页为准。
+- 首字延迟：读题请求发出 → `response.created` 约 0.26–0.35 s（探针 `backend/scripts/voice_turn_latency.py`
+  的 `read.gen_created`）。
+- 与 `role: user` 的 item 不同，它**不会**触发模型回答；与 `role: assistant` 的 item + 裸
+  `response.create` 不同，它**不会**被模型"接话"。
+- 文本会进入对话历史（"added to the conversation context history"），所以后面如果还有真正的模型
+  回合，模型知道数字人已经说过这句。
+
+### 1.3 光有 TTS 读法还不够：把其它"会说话的口子"也堵上
+
+数字人能开口的路径不止一条，每一条都要用**协议级**开关控制，而不是靠 prompt：
+
+| 口子 | 关法 | 代码位置 |
+|---|---|---|
+| 候选人停顿后 Azure 自动回复 | `turn_detection.create_response: false` | `voice_live_proxy.build_turn_detection` |
+| 前端"我答完了"后的裸 `response.create` | linear 模式下不发（`linearTurns` 选项） | `useInterviewVoice.commitAnswer` |
+| Foundry agent 自己的指令（"候选人答完要致谢"） | linear/judged 会话**不挂 agent**，走 MODEL 模式 | `voice_live_proxy.is_mouth_persona` |
+| 读题本身 | `pre_generated_assistant_message` | `useInterviewVoice.emitSpeak` |
+
+第三条值得展开：agent 模式下 Azure **拒绝** `response.create` 里覆盖 `instructions`（live 报错
+"Overriding instructions in response.create is not supported"），而 agent 自己的指令会赢过任何
+assistant item——2026-09-24 实测第 2 题的读题被 agent 变成了一句 "Thank you."。所以凡是"嘴"型会话
+（external、linear、judged）一律 MODEL 模式建连，agent 只留给编辑器 Playground。
+
+### 1.4 读法可靠了，还要"知道它读对了没有"
+
+之前的送达确认只按 response id（注释原话 "immune to paraphrasing"）——这恰恰让改写/编造无声无
+息。现在：
+
+- 读题 response 的 `audio_transcript.done` 到达时，`speechMatchesText(转写, 题目)`（忽略大小写、
+  标点、空白）不一致就 `console.warn("[voice] question read deviated…")`。TTS 读法下这永远不该触
+  发，触发即回归。
+- live spec `bank-linear-restart-live.spec.ts` 抓页面发出的每个 `response.create`，断言
+  `pre_generated_assistant_message.content[0].text === 卡片题目`，且 Azure 转写 == 卡片题目。
+
+---
+
+## 2. 不走 LLM 了，为什么建连还必须配模型？能不配吗？
+
+### 2.1 为什么必须配
+
+Voice Live 的会话身份就是"一个模型 + 一组语音能力"。建连 URL 必须带 `model=<区域原生模型>`
+或 `agent_name=…`，没有"纯 TTS 会话"这种类型：VAD、STT、TTS、avatar 都是**挂在这个模型会话上**的
+配套能力，而不是独立服务。所以即使我们一次 `response.create` 都不让模型"想"，会话也要有个模型
+坐在那里——它是会话的宿主，不是我们在用的功能。
+
+顺带一提，`model=` 只接受该区域原生的 Voice Live 模型（swedencentral 上 gpt-5-mini / gpt-4o /
+gpt-4.1-mini 等），自己部署的 deployment 名不算——这是另一坑（memory
+`ai-interview-voice-model-not-chat-model`）。
+
+### 2.2 那这个模型现在还干什么
+
+在 linear / judged / external 会话里：**一句话都不生成**。剩下三件事：
+
+1. 当宿主：承载 VAD/STT/TTS/avatar。
+2. 当保险丝：我们仍把 reader prompt（阅读契约）作为 system item 注入。万一哪条代码路径误发了一
+   个裸 `response.create`，它会按"只读稿、不追问"行事，而不是自由发挥。
+3. 真正用到它的只剩编辑器 **Playground**（agent 模式，自由对话测 instructions）。
+
+### 2.3 想彻底不配模型？可以，但换产品
+
+如果你的场景连"保险丝"都不要、也不用 Voice Live 的 VAD/STT：Azure **Speech 服务的实时 TTS
+avatar**（Speech SDK avatar synthesis，WebRTC）是纯 TTS + 数字人，不涉及任何 LLM。代价是：
+
+- 听（STT + VAD）要自己另接 Speech 的识别服务，轮次管理自己写；
+- 一条连接变多条，延迟与状态同步都要自己处理；
+- 我们已经踩平的 Voice Live 坑（首读被 avatar 握手切掉、cancel-then-speak、重连状态）要在新
+  管线上重来一遍。
+
+对我们这种"题库驱动 + 需要听候选人 + 偶尔要 judge 出声"的场景，留在 Voice Live、把模型当宿主
+是更省的选择：读题走 TTS，模型输入成本归零，架构不变。
+
+---
+
+## 3. 既要"精确读题"，又要"保留部分 LLM 生成"：代码和 prompt 怎么分工
+
+### 3.1 原则：**能用机制的绝不用 prompt；prompt 只管语气**
+
+| 要保证的事 | 用什么保证 | 为什么不用 prompt |
+|---|---|---|
+| 题目原文一字不差 | `pre_generated_assistant_message` | 实测 prompt "verbatim" 在 gpt-5-mini 上会漂 |
+| 候选人停顿时数字人不插话 | `create_response=false` | 单个布尔，比"请勿打断"可靠 100% |
+| 不追问、不纠偏 | 后端 judge 的 verdict 集合就是 `(wait, nudge)`；`follow_up`/`redirect` 直接不认 | 模型再"想"追问也发不出来 |
+| nudge 不是变相提问 | 服务端 `probe_guard`：含 `?/？` 或疑问词开头 ⇒ 静音 | prompt 里"不要问问题"是软约束 |
+| 不泄露评分要点 | judge 的 prompt **不放 rubric**；再加 `leak_guard` 兜底 | 模型看不见的东西无从泄露 |
+| 什么时候该说 | 后端状态机 + 页面时序（停顿计时、提交） | 时序不该交给模型判断 |
+| **怎么说**（语气、耐心、用词） | persona 的 `prompt_fragment` / reader prompt | 这才是 prompt 擅长的 |
+
+### 3.2 我们现在的三种"嘴"
+
+```
+                      决定说什么                 怎么说出来
+linear bank    ───►  后端题库指针          ───►  pre_generated TTS
+judged bank    ───►  题库指针 + 后端 judge  ───►  pre_generated TTS（题目和 nudge 都是）
+external       ───►  外部 workflow（Dify）  ───►  pre_generated TTS
+Playground     ───►  Voice Live 里的 agent  ───►  模型自己的 response（这里才让它"想"）
+```
+
+judged 模式是"保留部分 LLM"的典型：LLM 在**后端**（gpt-5-mini chat 调用，reasoning off），拿
+到的是候选人的草稿转写，只回答一个问题——"这句话是不是说完了"。它产出的 nudge 文本再作为普通
+文本走 `pre_generated` TTS。**Voice Live 里的模型仍然一句不生成**。这样 LLM 的自由度被限制在一个
+可以单元测试、可以 eval、可以加守卫的 JSON 输出里，而不是直接对着候选人开口。
+
+### 3.3 judge 的 prompt 怎么写才和代码配合
+
+- **有序检查再给结论**。reasoning-off 的小模型直接问"要不要说话"会把停顿当作"还在说"。让它先
+  引用"最后几个词"（`closing_words`），再判 `ends_complete`，最后才 `verdict`——顺序本身就是约束。
+- **允许的 verdict 由代码给**：prompt 里写 "Allowed verdicts right now: wait, nudge."，parse 时
+  不在集合内的一律 `wait` + error 事件。prompt 和代码说的是同一份 `VERDICTS`。
+- **不给它不需要的信息**：nudge 不需要 rubric，就不放。少一段上下文 = 少一种泄露 + 少一份 token。
+- **输出形状再过一遍代码**：长度上限、`leak_guard`、`probe_guard`，任何一条不过 ⇒ 静音。原则是
+  "宁可不说，不可说错"。
+- **persona 的 prompt 放在前面、契约放在最后并声明覆盖**（"it overrides anything above"）——管理员
+  可以改语气，改不动规则。
+
+### 3.4 前端协议层要防的几个坑（都踩过）
+
+1. **cancel-then-speak**：`create_response=true` 时 Azure 自动回复常在飞行中，直接发读题会撞
+   `conversation_already_has_active_response`。现在 linear 下没有自动回复，但机制保留：有活动
+   response 就先 `response.cancel`，等 `response.done` 再读。
+2. **phantom active response**：发 `response.create` 前乐观地标 `activeResponseRef=true`，如果
+   Azure 拒绝（非撞车错误）、看门狗放弃、或 WS 掉线，这个标记要**主动清掉**，否则后面每题都"取消
+   并排队"等一个永远不来的 `response.done`——整场静音（v0.39.2.3 / v0.39.3.1 修）。
+3. **首读被 avatar 握手切掉**：avatar 的音频走 WebRTC，视频帧没画出来前读题开头会被吃掉。首读
+   要等 avatar 就绪（有上限），重连后同样要重新 gate。
+4. **重连要重置轮次状态**：不只是 avatar 的守卫，读题看门狗、未确认的读题（stash 后在新会话重
+   读）、judge/自动提交计时器、麦克风（`cleanupMic` 再重新 `initMic`，否则每次重连泄漏一个
+   MediaStream）。
+5. **按 id 确认送达 ≠ 确认内容**：加转写比对。
+
+### 3.5 一个决策清单
+
+新加一句"数字人要说的话"时，问自己：
+
+1. 这句话的**内容**是谁定的？后端/外部系统 ⇒ `pre_generated`；必须由模型现场生成 ⇒ 才用
+   `response.create` 让它"想"，并且优先在**后端** LLM 里生成成文本再 TTS。
+2. 触发**时机**是谁定的？页面/状态机 ⇒ 用事件与计时器，不要依赖 `create_response=true`。
+3. 有没有**不该说**的情况？写成代码守卫（集合、正则、长度），prompt 只是第一道网。
+4. 怎么**证明**它说对了？live spec 抓 WS 帧断言发出的文本 == 期望，转写 == 期望。
+
+---
+
+## 附：这次事故的时间线（供复盘）
+
+- 2026-09-14：external 模式发现 assistant item 读法在 gpt-4o 上产生 "Understood." / 编题；改为
+  `response.instructions` 读法，gpt-4o 实测可靠。
+- 2026-09-23：prod 语音模型切到 gpt-5-mini（region-native 限制），读法未重验。
+- 2026-09-24：linear bank 也改为 MODEL 模式 + 同一读法（agent 指令劫持读题）。
+- 2026-09-28：真实面试 Q4 被改写、Q7 被编造；根因 = 读题仍是模型推理 + 按 id 确认看不见偏差。
+  修复 `pre_generated_assistant_message` + 转写比对 + live 断言（#123）；同日 judge 收敛为
+  nudge-only + `probe_guard`（#124）；重连状态重置 + 麦克风释放（#125）；延迟探针改为按真实
+  链路计时（#126）。
+
+一句话总结：**Voice Live 里的模型是会话的宿主，不是面试官的脑子。脑子在后端，嘴用 TTS，
+prompt 只管语气。**
