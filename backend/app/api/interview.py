@@ -134,13 +134,13 @@ class JudgeApplyIn(BaseModel):
 
 
 class JudgeOut(BaseModel):
-    verdict: str  # wait | nudge | follow_up | redirect
+    verdict: str  # wait | nudge (follow_up / redirect retired 2026-09-28 — never returned)
     speech_text: str = ""
     # The ``judge_events`` row behind this verdict (dry runs hand it back so the page can apply
     # it).
     event_id: str | None = None
-    # Present when a follow-up/redirect turn was written, so the page refreshes the header (the
-    # pending follow-up now shows as ``current_question`` with ``is_follow_up``) without a 2nd call.
+    # Always ``None`` since 2026-09-28: the judge never writes a turn, so there is no refreshed
+    # interview to hand back. Kept in the schema so older clients keep parsing the response.
     interview: InterviewOut | None = None
 
 
@@ -459,10 +459,10 @@ async def judge(
     Cheap exits (no LLM call, no ``judge_events`` row): the session is not ``judged`` (snapshot),
     not a live bank session, the ids are stale (question advanced / follow-up count moved), the
     draft is blank, or the per-question call budget is spent — all ⇒ ``wait``. A concurrent judge
-    for the same session is a 409. Otherwise one LLM call; ``follow_up`` / ``redirect`` write an
-    interviewer ``follow_up`` turn (consuming a ``max_follow_ups`` slot) and return the refreshed
-    interview so the header switches; ``nudge`` returns text only. Every LLM call writes one
-    ``judge_events`` row.
+    for the same session is a 409. Otherwise one LLM call; the only speaking verdict is ``nudge``
+    ("please go on"), returned as text — the judge never writes an interviewer turn (the
+    ``follow_up`` / ``redirect`` verdicts were retired 2026-09-28: the judge paces, it never
+    probes). Every LLM call writes one ``judge_events`` row.
     """
     session = await _owned_interview(db, interview_id, candidate)
     if session.status != "in_progress":
@@ -531,19 +531,9 @@ async def judge(
         db.add(event)
         await db.commit()
         await db.refresh(event)
-        if body.dry_run or result.verdict in ("wait", "nudge"):
-            return JudgeOut(
-                verdict=result.verdict, speech_text=result.speech_text, event_id=event.id
-            )
-        await state_machine.record_follow_up(db, session, current.id, result.speech_text)
-        await db.refresh(session)
-        question = await _current_question(db, session)
-        return JudgeOut(
-            verdict=result.verdict,
-            speech_text=result.speech_text,
-            event_id=event.id,
-            interview=_to_interview_out(session, question),
-        )
+        # wait ⇒ nothing to say; nudge ⇒ text only. The judge never writes a turn, so the header
+        # never switches because of it (``interview`` stays None).
+        return JudgeOut(verdict=result.verdict, speech_text=result.speech_text, event_id=event.id)
     finally:
         _JUDGE_IN_FLIGHT.discard(session.id)
 
@@ -575,9 +565,10 @@ async def judge_apply(
     db: AsyncSession = Depends(get_db),
 ) -> JudgeOut:
     """Deliver a dry-run verdict now that the pause has lasted (D17). Idempotent and stale-safe:
-    an unknown / already-applied event, a question that advanced, a moved follow-up count, or a
-    spent follow-up slot all come back as ``wait`` and write nothing. ``follow_up`` / ``redirect``
-    write the interviewer turn here (and consume the slot); ``nudge`` is just marked delivered."""
+    an unknown / already-applied event, a non-``nudge`` event, a question that advanced or a moved
+    follow-up count all come back as ``wait`` and write nothing. ``nudge`` is marked delivered and
+    returned as text — the judge never writes an interviewer turn (``follow_up`` / ``redirect``
+    retired 2026-09-28)."""
     session = await _owned_interview(db, interview_id, candidate)
     if session.status != "in_progress":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Interview is not live")
@@ -588,7 +579,7 @@ async def judge_apply(
             )
         )
     ).scalar_one_or_none()
-    if event is None or event.applied or event.verdict not in ("nudge", "follow_up", "redirect"):
+    if event is None or event.applied or event.verdict != "nudge":
         return JudgeOut(verdict="wait", event_id=body.event_id)
     questions = await state_machine.resolve_questions(db)
     current = state_machine.question_at(questions, session.current_question_index)
@@ -602,21 +593,9 @@ async def judge_apply(
     applied_used, _llm = await _judge_usage(db, session.id, current.id)
     if applied_used >= max_calls:
         return JudgeOut(verdict="wait", event_id=event.id)
-    if event.verdict in ("follow_up", "redirect") and follow_ups_asked >= current.max_follow_ups:
-        return JudgeOut(verdict="wait", event_id=event.id)  # slot spent since the dry run
     event.applied = True
     await db.commit()
-    if event.verdict == "nudge":
-        return JudgeOut(verdict="nudge", speech_text=event.speech_text, event_id=event.id)
-    await state_machine.record_follow_up(db, session, current.id, event.speech_text)
-    await db.refresh(session)
-    question = await _current_question(db, session)
-    return JudgeOut(
-        verdict=event.verdict,
-        speech_text=event.speech_text,
-        event_id=event.id,
-        interview=_to_interview_out(session, question),
-    )
+    return JudgeOut(verdict="nudge", speech_text=event.speech_text, event_id=event.id)
 
 
 @router.get("/{interview_id}", response_model=InterviewOut)

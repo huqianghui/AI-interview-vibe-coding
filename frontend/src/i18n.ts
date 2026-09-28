@@ -166,7 +166,7 @@ export const resources = {
         addQuestion: "Add question",
         maxFollowUps: "Max follow-ups",
         maxFollowUpsHint:
-          "How many follow-up questions the judge may ask on this question during the candidate's pauses (0 = none). Only applies in Judged turn mode — in Linear mode the interviewer never follows up, and \"I'm done\" always moves to the next question.",
+          "No longer used: since 2026-09-28 the judge only nudges (\"please go on\") during pauses and never asks follow-up questions in any turn mode; \"I'm done\" always moves to the next question. Kept for existing banks; the value has no effect.",
         selectBankHint: "Select a bank to view its questions.",
         rubricTitle: "Scoring rubric",
         weightsTotal: "Weights total: {{sum}} — {{count}} items",
@@ -366,7 +366,7 @@ export const resources = {
         newQuestionPlaceholder: "新题目",
         addQuestion: "添加题目",
         maxFollowUps: "最多追问",
-        maxFollowUpsHint: "这道题最多允许 judge 在候选人停顿时追问几次（0 = 不追问）。仅在 Judged 模式生效；Linear 模式下面试官从不追问，点击「我答完了」一定进入下一题。",
+        maxFollowUpsHint: "已停用：自 2026-09-28 起，judge 在候选人停顿时只会轻声提示「请继续」，任何模式下都不再追问；点击「我答完了」一定进入下一题。字段为兼容旧题库保留，取值不再生效。",
         selectBankHint: "选择一个题库以查看题目。",
         rubricTitle: "评分标准",
         weightsTotal: "权重合计: {{sum}} — {{count}} 项",

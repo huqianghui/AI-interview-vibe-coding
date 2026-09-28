@@ -100,9 +100,10 @@ Open **http://localhost:5173**. Routes: `/interview` (candidate) and `/admin` (e
 2. **Candidate** (`/interview`): Start → orientation → answer the question in text.
 3. **Submit advances (F6/F7):** answer and submit — the interview advances straight to the next
    question in every turn mode (the old deterministic "quotes your earlier answer" follow-up at
-   submit was retired in v0.39.2.0). In **Judged** turn mode a backend judge may nudge, follow up,
-   or redirect live during the candidate's pauses, before submit — never by quoting or naming a
-   rubric item (see `SPEC.md` F7).
+   submit was retired in v0.39.2.0). In **Judged** turn mode a backend judge may speak a short
+   nudge live during the candidate's pauses, before submit, if the answer trails off mid-thought —
+   never by quoting or naming a rubric item; the judge never writes a follow-up/redirect turn
+   (retired in v0.39.3.0, see `SPEC.md` F6/F7).
 4. **Report (F8):** finish → executive report with an **A–F grade gauge**, strength/gap narrative,
    and **SOP source shown beside your answer** (the P14 evidence). Toggle detail for per-item
    judgments (met / partial / not-met / violated).

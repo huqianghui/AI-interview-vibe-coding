@@ -71,12 +71,14 @@ export interface Interview {
 
 /** `POST /judge` result: what the interviewer should say during this pause, if anything. */
 export interface JudgeOut {
-  verdict: "wait" | "nudge" | "follow_up" | "redirect";
+  // Nudge-only since 2026-09-28 (owner: the judge paces, it never probes). `follow_up` / `redirect`
+  // are retired on the backend and never returned; the page ignores anything else defensively.
+  verdict: "wait" | "nudge";
   speech_text: string;
   // The judge_events row behind this verdict; a dry run hands it back for `applyJudge()`.
   event_id: string | null;
-  // Present when a follow-up/redirect turn was written — the refreshed interview (its
-  // current_question is now the follow-up, is_follow_up=true) so the page updates the header.
+  // Always null since 2026-09-28 — the judge never writes a turn, so there is no refreshed
+  // interview. Kept in the shape for wire compatibility; nothing reads it.
   interview: Interview | null;
 }
 

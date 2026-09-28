@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.39.3.0 (2026-09-28)
+
+### Changed
+- **The judge only paces — it never asks follow-up questions any more.** In judged turn mode the
+  interviewer used to be allowed, during a candidate's pause, to ask one guiding follow-up or pull an
+  off-topic answer back on track. Owner decision: the interview is fully controlled by the question
+  bank, so those two verdicts are retired. The judge now does exactly one thing: when the candidate
+  trails off mid-sentence or mid-thought it says one encouraging line ("Please go on." / "请继续。"),
+  read as text-to-speech exactly as written; a complete sentence — however short, thin, or off-topic
+  — gets silence, and "I'm done" always moves to the next question. The rubric is no longer shown to
+  the judge at all (a nudge needs none, and a rubric the model never sees cannot leak), which also
+  makes each judge call cheaper. The question-level "Max follow-ups" field stays for existing banks
+  but has no effect; the editor says so.
+- **A nudge can never be a question in disguise.** "Never asks a question" is no longer just an
+  instruction to the model: a would-be nudge containing a question mark or opening with an
+  interrogative (in English or Chinese) is silenced server-side and logged as `probe_blocked`.
+- Editor wording follows: the judged-turns option reads "a gentle nudge when the candidate trails off;
+  never a follow-up", and the hint no longer promises follow-ups or redirects.
+
 ## 0.39.2.3 (2026-09-28)
 
 ### Fixed

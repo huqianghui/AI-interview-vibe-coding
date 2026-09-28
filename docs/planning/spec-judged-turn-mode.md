@@ -353,6 +353,18 @@ _No new tasks from Performance review (D11 dropped)._
   mouth-mode marker and the reading-contract system item, but the frontend no longer fills `{text}`
   into `response.instructions` per turn. See `backend/app/models/persona.py` and
   `backend/app/services/voice_live_proxy.py`.
+- **v0.39.3.0 amendment — nudge-only judge (owner directive 2026-09-28, supersedes the verdict set
+  in "Amended design", D7 and the `follow_up`/`redirect` rows above):** "停顿后只做 nudge，不做追问"
+  — and `redirect` goes too. `VERDICTS = ("wait", "nudge")`; `follow_up` / `redirect` are
+  `RETIRED_VERDICTS` (a model that still emits one is an error event ⇒ silence). `allowed_verdicts()`
+  is constant; the prompt carries NO rubric and no follow-up history (a nudge needs neither, and a
+  rubric the model never sees cannot leak); the contract is the ordered "closing_words →
+  ends_complete → verdict" check (mid-thought ⇒ one "please go on", any complete sentence ⇒ wait).
+  `/judge` and `/judge/apply` never write an interviewer turn (`interview` is always null); the page
+  ignores any stray non-nudge verdict. Question-level `max_follow_ups` is kept for compatibility but
+  inert (editor hint says so); `record_follow_up` remains only as a retained hook. Real-model eval
+  12/12 in class (mid-thought → nudge, everything else → wait; injection → filter/wait). Live spec
+  case `incomplete` now asserts silence.
 
 ## GSTACK REVIEW REPORT
 
