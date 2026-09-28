@@ -2242,3 +2242,112 @@ describe("useInterviewVoice mouth-mode read is pre-generated TTS, never a model 
     expect(speechMatchesText("Thank you.", "How is monitoring adapted to regional risk?")).toBe(false);
   });
 });
+
+/**
+ * Automatic reconnect resets the turn/read bookkeeping (TODOS P2 from the v0.39.2.3 adversarial
+ * review). Before: the onclose reconnect branch reset only the avatar guards, so a WS drop mid-read
+ * carried `activeResponseRef=true` into the new session (every later speakQuestion cancelled-and-
+ * queued behind a phantom response → silence), never stashed the unconfirmed question for the
+ * resume path (dead code on the most common trigger), and left a stale watchdog timer ticking.
+ */
+describe("useInterviewVoice automatic reconnect resets turn state", () => {
+  class FakeWebSocket {
+    static last: FakeWebSocket | null = null;
+    static OPEN = 1;
+    readyState = 1;
+    onmessage: ((e: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+    sent: string[] = [];
+    constructor(public url: string) {
+      FakeWebSocket.last = this;
+    }
+    send(data: string) {
+      this.sent.push(data);
+    }
+    close() {
+      this.readyState = 3;
+      this.onclose?.();
+    }
+    receive(msg: unknown) {
+      this.onmessage?.({ data: JSON.stringify(msg) });
+    }
+  }
+  const DIRECTIVE = "You are Ava, the interviewer's voice.\n\nText to read this turn:\n\n{text}";
+  const reads = (ws: FakeWebSocket) =>
+    ws.sent
+      .map((s) => JSON.parse(s) as { type?: string; response?: { pre_generated_assistant_message?: { content?: { text?: string }[] } } })
+      .filter((f) => f.type === "response.create")
+      .map((f) => f.response?.pre_generated_assistant_message?.content?.[0]?.text ?? "(bare)");
+  const types = (ws: FakeWebSocket) => ws.sent.map((s) => (JSON.parse(s) as { type?: string }).type);
+
+  it("a WS drop mid-read: the new session re-speaks the unconfirmed question, keeps the draft, and never cancels a phantom", async () => {
+    FakeWebSocket.last = null;
+    vi.useFakeTimers();
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    let hook!: ReturnType<typeof useInterviewVoice>;
+    function Harness() {
+      hook = useInterviewVoice("iv-1", { locale: "en-US", tokenProvider: () => "tok", linearTurns: true });
+      return null;
+    }
+    const { unmount } = render(<Harness />);
+    let connectP!: Promise<void>;
+    act(() => {
+      connectP = hook.connect("en-US");
+    });
+    const bootstrap = (ws: FakeWebSocket) => {
+      ws.receive({ type: "proxy.connected", mode: "model", avatar_enabled: false, read_directive: DIRECTIVE, linear_turns: true });
+      ws.receive({ type: "session.updated", session: {} });
+    };
+    await act(async () => {
+      for (let i = 0; i < 20 && !FakeWebSocket.last; i++) await Promise.resolve();
+      bootstrap(FakeWebSocket.last!);
+      await connectP;
+    });
+    const firstWs = FakeWebSocket.last!;
+
+    // The candidate has said something this turn, and a question read is in flight but UNCONFIRMED
+    // (no response.created yet) when the WS drops.
+    act(() => {
+      expect(hook.speakQuestion("How is monitoring adapted to regional risk?")).toBe(true);
+    });
+    await act(async () => {
+      firstWs.receive({ type: "conversation.item.input_audio_transcription.completed", transcript: "I run a risk review" });
+      firstWs.close();
+    });
+    expect(hook.connectionState).toBe("reconnecting");
+
+    // Backoff → a NEW WS; its session.updated must re-speak the stashed question exactly once.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1100);
+    });
+    const secondWs = FakeWebSocket.last!;
+    expect(secondWs).not.toBe(firstWs);
+    await act(async () => {
+      bootstrap(secondWs);
+    });
+    expect(reads(secondWs)).toEqual(["How is monitoring adapted to regional risk?"]);
+    expect(types(secondWs)).not.toContain("response.cancel"); // no phantom active response
+    // The dead session's watchdog was disarmed: no duplicate read fires from it.
+    await act(async () => {
+      secondWs.receive({ type: "response.created", response: { id: "r2" } });
+      secondWs.receive({ type: "response.audio_transcript.done", response_id: "r2", item_id: "i2", transcript: "How is monitoring adapted to regional risk?" });
+      secondWs.receive({ type: "response.done" });
+      await vi.advanceTimersByTimeAsync(13_000);
+    });
+    expect(reads(secondWs)).toEqual(["How is monitoring adapted to regional risk?"]);
+
+    // The answer transcribed BEFORE the drop is still the draft (same question, same turn)…
+    expect(hook.peekDraft()).toBe("I run a risk review");
+    // …and the next question is read directly on the new session (no cancel, no queue).
+    act(() => {
+      expect(hook.speakQuestion("What methods do you use to gather feedback?")).toBe(true);
+    });
+    expect(reads(secondWs).at(-1)).toBe("What methods do you use to gather feedback?");
+    expect(types(secondWs)).not.toContain("response.cancel");
+
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+});

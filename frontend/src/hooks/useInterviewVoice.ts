@@ -420,15 +420,17 @@ export function useInterviewVoice(
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data));
   }, []);
 
-  const cleanup = useCallback(() => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    avatarStream.disconnect();
-    audio.cleanupMic();
-    avatarStartedRef.current = false;
-    sessionLiveRef.current = false;
+  // Everything a NEW Azure session must start without: the previous session's turn/read
+  // bookkeeping, its watchdog timers, and its half-finished transcript state. Shared by `cleanup()`
+  // (connect-timeout, mic failure, explicit disconnect) AND the automatic-reconnect branch of
+  // `connect()`'s onclose — which used to reset only the avatar guards, so after an ordinary
+  // network drop `activeResponseRef` could survive into the new session (every later speakQuestion
+  // then cancelled-and-queued behind a phantom response: silence), the unconfirmed question was
+  // never stashed for re-speaking (the resume path was dead on the most common trigger), and a
+  // stale read watchdog could fire against a session that had not reached `session.updated`
+  // (TODOS P2 from the v0.39.2.3 adversarial review). Mic/avatar continuity is deliberately NOT
+  // here — each caller decides that.
+  const resetTurnState = useCallback((opts?: { keepDraft?: boolean }) => {
     // Reset turn-response bookkeeping so a reconnect starts idle (no stale "active response" that
     // would make the first speakQuestion needlessly cancel, and no queued question from a dead
     // session leaking into the new one).
@@ -458,8 +460,10 @@ export function useInterviewVoice(
     firstReadDoneRef.current = false;
     avatarConnectedRef.current = false;
     // Drop any buffered user transcript — a new session starts a fresh turn; carrying stale
-    // segments across a disconnect/reconnect would mis-attribute them to the next answer.
-    userSegmentsSinceCommitRef.current = [];
+    // segments across a disconnect would mis-attribute them to the next answer. EXCEPT on an
+    // automatic mid-answer reconnect (`keepDraft`): the candidate is still on the same question and
+    // those segments ARE their answer so far — dropping them would submit a truncated answer.
+    if (!opts?.keepDraft) userSegmentsSinceCommitRef.current = [];
     // Disarm the silence-auto-commit timer — its fire would target a dead session's turn.
     clearSilenceAutoCommit();
     clearJudgeTimer();
@@ -469,7 +473,19 @@ export function useInterviewVoice(
     // Settle a commit still waiting on a transcript that will never arrive now that the WS is
     // going away — otherwise `await commitAnswer()` hangs forever on disconnect/reconnect/unmount.
     settlePendingCommit();
-  }, [audio, avatarStream, settlePendingCommit, clearSilenceAutoCommit, clearJudgeTimer]);
+  }, [settlePendingCommit, clearSilenceAutoCommit, clearJudgeTimer]);
+
+  const cleanup = useCallback(() => {
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    avatarStream.disconnect();
+    audio.cleanupMic();
+    avatarStartedRef.current = false;
+    sessionLiveRef.current = false;
+    resetTurnState();
+  }, [audio, avatarStream, resetTurnState]);
 
   /** WS message handler — Azure Voice Live realtime events, relayed near-verbatim by the backend
    * proxy (plus its own `proxy.connected` bootstrap frame). */
@@ -1006,6 +1022,12 @@ export function useInterviewVoice(
             // digital human never came back (orb forever after any WS drop).
             avatarStartedRef.current = false;
             sessionLiveRef.current = false;
+            // …and the turn/read bookkeeping (see resetTurnState): drops the dead session's
+            // in-flight marks and watchdog, stashes an unconfirmed question read so the new
+            // session's `session.updated` re-speaks it. The mic is only paused here (not torn
+            // down) so the candidate's capture resumes seamlessly, and the answer transcribed so
+            // far is kept — they are still on the same question.
+            resetTurnState({ keepDraft: true });
             reconnectTimerRef.current = setTimeout(() => {
               void connect(lastLocaleRef.current, true).catch(() => undefined);
             }, delay);
@@ -1045,7 +1067,7 @@ export function useInterviewVoice(
         throw error;
       }
     },
-    [audio, avatarStream, cleanup, handleMessage, setConn],
+    [audio, avatarStream, cleanup, handleMessage, resetTurnState, setConn],
   );
 
   const disconnect = useCallback(async () => {
