@@ -1214,8 +1214,8 @@ export function useInterviewVoice(
    * Speak a short interviewer aside (a judge nudge) verbatim, right now. Unlike `speakQuestion` it
    * is NOT deduplicated per text (the same "please go on" may legitimately recur) and it is DROPPED
    * when the interviewer is already speaking (never talk over a question read). Returns whether it
-   * was emitted. Judge follow-ups/redirects do NOT use this: they arrive as the new current question
-   * (header switch) and go through the normal verbatim question read.
+   * was emitted. Since 2026-09-28 a nudge is the judge's ONLY utterance (follow-ups and redirects
+   * are retired), and like every mouth-mode read it goes out as pre-generated TTS of the exact text.
    */
   const speakAside = useCallback(
     (text: string): boolean => {

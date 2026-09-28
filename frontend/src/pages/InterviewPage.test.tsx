@@ -1201,7 +1201,8 @@ describe("InterviewPage judged turns (issue #114)", () => {
     const user = userEvent.setup();
     vi.spyOn(client, "startInterview").mockResolvedValue(judged);
     vi.spyOn(client, "judgeInterview").mockResolvedValue({
-      verdict: "follow_up",
+      // A retired value a stale server might still send — not in the JudgeOut type on purpose.
+      verdict: "follow_up" as unknown as "wait",
       event_id: "e1",
       speech_text: "Who do you notify about it?",
       interview: {
@@ -1234,6 +1235,44 @@ describe("InterviewPage judged turns (issue #114)", () => {
     expect(vm.speakQuestion).not.toHaveBeenCalledWith("Who do you notify about it?");
     expect(vm.speakAside).not.toHaveBeenCalled();
     expect(hookSpy.mock.calls.at(-1)?.[1]?.judgeSilenceMs).toBe(2_000);
+  });
+
+  it("text: a stray follow_up verdict (retired) shows no bubble and never switches the header", async () => {
+    // Text-channel twin of the voice guard: a stale server's follow_up payload — even with a fully
+    // populated interview — must not become a bubble or move the card off the bank question.
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockResolvedValue({ ...judged, voice_judge_silence_seconds: 1 });
+    const judgeSpy = vi.spyOn(client, "judgeInterview").mockResolvedValue({
+      verdict: "follow_up" as unknown as "wait",
+      event_id: "e1",
+      speech_text: "Who do you notify about it?",
+      interview: {
+        ...judged,
+        current_question: {
+          question_id: "q1",
+          prompt: "Who do you notify about it?",
+          index: 0,
+          total: 2,
+          is_follow_up: true,
+          follow_ups_asked: 1,
+        },
+        voice_judge_silence_seconds: null,
+      },
+    });
+    const voiceModule = await import("../hooks/useInterviewVoice");
+    vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(voiceMock());
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+    await screen.findByText("Question one?");
+    await user.type(screen.getByRole("textbox"), "so the first thing I would do is");
+    await waitFor(() => expect(judgeSpy).toHaveBeenCalled(), { timeout: 3_000 });
+    // Give the (ignored) verdict time to land, then assert nothing changed.
+    await new Promise((r) => setTimeout(r, 300));
+    expect(screen.queryByTestId("judge-nudge")).not.toBeInTheDocument();
+    expect(screen.queryByText("Who do you notify about it?")).toBeNull();
+    expect(screen.getByText("Question one?")).toBeInTheDocument();
   });
 
   it("text: an idle draft asks the judge; a nudge shows as a bubble; submit is never blocked", async () => {

@@ -195,7 +195,7 @@ test.describe("Judged turns (real Azure + real judge)", () => {
           `judge must stay silent on a complete-but-thin answer; got ${JSON.stringify(judgeResults)}`,
         ).toBe(true);
         expect(judgeResults.some((j) => j.verdict === "follow_up" || j.verdict === "redirect")).toBe(false);
-        await expect(page.getByText(Q1)).toBeVisible();
+        await expect(page.getByText(Q1).first()).toBeVisible(); // card (+ transcript bubble)
         expect(transcripts.length).toBe(1);
       } else if (CASE === "complete") {
         // Give the judge window + LLM time to run; it must stay silent.

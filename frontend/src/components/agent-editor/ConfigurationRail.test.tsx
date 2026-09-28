@@ -110,6 +110,10 @@ describe("ConfigurationRail — bank turn mode (linear vs judged, issue #114)", 
     expect(screen.getByTestId("config-turn-mode")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /linear turns/i })).toBeChecked();
     expect(screen.getByRole("radio", { name: /judged turns/i })).not.toBeChecked();
+    // Nudge-only since 2026-09-28: the option label itself promises no follow-up.
+    expect(
+      screen.getByRole("radio", { name: /gentle nudge when the candidate trails off; never a follow-up/i }),
+    ).toBeInTheDocument();
     expect(screen.getByText(/stays silent while the candidate answers/i)).toBeInTheDocument();
     // v0.39.2.3: the hint states the delivery guarantee — questions are TTS of the bank text, never
     // generated or rephrased by a model (the card/spoken mismatch fix).

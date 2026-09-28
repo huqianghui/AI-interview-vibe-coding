@@ -50,9 +50,10 @@ export interface PersonaOut {
   external_auto_submit_enabled: boolean;
   external_auto_submit_silence_seconds: number;
   // BANK-session turn control (issue #114): "linear" (default) — silent between questions; "judged"
-  // — a backend judge may nudge / follow up / redirect DURING the candidate's pauses (never at
-  // submit). External sessions are always linear and never consult it. The pre-0.39 "model" value
-  // (Foundry agent speaking in its own turn) is retired — the backend maps it to "linear".
+  // — a backend judge may NUDGE ("please go on") when the candidate trails off mid-thought (never a
+  // follow-up or redirect since 2026-09-28, never at submit). External sessions are always linear
+  // and never consult it. The pre-0.39 "model" value (Foundry agent speaking in its own turn) is
+  // retired — the backend maps it to "linear".
   bank_turn_mode: BankTurnMode;
   // Judge knobs (judged mode only): pause length before a judge check (1–30 s) and the cap on
   // judge checks per question (0–5; 0 = never).
