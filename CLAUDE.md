@@ -116,3 +116,16 @@ Key routing rules:
 - Save progress → invoke /context-save
 - Resume context → invoke /context-restore
 - Author a backlog-ready spec/issue (写需求/规格) → invoke /spec
+
+## /ship scale rule (owner decision 2026-09-28)
+
+`/ship` dispatches up to 8 review subagents + 2 Codex runs by default. On this repo only the Claude
+adversarial reviewer and the coverage audit have produced actionable findings; the rest is time and
+tokens. So, when invoking `/ship`:
+
+- **Small fix PR** (diff < ~500 lines, no new route/migration/module, no auth change): run Step 7
+  (coverage audit) and Step 11's **Claude adversarial subagent** only. SKIP the five Step 9.1
+  specialists (do the Step 9 checklist pass inline yourself), and SKIP both Codex passes (Codex also
+  refuses this repo's gstack gate). Say so in one line in the PR body's Pre-Landing Review section.
+- **Feature / large PR** (≥ ~500 lines, or any new route/migration/module/auth): full default flow.
+- Never skip: fresh test runs, the live Azure spec when a voice path changed, the redaction scan.
