@@ -2242,3 +2242,323 @@ describe("useInterviewVoice mouth-mode read is pre-generated TTS, never a model 
     expect(speechMatchesText("Thank you.", "How is monitoring adapted to regional risk?")).toBe(false);
   });
 });
+
+/**
+ * Automatic reconnect resets the turn/read bookkeeping (TODOS P2 from the v0.39.2.3 adversarial
+ * review). Before: the onclose reconnect branch reset only the avatar guards, so a WS drop mid-read
+ * carried `activeResponseRef=true` into the new session (every later speakQuestion cancelled-and-
+ * queued behind a phantom response → silence), never stashed the unconfirmed question for the
+ * resume path (dead code on the most common trigger), and left a stale watchdog timer ticking.
+ */
+describe("useInterviewVoice automatic reconnect resets turn state", () => {
+  class FakeWebSocket {
+    static last: FakeWebSocket | null = null;
+    static OPEN = 1;
+    readyState = 1;
+    onmessage: ((e: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+    sent: string[] = [];
+    constructor(public url: string) {
+      FakeWebSocket.last = this;
+    }
+    send(data: string) {
+      this.sent.push(data);
+    }
+    close() {
+      this.readyState = 3;
+      this.onclose?.();
+    }
+    receive(msg: unknown) {
+      this.onmessage?.({ data: JSON.stringify(msg) });
+    }
+  }
+  const DIRECTIVE = "You are Ava, the interviewer's voice.\n\nText to read this turn:\n\n{text}";
+  const reads = (ws: FakeWebSocket) =>
+    ws.sent
+      .map((s) => JSON.parse(s) as { type?: string; response?: { pre_generated_assistant_message?: { content?: { text?: string }[] } } })
+      .filter((f) => f.type === "response.create")
+      .map((f) => f.response?.pre_generated_assistant_message?.content?.[0]?.text ?? "(bare)");
+  const types = (ws: FakeWebSocket) => ws.sent.map((s) => (JSON.parse(s) as { type?: string }).type);
+
+  it("a WS drop mid-read: the new session re-speaks the unconfirmed question, keeps the draft, and never cancels a phantom", async () => {
+    FakeWebSocket.last = null;
+    vi.useFakeTimers();
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    let hook!: ReturnType<typeof useInterviewVoice>;
+    function Harness() {
+      hook = useInterviewVoice("iv-1", { locale: "en-US", tokenProvider: () => "tok", linearTurns: true });
+      return null;
+    }
+    const { unmount } = render(<Harness />);
+    let connectP!: Promise<void>;
+    act(() => {
+      connectP = hook.connect("en-US");
+    });
+    const bootstrap = (ws: FakeWebSocket) => {
+      ws.receive({ type: "proxy.connected", mode: "model", avatar_enabled: false, read_directive: DIRECTIVE, linear_turns: true });
+      ws.receive({ type: "session.updated", session: {} });
+    };
+    await act(async () => {
+      for (let i = 0; i < 20 && !FakeWebSocket.last; i++) await Promise.resolve();
+      bootstrap(FakeWebSocket.last!);
+      await connectP;
+    });
+    const firstWs = FakeWebSocket.last!;
+
+    // The candidate has said something this turn, and a question read is in flight but UNCONFIRMED
+    // (no response.created yet) when the WS drops.
+    act(() => {
+      expect(hook.speakQuestion("How is monitoring adapted to regional risk?")).toBe(true);
+    });
+    await act(async () => {
+      firstWs.receive({ type: "conversation.item.input_audio_transcription.completed", transcript: "I run a risk review" });
+      firstWs.close();
+    });
+    expect(hook.connectionState).toBe("reconnecting");
+
+    // Backoff → a NEW WS; its session.updated must re-speak the stashed question exactly once.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1100);
+    });
+    const secondWs = FakeWebSocket.last!;
+    expect(secondWs).not.toBe(firstWs);
+    await act(async () => {
+      bootstrap(secondWs);
+    });
+    expect(reads(secondWs)).toEqual(["How is monitoring adapted to regional risk?"]);
+    expect(types(secondWs)).not.toContain("response.cancel"); // no phantom active response
+    // The dead session's watchdog was disarmed: no duplicate read fires from it.
+    await act(async () => {
+      secondWs.receive({ type: "response.created", response: { id: "r2" } });
+      secondWs.receive({ type: "response.audio_transcript.done", response_id: "r2", item_id: "i2", transcript: "How is monitoring adapted to regional risk?" });
+      secondWs.receive({ type: "response.done" });
+      await vi.advanceTimersByTimeAsync(13_000);
+    });
+    expect(reads(secondWs)).toEqual(["How is monitoring adapted to regional risk?"]);
+
+    // The answer transcribed BEFORE the drop is still the draft (same question, same turn)…
+    expect(hook.peekDraft()).toBe("I run a risk review");
+    // …and the next question is read directly on the new session (no cancel, no queue).
+    act(() => {
+      expect(hook.speakQuestion("What methods do you use to gather feedback?")).toBe(true);
+    });
+    expect(reads(secondWs).at(-1)).toBe("What methods do you use to gather feedback?");
+    expect(types(secondWs)).not.toContain("response.cancel");
+
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  // Shared connect for the three edge cases below (agent mode is enough — the reset path is the
+  // same; `avatar` arms the first-read gate; `opts` feeds the hook options under test).
+  async function connectFor(opts: Record<string, unknown>, avatar = false) {
+    FakeWebSocket.last = null;
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    let hook!: ReturnType<typeof useInterviewVoice>;
+    function Harness() {
+      hook = useInterviewVoice("iv-1", { locale: "en-US", tokenProvider: () => "tok", ...opts });
+      return null;
+    }
+    const { unmount } = render(<Harness />);
+    let connectP!: Promise<void>;
+    act(() => {
+      connectP = hook.connect("en-US");
+    });
+    await act(async () => {
+      for (let i = 0; i < 20 && !FakeWebSocket.last; i++) await Promise.resolve();
+      if (avatar) FakeWebSocket.last!.receive({ type: "proxy.connected", avatar_enabled: true });
+      FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
+      await connectP;
+    });
+    const reconnect = async () => {
+      const dead = FakeWebSocket.last!;
+      await act(async () => {
+        dead.close();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1100);
+      });
+      const fresh = FakeWebSocket.last!;
+      expect(fresh).not.toBe(dead);
+      return fresh;
+    };
+    return { getHook: () => hook, ws: () => FakeWebSocket.last!, reconnect, unmount };
+  }
+
+  it("a commitAnswer() awaiting its transcript settles promptly on the drop, never from the new session", async () => {
+    vi.useFakeTimers();
+    const { getHook, reconnect, unmount } = await connectFor({});
+    let committed!: Promise<string>;
+    act(() => {
+      committed = getHook().commitAnswer(); // no transcript yet → armed, waiting
+    });
+    const fresh = await reconnect();
+    // Settled by the reset (fail-closed ""), well before the 8 s commit timeout …
+    let settled: string | null = null;
+    void committed.then((v) => (settled = v));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    expect(settled).toBe("");
+    // … so a transcript arriving on the NEW session cannot be mis-attributed to the old commit.
+    await act(async () => {
+      fresh.receive({ type: "session.updated", session: {} });
+      fresh.receive({ type: "conversation.item.input_audio_transcription.completed", transcript: "new session words" });
+    });
+    expect(settled).toBe("");
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("silence auto-commit and judge timers armed before the drop never fire against the new session", async () => {
+    vi.useFakeTimers();
+    const onSilenceAutoCommit = vi.fn();
+    const onSilenceJudge = vi.fn();
+    const { ws, reconnect, unmount } = await connectFor({
+      silenceAutoCommitMs: 3_000,
+      onSilenceAutoCommit,
+      judgeSilenceMs: 2_000,
+      onSilenceJudge,
+    });
+    await act(async () => {
+      ws().receive({ type: "conversation.item.input_audio_transcription.completed", transcript: "I think that" });
+    });
+    await reconnect(); // both timers were ticking; the reset disarms them
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(onSilenceAutoCommit).not.toHaveBeenCalled();
+    expect(onSilenceJudge).not.toHaveBeenCalled();
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("a first read still held behind the avatar gate when the line drops is re-spoken on the new session", async () => {
+    vi.useFakeTimers();
+    const { getHook, reconnect, unmount } = await connectFor({}, true);
+    act(() => {
+      expect(getHook().speakQuestion("Gated first question.")).toBe(true); // held: avatar not painting
+    });
+    const fresh = await reconnect();
+    const items = () =>
+      fresh.sent
+        .map((f) => JSON.parse(f) as { type?: string; item?: { content?: { text?: string }[] } })
+        .filter((f) => f.type === "conversation.item.create")
+        .map((f) => f.item?.content?.[0]?.text);
+    await act(async () => {
+      fresh.receive({ type: "session.updated", session: {} });
+    });
+    // The stashed text is handed back to speakQuestion on the new session — and, the avatar being
+    // re-handshaked (avatar still enabled, not yet painting), it is HELD behind the first-read gate
+    // again rather than clipped: nothing on the wire yet …
+    expect(items()).toEqual([]);
+    // … until the gate releases it (avatar frames, or the bounded wait) — read exactly once, as the
+    // agent-mode assistant item since this harness has no read directive.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6_100); // FIRST_READ_AVATAR_GATE_MS (6 s) + slack
+    });
+    expect(items()).toEqual(["Gated first question."]);
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("each automatic reconnect releases the mic (cleanupMic) so connect() re-acquires it — no orphaned capture", async () => {
+    vi.useFakeTimers();
+    const { reconnect, unmount } = await connectFor({});
+    cleanupMicSpy.mockClear();
+    await reconnect();
+    // Before: only STOP_RECORDING was posted and initMic() then opened a SECOND MediaStream +
+    // AudioContext, leaving the first captured forever (browser mic indicator stuck on).
+    expect(cleanupMicSpy).toHaveBeenCalledTimes(1);
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("the partial user transcript of an interrupted utterance is folded into the kept draft", async () => {
+    vi.useFakeTimers();
+    const { getHook, ws, reconnect, unmount } = await connectFor({});
+    await act(async () => {
+      ws().receive({ type: "conversation.item.input_audio_transcription.completed", transcript: "First I log it," });
+      ws().receive({ type: "conversation.item.input_audio_transcription.delta", item_id: "u2", delta: "then I notify " });
+      ws().receive({ type: "conversation.item.input_audio_transcription.delta", item_id: "u2", delta: "the sponsor" });
+    });
+    await reconnect(); // u2's `.completed` will never arrive on the dead session
+    expect(getHook().peekDraft()).toBe("First I log it, then I notify the sponsor");
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("after the third failed reconnect everything is released like a disconnect: mic, draft, in-flight marks", async () => {
+    vi.useFakeTimers();
+    const onError = vi.fn();
+    const { getHook, ws, reconnect, unmount } = await connectFor({ onError });
+    await act(async () => {
+      ws().receive({ type: "conversation.item.input_audio_transcription.completed", transcript: "stale words" });
+    });
+    act(() => {
+      expect(getHook().speakQuestion("Unconfirmed?")).toBe(true); // optimistic in-flight mark
+    });
+    // Three drops of LIVE sessions → three reconnect attempts (1s/2s/4s; the counter is never
+    // reset by a successful reconnect); the 4th drop is terminal. A pre-connect close is a
+    // different path (connect() rejects), so each attempt is brought live first.
+    const live = (w: FakeWebSocket) => w.receive({ type: "session.updated", session: {} });
+    await reconnect();
+    await act(async () => {
+      live(FakeWebSocket.last!);
+      FakeWebSocket.last!.close();
+      await vi.advanceTimersByTimeAsync(2100);
+    });
+    await act(async () => {
+      live(FakeWebSocket.last!);
+      FakeWebSocket.last!.close();
+      await vi.advanceTimersByTimeAsync(4100);
+    });
+    cleanupMicSpy.mockClear();
+    await act(async () => {
+      live(FakeWebSocket.last!);
+      FakeWebSocket.last!.close();
+    });
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: "Voice connection failed after 3 attempts" }));
+    expect(cleanupMicSpy).toHaveBeenCalledTimes(1);
+    expect(getHook().peekDraft()).toBe("");
+    // A later manual connect starts clean: the first question read goes straight out, no cancel.
+    let connectP!: Promise<void>;
+    act(() => {
+      connectP = getHook().connect("en-US");
+    });
+    await act(async () => {
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+      FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
+      await connectP;
+    });
+    const fresh = FakeWebSocket.last!;
+    // The question left unconfirmed by the dead session is re-spoken first (the page latched it
+    // as spoken, nobody else will) — a REAL read in flight, not a phantom …
+    const itemTexts = () =>
+      fresh.sent
+        .map((f) => JSON.parse(f) as { type?: string; item?: { content?: { text?: string }[] } })
+        .filter((f) => f.type === "conversation.item.create")
+        .map((f) => f.item?.content?.[0]?.text);
+    expect(itemTexts()).toEqual(["Unconfirmed?"]);
+    await act(async () => {
+      fresh.receive({ type: "response.created", response: { id: "r-resume" } });
+      fresh.receive({ type: "response.done" });
+    });
+    // … after which the next question goes straight out: no cancel, no queue.
+    act(() => {
+      expect(getHook().speakQuestion("Fresh question?")).toBe(true);
+    });
+    expect(itemTexts()).toEqual(["Unconfirmed?", "Fresh question?"]);
+    expect(types(fresh)).not.toContain("response.cancel");
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+});

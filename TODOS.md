@@ -23,7 +23,8 @@ mutating transaction and re-run the staleness check before writing.
 **Effort:** S
 **Priority:** P2
 
-### Automatic voice reconnect bypasses `cleanup()` — speak/turn refs survive a WS drop
+## Completed
+### Automatic voice reconnect bypasses `cleanup()` — speak/turn refs survive a WS drop — fixed v0.39.3.1
 
 `useInterviewVoice.ts`: the unexpected-`onclose` reconnect branch resets only `avatarStartedRef` /
 `sessionLiveRef` (the avatar-handshake fix) but never `activeResponseRef`, `spokenTextRef`,
@@ -39,8 +40,7 @@ branch, keeping the mic/avatar-continuity behaviour that branch intentionally pr
 vitest reconnect case. Surfaced by the v0.39.2.3 adversarial review (INVESTIGATE).
 
 **Priority:** P2
-
-## Completed
+**Completed:** v0.39.3.1 (2026-09-28) — `resetTurnState()` shared by `cleanup()` and the reconnect branch (`keepDraft` keeps the answer so far); regression test in `useInterviewVoice.test.tsx`.
 
 ### Fallback interviewer prompt divergence — closed as obsolete, v0.39.0.0
 
