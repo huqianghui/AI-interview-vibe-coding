@@ -120,6 +120,9 @@ def main() -> None:
                     f"Q1='{rec['first_question'][:60]}'"
                 )
 
+                # Per-run: a turn that fails before setting it must not inherit the previous
+                # run's value (a stale "completed" would skip the finish loop below).
+                status = data.get("status", "")
                 for turn in range(1, args.max_turns + 1):
                     answer = ANSWERS[(turn - 1) % len(ANSWERS)]
                     t0 = now()

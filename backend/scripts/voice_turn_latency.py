@@ -100,7 +100,9 @@ class TurnRecorder:
         self.audio_bytes = 0
         self.audio_delta_count = 0
         self.usage: dict[str, Any] | None = None
-        self.forced_response_create = False
+        # True when this turn went through the MOUTH chain (transcript → HTTP /answer → TTS read
+        # of the next question) instead of a model-generated turn.
+        self.mouth_chain = False
 
     def mark(self, name: str, ts: float) -> None:
         self.marks.setdefault(name, ts)  # first occurrence wins
@@ -115,7 +117,7 @@ class TurnRecorder:
         out: dict[str, Any] = {
             "kind": self.kind,
             "label": self.label,
-            "forced_response_create": self.forced_response_create,
+            "mouth_chain": self.mouth_chain,
             "user_transcript": self.user_transcript,
             "assistant_transcript_head": self.assistant_transcript[:120],
             "assistant_audio_seconds": round(self.audio_bytes / (SAMPLE_RATE * 2), 2),
@@ -235,7 +237,6 @@ class Probe:
         self.session_metrics["mode"] = "direct"
         self.session_metrics["model"] = model
         self.session_metrics["avatar_enabled"] = False
-        self.session_metrics["is_external"] = False
 
         asyncio.create_task(self.reader())
         await self.send_json(
@@ -328,9 +329,6 @@ class Probe:
                 # the model never takes a turn; the page drives the brain over HTTP and reads
                 # each question as pre-generated TTS. `read_directive` is only the mouth marker.
                 self.session_metrics["mouth"] = bool(ev.get("linear_turns"))
-                self.session_metrics["is_external"] = bool(ev.get("read_directive")) and (
-                    ev.get("mode") == "model"
-                )
             elif ev.get("type") == "session.updated":
                 self.session_metrics["session_updated"] = round(ts - t2, 3)
                 break
@@ -400,11 +398,24 @@ class Probe:
                 # next question as pre-generated TTS. A bare response.create here would ask the
                 # model to improvise a turn production never allows — not a measurement of the
                 # real flow.
+                # NOTE: production joins every VAD segment since the last commit; the probe submits
+                # on the FIRST completed segment — probe WAVs must be single continuous utterances.
                 if mouth and rec.kind == "voice" and "response_created" not in rec.marks:
-                    rec.forced_response_create = True
+                    rec.mouth_chain = True
+                    if not rec.user_transcript.strip():
+                        # Production refuses to submit an empty transcript (no /answer call at
+                        # all) — an inaudible utterance is a failed turn, not a placeholder answer.
+                        stop.set()
+                        raise RuntimeError("empty transcript — production would not submit")
                     rec.mark("brain_answer_sent", now())
                     next_text = await self.submit_answer(rec.user_transcript)
                     rec.mark("brain_answer_done", now())
+                    if next_text is None:
+                        # The interview just completed: production reads NOTHING here (the page
+                        # moves to review), so there is no TTS to time — end the turn.
+                        rec.mark("interview_completed", now())
+                        stop.set()
+                        return
                     await self.send_read(next_text)
                     rec.mark("response_create_sent", now())
             elif etype == "response.created":
@@ -433,9 +444,9 @@ class Probe:
                 stop.set()
                 raise RuntimeError("websocket closed mid-turn")
 
-    async def submit_answer(self, text: str) -> str:
-        """The page's brain hop: POST the transcript, return the next question to read (or a
-        closing line when the interview just completed)."""
+    async def submit_answer(self, text: str) -> str | None:
+        """The page's brain hop: POST the transcript, return the next question to read — or None
+        when the interview just completed (production reads nothing then)."""
         assert self.http is not None
         resp = await self.http.post(
             f"{self.server}/candidate/interview/{self.interview_id}/answer",
@@ -447,7 +458,7 @@ class Probe:
         self.interview_status = data.get("status", "")
         q = data.get("current_question") or {}
         self.current_question = q.get("prompt") or ""
-        return self.current_question or "Thank you, that completes the interview."
+        return self.current_question or None
 
     async def send_read(self, text: str) -> None:
         """Read `text` exactly as the page does since v0.39.2.3: server-side TTS, no model turn."""

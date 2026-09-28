@@ -77,17 +77,13 @@ def test_read_turn_metrics_anchor_on_the_read_request():
 
 def test_summarize_percentiles_per_kind_and_metric_skip_non_numeric():
     runs = [
-        {
-            "turns": [
-                {"kind": "voice", "stt_final": 1.6, "label": "a", "forced_response_create": True}
-            ]
-        },
+        {"turns": [{"kind": "voice", "stt_final": 1.6, "label": "a", "mouth_chain": True}]},
         {"turns": [{"kind": "voice", "stt_final": 2.0}, {"kind": "read", "gen_done": 0.5}]},
     ]
     out = vtl.summarize(runs)
     assert out["voice.stt_final"] == {"n": 2, "min": 1.6, "median": 1.8, "max": 2.0}
     assert out["read.gen_done"] == {"n": 1, "min": 0.5, "median": 0.5, "max": 0.5}
-    assert not any(k.endswith("label") or k.endswith("forced_response_create") for k in out)
+    assert not any(k.endswith("label") or k.endswith("mouth_chain") for k in out)
     assert vtl.summarize([]) == {}
 
 

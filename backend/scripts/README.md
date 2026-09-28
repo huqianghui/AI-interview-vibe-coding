@@ -41,6 +41,11 @@ Turn contract follows the session the proxy reports on `proxy.connected`:
 - **Agent sessions** (editor Playground persona): the original bare `response.create` / user-item
   flow.
 
+Fidelity notes: an empty transcript is a FAILED turn (production never submits one); when the last
+answer completes the interview no read is timed (production reads nothing — the page moves to
+review); probe WAVs must be single continuous utterances (production joins every VAD segment since
+the last commit, the probe submits on the first completed segment).
+
 ```bash
 PROBE_USERNAME=user1 PROBE_PASSWORD=... \
 python scripts/voice_turn_latency.py --server http://127.0.0.1:8000 \
