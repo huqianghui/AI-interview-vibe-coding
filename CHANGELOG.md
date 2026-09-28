@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.39.3.2 (2026-09-28)
+
+### For contributors
+- **Latency probes are in the repo and work against today's stack.** `backend/scripts/brain_turn_rtt.py`
+  (HTTP round trips of the interview brain) and `backend/scripts/voice_turn_latency.py` (Voice Live
+  turn latency at the WS-proxy level) were untracked and both broke against the current server: they
+  called `/public/candidate/session` without the candidate JWT the login gate requires (401), and
+  the voice probe treated every mouth session as "external" and fired a bare `response.create` the
+  model never receives in production. Both now log in as a candidate (`--username/--password` or
+  `PROBE_USERNAME`/`PROBE_PASSWORD`), start a fresh interview per run (restarting a resumed one) and
+  finish it afterwards; the voice probe emulates the page's real chain on mouth sessions — transcript
+  → `/answer` (`brain_rtt`) → next question read as pre-generated TTS — and reads Q1 the same way.
+  `backend/scripts/README.md` documents prerequisites, outputs and caveats. Verified live against the
+  local backend + Azure.
+
 ## 0.39.3.1 (2026-09-28)
 
 ### Fixed
