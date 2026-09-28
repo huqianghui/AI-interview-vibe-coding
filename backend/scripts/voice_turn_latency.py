@@ -72,6 +72,12 @@ def now() -> float:
     return time.monotonic()
 
 
+def proxy_ws_url(server: str, token: str) -> str:
+    """The backend WS proxy URL for a base URL: https → wss (deployed), http → ws (local dev)."""
+    base = server.rstrip("/").replace("https://", "wss://").replace("http://", "ws://")
+    return f"{base}/voice-live/ws?token={token}"
+
+
 def load_pcm(path: Path) -> bytes:
     with wave.open(str(path), "rb") as w:
         assert w.getframerate() == SAMPLE_RATE, f"{path}: expected {SAMPLE_RATE}Hz"
@@ -298,9 +304,7 @@ class Probe:
         self.session_metrics["interview_start"] = round(now() - t1, 3)
         self.session_metrics["voice_linear_turns"] = data.get("voice_linear_turns")
 
-        # https → wss (deployed) or http → ws (local dev backend, no TLS).
-        ws_base = self.server.replace("https://", "wss://").replace("http://", "ws://")
-        ws_url = f"{ws_base}/voice-live/ws?token={token}"
+        ws_url = proxy_ws_url(self.server, token)
         self.ws = await websockets.connect(
             ws_url,
             max_size=None,
