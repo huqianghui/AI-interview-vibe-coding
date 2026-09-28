@@ -5,9 +5,10 @@
  * default persona to `judged` for the run, then drives one of three spoken-answer fixtures through
  * the real stack (frontend :5173 → backend :8000 → Azure Voice Live + the judge LLM):
  *
- *   JUDGED_CASE=incomplete  answer covers every required point but one → during the pause the judge
- *                           asks ONE guiding follow-up (header switches, it is read aloud); "I'm done"
- *                           then advances to Q2 with no further utterance.
+ *   JUDGED_CASE=incomplete  answer covers every required point but one, ending on a complete
+ *                           sentence → the judge stays SILENT (only `wait`; since 2026-09-28 it never
+ *                           asks a follow-up or redirects — it only paces), the header never moves,
+ *                           Q1 is read exactly once; "I'm done" advances to Q2.
  *   JUDGED_CASE=complete    answer covers everything → the judge stays silent (only `wait`), Q1 is
  *                           read exactly once, "I'm done" advances.
  *   JUDGED_CASE=pause       answer stops mid-thought for 12 s → exactly one spoken nudge, the
@@ -184,19 +185,18 @@ test.describe("Judged turns (real Azure + real judge)", () => {
         .toMatch(/deviation|site log/i);
 
       if (CASE === "incomplete") {
-        // The pause after the answer → judge follow-up (the ONLY missing required point is the
-        // sponsor notification) → header switches and the follow-up is read aloud.
-        await expect
-          .poll(() => judgeResults.some((j) => j.verdict === "follow_up"), {
-            timeout: 40_000,
-            message: `no follow_up verdict; got ${JSON.stringify(judgeResults)}`,
-          })
-          .toBe(true);
-        const fu = judgeResults.find((j) => j.verdict === "follow_up")!;
-        await expect(page.getByText(fu.speech_text)).toBeVisible({ timeout: 15_000 });
-        await expect.poll(() => transcripts.length, { timeout: 60_000 }).toBe(2);
-        expect(transcripts[1].toLowerCase()).toContain(fu.speech_text.toLowerCase().slice(0, 20));
-        for (const r of RUBRIC) expect(fu.speech_text.toLowerCase()).not.toContain(r.text.toLowerCase());
+        // The answer misses a required point (the sponsor notification) but ENDS on a complete
+        // sentence → since 2026-09-28 the judge only paces: it must NOT probe. Give the judge window
+        // + LLM time to run, then: only `wait` (never follow_up / redirect — retired), the card still
+        // shows Q1, nothing was read besides Q1.
+        await page.waitForTimeout(20_000);
+        expect(
+          judgeResults.every((j) => j.verdict === "wait"),
+          `judge must stay silent on a complete-but-thin answer; got ${JSON.stringify(judgeResults)}`,
+        ).toBe(true);
+        expect(judgeResults.some((j) => j.verdict === "follow_up" || j.verdict === "redirect")).toBe(false);
+        await expect(page.getByText(Q1)).toBeVisible();
+        expect(transcripts.length).toBe(1);
       } else if (CASE === "complete") {
         // Give the judge window + LLM time to run; it must stay silent.
         await page.waitForTimeout(20_000);
