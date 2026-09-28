@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.39.3.1 (2026-09-28)
+
+### Fixed
+- **A dropped voice connection mid-question no longer risks a silent interview.** When the voice
+  WebSocket dropped and reconnected on its own, only the digital human's handshake state was reset;
+  the question-reading bookkeeping survived into the new session. Three consequences, now fixed: a
+  question that was being read when the line dropped is read again on the new session (before, it
+  was lost — the card showed it but nobody spoke it); a stale "response in progress" flag no longer
+  carries over (before, every later question was cancelled-and-queued behind a response that did not
+  exist — the rest of the interview silent); and the previous session's read watchdog is disarmed
+  instead of firing into a half-open session. The candidate's answer transcribed before the drop is
+  kept — they are still on the same question — so "I'm done" submits the whole answer.
+
 ## 0.39.3.0 (2026-09-28)
 
 ### Changed
