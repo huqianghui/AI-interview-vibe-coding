@@ -134,7 +134,9 @@ describe("ConfigurationRail — bank turn mode (linear vs judged, issue #114)", 
       judge_max_calls_per_question: 1,
     });
     expect(screen.getByRole("radio", { name: /judged turns/i })).toBeChecked();
-    expect(screen.getByText(/never at submit/i)).toBeInTheDocument();
+    expect(screen.getByText(/never speaks at submit/i)).toBeInTheDocument();
+    // Nudge-only since 2026-09-28: the hint promises no follow-up questions and no redirects.
+    expect(screen.getByText(/never asks a follow-up question, never redirects/i)).toBeInTheDocument();
     // v0.39.2.3: judged reads (questions AND the judge's nudges) are TTS of the exact text.
     expect(screen.getByText(/read as text-to-speech, exactly as written/i)).toBeInTheDocument();
     const silence = screen.getByTestId("config-judge-silence");

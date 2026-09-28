@@ -325,8 +325,9 @@ interface TurnModeControlsProps {
 }
 
 /** The bank engine's turn contract (issue #114): linear (silent between questions) or judged (a
- * backend judge may nudge / follow up / redirect DURING the candidate's pauses — never at submit;
- * "I'm done" always advances). The two judge knobs show only for judged. */
+ * backend judge may NUDGE — "please go on" — DURING the candidate's pauses; never a follow-up or a
+ * redirect since 2026-09-28, never at submit; "I'm done" always advances). The two judge knobs show
+ * only for judged. */
 function TurnModeControls({ form, onChange }: TurnModeControlsProps) {
   const styles = useStyles();
   const mode = form.bank_turn_mode;
@@ -337,7 +338,7 @@ function TurnModeControls({ form, onChange }: TurnModeControlsProps) {
         hint={
           mode === "linear"
             ? "The interviewer only reads each question aloud and stays silent while the candidate answers — no acknowledgments, no follow-ups. Questions are read as text-to-speech of the bank text, never generated or rephrased by a model. The next question starts on \"I'm done\" (or auto-submit)."
-            : "While the candidate pauses, a backend judge reads the answer so far against the rubric and may say \"please go on\", ask ONE guiding follow-up, or bring an off-topic answer back — never at submit: \"I'm done\" always moves to the next question. Questions and the judge's words are read as text-to-speech, exactly as written. Tone and patience come from the Instructions prompt; the format rules are fixed."
+            : "While the candidate pauses mid-thought, a backend judge may say one encouraging line (\"please go on\") — it never asks a follow-up question, never redirects, and never speaks at submit: \"I'm done\" always moves to the next question. Questions and the judge's words are read as text-to-speech, exactly as written. Tone and patience come from the Instructions prompt; the format rules are fixed."
         }
       >
         <RadioGroup
@@ -352,7 +353,7 @@ function TurnModeControls({ form, onChange }: TurnModeControlsProps) {
           />
           <Radio
             value="judged"
-            label="Judged turns — nudge, follow up, or redirect when the answer needs it"
+            label="Judged turns — a gentle nudge when the candidate trails off; never a follow-up"
             data-testid="config-turn-mode-judged"
           />
         </RadioGroup>

@@ -412,10 +412,11 @@ export function InterviewPage() {
   // session like the two flags above. During a pause of that length — voice: after an utterance
   // (hook timer); text: after the last keystroke — the page asks the backend judge with the draft so
   // far. Verdicts: `nudge` ⇒ one spoken aside (voice) / a transient interviewer bubble (text);
-  // `follow_up` / `redirect` ⇒ the backend already wrote the interviewer turn, the returned interview
-  // makes it the current question (header switch; voice reads it through the normal question read);
-  // `wait` ⇒ nothing. The judge NEVER submits: "I'm done" / submit always advances, and any judge
-  // response that lands after a submit was sent is discarded (`submitSeqRef`).
+  // `wait` ⇒ nothing. That is the whole set since 2026-09-28 (owner: the judge paces, it never
+  // probes — the earlier `follow_up` / `redirect` verdicts that wrote an interviewer turn and
+  // switched the header are retired; the backend never returns them). The judge NEVER submits:
+  // "I'm done" / submit always advances, and any judge response that lands after a submit was sent
+  // is discarded (`submitSeqRef`).
   const [judgeSecondsReported, setJudgeSecondsReported] = useState<number | null>(null);
   useEffect(() => {
     const reported = interview?.voice_judge_silence_seconds;
@@ -528,16 +529,14 @@ export function InterviewPage() {
     }
   }
 
-  // Deliver a verdict to the candidate: nudge ⇒ spoken aside (voice) / bubble (text); follow_up or
-  // redirect ⇒ the returned interview makes it the current question (header switch; in voice the
-  // normal verbatim question read speaks it — linear turns never suppress follow-ups).
+  // Deliver a verdict to the candidate: nudge ⇒ spoken aside (voice, read as exact TTS) / bubble
+  // (text). Nothing else changes: the judge never writes a turn, so the header never moves because
+  // of it — the question the candidate sees is always the bank question until they submit.
   const deliverVerdict = useCallback(
     (res: import("../api/client").JudgeOut) => {
       if (res.verdict === "nudge" && res.speech_text) {
         if (channel === "voice") voice.speakAside(res.speech_text);
         else showNudge(res.speech_text);
-      } else if ((res.verdict === "follow_up" || res.verdict === "redirect") && res.interview) {
-        setInterview(res.interview);
       }
     },
     [channel, voice, showNudge],

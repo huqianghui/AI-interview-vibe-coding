@@ -1194,7 +1194,9 @@ describe("InterviewPage judged turns (issue #114)", () => {
     expect(screen.getByText("Question one?")).toBeInTheDocument();
   });
 
-  it("voice: a follow_up verdict switches the header to the judge's question, which is then read", async () => {
+  it("voice: a stray follow_up verdict (retired 2026-09-28) never switches the header or speaks", async () => {
+    // The backend no longer returns follow_up / redirect; if a stale server ever did, the page must
+    // ignore it — the judge only nudges, the question on the card is always the bank question.
     await i18n.changeLanguage("en-US");
     const user = userEvent.setup();
     vi.spyOn(client, "startInterview").mockResolvedValue(judged);
@@ -1226,12 +1228,12 @@ describe("InterviewPage judged turns (issue #114)", () => {
     await act(async () => {
       hookSpy.mock.calls.at(-1)?.[1]?.onSilenceJudge?.();
     });
-    await screen.findByText("Who do you notify about it?");
-    // Read through the normal verbatim question read (linear turns never suppress follow-ups)…
-    await waitFor(() => expect(vm.speakQuestion).toHaveBeenCalledWith("Who do you notify about it?"));
-    // …and the latch survived the null-reporting judge response.
-    expect(hookSpy.mock.calls.at(-1)?.[1]?.judgeSilenceMs).toBe(2_000);
+    await waitFor(() => expect(client.judgeInterview).toHaveBeenCalled());
+    // Header untouched, nothing read, nothing spoken as an aside; the latch survived.
+    expect(screen.queryByText("Who do you notify about it?")).toBeNull();
+    expect(vm.speakQuestion).not.toHaveBeenCalledWith("Who do you notify about it?");
     expect(vm.speakAside).not.toHaveBeenCalled();
+    expect(hookSpy.mock.calls.at(-1)?.[1]?.judgeSilenceMs).toBe(2_000);
   });
 
   it("text: an idle draft asks the judge; a nudge shows as a bubble; submit is never blocked", async () => {
