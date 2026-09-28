@@ -343,6 +343,16 @@ _No new tasks from Performance review (D11 dropped)._
   "You mentioned … Can you walk me through …" probe instead of question 2, contradicting the
   editor's "no follow-ups" promise. `answer_finalized` now advances unconditionally unless a
   provider is explicitly passed (none is); `max_follow_ups` is judged-only.
+- **v0.39.2.3 amendment (supersedes the "Transport" bullet above and the "Verbatim speech" row in
+  "What already exists"):** the mouth no longer reads via `response.instructions`. gpt-5-mini
+  drifted mid-interview (paraphrased/fabricated a question by Q4–Q7 of a 9-question bank) even
+  though that path was model-mediated-but-verbatim by design. Every mouth read — `linear`,
+  `judged`, and external — now goes through Voice Live's `response.create` +
+  `pre_generated_assistant_message`: server-side TTS of the exact text, no model turn at all. The
+  read directive built by `build_read_directive()` still rides the wire on `proxy.connected` as the
+  mouth-mode marker and the reading-contract system item, but the frontend no longer fills `{text}`
+  into `response.instructions` per turn. See `backend/app/models/persona.py` and
+  `backend/app/services/voice_live_proxy.py`.
 
 ## GSTACK REVIEW REPORT
 

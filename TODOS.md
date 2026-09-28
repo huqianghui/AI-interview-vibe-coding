@@ -23,6 +23,23 @@ mutating transaction and re-run the staleness check before writing.
 **Effort:** S
 **Priority:** P2
 
+### Automatic voice reconnect bypasses `cleanup()` — speak/turn refs survive a WS drop
+
+`useInterviewVoice.ts`: the unexpected-`onclose` reconnect branch resets only `avatarStartedRef` /
+`sessionLiveRef` (the avatar-handshake fix) but never `activeResponseRef`, `spokenTextRef`,
+`awaitingReadResponseRef`, `readResponseIdRef` or `speakWatchRef`; `cleanup()` (which also stashes
+the unconfirmed read into `resumeSpeakTextRef`) runs only on connect-timeout, mic failure and
+explicit `disconnect()`. Consequences: (a) the "re-speak the unconfirmed question after reconnect"
+path is dead for the most common trigger (a plain network drop); (b) an `activeResponseRef` left
+`true` at drop time survives into the new session and makes the next `speakQuestion` cancel-and-queue
+behind a phantom response (v0.39.2.3 fixed the same phantom on the watchdog give-up path, not here);
+(c) a stale `speakWatchRef` timer can fire against a session that has not reached `session.updated`.
+Fix shape: factor a shared "reset turn state" helper called from both `cleanup()` and the reconnect
+branch, keeping the mic/avatar-continuity behaviour that branch intentionally preserves; cover with a
+vitest reconnect case. Surfaced by the v0.39.2.3 adversarial review (INVESTIGATE).
+
+**Priority:** P2
+
 ## Completed
 
 ### Fallback interviewer prompt divergence — closed as obsolete, v0.39.0.0

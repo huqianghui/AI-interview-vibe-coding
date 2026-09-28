@@ -46,7 +46,7 @@ vi.mock("./useVoiceAudio", () => ({
   }),
 }));
 
-import { useInterviewVoice } from "./useInterviewVoice";
+import { speechMatchesText, useInterviewVoice } from "./useInterviewVoice";
 
 afterEach(() => {
   disconnectSpy.mockClear();
@@ -1984,5 +1984,261 @@ describe("useInterviewVoice first-read avatar gate", () => {
 
     unmount();
     vi.unstubAllGlobals();
+  });
+});
+
+/**
+ * MOUTH-mode verbatim read (the 2026-09-28 card/voice mismatch).
+ *
+ * In mouth mode (external, or linear/judged bank — `proxy.connected` carries a read directive) the
+ * question read used to be `response.create` with the reader prompt + question in
+ * `response.instructions`. That is still a MODEL turn asked to "read this verbatim": on gpt-5-mini,
+ * by Q4/Q7 of a 9-question bank the model continued the interview on its own — the card showed
+ * "How do you oversee safety reporting across EMEA?" while the avatar asked "What methods do you use
+ * to gather feedback from local teams?" — and because delivery is confirmed by response id, the page
+ * never noticed. The read is now `pre_generated_assistant_message`: server-side TTS of the exact
+ * text, no model inference (Voice Live API, present in the 2026-01-01-preview version in use).
+ */
+describe("useInterviewVoice mouth-mode read is pre-generated TTS, never a model turn", () => {
+  class FakeWebSocket {
+    static last: FakeWebSocket | null = null;
+    static OPEN = 1;
+    readyState = 1;
+    onmessage: ((e: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+    sent: string[] = [];
+    constructor(public url: string) {
+      FakeWebSocket.last = this;
+    }
+    send(data: string) {
+      this.sent.push(data);
+    }
+    close() {
+      this.readyState = 3;
+      this.onclose?.();
+    }
+    receive(msg: unknown) {
+      this.onmessage?.({ data: JSON.stringify(msg) });
+    }
+  }
+
+  const DIRECTIVE = "You are Ava, the interviewer's voice.\n\nText to read this turn:\n\n{text}";
+
+  // `directive` null ⇒ AGENT mode (proxy.connected without a read directive).
+  async function connectMouth(directive: string | null = DIRECTIVE) {
+    FakeWebSocket.last = null;
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    let hook!: ReturnType<typeof useInterviewVoice>;
+    function MouthHarness() {
+      hook = useInterviewVoice("iv-1", {
+        locale: "en-US",
+        tokenProvider: () => "tok",
+        linearTurns: true,
+      });
+      return null;
+    }
+    const { unmount } = render(<MouthHarness />);
+    let connectP!: Promise<void>;
+    act(() => {
+      connectP = hook.connect("en-US");
+    });
+    await act(async () => {
+      for (let i = 0; i < 20 && !FakeWebSocket.last; i++)
+        await Promise.resolve();
+      // The proxy bootstrap frame: mouth mode ⇒ a non-empty read directive.
+      FakeWebSocket.last!.receive({
+        type: "proxy.connected",
+        mode: "model",
+        avatar_enabled: false,
+        read_directive: directive ?? "",
+        linear_turns: directive !== null,
+      });
+      FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
+      await connectP;
+    });
+    return { getHook: () => hook, ws: () => FakeWebSocket.last!, unmount };
+  }
+
+  const parsed = (ws: FakeWebSocket) =>
+    ws.sent.map(
+      (s) =>
+        JSON.parse(s) as {
+          type?: string;
+          response?: {
+            instructions?: string;
+            pre_generated_assistant_message?: {
+              type?: string;
+              role?: string;
+              content?: { type?: string; text?: string }[];
+            };
+          };
+        },
+    );
+
+  it("reads the question via pre_generated_assistant_message with the exact text — no instructions, no assistant item", async () => {
+    const { getHook, ws, unmount } = await connectMouth();
+    const question = "How do you oversee safety reporting across EMEA? ($& stays literal)";
+
+    act(() => {
+      expect(getHook().speakQuestion(question)).toBe(true);
+    });
+
+    const frames = parsed(ws());
+    const creates = frames.filter((f) => f.type === "response.create");
+    expect(creates).toHaveLength(1);
+    const pre = creates[0].response?.pre_generated_assistant_message;
+    // The Voice Live contract: role assistant, ONE text content part, the text untouched.
+    expect(pre?.type).toBe("message");
+    expect(pre?.role).toBe("assistant");
+    expect(pre?.content).toEqual([{ type: "text", text: question }]);
+    // No model-mediated delivery of any kind — that is the drift the fix removes.
+    expect(creates[0].response?.instructions).toBeUndefined();
+    expect(frames.some((f) => f.type === "conversation.item.create")).toBe(false);
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("warns when the read response's transcript is not the question text (delivery still confirmed by id)", async () => {
+    const { getHook, ws, unmount } = await connectMouth();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const question = "How do you oversee safety reporting across EMEA?";
+
+    act(() => {
+      expect(getHook().speakQuestion(question)).toBe(true);
+    });
+    // Azure opens OUR read response, then its transcript lands under that id.
+    await act(async () => {
+      ws().receive({ type: "response.created", response: { id: "resp-1" } });
+      ws().receive({
+        type: "response.audio_transcript.done",
+        response_id: "resp-1",
+        item_id: "item-1",
+        transcript: "What methods do you use to gather feedback from local teams?",
+      });
+    });
+    expect(warn).toHaveBeenCalledWith(
+      "[voice] question read deviated from the question text",
+      expect.objectContaining({
+        wanted: question,
+        spoken: "What methods do you use to gather feedback from local teams?",
+      }),
+    );
+
+    // A faithful read (only case/punctuation differ) is silent.
+    warn.mockClear();
+    act(() => {
+      expect(getHook().speakQuestion("How do you know the TMF is complete for EMEA?")).toBe(true);
+    });
+    await act(async () => {
+      ws().receive({ type: "response.done" });
+      ws().receive({ type: "response.created", response: { id: "resp-2" } });
+      ws().receive({
+        type: "response.audio_transcript.done",
+        response_id: "resp-2",
+        item_id: "item-2",
+        transcript: "how do you know the TMF is complete for EMEA",
+      });
+    });
+    expect(warn).not.toHaveBeenCalledWith(
+      "[voice] question read deviated from the question text",
+      expect.anything(),
+    );
+
+    warn.mockRestore();
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("agent mode: a paraphrased read under the claimed id is tolerated — no deviation warning", async () => {
+    // Only mouth mode reads via TTS of the exact text. In agent mode the assistant item may be
+    // paraphrased by the agent's own turn contract (tolerated by design, see the "读两遍" tests), so
+    // the verbatim guard must stay quiet there instead of crying wolf on every Playground read.
+    const { getHook, ws, unmount } = await connectMouth(null);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    act(() => {
+      expect(getHook().speakQuestion("Please introduce your relevant experience.")).toBe(true);
+    });
+    await act(async () => {
+      ws().receive({ type: "response.created", response: { id: "resp-agent" } });
+      ws().receive({
+        type: "response.audio_transcript.done",
+        response_id: "resp-agent",
+        item_id: "item-agent",
+        transcript: "Could you tell me about your relevant experience?",
+      });
+    });
+    expect(warn).not.toHaveBeenCalledWith(
+      "[voice] question read deviated from the question text",
+      expect.anything(),
+    );
+    // And the agent-mode delivery shape is untouched: assistant item + bare response.create.
+    const frames = parsed(ws());
+    expect(frames.some((f) => f.type === "conversation.item.create")).toBe(true);
+    expect(frames.find((f) => f.type === "response.create")?.response).toBeUndefined();
+
+    warn.mockRestore();
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("a rejected read (non-collision error) never leaves a phantom active response: after the watchdog gives up, the next question is read directly", async () => {
+    // Adversarial review (v0.39.2.3): emitSpeak marks a response active BEFORE sending. If Azure
+    // rejects the read (e.g. an api-version that lacks pre_generated_assistant_message) no
+    // response.created / response.done ever arrives, the watchdog retries and finally gives up — and
+    // used to leave `activeResponseRef` stuck true, so every later question sent response.cancel and
+    // queued on a response.done that never came: silent for the rest of the interview.
+    vi.useFakeTimers();
+    const { getHook, ws, unmount } = await connectMouth();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    act(() => {
+      expect(getHook().speakQuestion("Question Azure rejects.")).toBe(true);
+    });
+    await act(async () => {
+      ws().receive({
+        type: "error",
+        error: { code: "invalid_request_error", message: "Unknown parameter: pre_generated_assistant_message" },
+      });
+      // Every watchdog retry is rejected the same way, until the attempts cap.
+      for (let i = 0; i < 6; i++) {
+        vi.advanceTimersByTime(13_000);
+        ws().receive({
+          type: "error",
+          error: { code: "invalid_request_error", message: "Unknown parameter: pre_generated_assistant_message" },
+        });
+      }
+    });
+    const before = parsed(ws());
+    expect(before.filter((f) => f.type === "response.create").length).toBe(4); // SPEAK_MAX_ATTEMPTS
+    expect(warn).toHaveBeenCalledWith(
+      "[voice] question read retries exhausted; giving up on voice read",
+    );
+
+    // The NEXT question must be read immediately — not cancelled-and-queued behind a phantom.
+    const sentBefore = ws().sent.length;
+    act(() => {
+      expect(getHook().speakQuestion("The next question.")).toBe(true);
+    });
+    const after = parsed(ws()).slice(sentBefore);
+    expect(after.some((f) => f.type === "response.cancel")).toBe(false);
+    const next = after.find((f) => f.type === "response.create");
+    expect(next?.response?.pre_generated_assistant_message?.content?.[0]?.text).toBe(
+      "The next question.",
+    );
+
+    warn.mockRestore();
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("speechMatchesText ignores case, punctuation and whitespace but not words", () => {
+    expect(speechMatchesText("How is monitoring adapted to regional risk?", "how is monitoring   adapted to regional risk")).toBe(true);
+    expect(speechMatchesText("你如何监督 EMEA 的安全报告？", "你如何监督 EMEA 的安全报告")).toBe(true);
+    expect(speechMatchesText("What strategies do you use to ensure compliance with local regulations?", "How do you manage regulatory differences across EMEA countries?")).toBe(false);
+    expect(speechMatchesText("Thank you.", "How is monitoring adapted to regional risk?")).toBe(false);
   });
 });

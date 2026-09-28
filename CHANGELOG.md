@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.39.2.3 (2026-09-28)
+
+### Fixed
+- **The digital human reads the question on the card — exactly.** In a linear bank interview the
+  card showed "Question 7 of 9 — How do you oversee safety reporting across EMEA?" while the avatar
+  asked "What methods do you use to gather feedback from local teams?" (Q4 was paraphrased the same
+  way). The card comes from the backend's question pointer and was right; the READ was still a
+  model turn: the page sent `response.create` with the reader prompt + question in
+  `response.instructions` ("say ONLY this, verbatim"), which gpt-4o honoured but gpt-5-mini — the
+  voice model since v0.38.0.2 — drifted on once the conversation looked like an interview, and the
+  page confirmed delivery by response id, so a wrong read was never noticed. Mouth-mode reads
+  (external, linear/judged bank) now use Voice Live's `pre_generated_assistant_message`: the server
+  synthesizes the exact text with no model inference, so the spoken question cannot differ from the
+  card. The hook also warns when a read response's transcript is not the question text, and the
+  live linear-bank spec asserts pre-generated delivery + spoken == card for every read. The
+  editor's turn-mode hints now say so: in linear/judged mode the question (and the judge's
+  words) are spoken as text-to-speech of the exact text — no language model generates or
+  rephrases anything.
+- **A rejected question read can no longer mute the rest of the interview.** If Azure rejects a
+  read request (for example an API version without the pre-generated read), the page retried a
+  few times and gave up — but kept believing a response was still playing, so every later
+  question was cancelled-and-queued behind a phantom and never spoken. The in-flight marks are
+  now released on rejection and on give-up, so the next question reads normally.
+
 ## 0.39.2.2 (2026-09-24)
 
 ### Fixed

@@ -336,8 +336,8 @@ function TurnModeControls({ form, onChange }: TurnModeControlsProps) {
         label="Between questions (question bank)"
         hint={
           mode === "linear"
-            ? "The interviewer only reads each question aloud and stays silent while the candidate answers — no acknowledgments, no follow-ups. The next question starts on \"I'm done\" (or auto-submit)."
-            : "While the candidate pauses, a backend judge reads the answer so far against the rubric and may say \"please go on\", ask ONE guiding follow-up, or bring an off-topic answer back — never at submit: \"I'm done\" always moves to the next question. Tone and patience come from the Instructions prompt; the format rules are fixed."
+            ? "The interviewer only reads each question aloud and stays silent while the candidate answers — no acknowledgments, no follow-ups. Questions are read as text-to-speech of the bank text, never generated or rephrased by a model. The next question starts on \"I'm done\" (or auto-submit)."
+            : "While the candidate pauses, a backend judge reads the answer so far against the rubric and may say \"please go on\", ask ONE guiding follow-up, or bring an off-topic answer back — never at submit: \"I'm done\" always moves to the next question. Questions and the judge's words are read as text-to-speech, exactly as written. Tone and patience come from the Instructions prompt; the format rules are fixed."
         }
       >
         <RadioGroup
