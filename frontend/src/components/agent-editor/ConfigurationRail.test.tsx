@@ -111,6 +111,9 @@ describe("ConfigurationRail — bank turn mode (linear vs judged, issue #114)", 
     expect(screen.getByRole("radio", { name: /linear turns/i })).toBeChecked();
     expect(screen.getByRole("radio", { name: /judged turns/i })).not.toBeChecked();
     expect(screen.getByText(/stays silent while the candidate answers/i)).toBeInTheDocument();
+    // v0.39.2.3: the hint states the delivery guarantee — questions are TTS of the bank text, never
+    // generated or rephrased by a model (the card/spoken mismatch fix).
+    expect(screen.getByText(/read as text-to-speech of the bank text/i)).toBeInTheDocument();
     expect(screen.queryByTestId("config-judge-silence")).not.toBeInTheDocument();
     expect(screen.queryByTestId("config-judge-max-calls")).not.toBeInTheDocument();
   });
@@ -132,6 +135,8 @@ describe("ConfigurationRail — bank turn mode (linear vs judged, issue #114)", 
     });
     expect(screen.getByRole("radio", { name: /judged turns/i })).toBeChecked();
     expect(screen.getByText(/never at submit/i)).toBeInTheDocument();
+    // v0.39.2.3: judged reads (questions AND the judge's nudges) are TTS of the exact text.
+    expect(screen.getByText(/read as text-to-speech, exactly as written/i)).toBeInTheDocument();
     const silence = screen.getByTestId("config-judge-silence");
     const calls = screen.getByTestId("config-judge-max-calls");
     expect(silence).toHaveValue(4);
