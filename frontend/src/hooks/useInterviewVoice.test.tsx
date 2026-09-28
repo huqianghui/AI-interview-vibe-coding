@@ -2350,4 +2350,120 @@ describe("useInterviewVoice automatic reconnect resets turn state", () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
+
+  // Shared connect for the three edge cases below (agent mode is enough — the reset path is the
+  // same; `avatar` arms the first-read gate; `opts` feeds the hook options under test).
+  async function connectFor(opts: Record<string, unknown>, avatar = false) {
+    FakeWebSocket.last = null;
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    let hook!: ReturnType<typeof useInterviewVoice>;
+    function Harness() {
+      hook = useInterviewVoice("iv-1", { locale: "en-US", tokenProvider: () => "tok", ...opts });
+      return null;
+    }
+    const { unmount } = render(<Harness />);
+    let connectP!: Promise<void>;
+    act(() => {
+      connectP = hook.connect("en-US");
+    });
+    await act(async () => {
+      for (let i = 0; i < 20 && !FakeWebSocket.last; i++) await Promise.resolve();
+      if (avatar) FakeWebSocket.last!.receive({ type: "proxy.connected", avatar_enabled: true });
+      FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
+      await connectP;
+    });
+    const reconnect = async () => {
+      const dead = FakeWebSocket.last!;
+      await act(async () => {
+        dead.close();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1100);
+      });
+      const fresh = FakeWebSocket.last!;
+      expect(fresh).not.toBe(dead);
+      return fresh;
+    };
+    return { getHook: () => hook, ws: () => FakeWebSocket.last!, reconnect, unmount };
+  }
+
+  it("a commitAnswer() awaiting its transcript settles promptly on the drop, never from the new session", async () => {
+    vi.useFakeTimers();
+    const { getHook, reconnect, unmount } = await connectFor({});
+    let committed!: Promise<string>;
+    act(() => {
+      committed = getHook().commitAnswer(); // no transcript yet → armed, waiting
+    });
+    const fresh = await reconnect();
+    // Settled by the reset (fail-closed ""), well before the 8 s commit timeout …
+    let settled: string | null = null;
+    void committed.then((v) => (settled = v));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    expect(settled).toBe("");
+    // … so a transcript arriving on the NEW session cannot be mis-attributed to the old commit.
+    await act(async () => {
+      fresh.receive({ type: "session.updated", session: {} });
+      fresh.receive({ type: "conversation.item.input_audio_transcription.completed", transcript: "new session words" });
+    });
+    expect(settled).toBe("");
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("silence auto-commit and judge timers armed before the drop never fire against the new session", async () => {
+    vi.useFakeTimers();
+    const onSilenceAutoCommit = vi.fn();
+    const onSilenceJudge = vi.fn();
+    const { ws, reconnect, unmount } = await connectFor({
+      silenceAutoCommitMs: 3_000,
+      onSilenceAutoCommit,
+      judgeSilenceMs: 2_000,
+      onSilenceJudge,
+    });
+    await act(async () => {
+      ws().receive({ type: "conversation.item.input_audio_transcription.completed", transcript: "I think that" });
+    });
+    await reconnect(); // both timers were ticking; the reset disarms them
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(onSilenceAutoCommit).not.toHaveBeenCalled();
+    expect(onSilenceJudge).not.toHaveBeenCalled();
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("a first read still held behind the avatar gate when the line drops is re-spoken on the new session", async () => {
+    vi.useFakeTimers();
+    const { getHook, reconnect, unmount } = await connectFor({}, true);
+    act(() => {
+      expect(getHook().speakQuestion("Gated first question.")).toBe(true); // held: avatar not painting
+    });
+    const fresh = await reconnect();
+    const items = () =>
+      fresh.sent
+        .map((f) => JSON.parse(f) as { type?: string; item?: { content?: { text?: string }[] } })
+        .filter((f) => f.type === "conversation.item.create")
+        .map((f) => f.item?.content?.[0]?.text);
+    await act(async () => {
+      fresh.receive({ type: "session.updated", session: {} });
+    });
+    // The stashed text is handed back to speakQuestion on the new session — and, the avatar being
+    // re-handshaked (avatar still enabled, not yet painting), it is HELD behind the first-read gate
+    // again rather than clipped: nothing on the wire yet …
+    expect(items()).toEqual([]);
+    // … until the gate releases it (avatar frames, or the bounded wait) — read exactly once, as the
+    // agent-mode assistant item since this harness has no read directive.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6_100); // FIRST_READ_AVATAR_GATE_MS (6 s) + slack
+    });
+    expect(items()).toEqual(["Gated first question."]);
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 });
