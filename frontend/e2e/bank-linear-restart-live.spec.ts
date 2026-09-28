@@ -36,6 +36,13 @@ const LIVE = process.env.LIVE_VOICE === "1";
 const BASE = process.env.BASE || "http://localhost:5173";
 const API = process.env.E2E_API || `${BASE}/api`;
 const ACK = /\b(thank|thanks|got it|understood|okay|ok)\b|谢谢|好的|明白|收到/i;
+// Spoken-vs-card comparison: case, punctuation and whitespace are TTS/ASR noise; words are not.
+const norm = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
 test.describe("Bank linear turns + Start over (real Azure)", () => {
   test.skip(!LIVE, "opt-in: set LIVE_VOICE=1 to run against real Azure");
@@ -53,10 +60,33 @@ test.describe("Bank linear turns + Start over (real Azure)", () => {
     const transcripts: { ws: number; text: string }[] = [];
     const userTranscripts: string[] = [];
     const errors: string[] = [];
+    // Every `response.create` the PAGE sends: the read must be a pre-generated assistant message
+    // (server-side TTS of the exact card text), never a model turn (`instructions` / bare create).
+    const readsSent: { preGenerated: string | null; instructions: string | null }[] = [];
     let wsCount = 0;
     page.on("websocket", (ws) => {
       if (!/voice-live\/ws/.test(ws.url())) return;
       const idx = ++wsCount;
+      ws.on("framesent", (f) => {
+        const data = typeof f.payload === "string" ? f.payload : "";
+        if (!data) return;
+        try {
+          const msg = JSON.parse(data) as {
+            type?: string;
+            response?: {
+              instructions?: string;
+              pre_generated_assistant_message?: { content?: { text?: string }[] };
+            };
+          };
+          if (msg.type !== "response.create") return;
+          readsSent.push({
+            preGenerated: msg.response?.pre_generated_assistant_message?.content?.[0]?.text ?? null,
+            instructions: msg.response?.instructions ?? null,
+          });
+        } catch {
+          /* binary / non-JSON */
+        }
+      });
       ws.on("framereceived", (f) => {
         const data = typeof f.payload === "string" ? f.payload : "";
         if (!data) return;
@@ -136,6 +166,14 @@ test.describe("Bank linear turns + Start over (real Azure)", () => {
         .toBeGreaterThanOrEqual(1);
       console.log(`[live] read #1: "${transcripts[0].text.slice(0, 80)}…"`);
       expect(created.length).toBe(1);
+      // VERBATIM (2026-09-28 regression): the page must have asked Azure for a pre-generated read of
+      // the card text — never a model turn — and what the avatar SAID must be that text. The old
+      // `response.instructions` read let gpt-5-mini paraphrase Q4 and fabricate Q7 of a 9-question
+      // bank while the card showed the bank question; a by-id delivery check never noticed.
+      expect(readsSent.length, "exactly one response.create for read #1").toBe(1);
+      expect(readsSent[0].instructions, "no model-mediated read").toBeNull();
+      expect(readsSent[0].preGenerated, "read #1 is pre-generated TTS of the card text").toBe(q1);
+      expect(norm(transcripts[0].text), "spoken Q1 == card Q1").toBe(norm(q1));
 
       // The fake mic speaks at ~45s after getUserMedia; wait for Azure's transcription of it.
       await expect
@@ -171,6 +209,10 @@ test.describe("Bank linear turns + Start over (real Azure)", () => {
         .toBeGreaterThanOrEqual(2);
       expect(created.length).toBe(2);
       for (const t of transcripts) expect(t.text, "no acknowledgment ever").not.toMatch(ACK);
+      expect(readsSent.length, "exactly one response.create per question read").toBe(2);
+      expect(readsSent[1].instructions).toBeNull();
+      expect(readsSent[1].preGenerated, "read #2 is pre-generated TTS of the card text").toBe(q2);
+      expect(norm(transcripts[1].text), "spoken Q2 == card Q2").toBe(norm(q2));
 
       // ---- 4. Start over -----------------------------------------------------------------
       const restartResp = page.waitForResponse((r) => r.url().includes("/restart"));
@@ -229,6 +271,11 @@ test.describe("Bank linear turns + Start over (real Azure)", () => {
       console.log(`[live] read #3: "${transcripts[2].text.slice(0, 80)}…"`);
       expect(created.length).toBe(3);
       for (const t of transcripts) expect(t.text).not.toMatch(ACK);
+      const q1Again = fresh.current_question?.prompt ?? "";
+      expect(readsSent.length).toBe(3);
+      expect(readsSent[2].instructions).toBeNull();
+      expect(readsSent[2].preGenerated, "read #3 is pre-generated TTS of the card text").toBe(q1Again);
+      expect(norm(transcripts[2].text), "spoken Q1 (fresh session) == card Q1").toBe(norm(q1Again));
       expect(errors, `Azure error frames: ${errors.join(" || ")}`).toEqual([]);
       await expect(page.getByText(/语音不可用|voice unavailable/i)).toHaveCount(0);
     } finally {
