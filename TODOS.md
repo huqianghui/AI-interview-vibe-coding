@@ -86,9 +86,17 @@ comes BACK and has never been exercised against real Azure, because that run nev
 survives. Worst case it is too strict (picture stays off longer than needed) or too loose (one extra
 ~5 s rebuild, capped at two attempts per session by `MAX_RESTORE_ATTEMPTS`).
 
-**How to measure:** start `avatar-auto-downgrade-live` under shaping, and mid-run
-`sudo frontend/e2e/scripts/netshape.sh off`; then wait out the 60 s cooldown plus the 45 s healthy hold
-and assert `data-media-mode` returns to `video`.
+**How to measure:** one command, which shapes the link, waits for the app to drop the picture by
+itself, removes the shaping at that exact point and measures the return:
+`sudo frontend/e2e/scripts/verify-restore.sh` (spec: `frontend/e2e/avatar-restore-live.spec.ts`).
+
+**Read `earned` in its output before believing a pass.** `readHealth` reports concealment 0 when NO
+audio samples arrive, because DTX silence and a dead stream are indistinguishable at that layer — so a
+silent interviewer also reads as healthy, and the restore can ride on a 0-of-0 reading without ever
+testing `CONCEAL_GOOD`. That behaviour is defensible in production (no voice arriving means no voice to
+protect, and the threshold-free trigger drops the picture again within ~4 s if the link is still bad),
+but it means the threshold needs a run with audio actually flowing: pass `FAKE_AUDIO` so a turn stays
+alive. The spec prints `earned: false` when the run did not exercise the threshold.
 
 **Effort:** S
 **Priority:** P3
