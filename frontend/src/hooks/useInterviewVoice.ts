@@ -31,7 +31,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { _internal as clientInternal, type VoiceSession } from "../api/client";
-import { useVoiceAudio } from "./useVoiceAudio";
+import { AZURE_DEFAULT_INPUT_SAMPLE_RATE, MIC_SAMPLE_RATE, useVoiceAudio } from "./useVoiceAudio";
 import { useAvatarStream } from "./useAvatarStream";
 import type {
   AudioState,
@@ -228,7 +228,14 @@ export function useInterviewVoice(
   const audio = useVoiceAudio();
   // Stable fallback ref (not re-created per render) for callers that don't pass a videoRef.
   const fallbackVideoRef = useRef<HTMLVideoElement | null>(null);
-  const avatarStream = useAvatarStream(options.videoRef ?? fallbackVideoRef);
+  // Turning the digital human's picture on/off needs a whole new Voice Live session: Azure honours
+  // `session.avatar.connect` once per session and has no renegotiate/disconnect event (it answers a
+  // second offer with "WebRTC connection is in connected state" — measured 2026-09-30). The media hook
+  // decides WHEN, this hook owns HOW, via a ref because `restartForMediaMode` is defined below `connect`.
+  const restartForMediaModeRef = useRef<((next: "video" | "audio-only") => void) | null>(null);
+  const avatarStream = useAvatarStream(options.videoRef ?? fallbackVideoRef, {
+    onModeSwitchRequest: (next) => restartForMediaModeRef.current?.(next),
+  });
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttemptRef = useRef(0);
@@ -386,13 +393,16 @@ export function useInterviewVoice(
   // opening question has actually been emitted; until then, when the avatar is enabled but not yet
   // painting frames, the read is held in `firstReadGate` (text + a fallback timer) so its opening
   // words aren't clipped by the still-loading avatar media pipeline. Latest-wins: a newer question
-  // supersedes a held one. `avatarConnected` mirrors avatarStream.isConnected for the callback.
+  // supersedes a held one. `avatarReady` mirrors avatarStream.isMediaReady for the callback — NOT
+  // `isConnected`: on a weak link the session degrades to audio-only (`docs/avatar-weaknet-probe.md`
+  // §3.9), which never paints a frame, so gating on painted frames made every audio-only question sit
+  // out the full gate timeout in silence before being read.
   const firstReadDoneRef = useRef(false);
   const firstReadGateRef = useRef<{
     text: string;
     timer: ReturnType<typeof setTimeout>;
   } | null>(null);
-  const avatarConnectedRef = useRef(false);
+  const avatarReadyRef = useRef(false);
 
   // Settle any armed commit with whatever transcript has accumulated so far (usually ""). Called
   // from the transcription handler (with the just-arrived text already pushed) and from teardown
@@ -458,7 +468,7 @@ export function useInterviewVoice(
       firstReadGateRef.current = null;
     }
     firstReadDoneRef.current = false;
-    avatarConnectedRef.current = false;
+    avatarReadyRef.current = false;
     // Drop any buffered user transcript — a new session starts a fresh turn; carrying stale
     // segments across a disconnect would mis-attribute them to the next answer. EXCEPT on an
     // automatic mid-answer reconnect (`keepDraft`): the candidate is still on the same question and
@@ -564,6 +574,57 @@ export function useInterviewVoice(
       switch (msg.type as string | undefined) {
         case "proxy.connected":
           avatarEnabledRef.current = Boolean(msg.avatar_enabled);
+          // Mic-rate drift guard. The backend declares `input_audio_sampling_rate` on the session and
+          // Azure decodes our raw PCM16 at exactly that rate, so if the two sides disagree the
+          // interviewer hears a pitch- and speed-shifted candidate and every transcript is garbage —
+          // with NO error frame from Azure. The candidate would be scored on nonsense and never know.
+          //
+          // A MISSING field is not "no information": it means a backend from before this contract
+          // existed, and Azure's own default for pcm16 is 24 kHz. So treat absent as 24000 rather than
+          // skipping the check — otherwise the guard goes quiet in exactly the version-skew case it
+          // exists for (new page, rolled-back backend).
+          {
+            const declaredRate =
+              typeof msg.input_audio_sampling_rate === "number"
+                ? msg.input_audio_sampling_rate
+                : AZURE_DEFAULT_INPUT_SAMPLE_RATE;
+            if (declaredRate !== MIC_SAMPLE_RATE) {
+              const detail =
+                `mic rate mismatch: the server decodes audio at ${String(declaredRate)}Hz` +
+                (typeof msg.input_audio_sampling_rate === "number" ? "" : " (field absent — assuming Azure's default)") +
+                ` but this page records at ${MIC_SAMPLE_RATE}Hz`;
+              console.error(
+                `[voice] MIC RATE MISMATCH: ${detail}. Transcription would be garbage, so voice is being ` +
+                  `refused. Keep useVoiceAudio.MIC_SAMPLE_RATE and Settings.voice_live_input_sampling_rate in sync.`,
+              );
+              // Refuse the session rather than record an un-transcribable interview. This repo's rule is
+              // that the page must never silently degrade — surfacing it drops the candidate to the text
+              // channel with the real reason, which is recoverable; a garbled voice interview is not.
+              // Treated exactly like a pre-connect Azure fatal: mark it so `onclose` does not reconnect
+              // (a retry would hit the same mismatch) and reject the in-flight connect, otherwise the
+              // `session.updated` frame right behind this one flips the state back to "connected".
+              const mismatch = new Error(detail);
+              fatalErrorRef.current = true;
+              // Azure is not the one at fault here, so it will never close this socket — WE have to,
+              // or the `session.updated` frame right behind this one resolves the connect and flips
+              // the state back to "connected" while the mic keeps streaming at the wrong rate.
+              // `intentionalCloseRef` keeps `onclose` from treating it as a drop worth retrying.
+              intentionalCloseRef.current = true;
+              const doomed = wsRef.current;
+              wsRef.current = null;
+              if (doomed) {
+                doomed.onmessage = null;
+                doomed.onerror = null;
+                doomed.onclose = null;
+                doomed.close();
+              }
+              audio.cleanupMic();
+              setConn("error");
+              optionsRef.current.onError?.(mismatch);
+              onFatalError(mismatch);
+              return;
+            }
+          }
           // EXTERNAL mode sends a non-empty read-directive template; bank/agent mode sends "" (or
           // omits it) → null, so emitSpeak keeps the assistant-item delivery there.
           readDirectiveRef.current =
@@ -928,7 +989,7 @@ export function useInterviewVoice(
   );
 
   const connect = useCallback(
-    async (locale?: string, isReconnect = false): Promise<void> => {
+    async (locale?: string, isReconnect = false, keepDraft = false): Promise<void> => {
       const effectiveLocale = locale ?? optionsRef.current.locale ?? "en-US";
       lastLocaleRef.current = effectiveLocale;
       if (!isReconnect) {
@@ -937,7 +998,12 @@ export function useInterviewVoice(
         // A manual (re)connect starts from a clean slate: whatever the previous session left
         // (a draft, a phantom in-flight mark, a pending commit) belongs to a turn that is over.
         // Idempotent after cleanup(); protects the path where no cleanup ran.
-        resetTurnState();
+        //
+        // `keepDraft` exists because those two things are NOT the same decision. A media-mode rebuild
+        // needs the budget reset (it is not a failure) but must NOT lose what the candidate has already
+        // said — and it fires precisely when the network is bad, i.e. mid-answer. Without this the
+        // draft `restartForMediaMode` carefully preserved was wiped three lines later, every time.
+        resetTurnState(keepDraft ? { keepDraft: true } : undefined);
       }
       intentionalCloseRef.current = false;
       setConn("connecting");
@@ -1103,6 +1169,48 @@ export function useInterviewVoice(
     setIsMuted(false);
     isMutedRef.current = false;
   }, [audio, cleanup, setConn]);
+
+  /**
+   * Rebuild the Voice Live session because the avatar media mode changed (weak-network degrade, or the
+   * candidate's manual toggle). Deliberately NOT the failure path:
+   *   - it resets the WS reconnect budget (`connect(..., false)`), so two mode switches can't use up the
+   *     three retries a real drop will need;
+   *   - `keepDraft` preserves whatever the candidate has already said, and `resetTurnState` stashes the
+   *     current question so the new session re-reads it instead of losing it.
+   */
+  const restartForMediaMode = useCallback(
+    (next: "video" | "audio-only") => {
+      console.info(`[voice] rebuilding the session for media mode ${next}`);
+      intentionalCloseRef.current = true; // our own close must not trip the auto-reconnect path
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      if (wsRef.current) {
+        // Detach BEFORE closing: `onclose` fires on a later tick, by which time connect() below has
+        // already reset `intentionalCloseRef`, so the old socket's handler would sail past the
+        // intentional-close guard and fire a SECOND connect (observed live — two "opening WS proxy"
+        // lines per switch, two avatar sessions, straight into Azure's avatar rate limit).
+        wsRef.current.onclose = null;
+        wsRef.current.onmessage = null;
+        wsRef.current.onerror = null;
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      audio.cleanupMic();
+      avatarStartedRef.current = false;
+      sessionLiveRef.current = false;
+      setConn("reconnecting");
+      // isReconnect=false resets the reconnect budget (this is a policy switch, not a failure);
+      // keepDraft=true stops that same flag from wiping the candidate's in-progress answer. connect()
+      // runs the keepDraft-preserving reset itself, so this function must NOT reset separately.
+      void connect(lastLocaleRef.current, false, true).catch((err: unknown) => {
+        console.warn("[voice] media-mode session rebuild failed", err);
+      });
+    },
+    [audio, connect, resetTurnState, setConn],
+  );
+  restartForMediaModeRef.current = restartForMediaMode;
 
   const toggleMute = useCallback(() => {
     setIsMuted((prev) => {
@@ -1302,14 +1410,15 @@ export function useInterviewVoice(
 
       // FIRST-READ AVATAR GATE (the "第一句话前面的词被吃掉" fix): the opening question's audio is
       // clipped when it's read before the avatar's media pipeline is up (assistant TTS rides the
-      // avatar's WebRTC track, live only once frames paint). So hold the FIRST read until the avatar
-      // is connected — or a short bound elapses (handshake stalled / avatar off despite the flag),
+      // avatar's WebRTC track, live only once that track is flowing). So hold the FIRST read until the
+      // media path is ready — painted frames, or a live audio track in an audio-only session — or a
+      // short bound elapses (handshake stalled / avatar off despite the flag),
       // so we never leave the candidate in silence. Only gates the first read of a session, and only
       // when the avatar is enabled but not yet painting; every later question reads immediately.
       if (
         !firstReadDoneRef.current &&
         avatarEnabledRef.current &&
-        !avatarConnectedRef.current
+        !avatarReadyRef.current
       ) {
         if (firstReadGateRef.current)
           clearTimeout(firstReadGateRef.current.timer);
@@ -1434,15 +1543,15 @@ export function useInterviewVoice(
   // the moment the avatar starts painting frames — so the opening question is read as soon as its
   // audio can actually be heard, without waiting out the full gate timeout.
   useEffect(() => {
-    avatarConnectedRef.current = avatarStream.isConnected;
-    if (avatarStream.isConnected && firstReadGateRef.current) {
+    avatarReadyRef.current = avatarStream.isMediaReady;
+    if (avatarStream.isMediaReady && firstReadGateRef.current) {
       const { text, timer } = firstReadGateRef.current;
       clearTimeout(timer);
       firstReadGateRef.current = null;
       console.info("[voice] avatar ready → releasing held first question read");
       speakQuestionRef.current?.(text);
     }
-  }, [avatarStream.isConnected]);
+  }, [avatarStream.isMediaReady]);
 
   return {
     connect,
@@ -1457,5 +1566,14 @@ export function useInterviewVoice(
     connectionState,
     audioState,
     isAvatarConnected: avatarStream.isConnected,
+    /** `"audio-only"` once the picture has been given up to protect the voice on a weak link. */
+    mediaMode: avatarStream.mediaMode,
+    /** The candidate's manual override of the picture (`auto` = follow the link's health). */
+    videoPreference: avatarStream.videoPreference,
+    setVideoPreference: avatarStream.setVideoPreference,
+    /** False while Azure's avatar rate-limit cooldown blocks turning the picture back on. */
+    canEnableVideo: avatarStream.canEnableVideo,
+    /** Epoch ms when that cooldown lifts (null when there is nothing to wait for). */
+    videoEnableAtMs: avatarStream.videoEnableAtMs,
   };
 }
