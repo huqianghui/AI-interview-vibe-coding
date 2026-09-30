@@ -89,6 +89,9 @@ PY
     > "/tmp/ai-interview-backend-ab-${rate}.log" 2>&1 &)
   sleep 6
 
+  # Assignment PREFIXES on `npx`, deliberately — bash passes those through execve into the child's
+  # environment. Do NOT rewrite this as `env E2E_ADMIN_PASSWORD=... npx ...`: `env` is a real binary, so
+  # the assignments become its argv and any local user can read the password out of `ps aux`.
   (cd "$FE" && LIVE_VOICE=1 FAKE_AUDIO="$FAKE_ARG" \
     AB_REFERENCE="$REFERENCE" AB_RESULT_FILE="$RESULTS" AB_LABEL="${rate}Hz" \
     E2E_API=http://127.0.0.1:8000/api E2E_ADMIN_USERNAME="$ADMIN_USER" E2E_ADMIN_PASSWORD="$ADMIN_PW" \
