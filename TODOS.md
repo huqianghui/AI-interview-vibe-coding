@@ -37,34 +37,28 @@ WS-teardown ordering) the way `avatarHealth.ts` was extracted, one at a time, ea
 **Effort:** M
 **Priority:** P3
 
-### Re-enabling the voice-damage trigger: gate it on the video actually being expensive
+### Voice-damage trigger: CLOSED by owner decision, not deferred
 
-**What:** `USE_VOICE_DAMAGE_TRIGGER` is false. The calibration is now DONE (see
-`docs/avatar-weaknet-probe.md` §5.4.5/§5.4.6) and it says the metric is fine — the problem is that its
-healthy baseline depends on which avatar is streaming, while the threshold is global:
+**Decision (owner, 2026-09-30):** the scenario it would cover — the interviewer's voice damaged while the
+video decodes perfectly well — does not occur, so the trigger is not coming back. Recorded here so the
+"gap" is not rediscovered and re-litigated: it was considered, measured, and deliberately left closed.
 
-| avatar | healthy audible concealment | under 3% loss |
-|---|---|---|
-| `lisa` (1080p video) | 0.3 – 0.5% | 21.9% |
-| `amira` (512² photo) | 8 – 19.3% | 16.9% |
+**The evidence behind the decision:** on the 1080p avatar under 3% packet loss the picture stops decoding
+at the same time as the audio degrades, so "video bytes arriving while `framesDecoded` does not grow" —
+which needs no threshold at all — already represents the whole link's condition. There is no measured
+case of audio degrading on its own.
 
-On lisa the two are ~45x apart and `CONCEAL_BAD = 0.15` sits cleanly between them. On amira the healthy
-range swallows the threshold, so the trigger fires on healthy sessions. One global number cannot serve
-both.
+**What the alternative would have cost:** the concealment metric's healthy baseline is per-avatar (0.3-0.5%
+on `lisa` 1080p, 8-19.3% on `amira` 512²; see `docs/avatar-weaknet-probe.md` §5.4.6), so a single global
+threshold fires on healthy photo-avatar sessions. The shape that would have avoided a per-avatar threshold
+table was a conjunction — concealment may only speak while the video is genuinely consuming bandwidth — so
+a cheap stream is silent for free. Not implemented, and now not wanted.
 
-**Why the current state is not a gap:** on lisa, where the video is genuinely expensive, the
-threshold-free primary trigger fires anyway — the passing run of 2026-09-30 downgraded on
-`decoding=false`, not on concealment. On amira the video is 512² and cheap, so dropping the picture buys
-almost nothing. Retiring the trigger costs no real failure scenario.
+**If this is ever reopened,** the bar is a real case: a session where the voice is measurably damaged while
+`framesDecoded` keeps growing. Adding a trigger without one is what the six calibration runs argued
+against.
 
-**Proposed shape (not implemented — needs a decision):** make it a conjunction rather than a second
-independent trigger. Only let concealment speak when the video is actually consuming bandwidth worth
-reclaiming (say, video bytes above some rate per window). Then amira is silent for free, lisa can act,
-and no per-avatar threshold table is needed. Verify the same way: shaped and unshaped distributions on
-BOTH avatars, and neither may overlap the threshold.
-
-**Effort:** S to implement, M to verify (two avatars × two shaping states).
-**Priority:** P3 — downgraded from P2: the measurement is done and the current behaviour is correct.
+**Status:** closed, no action.
 
 
 ## Completed
