@@ -74,35 +74,64 @@ curl -s -m 3 -o /dev/null http://127.0.0.1:5173/ || { echo "frontend :5173 not r
 # Remember the developer's default persona so the run can put it back. Escape apostrophes before they
 # go back into SQL: the restore is this script's safety net, and an unescaped value would leave the DB
 # pointing at whatever avatar this run chose (same guard as weaknet-phase2.sh).
-ORIG=$(sqlite3 "$DB" "select character||'|'||coalesce(style,'') from interviewer_personas where is_default=1;")
+#
+# Read and VALIDATE before mutating anything, and arm the trap before the first write. Three separate
+# ways this used to lose the developer's persona row: the read was unchecked, so an empty result made
+# the restore write character='' on exit; the trap was installed AFTER the mutation, so a Ctrl-C in
+# that window left the temporary avatar in place with no cleanup registered; and the restore's own
+# UPDATE was unchecked while the script printed "restored" regardless.
+ORIG=$(sqlite3 "$DB" "select character||'|'||coalesce(style,'') from interviewer_personas where is_default=1;") || {
+  echo "could not read the default persona from $DB — refusing to run rather than risk restoring a wrong value"
+  exit 1
+}
 ORIG_CHAR="${ORIG%%|*}"; ORIG_STYLE="${ORIG#*|}"
+if [[ -z "$ORIG_CHAR" ]]; then
+  echo "the default persona has no character value (got '$ORIG') — refusing to run, because the restore"
+  echo "on exit would write an empty character back into the shared dev DB."
+  exit 1
+fi
 ORIG_CHAR_SQL=${ORIG_CHAR//\'/\'\'}
 ORIG_STYLE_SQL=${ORIG_STYLE//\'/\'\'}
-
-case "$AVATAR" in
-  lisa)  sqlite3 "$DB" "update interviewer_personas set character='lisa', style='casual-sitting' where is_default=1;" ;;
-  amira) sqlite3 "$DB" "update interviewer_personas set character='amira', style='' where is_default=1;" ;;
-  *) echo "unknown AVATAR '$AVATAR' (lisa = 1080p video, amira = 512px photo)"; exit 1 ;;
-esac
-echo "avatar: $AVATAR (was $ORIG_CHAR/${ORIG_STYLE:-none})"
 
 WATCHER=""
 restore() {
   [[ -n "$WATCHER" ]] && kill "$WATCHER" 2>/dev/null
   "$SHAPER" off >/dev/null 2>&1 || true
   rm -f "$SIGNAL"
-  sqlite3 "$DB" "update interviewer_personas set character='$ORIG_CHAR_SQL', style='$ORIG_STYLE_SQL' where is_default=1;"
-  echo "restored: shaping off, default persona = $ORIG_CHAR/${ORIG_STYLE:-none}"
+  if sqlite3 "$DB" "update interviewer_personas set character='$ORIG_CHAR_SQL', style='$ORIG_STYLE_SQL' where is_default=1;"; then
+    echo "restored: shaping off, default persona = $ORIG_CHAR/${ORIG_STYLE:-none}"
+  else
+    # Say so loudly. Reporting success here while the row stayed on the temporary avatar is how a
+    # developer ends up debugging the wrong digital human tomorrow.
+    echo "WARNING: shaping is off, but restoring the default persona FAILED (DB locked?)."
+    echo "         Put it back by hand: sqlite3 '$DB' \"update interviewer_personas set character='$ORIG_CHAR_SQL', style='$ORIG_STYLE_SQL' where is_default=1;\""
+  fi
 }
 trap restore EXIT INT TERM
 
+case "$AVATAR" in
+  lisa)  sqlite3 "$DB" "update interviewer_personas set character='lisa', style='casual-sitting' where is_default=1;" || { echo "could not set the avatar to lisa"; exit 1; } ;;
+  amira) sqlite3 "$DB" "update interviewer_personas set character='amira', style='' where is_default=1;" || { echo "could not set the avatar to amira"; exit 1; } ;;
+  *) echo "unknown AVATAR '$AVATAR' (lisa = 1080p video, amira = 512px photo)"; exit 1 ;;
+esac
+echo "avatar: $AVATAR (was $ORIG_CHAR/${ORIG_STYLE:-none})"
+
 rm -f "$SIGNAL"
 mkdir -p "$(dirname "$SIGNAL")"
-# The spec runs as $RUN_AS, so it must be able to create the signal file in this directory.
+# The spec runs as $RUN_AS, so it must be able to create the signal file in this directory. Verified
+# rather than hoped: if the child cannot write it, the watcher polls forever, the shaping never lifts,
+# and the run fails for a reason that looks like the app's fault.
 chown "$RUN_AS" "$(dirname "$SIGNAL")" 2>/dev/null || true
+sudo -u "$RUN_AS" test -w "$(dirname "$SIGNAL")" || {
+  echo "$(dirname "$SIGNAL") is not writable by $RUN_AS — the spec could not signal the shaper, so the"
+  echo "link would stay throttled for the whole run. Fix the ownership and rerun."
+  exit 1
+}
 
 echo "shaping: $PROFILE ($SPEC_ARGS)"
-"$SHAPER" on $SPEC_ARGS
+# Checked, because an unnoticed failure here is the worst outcome this script has: the spec would run
+# against a healthy network and its pass would look like "restore under load works".
+"$SHAPER" on $SPEC_ARGS || { echo "shaping FAILED to apply — refusing to run, the measurement would be meaningless"; exit 1; }
 sleep 2
 
 # Un-shape the moment the spec reports the downgrade. Backgrounded so the spec runs in the foreground

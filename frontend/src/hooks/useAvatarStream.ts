@@ -525,6 +525,32 @@ export function useAvatarStream(
       sendSdpOffer: (clientSdp: string) => Promise<void> | void,
       wantVideo: boolean,
     ) => {
+      // Consult the rate-limit ledger HERE, not at the call sites. `noteAvatarRequest()` already records
+      // every offer from this one place, and the check belongs next to it: `attemptRecovery` and
+      // `switchMediaMode` asked, but the consumer-driven `connect()` did not — and that is a reachable
+      // hole, not a theoretical one. `useInterviewVoice`'s WS reconnect loop retries at 1s/3s/7s and
+      // resets `avatarStartedRef` each time, so a link that drops the socket three times inside 20 s
+      // fires three avatar offers; Azure refuses the third, the failure is caught as non-fatal, and the
+      // candidate silently loses the picture for the rest of the session. That is the bug this whole
+      // change exists to prevent, arriving through the one path that was still unguarded.
+      //
+      // Placement is load-bearing: this MUST precede `serverSdpPromise` below, whose 15 s timeout is
+      // armed before the offer is sent. Waiting after that point would guarantee an SDP timeout.
+      const handshakeGen = genRef.current;
+      const budgetWait = avatarRequestWaitMs();
+      if (budgetWait > 0) {
+        console.info(
+          `[avatar-stream] holding the avatar offer ${Math.ceil(budgetWait / 1000)}s — Azure's request allowance is spent`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, budgetWait));
+        if (handshakeGen !== genRef.current) {
+          // Someone started a newer handshake while we waited. Sending now would spend a real Azure
+          // request on a dead peer connection. The caller's catch treats this as non-fatal, resets its
+          // one-shot guard and keeps the voice, so a later `session.updated` can try again.
+          throw new Error("avatar handshake superseded while waiting for the rate-limit allowance");
+        }
+      }
+
       // Two recvonly transceivers, registered BEFORE createOffer — the avatar only streams TO us.
       // For an audio-only session the video m-line is still offered but marked `inactive`: Azure
       // answers that and sends only the audio track (~100 kbps). DELETING the m-line instead is
@@ -598,7 +624,7 @@ export function useAvatarStream(
       await pc.setRemoteDescription({ type: "answer", sdp: serverSdp });
       console.info("[avatar-stream] setRemoteDescription success; awaiting first video frame");
     },
-    [noteAvatarRequest],
+    [avatarRequestWaitMs, noteAvatarRequest],
   );
 
   /** Close the current PC and run a fresh handshake on a new one, reusing the stashed ICE servers +

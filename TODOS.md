@@ -42,6 +42,40 @@ WS-teardown ordering) the way `avatarHealth.ts` was extracted, one at a time, ea
 **Effort:** M
 **Priority:** P3
 
+### `connect()` has no re-entrancy guard, and two UI affordances are deliberately always clickable
+
+**What:** `useInterviewVoice.connect()` can be entered twice concurrently. Both call sites that reach
+it from the UI are intentionally never disabled: the mic-permission dialog's Retry (`onRetry={startVoice}`)
+and the top-bar voice pill (`onClick={startVoice}`, whose comment says it "must stay retryable"). Other
+buttons in the same file do use `disabled={busy}`; these two do not, on purpose.
+
+Two overlapping calls each overwrite `wsRef.current` and `micReadyRef.current`, orphaning the first
+WebSocket while its `onmessage`/`onclose` handlers stay live. The orphan can schedule its own reconnect,
+and if it still receives `session.updated` it runs the full connected-state and avatar-handshake side
+effects through the same shared refs while `send()` now targets the other socket — two logically
+distinct sessions going live against one ref set. Nothing adversarial is needed: double-clicking a
+dialog button that is designed to stay clickable does it.
+
+**Not introduced here.** `connect()` never had a guard; this branch only made one consequence visible,
+because `connectsSinceLiveRef` now counts attempts, so a duplicate click spends one of six. That part is
+mild — a live session zeroes the counter, so reaching the ceiling still needs genuine failures — and the
+cross-wiring is the real problem.
+
+**Why it is filed rather than fixed in v0.40.1.0:** the obvious fix (memoise the in-flight connect and
+hand the same promise to a second caller) is wrong as stated. `restartForMediaMode` legitimately calls
+`connect()` while a previous attempt may still be in flight, and de-duplicating there would silently
+drop a media-mode switch. So the fix needs to distinguish "a human clicked twice" from "the policy is
+rebuilding", which is a real design decision in the file that is already 1608 lines and already has a
+split planned ([[the refactor item above]] — `docs/planning/plan-refactor-interview-voice-hook-20260930.md`).
+
+**Fix shape:** either gate the two affordances on `connectionState === "connecting"` while keeping them
+enabled for every other state, or give `connect()` an explicit intentional-restart parameter and
+de-duplicate only the non-restart path. Prefer whichever lands alongside the hook split, so the
+ownership of the WS lifecycle is in one place when the guard is added.
+
+**Effort:** S for the guard, M if taken with the split.
+**Priority:** P2 — reachable by a candidate with two clicks, and the damage is cross-wired session state.
+
 ## Completed
 ### Voice-damage trigger: CLOSED by owner decision, not deferred
 

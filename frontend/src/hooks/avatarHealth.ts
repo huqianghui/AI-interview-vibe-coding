@@ -162,6 +162,23 @@ export function readHealth(
 
   if (!prev) return { snapshot, health: null };
 
+  // Counters must only ever grow. Two cases break that, and both used to produce garbage deltas:
+  // a NEW peer connection starts its counters at zero while `prev` still holds the old session's
+  // totals, and two sampling ticks whose `getStats()` promises resolve out of order (plausible when a
+  // backgrounded tab burst-fires coalesced timers) can leave an older snapshot stored after a newer
+  // one. Either way the next window computes a negative delta, which `dSamples > 0` reads as "no audio
+  // arrived" — so the restore's healthy streak resets and the picture is held back for no reason, the
+  // same user-visible harm this change set exists to fix. Treat a non-monotonic report as a fresh
+  // baseline instead: no verdict for this window, correct deltas from the next one.
+  if (
+    snapshot.totalSamplesReceived < prev.totalSamplesReceived ||
+    snapshot.concealedSamples < prev.concealedSamples ||
+    snapshot.framesDecoded < prev.framesDecoded ||
+    snapshot.videoBytesReceived < prev.videoBytesReceived
+  ) {
+    return { snapshot, health: null };
+  }
+
   const dSamples = snapshot.totalSamplesReceived - prev.totalSamplesReceived;
   const dConcealed = snapshot.concealedSamples - prev.concealedSamples;
   const dSilent = snapshot.silentConcealedSamples - prev.silentConcealedSamples;
