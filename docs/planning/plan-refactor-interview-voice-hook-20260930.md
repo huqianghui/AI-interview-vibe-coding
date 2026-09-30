@@ -1,7 +1,19 @@
 # 拆分 `useInterviewVoice`（1608 行单函数）
 
-> **状态：计划，未开工。** 排在 `fix/avatar-recovery-rate-limit` 与后端 CAS 之后，因为它要动的正是那两批改过的文件。
+> **状态：第一步已完成（v0.40.4.0）。** 第二步（朗读与首读确认簇）与 `handleMessage` 仍未动。
 > 来源：v0.40.0.0 可维护性评审（`TODOS.md`，P3）。
+>
+> **第一步实际交付与计划的两处差异，都是实现时才看清的：**
+>
+> 1. **`commitAnswer` 没有搬进模块。** 计划说它"需要注入 `send`"，实际它还依赖 `activeResponseRef`
+>    和 `linearTurns`——那是 WebSocket 回合协议，不是草稿状态。搬过去要注入三样东西，等于把耦合换个
+>    地方藏。最终边界是：**模块拥有状态和它的不变量，hook 拥有协议决策**。`commitAnswer` 留在原处但
+>    变短了，改为调用 `draft.drain()` / `draft.armPending()`。模块因此不需要 `send`，也不需要任何会话 ref。
+> 2. **`assistantLiveTranscriptRef` 排除在外。** 计划把它列进簇里，但它是**面试官**的转写累加器，
+>    不属于"候选人的答案草稿"。`resetTurnState` 清它只是顺手，不构成归属。它留在原 hook 里。
+>
+> 实际效果：`useInterviewVoice` 1682 → 1602 行，新模块 171 行，29 个单元测试，
+> **既有 351 个测试一字未改地通过**。
 
 ## 为什么值得做，以及为什么它不紧急
 

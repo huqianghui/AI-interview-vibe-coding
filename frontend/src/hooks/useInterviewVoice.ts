@@ -29,6 +29,8 @@
  * the WS pins the persona under test instead of resolving the default enabled one.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+
+import { useAnswerDraft } from "./useAnswerDraft";
 import type { RefObject } from "react";
 import { _internal as clientInternal, type VoiceSession } from "../api/client";
 import { AZURE_DEFAULT_INPUT_SAMPLE_RATE, MIC_SAMPLE_RATE, useVoiceAudio } from "./useVoiceAudio";
@@ -332,52 +334,12 @@ export function useInterviewVoice(
   // `.completed` handler pushes the final text, cancels the timer, and resolves it. This is what
   // guarantees a voice answer is submitted with the ACTUAL transcript of THIS turn, not the empty
   // (or stale previous-turn) value that a synchronous read would capture before the round-trip.
-  const pendingCommitRef = useRef<{
-    resolve: (text: string) => void;
-    parts: string[];
-    timer: ReturnType<typeof setTimeout>;
-  } | null>(null);
-  // Buffers user transcripts that land BETWEEN commits. Under server-VAD (azure_semantic_vad +
-  // end-of-utterance detection, our production config) Azure auto-segments speech and emits the
-  // `input_audio_transcription.completed` event as soon as the user stops talking — i.e. BEFORE
-  // they click "I'm done". Those pre-click transcripts have no armed pending to land in, so without
-  // this buffer they reached only the transcript panel and were lost to `commitAnswer()`, which
-  // then timed out to "" → the false "我们没有听到你的回答" error even though the answer was on screen.
-  // `commitAnswer` drains this first; it's cleared on drain and on teardown so nothing leaks across
-  // turns or sessions.
-  const userSegmentsSinceCommitRef = useRef<string[]>([]);
-  // The silence-auto-commit timer (see `silenceAutoCommitMs` / silenceAutoCommitDelay
-  // and `onSilenceAutoCommit`). Armed/re-armed each time a user utterance segment is buffered,
-  // cleared when the candidate resumes speaking, when a commit runs (button or auto), and on
-  // teardown. Held in a ref so the message handler can (re)arm it without re-subscribing.
-  const silenceAutoCommitTimerRef = useRef<ReturnType<
-    typeof setTimeout
-  > | null>(null);
-  const clearSilenceAutoCommit = useCallback(() => {
-    if (silenceAutoCommitTimerRef.current) {
-      clearTimeout(silenceAutoCommitTimerRef.current);
-      silenceAutoCommitTimerRef.current = null;
-    }
-  }, []);
-  // Judge silence timer (issue #114) — parallel to the auto-submit one, same arm/clear points.
-  const judgeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clearJudgeTimer = useCallback(() => {
-    if (judgeTimerRef.current) {
-      clearTimeout(judgeTimerRef.current);
-      judgeTimerRef.current = null;
-    }
-  }, []);
-  // Live (partial) user-transcript accumulator, keyed by the Azure conversation item id. The
-  // `input_audio_transcription.delta` events carry INCREMENTAL text for the utterance the user is
-  // still speaking; we accumulate per item and emit the running text as a non-final segment under
-  // a stable id, so the panel shows the words as they're spoken instead of one bubble appearing
-  // only after the utterance ends. The `.completed` event finalizes the SAME id (replacing the live
-  // bubble in place) and remains the only text that feeds commitAnswer — partials are display-only.
-  const userLiveTranscriptRef = useRef<Map<string, string>>(new Map());
-  // Same accumulator for the ASSISTANT's `response.audio_transcript.delta`. Each delta frame
-  // carries only the incremental fragment, but every onTranscript consumer REPLACES the segment
-  // with the same id — so emitting the bare fragment made the interviewer's bubble show only the
-  // latest word until `.done` swapped in the full text. Accumulate here and emit the running text.
+  /** The candidate's in-progress answer and everything that decides what "I'm done" submits: the
+   * buffered segments, the streaming partials, an armed commit's promise, and the two end-of-utterance
+   * timers. Extracted to `useAnswerDraft` because the keepDraft rule that caused a deterministic draft
+   * loss in v0.40.0.0 was spread across two functions that could not see each other; it has one owner
+   * and its own tests now. The handle is referentially stable, so it is safe in dependency arrays. */
+  const draft = useAnswerDraft();
   const assistantLiveTranscriptRef = useRef<Map<string, string>>(new Map());
   const optionsRef = useRef(options);
   optionsRef.current = options;
@@ -437,16 +399,13 @@ export function useInterviewVoice(
   } | null>(null);
   const avatarReadyRef = useRef(false);
 
-  // Settle any armed commit with whatever transcript has accumulated so far (usually ""). Called
-  // from the transcription handler (with the just-arrived text already pushed) and from teardown
-  // paths (disconnect / reconnect / unmount) so `await commitAnswer()` can never hang past the WS.
+  // Settle any armed commit with whatever transcript has accumulated so far (usually ""). Called from
+  // the transcription handler (with the just-arrived text already recorded) and from teardown paths
+  // (disconnect / reconnect / unmount) so `await commitAnswer()` can never hang past the WS. Kept as a
+  // named local because several call sites read better this way than as `draft.settlePending()`.
   const settlePendingCommit = useCallback(() => {
-    const pending = pendingCommitRef.current;
-    if (!pending) return;
-    clearTimeout(pending.timer);
-    pendingCommitRef.current = null;
-    pending.resolve(pending.parts.join(" ").trim());
-  }, []);
+    draft.settlePending();
+  }, [draft]);
 
   const setConn = useCallback((state: VoiceConnectionState) => {
     setConnectionState(state);
@@ -502,30 +461,14 @@ export function useInterviewVoice(
     }
     firstReadDoneRef.current = false;
     avatarReadyRef.current = false;
-    // Drop any buffered user transcript — a new session starts a fresh turn; carrying stale
-    // segments across a disconnect would mis-attribute them to the next answer. EXCEPT on an
-    // automatic mid-answer reconnect (`keepDraft`): the candidate is still on the same question and
-    // those segments ARE their answer so far — dropping them would submit a truncated answer.
-    if (!opts?.keepDraft) userSegmentsSinceCommitRef.current = [];
-    // Disarm the silence-auto-commit timer — its fire would target a dead session's turn.
-    clearSilenceAutoCommit();
-    clearJudgeTimer();
-    // Drop live partial accumulators too — their item ids belong to the dead Azure session. Under
-    // `keepDraft` an utterance whose `.completed` will now never arrive is folded into the draft
-    // from its last partial first, so the words the candidate saw streaming are not lost from what
-    // "I'm done" submits (adversarial review).
-    if (opts?.keepDraft) {
-      for (const partial of userLiveTranscriptRef.current.values()) {
-        const text = partial.trim();
-        if (text) userSegmentsSinceCommitRef.current.push(text);
-      }
-    }
-    userLiveTranscriptRef.current.clear();
+    // The answer side of a turn reset — dropping or keeping the draft, folding partials under
+    // keepDraft, disarming both silence timers, and settling an armed commit — belongs to
+    // `useAnswerDraft` and lives there with its own tests.
+    draft.reset(opts);
+    // The INTERVIEWER's live transcript is not part of the candidate's answer, so it stays here: its
+    // item ids belong to the dead Azure session either way.
     assistantLiveTranscriptRef.current.clear();
-    // Settle a commit still waiting on a transcript that will never arrive now that the WS is
-    // going away — otherwise `await commitAnswer()` hangs forever on disconnect/reconnect/unmount.
-    settlePendingCommit();
-  }, [settlePendingCommit, clearSilenceAutoCommit, clearJudgeTimer]);
+  }, [draft]);
 
   const cleanup = useCallback(() => {
     if (wsRef.current) {
@@ -755,8 +698,8 @@ export function useInterviewVoice(
           // The candidate resumed speaking — they haven't finished the answer yet, so cancel any
           // pending silence-auto-commit (and the judge window). Both re-arm when the next
           // utterance completes.
-          clearSilenceAutoCommit();
-          clearJudgeTimer();
+          draft.clearSilenceAutoCommit();
+          draft.clearJudge();
           break;
         case "input_audio_buffer.speech_stopped":
           setAudio("idle");
@@ -770,9 +713,7 @@ export function useInterviewVoice(
           const itemId = msg.item_id as string | undefined;
           const delta = (msg.delta as string | undefined) ?? "";
           if (itemId && delta) {
-            const running =
-              (userLiveTranscriptRef.current.get(itemId) ?? "") + delta;
-            userLiveTranscriptRef.current.set(itemId, running);
+            const running = draft.notePartial(itemId, delta);
             emit("user", running, false, `user-${itemId}`);
           }
           break;
@@ -783,10 +724,8 @@ export function useInterviewVoice(
           // replaced in place (no duplicate). Items that never streamed a delta (delta events off
           // or absent, e.g. plain azure-speech configs) fall back to the counter id as before.
           const itemId = msg.item_id as string | undefined;
-          const hadLive = Boolean(
-            itemId && userLiveTranscriptRef.current.has(itemId),
-          );
-          if (itemId) userLiveTranscriptRef.current.delete(itemId);
+          const hadLive = Boolean(itemId && draft.hasPartial(itemId));
+          if (itemId) draft.dropPartial(itemId);
           // Always feed the transcript panel first, so by the time commitAnswer()'s promise
           // resolves the answer bubble is already on screen ("fully shown before submit").
           if (transcript)
@@ -798,19 +737,16 @@ export function useInterviewVoice(
                 ? `user-${itemId}`
                 : `user-${++transcriptIdCounter.current}`,
             );
-          const pending = pendingCommitRef.current;
-          if (pending) {
-            // "I'm done" was clicked and is waiting: this completed event is (part of) THIS turn's
-            // final transcript — record it and resolve the awaiter (manual-VAD / click-before-STT
-            // ordering).
-            if (transcript) pending.parts.push(transcript);
+          // "I'm done" was clicked and is waiting: this completed event is (part of) THIS turn's final
+          // transcript — record it and resolve the awaiter (manual-VAD / click-before-STT ordering).
+          if (draft.landTranscript(transcript)) {
             settlePendingCommit();
           } else if (transcript) {
             // No commit armed yet — under server-VAD this transcript arrived BEFORE the click.
             // Buffer it so the next commitAnswer() can drain it instead of hanging on a completed
             // event that already fired. (This was the empty-answer bug: the panel showed the bubble
             // but commitAnswer never saw the text.)
-            userSegmentsSinceCommitRef.current.push(transcript);
+            draft.pushSegment(transcript);
             // Arm/re-arm the silence-auto-commit timer when the admin enabled it on the persona.
             // This segment is an end-of-utterance; if the candidate stays silent for the configured
             // window (no new speech re-arms it, see the speech_started case), auto-submit the
@@ -818,22 +754,14 @@ export function useInterviewVoice(
             // the turn advances only on the "I'm done" click, so a thinking pause can't submit.
             const delay = silenceAutoCommitDelay(optionsRef.current.silenceAutoCommitMs);
             if (delay !== null) {
-              clearSilenceAutoCommit();
-              silenceAutoCommitTimerRef.current = setTimeout(() => {
-                silenceAutoCommitTimerRef.current = null;
-                optionsRef.current.onSilenceAutoCommit?.();
-              }, delay);
+              draft.armSilenceAutoCommit(() => optionsRef.current.onSilenceAutoCommit?.(), delay);
             }
             // Judged sessions: the same end-of-utterance arms the judge window (issue #114) and,
             // first, lets the page prefetch the verdict so the LLM runs DURING the window (D17).
             const judgeDelay = silenceAutoCommitDelay(optionsRef.current.judgeSilenceMs);
             if (judgeDelay !== null) optionsRef.current.onUtteranceComplete?.();
             if (judgeDelay !== null) {
-              clearJudgeTimer();
-              judgeTimerRef.current = setTimeout(() => {
-                judgeTimerRef.current = null;
-                optionsRef.current.onSilenceJudge?.();
-              }, judgeDelay);
+              draft.armJudge(() => optionsRef.current.onSilenceJudge?.(), judgeDelay);
             }
           }
           break;
@@ -1018,8 +946,7 @@ export function useInterviewVoice(
       setAudio,
       setConn,
       settlePendingCommit,
-      clearSilenceAutoCommit,
-      clearJudgeTimer,
+      draft,
     ],
   );
 
@@ -1353,8 +1280,8 @@ export function useInterviewVoice(
   const commitAnswer = useCallback((): Promise<string> => {
     // This turn is being committed (via the "I'm done" button OR the silence auto-commit),
     // so disarm the silence timer — it must not fire a second commit for a turn already submitted.
-    clearSilenceAutoCommit();
-    clearJudgeTimer(); // a submit ends the pause — no judge check may fire for the old answer
+    draft.clearSilenceAutoCommit();
+    draft.clearJudge(); // a submit ends the pause — no judge check may fire for the old answer
     // Defensively settle any prior armed commit (e.g. a double-click) before arming a fresh one.
     settlePendingCommit();
 
@@ -1363,10 +1290,9 @@ export function useInterviewVoice(
     // typically BEFORE they click "I'm done" — so the answer is usually already buffered here. If
     // so, resolve immediately with it; no need to wait for (or time out on) a completed event that
     // has already fired. This is the fix for the empty-answer bug.
-    const buffered = userSegmentsSinceCommitRef.current;
-    if (buffered.length > 0) {
-      const text = buffered.join(" ").trim();
-      userSegmentsSinceCommitRef.current = [];
+    const buffered = draft.drain();
+    if (buffered) {
+      const text = buffered;
       // Nudge the agent's turn along ONLY if nothing is already responding. Under server-VAD
       // (bank production) Azure has usually auto-created the response already, so an unconditional
       // response.create here just collides (`conversation_already_has_active_response`) — it's the
@@ -1389,19 +1315,13 @@ export function useInterviewVoice(
     // Nothing buffered yet — the click beat the STT round-trip (fast speaker, or manual-VAD). Arm a
     // pending commit and wait for the next completed event, failing closed to "" after the timeout.
     return new Promise<string>((resolve) => {
-      const timer = setTimeout(() => {
-        const pending = pendingCommitRef.current;
-        if (!pending) return;
-        pendingCommitRef.current = null;
-        resolve(pending.parts.join(" ").trim());
-      }, COMMIT_TRANSCRIPT_TIMEOUT_MS);
-      pendingCommitRef.current = { resolve, parts: [], timer };
+      draft.armPending(resolve, COMMIT_TRANSCRIPT_TIMEOUT_MS);
       // Same linear-turns guard as the buffered branch: never fire a bare response.create when the
       // model has no turn of its own (it would improvise an off-script follow-up).
       if (!activeResponseRef.current && !optionsRef.current.linearTurns)
         send({ type: "response.create" });
     });
-  }, [send, settlePendingCommit, clearSilenceAutoCommit, clearJudgeTimer]);
+  }, [draft, send, settlePendingCommit]);
 
   // Emit the assistant-item + response.create pair that makes Voice Live read `text` verbatim.
   // Assumes no response is currently active (checked by the callers). Records the attempt so a
@@ -1481,7 +1401,7 @@ export function useInterviewVoice(
   );
 
   /** The candidate's buffered, not-yet-committed transcript (what the judge reads). */
-  const peekDraft = useCallback(() => userSegmentsSinceCommitRef.current.join(" ").trim(), []);
+  const peekDraft = useCallback(() => draft.peek(), [draft]);
 
   /** Speak the backend-provided question text verbatim (SPEC Phase 4 voice→turn sub-design).
    *
