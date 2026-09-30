@@ -152,6 +152,8 @@ export function useAvatarStream(
    * alongside the new one. Hold the handle so teardown can kill it outright. */
   const framePollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const snapshotRef = useRef<HealthSnapshot | null>(null);
+  /** Sampling windows since this PC started, used only to throttle the audio-only diagnostic below. */
+  const windowCountRef = useRef(0);
   const decisionRef = useRef<DecisionState>(initialDecisionState());
   /** Mirrors `decisionRef.current.mode` for render. */
   const [mediaMode, setMediaMode] = useState<MediaMode>("video");
@@ -337,6 +339,7 @@ export function useAvatarStream(
   const startSampling = useCallback(
     (pc: RTCPeerConnection) => {
       stopSampling();
+      windowCountRef.current = 0;
       const gen = genRef.current;
       statsTimerRef.current = setInterval(() => {
         if (gen !== genRef.current || pc !== pcRef.current) {
@@ -353,8 +356,41 @@ export function useAvatarStream(
             if (!health) return; // first sample: no window to judge yet.
 
             const before = decisionRef.current;
+
+            // A PIN the actuator refused must be retried, not forgotten. `setVideoPreference` records the
+            // preference and then asks `switchMediaMode`, which can veto (Azure's cooldown / request
+            // allowance) — and `reduceHealth` short-circuits on any non-"auto" preference, so nothing
+            // would ever ask again: the candidate's "turn the picture on" would be silently dropped for
+            // the rest of the session. Same defect class as the vetoed restore above. The UI's own gate
+            // usually stops a human reaching this, but that gate only knows about the 60 s cooldown while
+            // the actuator also enforces the request allowance, so the two can disagree; retrying here
+            // makes the pin eventually consistent instead of relying on them never disagreeing.
+            const pinned: MediaMode | null =
+              before.preference === "on" ? "video" : before.preference === "off" ? "audio-only" : null;
+            if (pinned !== null && before.mode !== pinned) {
+              switchMediaModeRef.current?.(pinned, `user-pinned-${before.preference}-retry`);
+              return; // the pin is the whole decision for this window; the health policy is paused anyway.
+            }
+
             const { state, action } = reduceHealth(before, health, now);
             decisionRef.current = state;
+
+            // While waiting in audio-only, say why the picture has not come back yet. This is the only
+            // window where the answer is non-obvious, and four live runs in a row failed to restore with
+            // no way to tell whether the streak was resetting, the actuator was vetoing, or the sampler
+            // was not running at all. Throttled to every fifth window (~10 s) and silent in video mode,
+            // so a healthy session stays quiet.
+            windowCountRef.current += 1;
+            if (state.mode === "audio-only" && windowCountRef.current % 5 === 0) {
+              const heldMs = state.healthySince === null ? 0 : now - state.healthySince;
+              console.info(
+                `[avatar-health] waiting to restore: audible=${(health.concealmentRatio * 100).toFixed(1)}% ` +
+                  `(need <${(HEALTH_THRESHOLDS.CONCEAL_GOOD * 100).toFixed(0)}%), ` +
+                  `healthy for ${(heldMs / 1000).toFixed(0)}s of ${(state.healthyHoldMs / 1000).toFixed(0)}s, ` +
+                  `${state.lastDowngradeAt === null ? "no downgrade on record" : `${Math.max(0, Math.ceil((HEALTH_THRESHOLDS.MIN_AFTER_DOWNGRADE_MS - (now - state.lastDowngradeAt)) / 1000))}s left on the policy cooldown`}, ` +
+                  `failedRestores=${state.failedRestores}, preference=${state.preference}`,
+              );
+            }
 
             // Honest UI: the probe measured a ~4 s gap between "video bytes hit zero" and ICE
             // reporting `disconnected`, during which the page still claimed a live avatar frozen on

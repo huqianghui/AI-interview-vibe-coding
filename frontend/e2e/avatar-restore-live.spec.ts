@@ -97,7 +97,10 @@ test.describe("Weak-network picture RESTORE (real Azure link, shaping removed mi
     const decisions: string[] = [];
     page.on("console", (msg) => {
       const text = msg.text();
-      if (/media health|media mode →|rebuilding the session|not restoring the picture/.test(text)) {
+      // "link healthy again" was missing from this list for the first four runs, which made an absent
+      // restore decision indistinguishable from a captured-but-unlogged one. Match on the words the
+      // hook actually prints, not on what it feels like it should print.
+      if (/media health|media mode →|rebuilding the session|restoring the picture|link healthy|avatar-health/.test(text)) {
         decisions.push(`${new Date().toISOString().slice(11, 19)} ${text}`);
       }
     });
@@ -215,6 +218,33 @@ test.describe("Weak-network picture RESTORE (real Azure link, shaping removed mi
     console.log("\ndecision log:");
     decisions.forEach((d) => console.log(`  ${d}`));
     console.log("===================================================\n");
+
+    // Written to disk as well as stdout. The summary and the per-sample trace are the entire point of
+    // this spec, and on the first four runs they were lost to terminal scrollback every time while the
+    // assertion failure below was the only thing that survived. A file can be read directly.
+    const outDir = path.resolve(__dirname, "output");
+    fs.mkdirSync(outDir, { recursive: true });
+    const report = {
+      at: new Date().toISOString(),
+      restored,
+      downgradedAtS: Math.round((downgradedAt - started) / 1000),
+      restoredAfterS: restored ? Math.round((restoredAt - downgradedAt) / 1000) : null,
+      thresholds: HEALTH_THRESHOLDS,
+      hold: {
+        audioSamples: samplesDuringHold,
+        silent: silentDuringHold,
+        concealed: concealedDuringHold,
+        audible: audibleDuringHold,
+        audibleRatio: observedRatio,
+        rawRatio: rawRatio,
+        earned,
+      },
+      samples,
+      decisions,
+    };
+    const file = path.join(outDir, "restore-latest.json");
+    fs.writeFileSync(file, JSON.stringify(report, null, 2));
+    console.log(`full report written to ${file}`);
 
     // The assertion is the restore itself. Everything above is the evidence for calibrating the
     // threshold, and it is printed BEFORE this so a failure still hands over the numbers.

@@ -581,6 +581,42 @@ describe("useAvatarStream weak-network adaptation", () => {
     expect(result.current.videoPreference).toBe("off");
   });
 
+  it('retries a pin the cooldown refused, so "turn the picture on" is not silently dropped', async () => {
+    // `setVideoPreference("on")` records the preference and then asks the actuator, which vetoes while
+    // the cooldown is live. `reduceHealth` short-circuits on any non-"auto" preference, so before the
+    // fix nothing ever asked again and the candidate's request was dropped for the rest of the session.
+    // The UI's own gate usually stops a human reaching this, but that gate only knows about the 60 s
+    // cooldown while the actuator also enforces Azure's request allowance, so the two can disagree.
+    const videoRef = makeVideoRef();
+    const sendOffer = vi.fn();
+    const { result, requests } = renderStream(videoRef);
+    await bringUp(result, sendOffer, 0);
+
+    // Pin OFF first: dropping the picture is never vetoed.
+    await act(async () => {
+      result.current.setVideoPreference("off");
+    });
+    expect(requests).toEqual(["audio-only"]);
+    const audioPc = await bringUp(result, sendOffer, 1);
+
+    // Ask for it back at once. The rebuilt session restarted the cooldown, so this is refused.
+    await act(async () => {
+      result.current.setVideoPreference("on");
+    });
+    expect(requests, "refused while the cooldown is live").toEqual(["audio-only"]);
+    expect(result.current.videoPreference, "but the intent is on record").toBe("on");
+    expect(result.current.mediaMode).toBe("audio-only");
+
+    // Let sampling windows pass. Once the cooldown expires the pin must be honoured with no further
+    // input from the candidate.
+    const windows = Math.ceil(T.VIDEO_SWITCH_MIN_INTERVAL_MS / T.SAMPLE_INTERVAL_MS) + 3;
+    const c = counters();
+    for (let i = 0; i < windows; i++) await tick(audioPc, audioOnlyStep(c));
+
+    expect(requests, "the pin must be retried, not forgotten").toEqual(["audio-only", "video"]);
+    expect(result.current.mediaMode).toBe("video");
+  });
+
   it("keeps the audio-only mode through a media drop, and does not spend the self-heal budget on the switch", async () => {
     // A policy switch is not a failure: the rebuilt session must still get all three self-heal attempts.
     // And a link that just proved it can't carry video must not get the picture back via recovery.
