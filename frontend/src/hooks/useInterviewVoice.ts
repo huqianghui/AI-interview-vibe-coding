@@ -126,6 +126,20 @@ export interface UseInterviewVoiceOptions {
   onUtteranceComplete?: () => void;
 }
 
+/** Options for `connect`. Named rather than positional because there are now three independent flags,
+ * and `connect(locale, false, true, true)` is how a caller silently gets one of them wrong. */
+export interface ConnectOptions {
+  /** A background retry after an unexpected close. Leaves the retry budget accounting alone. */
+  isReconnect?: boolean;
+  /** Keep the candidate's in-progress answer across the rebuild. Orthogonal to `isReconnect`: a
+   * media-mode rebuild wants the budget reset AND the draft kept. */
+  keepDraft?: boolean;
+  /** This call deliberately REPLACES whatever connect is in flight — the caller has already torn the
+   * old socket down. Without it, a concurrent second connect joins the first instead of opening a
+   * rival session. Only the two internal re-entrant paths set this. */
+  replaceInFlight?: boolean;
+}
+
 const MAX_RECONNECT = 3;
 const RECONNECT_DELAYS = [1000, 2000, 4000];
 /** Ceiling on connect attempts that never produced a live session, counted ACROSS mode switches.
@@ -251,6 +265,13 @@ export function useInterviewVoice(
   /** Connect attempts since the last session that actually went live. Survives mode switches (see
    * MAX_CONNECTS_WITHOUT_LIVE); cleared by `session.updated`, the only proof a session works. */
   const connectsSinceLiveRef = useRef(0);
+  /** The connect attempt currently in flight, if any. Set synchronously at the top of `connect` so a
+   * second caller cannot slip past it during the async work before the socket is even created. */
+  const connectInFlightRef = useRef<Promise<void> | null>(null);
+  /** Forward reference to the guarded `connect`, so the two internal callers below (the onclose retry
+   * and the media-mode rebuild) go through the same bookkeeping instead of around it. Same pattern the
+   * rest of this hook uses to break the useCallback dependency cycle. */
+  const connectRef = useRef<((locale?: string, opts?: ConnectOptions) => Promise<void>) | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const intentionalCloseRef = useRef(false);
   // Set when a PRE-CONNECT Azure `error` frame (e.g. `invalid_model` — the configured Voice Live
@@ -1002,8 +1023,11 @@ export function useInterviewVoice(
     ],
   );
 
-  const connect = useCallback(
-    async (locale?: string, isReconnect = false, keepDraft = false): Promise<void> => {
+  /** Opens a Voice Live session. Not called directly from outside — `connect` below wraps this with the
+   * re-entrancy guard, and every caller goes through that. */
+  const openSession = useCallback(
+    async (locale?: string, opts: ConnectOptions = {}): Promise<void> => {
+      const { isReconnect = false, keepDraft = false } = opts;
       const effectiveLocale = locale ?? optionsRef.current.locale ?? "en-US";
       lastLocaleRef.current = effectiveLocale;
       // Counted before the branch below, because that branch is exactly what this survives: the
@@ -1138,7 +1162,11 @@ export function useInterviewVoice(
             // the candidate is still on the same question.
             resetTurnState({ keepDraft: true });
             reconnectTimerRef.current = setTimeout(() => {
-              void connect(lastLocaleRef.current, true).catch(() => undefined);
+              // replaceInFlight: this retry IS the supersession — `wsRef` was nulled above, and the
+              // attempt that just died is the one being replaced.
+              void connectRef.current
+                ?.(lastLocaleRef.current, { isReconnect: true, replaceInFlight: true })
+                .catch(() => undefined);
             }, delay);
           } else {
             // Terminal: release everything (mic, avatar, turn/read bookkeeping) exactly like an
@@ -1182,6 +1210,47 @@ export function useInterviewVoice(
     },
     [audio, avatarStream, cleanup, handleMessage, resetTurnState, setConn],
   );
+
+  /**
+   * Open a voice session, or join the attempt already running.
+   *
+   * The re-entrancy guard exists because the two affordances that reach here are deliberately never
+   * disabled — the mic-permission dialog's Retry and the top-bar voice pill, whose comment says it must
+   * stay retryable. Nothing adversarial is needed to double-enter: two clicks on a button designed to
+   * stay clickable will do it, and the window is wide, because a connect does real async work (unlocking
+   * autoplay, fetching a token, starting the mic) before it ever assigns `wsRef`. Checking for an
+   * existing socket would therefore miss the race entirely, which is why the marker is set here,
+   * synchronously, before the first await.
+   *
+   * What went wrong without it: each attempt overwrote `wsRef` and `micReadyRef`, orphaning the earlier
+   * socket with its handlers still armed. The orphan could schedule its own reconnect, and if it still
+   * received `session.updated` it ran the connected-state and avatar-handshake side effects through the
+   * same shared refs while `send()` pointed at the other socket — two logically distinct sessions live
+   * against one ref set, plus a second avatar offer against Azure's rate limit.
+   *
+   * Joining rather than superseding is the right answer for a double-click: the candidate wants voice,
+   * not two sessions, and superseding would spend an extra avatar request for nothing. Callers that
+   * genuinely need a NEW session say `replaceInFlight` and have already torn the old socket down.
+   */
+  const connect = useCallback(
+    async (locale?: string, opts: ConnectOptions = {}): Promise<void> => {
+      if (connectInFlightRef.current && !opts.replaceInFlight) {
+        console.info("[voice] connect already in flight — joining it instead of opening a second session");
+        return connectInFlightRef.current;
+      }
+      const attempt = openSession(locale, opts);
+      connectInFlightRef.current = attempt;
+      try {
+        await attempt;
+      } finally {
+        // Only clear if this attempt still owns the slot: a `replaceInFlight` caller may have started a
+        // newer one while this was settling, and clearing then would let a click open a rival session.
+        if (connectInFlightRef.current === attempt) connectInFlightRef.current = null;
+      }
+    },
+    [openSession],
+  );
+  connectRef.current = connect;
 
   const disconnect = useCallback(async () => {
     intentionalCloseRef.current = true;
@@ -1228,16 +1297,21 @@ export function useInterviewVoice(
       avatarStartedRef.current = false;
       sessionLiveRef.current = false;
       setConn("reconnecting");
-      // isReconnect=false resets the reconnect budget (this is a policy switch, not a failure);
-      // keepDraft=true stops that same flag from wiping the candidate's in-progress answer. connect()
-      // runs the keepDraft-preserving reset itself, so this function must NOT reset separately.
-      void connect(lastLocaleRef.current, false, true).catch((err: unknown) => {
-        console.warn("[voice] media-mode session rebuild failed", err);
-      });
+      // Leaving isReconnect false resets the reconnect budget (this is a policy switch, not a failure);
+      // keepDraft stops that same reset from wiping the candidate's in-progress answer, because connect()
+      // runs the keepDraft-preserving reset itself and this function must NOT reset separately.
+      // replaceInFlight says the supersession is deliberate: the old socket is already detached and
+      // closed above, so this must open a new session rather than join an attempt in flight.
+      void connectRef.current
+        ?.(lastLocaleRef.current, { keepDraft: true, replaceInFlight: true })
+        .catch((err: unknown) => {
+          console.warn("[voice] media-mode session rebuild failed", err);
+        });
     },
     // No resetTurnState here on purpose: connect() runs the keepDraft-preserving reset itself, so
-    // listing it would claim a dependency this callback does not have.
-    [audio, connect, setConn],
+    // listing it would claim a dependency this callback does not have. `connect` is reached through
+    // `connectRef` rather than captured, which is what keeps this out of a dependency cycle with it.
+    [audio, setConn],
   );
   restartForMediaModeRef.current = restartForMediaMode;
 

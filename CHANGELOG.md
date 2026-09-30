@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.40.3.0 (2026-09-30)
+
+### Fixed
+- **Clicking "use voice" or the microphone dialog's Retry twice no longer opens two competing voice
+  sessions.** Both buttons stay clickable on purpose, so an impatient candidate could double-enter
+  the connect path. Each attempt claimed the same internal state, leaving the earlier connection
+  orphaned but still listening: it could start its own reconnect, and could run the digital human's
+  handshake while messages were being sent to the other connection. The second click now joins the
+  attempt already running, which is what the candidate actually wanted — one working session, not two.
+
 ## 0.40.2.0 (2026-09-30)
 
 ### Fixed

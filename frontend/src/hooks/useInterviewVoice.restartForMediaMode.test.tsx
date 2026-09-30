@@ -214,4 +214,66 @@ describe("useInterviewVoice restartForMediaMode", () => {
     unmount();
   });
 
+
+  it("a double-click opens ONE session, and a deliberate rebuild still opens a new one", async () => {
+    // Both affordances that reach connect() are deliberately never disabled — the mic-permission
+    // dialog's Retry and the top-bar voice pill, whose own comment says it must stay retryable. So two
+    // clicks is not an adversarial scenario, it is a candidate being impatient. Before the guard, each
+    // attempt overwrote wsRef and micReadyRef and orphaned the earlier socket with its handlers still
+    // armed: the orphan could schedule its own reconnect and, if it still saw session.updated, run the
+    // connected-state and avatar-handshake side effects through the same refs while send() pointed at
+    // the other socket.
+    //
+    // The guard must NOT be a blanket "one connect at a time", which is why the second half of this
+    // test matters: a media-mode rebuild legitimately needs a NEW session, and de-duplicating it would
+    // silently drop the switch.
+    FakeWebSocket.last = null;
+    FakeWebSocket.instances = [];
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    let hook!: ReturnType<typeof useInterviewVoice>;
+    function Harness() {
+      hook = useInterviewVoice("iv-dbl", { locale: "en-US", tokenProvider: () => "tok" });
+      return null;
+    }
+    const { unmount } = render(<Harness />);
+
+    // Two clicks, back to back, before anything can answer.
+    let first!: Promise<void>;
+    let second!: Promise<void>;
+    act(() => {
+      first = hook.connect("en-US");
+      second = hook.connect("en-US");
+    });
+    await act(async () => {
+      for (let i = 0; i < 20 && !FakeWebSocket.last; i++) await Promise.resolve();
+    });
+
+    expect(
+      FakeWebSocket.instances.length,
+      "a second click must join the first attempt, not open a rival socket",
+    ).toBe(1);
+
+    // And both callers see the same outcome, because the second was handed the first's promise.
+    await act(async () => {
+      FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
+      await first;
+      await second;
+    });
+    expect(hook.connectionState).toBe("connected");
+
+    // Now the part the guard must not break: a deliberate rebuild opens a genuinely new session.
+    act(() => {
+      avatarBridge.onModeSwitchRequest!("audio-only");
+    });
+    await act(async () => {
+      for (let i = 0; i < 20 && FakeWebSocket.instances.length < 2; i++) await Promise.resolve();
+    });
+    expect(
+      FakeWebSocket.instances.length,
+      "a media-mode rebuild is a supersession, not a duplicate — it must get its own socket",
+    ).toBe(2);
+
+    unmount();
+  });
+
 });
