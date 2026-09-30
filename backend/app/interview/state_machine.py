@@ -15,12 +15,21 @@ originates a follow-up in production (a submit always advances, every turn mode)
 written only by :func:`record_follow_up` — the judge's pre-submit path in ``judged`` sessions.
 
 Status lifecycle enforced: created → in_progress → completed → scored.
+
+Concurrency (TODOS.md, "mutation routes race on a stale session snapshot"): production runs
+SQLite, where ``SELECT ... FOR UPDATE`` is a silent no-op (the dialect drops it) — a row lock would
+look correct in review and protect nothing. ``answer_finalized`` and ``abandon_interview`` instead
+reuse the CAS already proven in ``external_runner._reserve_turn``: a single guarded
+``UPDATE ... WHERE turn_version = :seen AND <status guard>`` that bumps ``turn_version`` atomically.
+Zero rows affected means another commit (an interleaved ``/answer`` or ``/restart``) landed first,
+and the caller re-checked ``session.current_question_index``/``status`` against a value that never
+became stale between load and write — the exact TOCTOU the TODO names.
 """
 
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.interview.questions import Question, question_at, resolve_questions
@@ -69,6 +78,12 @@ async def find_resumable_interview(
     )
 
 
+# Bound on abandon_interview's CAS retry loop. Each attempt is a single local UPDATE (no I/O, no
+# LLM call), so looping is cheap; this only exists to make a hypothetical hot loop impossible, not
+# because contention this tight is expected.
+_ABANDON_CAS_MAX_ATTEMPTS = 5
+
+
 async def abandon_interview(db: AsyncSession, session: InterviewSession) -> InterviewSession:
     """Mark a live interview ``abandoned`` — the candidate chose to start over (v0.38.3.0).
 
@@ -79,14 +94,41 @@ async def abandon_interview(db: AsyncSession, session: InterviewSession) -> Inte
     could not be notified) and ``completed`` (an external session that was just sent the ``end``
     signal by the restart route — it must not linger as a scoreless "finished" interview); anything
     else is an illegal transition.
+
+    CAS-guarded (module docstring) against a concurrent ``/answer`` that advances or completes the
+    same session between the caller's load and this write. Unlike ``answer_finalized``, a lost race
+    here is safe to just retry: restart's intent — "abandon whatever is currently live" — does not
+    depend on which question the candidate was on, so re-reading and re-attempting the same CAS
+    cannot write content against the wrong question the way retrying an answer could. Only a status
+    that has left the accepted set (e.g. a second concurrent restart already abandoned it) is a real
+    conflict, and that already raises above on the next loop iteration.
     """
-    if session.status not in ("in_progress", "completed"):
-        raise InterviewStateError(f"Cannot abandon an interview in status {session.status!r}")
-    session.status = "abandoned"
-    session.completed_at = _now()
-    await db.commit()
-    await db.refresh(session)
-    return session
+    for _ in range(_ABANDON_CAS_MAX_ATTEMPTS):
+        if session.status not in ("in_progress", "completed"):
+            raise InterviewStateError(f"Cannot abandon an interview in status {session.status!r}")
+        result = await db.execute(
+            update(InterviewSession)
+            .where(
+                InterviewSession.id == session.id,
+                InterviewSession.turn_version == session.turn_version,
+                InterviewSession.status.in_(("in_progress", "completed")),
+            )
+            .values(
+                status="abandoned",
+                completed_at=_now(),
+                turn_version=InterviewSession.turn_version + 1,
+            )
+        )
+        if result.rowcount == 1:
+            await db.commit()
+            await db.refresh(session)
+            return session
+        # Someone else's commit (a concurrent /answer, or a second /restart) landed since we last
+        # looked — re-read live state and loop; the top-of-loop status check catches a genuine
+        # conflict (already abandoned) instead of retrying forever.
+        await db.rollback()
+        await db.refresh(session)
+    raise InterviewStateError("Interview session is changing too fast to abandon — please retry")
 
 
 async def start_interview(
@@ -238,6 +280,24 @@ async def answer_finalized(
     # substance. Route catches InterviewStateError → 409.
     if not content.strip():
         raise InterviewStateError("Answer content must not be empty")
+
+    # CAS reservation (module docstring): bump turn_version now, before any turn writes, so a
+    # concurrent /answer (double-submit) or /restart that already committed against this same
+    # session is caught here instead of racing silently to two different outcomes. Zero rows means
+    # someone else's write landed first — roll back and make the candidate retry against fresh
+    # state rather than write turns beside (or on top of) it.
+    reserved = await db.execute(
+        update(InterviewSession)
+        .where(
+            InterviewSession.id == session.id,
+            InterviewSession.turn_version == session.turn_version,
+            InterviewSession.status == "in_progress",
+        )
+        .values(turn_version=InterviewSession.turn_version + 1)
+    )
+    if reserved.rowcount != 1:
+        await db.rollback()
+        raise InterviewStateError("Interview session changed concurrently — please retry")
 
     follow_ups_asked = await _follow_ups_asked(db, session.id, current.id)
     next_turn_index = await _next_turn_index(db, session.id)

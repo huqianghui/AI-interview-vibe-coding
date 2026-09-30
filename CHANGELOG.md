@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.40.2.0 (2026-09-30)
+
+### Fixed
+- **Two things happening at once can no longer corrupt one candidate's interview.** Submitting an
+  answer, restarting, and the background judge each loaded the interview once and then wrote against
+  that snapshot, with nothing stopping another request from committing in between. A judge verdict
+  that arrived while the candidate was already on the next question could spend one of their limited
+  follow-up slots on a question they had left, and a restart racing a submit could land in either
+  order. Each write is now guarded by a freshness token, so whichever request is second loses cleanly
+  instead of writing on top of the first.
+- The candidate never sees an error for losing a race that is not their fault. A restart that loses
+  simply re-reads and tries again, because its intent does not depend on which question was open. A
+  judge verdict that loses goes quiet, because judging is background pacing the candidate never
+  asked for. Only a submitted answer asks the candidate to retry, and only because writing an answer
+  against a question they were never shown would be worse than asking again.
+
 ## 0.40.1.0 (2026-09-30)
 
 ### Fixed

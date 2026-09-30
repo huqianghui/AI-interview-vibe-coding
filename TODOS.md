@@ -2,27 +2,6 @@
 
 ## Interview (voice)
 
-### Interview mutation routes race on a stale session snapshot (judge/apply vs submit)
-
-**What:** `backend/app/api/interview.py` — `answer`, `judge`, `judge/apply`, `restart` and `end`
-each load the `InterviewSession` once via `_owned_interview` and later write against that snapshot;
-no row lock or optimistic-concurrency token. If `judge/apply` and a `/answer` submit interleave, the
-apply passes its staleness checks against the cached `current_question_index` and writes an
-orphaned interviewer `follow_up` turn for a question the candidate already left (out-of-order
-`turn_index`), silently consuming a `max_follow_ups` slot and a judge-budget slot. Same class of
-TOCTOU for concurrent `/answer` + `/restart`.
-
-**Why it is not urgent:** scoring is unaffected (`group_answers` reads candidate turns by
-question_id only) and the page delivers `res.interview.current_question`, so nothing is spoken
-twice; the damage is a wasted slot and a confusing turn ordering, scoped to one candidate's own
-session. Surfaced by the v0.39.2.0 adversarial review; pre-existing, not introduced there.
-
-**Fix shape:** re-read the session (or `SELECT … FOR UPDATE` / a version column) inside the
-mutating transaction and re-run the staleness check before writing.
-
-**Effort:** S
-**Priority:** P2
-
 ### `useInterviewVoice` has grown to 1608 lines in one function
 
 **Plan:** `docs/planning/plan-refactor-interview-voice-hook-20260930.md` — step one extracts the
@@ -77,6 +56,56 @@ ownership of the WS lifecycle is in one place when the guard is added.
 **Priority:** P2 — reachable by a candidate with two clicks, and the damage is cross-wired session state.
 
 ## Completed
+### Interview mutation routes race on a stale session snapshot — fixed v0.40.2.0
+
+**Outcome:** guarded the two bank-engine mutators that actually write against a cached snapshot —
+`answer_finalized` and `abandon_interview` (`backend/app/interview/state_machine.py`) — with the
+same optimistic-concurrency token already proven for the external engine
+(`external_runner._reserve_turn`): `InterviewSession.turn_version` is now bumped by BOTH engines, so
+it is a single unified freshness signal. `answer_finalized` takes a guarded
+`UPDATE ... WHERE turn_version = :seen AND status = 'in_progress'` before writing any turn; zero
+rows means a concurrent `/answer` or `/restart` already committed, and it raises
+`InterviewStateError` (→ 409) rather than write beside or on top of that commit — a candidate must
+retry, since blindly re-reading and continuing could write against a question they were never
+shown. `abandon_interview` instead retries the same CAS in a bounded loop, because restart's intent
+("abandon whatever is live") is content-independent and therefore safe to just re-attempt against
+fresh state; it never surfaces a spurious 409 to a candidate who was simply unlucky in the race.
+`/judge` and `/judge/apply` (`backend/app/api/interview.py`) got a lighter guard: a shared
+`_turn_version_changed(db, session)` helper, checked immediately before each route's write (after
+`/judge`'s LLM call returns, and right before `/judge/apply` marks an event applied) — on staleness
+both return `verdict="wait"`, never a 409, because judging is invisible background pacing the
+candidate never asked for and never sees fail. `/end` and `/recover` were deliberately left
+unguarded: `/end`'s bank branch is a pure no-op and its external branch already goes through
+`external_runner.end`'s own CAS; `/recover` is entirely delegated to the already-guarded
+`external_runner.recover` and was never named by the TODO. No new migration — `turn_version` already
+existed on `InterviewSession`; this only extends its use to the bank engine.
+
+**Correction to the original TODO's framing:** the TODO describes `judge/apply`'s failure mode as
+writing "an orphaned interviewer `follow_up` turn" for a stale question. That write path no longer
+exists in current code — the nudge-only judged-turn refactor (`98f835e`, v0.39.3.0, 2026-09-28)
+retired the `follow_up`/`redirect` verdicts, and `state_machine.record_follow_up` (the function that
+would perform such a write) has zero callers anywhere in `app/` or `tests/` today. `judge_apply` now
+only flips `JudgeEvent.applied` and returns text — it never touches `InterviewSession` or writes an
+`InterviewTurn`. The underlying TOCTOU class the TODO is naming is still real, though: a stale
+`judge`/`judge/apply` call can still consume a `judge_events` row and a budget slot for a question
+the candidate already left, and a stale `/answer` vs `/answer` or `/answer` vs `/restart` race can
+still land two writes that should never have both landed. That class is what this fix closes; the
+specific "orphaned turn" mechanic the TODO named is stale documentation, not a live bug.
+
+**Tests:** `backend/tests/test_interview_concurrency.py` — genuine interleaving via a file-backed
+(not `:memory:`/`StaticPool`) aiosqlite DB with two independent `AsyncSession`s racing through
+`asyncio.gather`, mirroring the pattern already established in `test_external_interview.py`:
+two concurrent `answer_finalized` calls on one session (exactly one wins, one raises
+`InterviewStateError`); a concurrent `answer_finalized` vs `abandon_interview` (restart always
+eventually lands regardless of ordering, and the answer either lands cleanly first or is cleanly
+rejected — never both landing in a corrupt order); and `_turn_version_changed` observing, from a
+separate connection, a commit made by a genuinely concurrent `answer_finalized` while its own
+"slow step" (an `asyncio.sleep` standing in for the real outbound LLM call) is in flight.
+
+**Priority:** P2
+**Completed:** v0.40.2.0 (2026-09-30) — see `backend/app/interview/state_machine.py`,
+`backend/app/api/interview.py`, `backend/tests/test_interview_concurrency.py`.
+
 ### Voice-damage trigger: CLOSED by owner decision, not deferred
 
 **Decision (owner, 2026-09-30):** the scenario it would cover — the interviewer's voice damaged while the
