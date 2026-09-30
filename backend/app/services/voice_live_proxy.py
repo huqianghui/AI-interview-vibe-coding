@@ -287,7 +287,18 @@ def build_avatar_session(
     linear_turns = linear_turns_for_persona(persona, playground=playground)
     session_kwargs: dict[str, Any] = {
         "modalities": modalities,
-        "voice": AzureStandardVoice(name=voice_name, type="azure-standard"),
+        # The persona's two speech knobs ride the session voice: ``temperature`` (expressiveness of
+        # HD voices, 0–1) and ``rate`` (speaking speed "0.5"–"1.5", stringified per the Voice Live
+        # schema). They were only ever wired into the legacy ``/calls`` metadata builder, so on this
+        # proxy path — the one production uses — the editor's "Voice temperature" / "Playback speed"
+        # did nothing (found 2026-09-30). Prompt text cannot reach these; only session.voice can.
+        # Duck-typed like ``eou_detection`` above (the pure builder is unit-tested with a stand-in).
+        "voice": AzureStandardVoice(
+            name=voice_name,
+            type="azure-standard",
+            temperature=float(getattr(persona, "voice_temperature", 0.8)),
+            rate=str(getattr(persona, "playback_speed", 1.0)),
+        ),
         # Server VAD detects when the user stops speaking (AI Foundry portal parity). Whether it
         # also AUTO-generates the model's reply is the linear-turns decision above (model-turn bank
         # personas: True; linear bank + all external: False). The user can always barge in to cut
