@@ -58,6 +58,10 @@ protect, and the threshold-free trigger drops the picture again within ~4 s if t
 but it means the threshold needs a run with audio actually flowing: pass `FAKE_AUDIO` so a turn stays
 alive. The spec prints `earned: false` when the run did not exercise the threshold.
 
+A readable `FAKE_AUDIO` is checked before the run starts, because Chromium does not complain about an
+unreadable `--use-file-for-fake-audio-capture` path — it silently falls back to its default tone, so the
+run looks normal and only `earned` hints that the audio never played.
+
 **Effort:** S
 **Priority:** P3
 

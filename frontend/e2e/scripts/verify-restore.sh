@@ -43,6 +43,19 @@ SPEC_ARGS="$(profile_spec "$PROFILE")"
 [[ -n "$SPEC_ARGS" ]] || { echo "unknown PROFILE '$PROFILE' (office-tight | office-bad)"; exit 1; }
 
 [[ $EUID -eq 0 ]] || { echo "run with sudo (network shaping needs root)"; exit 1; }
+# Fail fast on a FAKE_AUDIO path that does not exist. Chromium does NOT complain about an unreadable
+# --use-file-for-fake-audio-capture file: it silently falls back to its default tone, so the run looks
+# normal and only the `earned` line at the end hints that the audio you thought you supplied never
+# played. Copy-pasting the placeholder path out of the docs did exactly that (2026-09-30).
+if [[ -n "${FAKE_AUDIO:-}" && ! -r "$FAKE_AUDIO" ]]; then
+  echo "FAKE_AUDIO='$FAKE_AUDIO' is not a readable file."
+  echo "Build one (utterance + 3 s trailing silence, which Chromium then loops):"
+  echo "  say -o /tmp/raw.aiff \"She sells sixth-floor thermostats, and the finance staff should specify these first, with thorough research.\""
+  echo "  afconvert -f WAVE -d LEI16@48000 -c 1 /tmp/raw.aiff /tmp/speech.wav"
+  echo "  python3 -c \"import wave;w=wave.open('/tmp/speech.wav');p=w.getparams();f=w.readframes(w.getnframes());o=wave.open('/tmp/answer.wav','wb');o.setparams(p);o.writeframes(f+b'\\0'*(p.framerate*p.sampwidth*p.nchannels*3));o.close()\""
+  echo "Then rerun with FAKE_AUDIO=/tmp/answer.wav"
+  exit 1
+fi
 curl -s -m 3 -o /dev/null http://127.0.0.1:8000/api/auth/login || { echo "backend :8000 not running"; exit 1; }
 curl -s -m 3 -o /dev/null http://127.0.0.1:5173/ || { echo "frontend :5173 not running"; exit 1; }
 
