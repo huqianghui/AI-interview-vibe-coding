@@ -23,7 +23,12 @@ mutating transaction and re-run the staleness check before writing.
 **Effort:** S
 **Priority:** P2
 
-### `useInterviewVoice` has grown to ~1300 lines in one function
+### `useInterviewVoice` has grown to 1608 lines in one function
+
+**Plan:** `docs/planning/plan-refactor-interview-voice-hook-20260930.md` — step one extracts the
+answer-draft/commit cluster (where the v0.40.0.0 draft-loss bug lived); the read/speak cluster and the
+482-line `handleMessage` switch are explicitly out of scope. Hard line: the existing frontend tests must
+pass unmodified.
 
 **What:** the hook now carries WS lifecycle, mic-rate validation, first-read gating, turn state and
 the media-mode session rebuild in a single function body with 19 inlined callbacks. The sibling change
@@ -37,6 +42,7 @@ WS-teardown ordering) the way `avatarHealth.ts` was extracted, one at a time, ea
 **Effort:** M
 **Priority:** P3
 
+## Completed
 ### Voice-damage trigger: CLOSED by owner decision, not deferred
 
 **Decision (owner, 2026-09-30):** the scenario it would cover — the interviewer's voice damaged while the
@@ -60,8 +66,6 @@ against.
 
 **Status:** closed, no action.
 
-
-## Completed
 ### Picture restore verified end-to-end on a recovering link — v0.40.1.0
 
 The run the whole calibration effort was for. Under OS-level shaping with the 1080p avatar, the session
