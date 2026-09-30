@@ -57,8 +57,16 @@ distinct gaps may separate better than their total size); `jitterBufferDelay / j
 `packetsLost` on the audio stream alone; or the audible ratio measured ONLY across windows where speech
 is actually arriving (gated on `audioLevel` or `totalAudioEnergy`) rather than every window.
 
+**Scope limit on the measurement that retired it:** all five runs used `amira`, the 512x512 photo
+avatar, because `verify-restore.sh` did not control the persona and that happened to be the machine's
+default. A 512-square stream decodes fine at 3% loss, so the video load was an order of magnitude below
+the 1080p case. The "cannot separate" finding is a valid within-run comparison and holds for that
+condition, but it has NOT been tested on `lisa` (1080p), where the video load is far heavier and the two
+distributions may well separate. So the first thing to do is repeat the measurement on lisa — the script
+now defaults to it.
+
 **How to judge a candidate metric:** it must be recorded on a shaped link AND on the same link unshaped,
-and the two distributions must not overlap. That is the bar 0.15 failed. `verify-restore.sh` already
+and the two distributions must not overlap. That is the bar 0.15 failed on amira. `verify-restore.sh` already
 captures per-window stats to `frontend/e2e/output/restore-latest.json`; extend the sampled fields rather
 than writing a new harness.
 

@@ -12,6 +12,10 @@
 #
 # Optional:
 #   sudo PROFILE="office-tight" frontend/e2e/scripts/verify-restore.sh
+#   sudo AVATAR=amira frontend/e2e/scripts/verify-restore.sh
+#     Defaults to lisa (1080p) — the only avatar measured to stop decoding on a shaped link, and so the
+#     only one that exercises the threshold-free primary trigger. amira is 512x512 and decodes fine at
+#     3% loss, which is why five earlier runs never triggered it.
 #   sudo FAKE_AUDIO=/path/to/answer.wav frontend/e2e/scripts/verify-restore.sh
 #     Without FAKE_AUDIO the interviewer is silent for most of the healthy hold, and a silent stream
 #     reports concealment 0 — which the policy reads as healthy. The run still proves the picture comes
@@ -25,10 +29,18 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 FE="$ROOT/frontend"
+DB="$ROOT/backend/ai_coach.db"
 SHAPER="$FE/e2e/scripts/netshape.sh"
 RUN_AS="${SUDO_USER:-$(id -un)}"
 SIGNAL="$FE/e2e/output/restore-signal"
 PROFILE="${PROFILE:-office-bad}"
+# Which avatar the run uses. THIS IS LOAD-BEARING, and not controlling it cost five inconclusive runs:
+# the default persona happened to be `amira`, a 512x512 photo avatar, whose stream decodes perfectly well
+# at 3% loss. So `framesDecoded` kept growing, the threshold-free primary trigger could never fire, and
+# every downgrade came from the (now retired) concealment trigger instead. `lisa` is the 1080p video
+# avatar, which is what v0.40.0.0 measured decoding ZERO frames while still consuming ~1 Mbps. Restored
+# on exit either way, like weaknet-phase2.sh does.
+AVATAR="${AVATAR:-lisa}"
 
 # Same profile table as weaknet-phase2.sh (macOS bash 3.2 has no associative arrays). udp scope only:
 # shaping TCP as well kills the backend's TLS handshake to Azure and no session is created at all.
@@ -59,12 +71,28 @@ fi
 curl -s -m 3 -o /dev/null http://127.0.0.1:8000/api/auth/login || { echo "backend :8000 not running"; exit 1; }
 curl -s -m 3 -o /dev/null http://127.0.0.1:5173/ || { echo "frontend :5173 not running"; exit 1; }
 
+# Remember the developer's default persona so the run can put it back. Escape apostrophes before they
+# go back into SQL: the restore is this script's safety net, and an unescaped value would leave the DB
+# pointing at whatever avatar this run chose (same guard as weaknet-phase2.sh).
+ORIG=$(sqlite3 "$DB" "select character||'|'||coalesce(style,'') from interviewer_personas where is_default=1;")
+ORIG_CHAR="${ORIG%%|*}"; ORIG_STYLE="${ORIG#*|}"
+ORIG_CHAR_SQL=${ORIG_CHAR//\'/\'\'}
+ORIG_STYLE_SQL=${ORIG_STYLE//\'/\'\'}
+
+case "$AVATAR" in
+  lisa)  sqlite3 "$DB" "update interviewer_personas set character='lisa', style='casual-sitting' where is_default=1;" ;;
+  amira) sqlite3 "$DB" "update interviewer_personas set character='amira', style='' where is_default=1;" ;;
+  *) echo "unknown AVATAR '$AVATAR' (lisa = 1080p video, amira = 512px photo)"; exit 1 ;;
+esac
+echo "avatar: $AVATAR (was $ORIG_CHAR/${ORIG_STYLE:-none})"
+
 WATCHER=""
 restore() {
   [[ -n "$WATCHER" ]] && kill "$WATCHER" 2>/dev/null
   "$SHAPER" off >/dev/null 2>&1 || true
   rm -f "$SIGNAL"
-  echo "restored: shaping off"
+  sqlite3 "$DB" "update interviewer_personas set character='$ORIG_CHAR_SQL', style='$ORIG_STYLE_SQL' where is_default=1;"
+  echo "restored: shaping off, default persona = $ORIG_CHAR/${ORIG_STYLE:-none}"
 }
 trap restore EXIT INT TERM
 
