@@ -55,6 +55,12 @@ prints the audible and raw ratios side by side per sample, plus `earned`, which 
 AUDIBLE audio arrived during the hold. One shaped run gives `CONCEAL_BAD` (what the audible ratio
 actually reads under 3% loss) and one recovering run gives `CONCEAL_GOOD`.
 
+**First real data point (2026-09-30, third run, corrected metric):** under office-bad (3% loss) the
+downgrade read `audible 37.8% / raw 47.5% / decoding=true`. So 0.15 is not obviously wrong for
+`CONCEAL_BAD` — real audible damage sat well above it while video still decoded — but one sample is
+not a calibration, and nothing has yet measured what the audible ratio reads on a HEALTHY link, which
+is what `CONCEAL_GOOD` needs.
+
 **Effort:** S
 **Priority:** P2 — raised from P3: the metric bug it came from was real and user-visible.
 

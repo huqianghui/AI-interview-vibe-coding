@@ -317,6 +317,23 @@ export function useAvatarStream(
   const switchMediaModeRef = useRef<((next: MediaMode, reason: string) => void) | null>(null);
 
   /** Poll `getStats()` on a live PC and act on the media-health verdict (see `avatarHealth.ts`). */
+  /** Put the policy back in the mode the MEDIA is actually in, after the actuator refused a switch.
+   *
+   * `reduceHealth` commits the transition the moment it decides one, but `switchMediaMode` holds a veto
+   * (Azure's avatar cooldown and request allowance). Without this, a vetoed restore left the policy
+   * believing it was in video while the media stayed audio-only — and from the video branch it evaluates
+   * only the DOWNGRADE triggers, which an audio-only session can never satisfy, so it never asked again.
+   * That was deterministic, not a race: the downgrade timestamp starts at the decision, the actuator's
+   * cooldown starts ~5 s later when the rebuilt session connects, so the first restore attempt was
+   * ALWAYS about five seconds early. Measured 2026-09-30: the picture never returned in 225 s.
+   *
+   * `healthySince` is carried forward rather than cleared, so the next window retries immediately
+   * instead of waiting out another full hold — the veto is a "not yet", not a "no". */
+  const reconcile = useCallback((before: DecisionState, now: number) => {
+    decisionRef.current = { ...before, healthySince: before.healthySince ?? now };
+    applyMode(before.mode);
+  }, [applyMode]);
+
   const startSampling = useCallback(
     (pc: RTCPeerConnection) => {
       stopSampling();
@@ -335,7 +352,8 @@ export function useAvatarStream(
             snapshotRef.current = snapshot;
             if (!health) return; // first sample: no window to judge yet.
 
-            const { state, action } = reduceHealth(decisionRef.current, health, now);
+            const before = decisionRef.current;
+            const { state, action } = reduceHealth(before, health, now);
             decisionRef.current = state;
 
             // Honest UI: the probe measured a ~4 s gap between "video bytes hit zero" and ICE
@@ -349,19 +367,19 @@ export function useAvatarStream(
                   `raw=${(health.rawConcealmentRatio * 100).toFixed(1)}% incl. silence, ` +
                   `decoding=${health.videoDecoding} rtt=${health.rttMs ?? "?"}ms) → dropping the picture to save the voice`,
               );
-              switchMediaModeRef.current?.("audio-only", "health-downgrade");
+              if (!switchMediaModeRef.current?.("audio-only", "health-downgrade")) reconcile(before, now);
             } else if (action === "restore") {
               console.info(
                 `[avatar-stream] link healthy again (audible conceal=${(health.concealmentRatio * 100).toFixed(1)}%, ` +
                   `raw=${(health.rawConcealmentRatio * 100).toFixed(1)}% incl. silence) → restoring the picture`,
               );
-              switchMediaModeRef.current?.("video", "health-restore");
+              if (!switchMediaModeRef.current?.("video", "health-restore")) reconcile(before, now);
             }
           })
           .catch(() => undefined); // getStats can reject on a closing PC; the guards above cover it.
       }, HEALTH_THRESHOLDS.SAMPLE_INTERVAL_MS);
     },
-    [stopSampling],
+    [reconcile, stopSampling],
   );
 
   /** Wire connection/track handlers on a freshly-built PC. Shared by the initial connect and every
@@ -662,14 +680,14 @@ export function useAvatarStream(
    * the video is the thing starving the voice) and delegates the rebuild to the consumer, because Azure
    * will not renegotiate an avatar connection on a live session — see the module header. */
   const switchMediaMode = useCallback(
-    (next: MediaMode, reason: string) => {
-      if (!sendOfferRef.current) return; // no live avatar session to switch.
-      if (wantVideoRef.current === (next === "video")) return; // already in that mode.
+    (next: MediaMode, reason: string): boolean => {
+      if (!sendOfferRef.current) return false; // no live avatar session to switch.
+      if (wantVideoRef.current === (next === "video")) return false; // already in that mode.
       if (!onModeSwitchRequestRef.current) {
         // Nobody can rebuild the session, so tearing the media down here would kill the avatar for
         // good. Refuse instead — a consumer that wants adaptation must wire the callback.
         console.warn("[avatar-stream] media mode change requested but no onModeSwitchRequest is wired; ignoring");
-        return;
+        return false;
       }
       if (next === "video") {
         // Asymmetric on purpose: Azure rate-limits avatar session creation, and a refused request
@@ -687,7 +705,7 @@ export function useAvatarStream(
             `[avatar-stream] not restoring the picture yet (${Math.ceil(wait / 1000)}s left on the Azure avatar ` +
               `rate-limit ${cooldown >= wait ? "cooldown" : "allowance"})`,
           );
-          return;
+          return false;
         }
       }
 
@@ -697,6 +715,7 @@ export function useAvatarStream(
       applyMode(next);
       teardownMedia();
       onModeSwitchRequestRef.current?.(next);
+      return true;
     },
     [applyMode, avatarRequestWaitMs, teardownMedia],
   );

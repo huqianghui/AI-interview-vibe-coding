@@ -504,6 +504,59 @@ describe("useAvatarStream weak-network adaptation", () => {
     expect(videoPc.transceivers[0]).toEqual({ kind: "video", direction: "recvonly" });
   });
 
+  it("retries a restore the actuator vetoed, instead of recording one that never happened", async () => {
+    // Production has a gap the test above does not reproduce: the policy's cooldown is measured from
+    // the moment it DECIDES to downgrade, while the actuator's is measured from when the REBUILT
+    // session connects — about five seconds later. So the first restore decision is always slightly
+    // early and `switchMediaMode` vetoes it. Before the fix `reduceHealth` had already recorded the
+    // mode as "video", and from the video branch an audio-only session can never satisfy a downgrade
+    // trigger (no video bytes to be wasted, no voice being concealed), so nothing ever asked again.
+    // Measured live 2026-09-30: the picture did not come back in 225 s. Deterministic, not a race.
+    const videoRef = makeVideoRef();
+    const sendOffer = vi.fn();
+    const { result, requests } = renderStream(videoRef);
+    const pc = await bringUp(result, sendOffer, 0);
+
+    const c = counters();
+    for (let i = 0; i <= T.BAD_WINDOWS; i++) await tick(pc, wastingStep(c));
+    expect(requests).toEqual(["audio-only"]);
+    const decidedAt = Date.now();
+
+    // The rebuilt session lands later than the decision, as it does live (~5 s of teardown + connect).
+    const REBUILD_LAG_MS = 6_000;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REBUILD_LAG_MS);
+    });
+    const audioPc = await bringUp(result, sendOffer, 1);
+    const connectedAt = Date.now();
+
+    // When each side is willing: the policy from the decision, the actuator from the connect.
+    const policyAllowsAt = decidedAt + Math.max(T.MIN_AFTER_DOWNGRADE_MS, T.INITIAL_HEALTHY_HOLD_MS);
+    const actuatorAllowsAt = connectedAt + T.VIDEO_SWITCH_MIN_INTERVAL_MS;
+    expect(
+      actuatorAllowsAt - policyAllowsAt,
+      "this test only means something while the actuator is stricter than the policy — if a threshold " +
+        "change closed that gap, delete the test rather than let it pass vacuously",
+    ).toBeGreaterThan(T.SAMPLE_INTERVAL_MS);
+
+    // Walk to one window PAST the policy's allowance: it has decided to restore and been refused.
+    const c2 = counters();
+    while (Date.now() < policyAllowsAt + T.SAMPLE_INTERVAL_MS) await tick(audioPc, audioOnlyStep(c2));
+    expect(requests, "the actuator refused, so no rebuild was requested").toEqual(["audio-only"]);
+    expect(
+      result.current.mediaMode,
+      "and the policy must not claim the picture is back when the media is still audio-only",
+    ).toBe("audio-only");
+
+    // Past the actuator's allowance it must ask again — the veto was "not yet", not "no".
+    while (Date.now() < actuatorAllowsAt + T.SAMPLE_INTERVAL_MS) await tick(audioPc, audioOnlyStep(c2));
+    expect(requests, "once the cooldown passes the picture must be asked for again").toEqual([
+      "audio-only",
+      "video",
+    ]);
+    expect(result.current.mediaMode).toBe("video");
+  });
+
   it("keeps the picture off for the whole session when the candidate pinned it off", async () => {
     const videoRef = makeVideoRef();
     const sendOffer = vi.fn();
