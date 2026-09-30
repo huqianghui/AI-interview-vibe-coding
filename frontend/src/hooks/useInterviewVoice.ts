@@ -1208,7 +1208,9 @@ export function useInterviewVoice(
         console.warn("[voice] media-mode session rebuild failed", err);
       });
     },
-    [audio, connect, resetTurnState, setConn],
+    // No resetTurnState here on purpose: connect() runs the keepDraft-preserving reset itself, so
+    // listing it would claim a dependency this callback does not have.
+    [audio, connect, setConn],
   );
   restartForMediaModeRef.current = restartForMediaMode;
 

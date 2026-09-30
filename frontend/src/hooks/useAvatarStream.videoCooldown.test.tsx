@@ -98,12 +98,16 @@ function startConnect() {
   const videoRef = makeVideoRef();
   const sendOffer = vi.fn();
   const modeSwitches: ("video" | "audio-only")[] = [];
-  let result!: ReturnType<typeof renderHook<ReturnType<typeof useAvatarStream>, unknown>>["result"];
+  // The callback has to reach the hook that has not been rendered yet, so it reads through a holder
+  // instead of a forward-declared binding. Same indirection a ref gives, without a `let` that is
+  // assigned exactly once.
+  const hook: { result?: ReturnType<typeof renderHook<ReturnType<typeof useAvatarStream>, unknown>>["result"] } = {};
   const onModeSwitchRequest = (next: "video" | "audio-only") => {
     modeSwitches.push(next);
-    void result.current.connect(ICE_SERVERS, sendOffer).catch(() => undefined);
+    void hook.result?.current.connect(ICE_SERVERS, sendOffer).catch(() => undefined);
   };
-  ({ result } = renderHook(() => useAvatarStream(videoRef, { onModeSwitchRequest })));
+  const { result } = renderHook(() => useAvatarStream(videoRef, { onModeSwitchRequest }));
+  hook.result = result;
   act(() => {
     void result.current.connect(ICE_SERVERS, sendOffer).catch(() => undefined);
   });

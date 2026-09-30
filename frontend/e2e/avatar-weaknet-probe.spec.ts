@@ -435,9 +435,11 @@ test.describe("Avatar weak-network probe (real Azure)", () => {
               avatar = { video: { bitrate } };
             } else {
               const cur = (ww.__lastSession?.avatar as Record<string, unknown> | undefined) ?? {};
+              const rest = { ...cur };
               // ice_servers dropped deliberately: Azure re-issues them, and they carry TURN credentials
-              // we must not echo back or log.
-              const { ice_servers: _ice, ...rest } = cur as Record<string, unknown> & { ice_servers?: unknown };
+              // we must not echo back or log. Deleted rather than destructured-and-ignored so the
+              // intent is the statement itself, not an unused binding.
+              delete rest.ice_servers;
               const video = { ...((rest.video as Record<string, unknown>) ?? {}), bitrate };
               avatar = { ...rest, video };
             }
