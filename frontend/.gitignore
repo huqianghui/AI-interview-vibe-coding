@@ -4,3 +4,4 @@ dist/
 .vite/
 coverage/
 *.tsbuildinfo
+e2e/output/

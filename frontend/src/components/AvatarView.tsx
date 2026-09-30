@@ -24,6 +24,7 @@
 import { forwardRef, useCallback, useEffect, useRef, useState } from "react";
 import { makeStyles, mergeClasses, Text } from "@fluentui/react-components";
 import { useTranslation } from "react-i18next";
+import type { MediaMode } from "../hooks/avatarHealth";
 import { AudioOrb } from "./AudioOrb";
 import { fitBox, fitFor } from "./avatarFit";
 import type { AudioState } from "../types/voice";
@@ -101,7 +102,19 @@ const useStyles = makeStyles({
     borderRadius: "16px",
     backgroundColor: "rgba(0, 0, 0, 0.55)",
     color: "#fff",
-    whiteSpace: "nowrap",
+    // The zh-CN voice-only copy is much longer than the "connecting" string this pill was tuned for,
+    // and the pill is centred with translateX(-50%) against no edge constraint — so cap it and let it
+    // wrap rather than overflow the stage on a phone-width viewport.
+    maxWidth: "calc(100% - 24px)",
+    textAlign: "center",
+  },
+  voiceOnlyDot: {
+    width: "8px",
+    height: "8px",
+    borderRadius: "50%",
+    // Amber and steady: this is a settled state, not something still in progress, so it must not
+    // pulse like the connecting dot.
+    backgroundColor: "#f0b429",
   },
   connectingDot: {
     width: "8px",
@@ -147,11 +160,16 @@ interface AvatarViewProps {
   audioState: AudioState;
   /** True once a real avatar video track is playing → show video, hide the orb. */
   isAvatarConnected: boolean;
+  /** `"audio-only"` once the media layer gave up the picture to protect the interviewer's voice on a
+   * weak link (`docs/avatar-weaknet-probe.md` §3.9). Without this the orb is ambiguous — it looks
+   * identical to "still connecting", so the candidate can't tell a deliberate degrade from a hang.
+   * Defaults to `"video"` so callers that don't care (the editor Playground) need no change. */
+  mediaMode?: MediaMode;
 }
 
 /** Ref is the `<video>` element the voice hook attaches the avatar stream to (via `videoRef`). */
 export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function AvatarView(
-  { audioState, isAvatarConnected },
+  { audioState, isAvatarConnected, mediaMode = "video" },
   ref,
 ) {
   const styles = useStyles();
@@ -219,7 +237,9 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
     return () => clearTimeout(timer);
   }, [isAvatarConnected]);
 
-  const showPortrait = !isAvatarConnected && portrait !== null;
+  // Deliberately picture-less: say so, and don't also claim to be "connecting".
+  const audioOnly = mediaMode === "audio-only";
+  const showPortrait = !isAvatarConnected && !audioOnly && portrait !== null;
   const mediaRatio = isAvatarConnected ? videoRatio : showPortrait ? portraitRatio : null;
   const hug = useHugBox(rootEl, mediaRatio);
   return (
@@ -229,6 +249,7 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
       style={hug ? { width: hug.width, height: hug.height } : undefined}
       data-testid="avatar-view"
       data-avatar-connected={isAvatarConnected}
+      data-media-mode={mediaMode}
     >
       <video
         ref={setVideoRef}
@@ -267,6 +288,20 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
         </>
       )}
       {!isAvatarConnected && !showPortrait && <AudioOrb audioState={audioState} />}
+      {audioOnly && (
+        // role=status + aria-live so a screen-reader user is TOLD the picture was dropped. Losing the
+        // digital human mid-interview is a bigger state change than anything the orb announces, so it
+        // must not be the one thing that is silent to assistive tech.
+        <div
+          className={styles.connectingHint}
+          role="status"
+          aria-live="polite"
+          data-testid="avatar-voice-only-hint"
+        >
+          <span className={styles.voiceOnlyDot} aria-hidden />
+          <Text size={200}>{t("voice.voiceOnlyNotice")}</Text>
+        </div>
+      )}
     </div>
   );
 });

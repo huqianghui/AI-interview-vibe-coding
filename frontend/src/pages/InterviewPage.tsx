@@ -541,6 +541,15 @@ export function InterviewPage() {
     },
     [channel, voice, showNudge],
   );
+  // Turning the picture back on waits out an Azure rate-limit cooldown. Compute the copy at render
+  // time from a fixed deadline — no ticking timer, so this costs nothing when nothing else changes.
+  const videoToggleBlocked = voice.mediaMode === "audio-only" && !voice.canEnableVideo;
+  const videoCooldownSeconds = voice.videoEnableAtMs
+    ? Math.max(1, Math.ceil((voice.videoEnableAtMs - Date.now()) / 1000))
+    : null;
+  const videoCooldownReason = videoCooldownSeconds
+    ? t("voice.showAvatarCooldownSeconds", { seconds: videoCooldownSeconds })
+    : t("voice.showAvatarCooldown");
 
   // Speculative prefetch (D17): the moment an utterance ends, ask the judge with `dry_run` so the
   // LLM round-trip (2–3 s) overlaps the silence window (2 s) instead of following it. The result
@@ -1168,6 +1177,36 @@ export function InterviewPage() {
             <Button onClick={voice.toggleMute}>
               {voice.isMuted ? t("voice.unmute") : t("voice.mute")}
             </Button>
+            {/* Manual override of the automatic weak-network degrade. Our thresholds cannot be right
+                for every network, so the candidate can force the picture off (saves ~1 Mbps and, more
+                importantly, stops the video starving the interviewer's voice) or force it back on.
+                Pinning also stops the automation from moving the mode on its own. */}
+            {/* Azure rate-limits avatar session creation and every switch makes a new one, so turning
+                the picture back ON has a cooldown. Disable the control instead of letting the click do
+                nothing — but SAY WHY: a dimmed button with no reason is indistinguishable from a bug,
+                and a screen-reader user would hear only "dimmed". Turning it OFF is never blocked;
+                that is the move that rescues the audio. */}
+            <Button
+              onClick={() =>
+                voice.setVideoPreference(voice.mediaMode === "audio-only" ? "on" : "off")
+              }
+              disabled={videoToggleBlocked}
+              title={videoToggleBlocked ? videoCooldownReason : undefined}
+              aria-describedby={videoToggleBlocked ? "voice-video-cooldown" : undefined}
+              data-testid="voice-video-toggle"
+            >
+              {voice.mediaMode === "audio-only" ? t("voice.showAvatar") : t("voice.hideAvatar")}
+            </Button>
+            {videoToggleBlocked && (
+              <Text
+                id="voice-video-cooldown"
+                size={200}
+                style={{ opacity: 0.7 }}
+                data-testid="voice-video-cooldown"
+              >
+                {videoCooldownReason}
+              </Text>
+            )}
             {/* Manual end-of-answer control (P13) */}
             <Button
               appearance="primary"
@@ -1298,6 +1337,7 @@ export function InterviewPage() {
                   ref={avatarVideoRef}
                   audioState={badgeState}
                   isAvatarConnected={voice.isAvatarConnected}
+                  mediaMode={voice.mediaMode}
                 />
               </div>
             </div>

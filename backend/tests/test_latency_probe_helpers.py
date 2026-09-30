@@ -87,7 +87,7 @@ def test_summarize_percentiles_per_kind_and_metric_skip_non_numeric():
     assert vtl.summarize([]) == {}
 
 
-def _wav(path: Path, *, rate=24000, channels=1, width=2) -> Path:
+def _wav(path: Path, *, rate=16000, channels=1, width=2) -> Path:
     with wave.open(str(path), "wb") as w:
         w.setnchannels(channels)
         w.setsampwidth(width)
@@ -96,11 +96,14 @@ def _wav(path: Path, *, rate=24000, channels=1, width=2) -> Path:
     return path
 
 
-def test_load_pcm_accepts_24k_mono_16bit_and_rejects_anything_else(tmp_path):
+def test_load_pcm_accepts_16k_mono_16bit_and_rejects_anything_else(tmp_path):
+    # 16 kHz, matching the session's input_audio_sampling_rate and the browser's MIC_SAMPLE_RATE —
+    # feeding a 24 kHz file into a 16 kHz session would upload pitch-shifted audio (see
+    # docs/voice-live-control-notes.md §4).
     good = _wav(tmp_path / "u1.wav")
     assert len(vtl.load_pcm(good)) == 480
-    with pytest.raises(AssertionError, match="24000Hz"):
-        vtl.load_pcm(_wav(tmp_path / "rate.wav", rate=16000))
+    with pytest.raises(AssertionError, match="16000Hz"):
+        vtl.load_pcm(_wav(tmp_path / "rate.wav", rate=24000))
     with pytest.raises(AssertionError, match="mono"):
         vtl.load_pcm(_wav(tmp_path / "stereo.wav", channels=2))
     with pytest.raises(AssertionError, match="16-bit"):

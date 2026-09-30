@@ -166,4 +166,5 @@ stored cloud credentials, managed identity everywhere, keyless. See
 | [`docs/IMPLEMENTATION-STATUS.md`](docs/IMPLEMENTATION-STATUS.md) | Feature-by-feature status, shipped versions, live-Azure validation state |
 | [`docs/VERIFICATION.md`](docs/VERIFICATION.md) | How to verify the requirements and run the system |
 | [`docs/planning/`](docs/planning/) | Spec lineage: design docs, plans, and reviews |
+| [`docs/avatar-weaknet-probe.md`](docs/avatar-weaknet-probe.md) | Weak-network digital-human media adaptation: measurement method, findings, and the shipped auto-downgrade implementation |
 | [`CHANGELOG.md`](CHANGELOG.md) | Per-release detail |

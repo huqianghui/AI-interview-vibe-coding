@@ -52,7 +52,10 @@ import websockets
 # store; certifi's bundle works (same fix as voice_live_proxy._certifi_ssl_context).
 SSL_CTX = ssl.create_default_context(cafile=certifi.where())
 
-SAMPLE_RATE = 24000
+# Matches the production session's input_audio_sampling_rate
+# (Settings.voice_live_input_sampling_rate) and the browser's MIC_SAMPLE_RATE, so probe
+# latencies reflect what candidates actually experience.
+SAMPLE_RATE = 16000
 CHUNK_MS = 100
 CHUNK_SAMPLES = SAMPLE_RATE * CHUNK_MS // 1000
 CHUNK_BYTES = CHUNK_SAMPLES * 2  # PCM16
@@ -80,7 +83,10 @@ def proxy_ws_url(server: str, token: str) -> str:
 
 def load_pcm(path: Path) -> bytes:
     with wave.open(str(path), "rb") as w:
-        assert w.getframerate() == SAMPLE_RATE, f"{path}: expected {SAMPLE_RATE}Hz"
+        assert w.getframerate() == SAMPLE_RATE, (
+            f"{path}: expected {SAMPLE_RATE}Hz, got {w.getframerate()}Hz — regenerate with "
+            f"afconvert -f WAVE -d LEI16@{SAMPLE_RATE} -c 1 <in> {path.name}"
+        )
         assert w.getnchannels() == 1, f"{path}: expected mono"
         assert w.getsampwidth() == 2, f"{path}: expected 16-bit"
         return w.readframes(w.getnframes())
@@ -253,6 +259,11 @@ class Probe:
                     "input_audio_transcription": {"model": "azure-speech", "language": locale},
                     "input_audio_noise_reduction": {"type": "azure_deep_noise_suppression"},
                     "input_audio_echo_cancellation": {"type": "server_echo_cancellation"},
+                    # Must match SAMPLE_RATE above (and production's
+                    # Settings.voice_live_input_sampling_rate): Azure decodes the PCM we upload at
+                    # whatever the session declares, so omitting this would make it assume its
+                    # 24 kHz default and read our 16 kHz frames as pitch-shifted nonsense.
+                    "input_audio_sampling_rate": SAMPLE_RATE,
                     "instructions": (
                         "You are a friendly job interviewer. Reply briefly (1-2 sentences) "
                         "to whatever the candidate says, then ask one short follow-up question."

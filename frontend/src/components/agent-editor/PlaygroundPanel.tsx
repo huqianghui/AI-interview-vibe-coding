@@ -235,9 +235,13 @@ export function PlaygroundPanel({ personaId, character, style, locale }: Playgro
               ref={avatarVideoRef}
               audioState={voice.audioState}
               isAvatarConnected={voice.isAvatarConnected}
+              mediaMode={voice.mediaMode}
             />
           </div>
-          {!voice.isAvatarConnected && (
+          {/* The weak-network degrade can drop the picture here too (this panel drives the same voice
+              hook), and then the picture is NOT coming back on its own — so don't cover the orb with a
+              still portrait that implies it is. AvatarView's own voice-only notice explains the state. */}
+          {!voice.isAvatarConnected && voice.mediaMode !== "audio-only" && (
             <div className={styles.portraitOverlay} data-testid="playground-portrait-overlay">
               <AvatarPreview character={character} style={style} />
             </div>

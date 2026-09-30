@@ -1,5 +1,64 @@
 # Changelog
 
+## 0.40.0.0 (2026-09-30)
+
+### Added
+- **On a weak network the interview now keeps the interviewer's VOICE and gives up the picture.**
+  The digital human's video and its speech share one connection, so a lossy link does not just make
+  the face stutter — it destroys the audio. Measured on real Azure at 3% packet loss: the 1080p
+  avatar decoded **zero frames for over 30 seconds** while still consuming about 1 Mbps, and **31% of
+  the interviewer's speech was invented by packet-loss concealment**. The candidate cannot hear the
+  question, so the interview is worthless. The app now watches the media connection and, when the
+  picture is costing the voice, drops the picture and keeps talking: the same measurement then showed
+  concealment fall to **2.5%**, lost audio packets from 505 to 66, and round-trip time from 876 ms to
+  534 ms (our own video had been adding a third of a second of delay to its own audio).
+  Candidates see the audio orb and a plain notice, and the picture comes back on its own once the
+  connection has been healthy for a while. Verified end to end on a deliberately degraded link: with no
+  interaction at all, the session gave up the picture within 41 seconds and kept talking.
+- **A manual control to turn the digital human's picture off or on.** Automatic thresholds cannot be
+  right for every network, so the candidate can decide. Turning the picture off is never delayed —
+  it is the move that rescues the audio. Turning it back on waits out a short cooldown, and the
+  control now says why it is unavailable instead of just appearing broken.
+
+### Changed
+- **The microphone now uploads at 16 kHz instead of 24 kHz, cutting the upstream bandwidth by a
+  third** (measured 540–680 kbps before). On a narrow office uplink the old rate starved the app's
+  own signalling until the digital human failed to connect at all. This costs nothing in accuracy:
+  the speech recogniser in use is a 16 kHz pipeline and was discarding the extra band anyway.
+  Verified against real Azure by transcribing the same sentence at both rates — **0.0% word error
+  rate either way, transcripts identical word for word.** Both sides of the connection declare the
+  rate and cross-check it at connect time, because a mismatch would garble every transcript with no
+  error from Azure to warn anyone.
+- The first question is now spoken as soon as the interviewer's audio is live, rather than waiting
+  for a video frame that never arrives in a picture-less session. That removed a six-second silence
+  at the start of every degraded interview.
+
+### Fixed
+- The page no longer claims the digital human is connected after its video has actually stopped.
+  Previously there was a gap of several seconds — the face frozen on its last frame — before the
+  connection reported itself as lost.
+- If the microphone rate and the server ever disagree, voice is refused with the real reason and the
+  candidate is moved to the text channel, instead of silently recording an interview that cannot be
+  transcribed.
+
+### For contributors
+- New `docs/avatar-weaknet-probe.md` records the whole investigation: the measurement tooling, four
+  network profiles of real data, and two hard Azure limits found the hard way — an avatar connection
+  can be negotiated **only once per session** (there is no renegotiate or disconnect event), and
+  avatar session creation is **rate-limited** (a third request within ~20 seconds is refused for 43
+  seconds). Those two facts are why changing the picture rebuilds the whole session and why the
+  cooldown is asymmetric. `docs/voice-live-control-notes.md` §4 explains why the audio input rate
+  defaults to 24 kHz even though the speech service's own default is 16 kHz.
+- Measurement tooling is in the repo: a `getStats`-based weak-network probe, an OS-level network
+  shaper, a profile runner, a live audio-only verification spec, and a microphone-rate transcription
+  A/B harness. Two reusable gotchas are documented with them: a looping fake-microphone file never
+  lets voice-activity detection close a turn (so no transcript is ever produced), and a fake
+  microphone that starts before the session is up loses the first half of the utterance.
+- The media policy lives in one dependency-free module (`frontend/src/hooks/avatarHealth.ts`) so it
+  is testable without a browser. It deliberately does **not** use the WebRTC "freeze count" as a
+  health signal: when nothing decodes at all, no freeze events are produced, so a completely frozen
+  1080p stream reports *fewer* freezes than a healthy one.
+
 ## 0.39.3.3 (2026-09-30)
 
 ### Fixed

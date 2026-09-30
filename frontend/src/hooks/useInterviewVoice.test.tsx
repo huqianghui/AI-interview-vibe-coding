@@ -17,23 +17,52 @@ import { render, act } from "@testing-library/react";
 const disconnectSpy = vi.fn();
 const cleanupMicSpy = vi.fn();
 
-// Mutable avatar-connectivity holder so the avatar-gate tests can flip `isConnected` between
-// renders (the default is false — matches every pre-existing test that never touches it).
-const avatarState = { isConnected: false };
+// Mutable avatar-connectivity holder so the avatar-gate tests can flip readiness between renders
+// (the default is false — matches every pre-existing test that never touches it). `audioOnlyReady`
+// models the weak-network degrade: an audio-only session never paints a frame, so `isConnected` stays
+// false while the media path IS carrying the interviewer's voice.
+const avatarState = { isConnected: false, mediaMode: "video" as "video" | "audio-only", audioOnlyReady: false };
 
 // Stub the two sub-hooks so the test doesn't need a real WebRTC/audio stack — we only care about
 // whether the hook's teardown effect fires `avatarStream.disconnect()` on re-render vs unmount.
+/** Options the hook handed to useAvatarStream on the latest render. `onModeSwitchRequest` is the ONLY
+ * way the weak-network policy reaches `restartForMediaMode`, so a zero-arg mock factory would leave
+ * that whole path — including its double-connect guard — unreachable by any test. */
+const avatarOptions: { onModeSwitchRequest?: (next: "video" | "audio-only") => void } = {};
 vi.mock("./useAvatarStream", () => ({
-  useAvatarStream: () => ({
-    connect: vi.fn(),
-    disconnect: disconnectSpy,
-    handleServerSdp: vi.fn(),
-    get isConnected() {
-      return avatarState.isConnected;
-    },
-  }),
+  useAvatarStream: (
+    _videoRef: unknown,
+    options?: { onModeSwitchRequest?: (next: "video" | "audio-only") => void },
+  ) => {
+    avatarOptions.onModeSwitchRequest = options?.onModeSwitchRequest;
+    return {
+      connect: vi.fn(),
+      disconnect: disconnectSpy,
+      handleServerSdp: vi.fn(),
+      get isConnected() {
+        return avatarState.isConnected;
+      },
+      get isMediaReady() {
+        return (
+          avatarState.isConnected ||
+          (avatarState.mediaMode === "audio-only" && avatarState.audioOnlyReady)
+        );
+      },
+      get mediaMode() {
+        return avatarState.mediaMode;
+      },
+      videoPreference: "auto" as const,
+      setVideoPreference: vi.fn(),
+      canEnableVideo: true,
+      videoEnableAtMs: null,
+    };
+  },
 }));
-vi.mock("./useVoiceAudio", () => ({
+// Mock the HOOK but keep the module's real constants: the mic-rate drift guard compares against
+// MIC_SAMPLE_RATE, so a hand-written stand-in value would let the guard's tests pass while the
+// shipped rate drifted.
+vi.mock("./useVoiceAudio", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./useVoiceAudio")>()),
   useVoiceAudio: () => ({
     initMic: vi.fn(),
     startRecording: vi.fn(),
@@ -47,11 +76,15 @@ vi.mock("./useVoiceAudio", () => ({
 }));
 
 import { speechMatchesText, useInterviewVoice } from "./useInterviewVoice";
+import { AZURE_DEFAULT_INPUT_SAMPLE_RATE, MIC_SAMPLE_RATE } from "./useVoiceAudio";
 
 afterEach(() => {
   disconnectSpy.mockClear();
   cleanupMicSpy.mockClear();
   avatarState.isConnected = false;
+  avatarState.mediaMode = "video";
+  avatarState.audioOnlyReady = false;
+  avatarOptions.onModeSwitchRequest = undefined;
 });
 
 function Harness({ tick }: { tick: number }) {
@@ -1864,6 +1897,7 @@ describe("useInterviewVoice first-read avatar gate", () => {
       if (avatarEnabled) {
         FakeWebSocket.last!.receive({
           type: "proxy.connected",
+          input_audio_sampling_rate: MIC_SAMPLE_RATE,
           avatar_enabled: true,
         });
       }
@@ -1897,6 +1931,31 @@ describe("useInterviewVoice first-read avatar gate", () => {
     expect(questionReads(ws())).toEqual([
       "First question, please introduce yourself.",
     ]);
+
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("releases the held first read when a weak link degrades to audio-only (no frame will ever paint)", async () => {
+    // `docs/avatar-weaknet-probe.md` §3.9: on a lossy link the session drops the picture to protect
+    // the voice. Gating on painted frames then left every question silent for the full 6s gate even
+    // though the audio track was live and could have carried it immediately.
+    const { getHook, ws, rerender, unmount } = await connectHook(true);
+
+    act(() => {
+      expect(getHook().speakQuestion("Audio-only question.")).toBe(true);
+    });
+    expect(questionReads(ws())).toEqual([]);
+
+    // The media layer switched to audio-only and the audio track is flowing. No frames, ever.
+    avatarState.mediaMode = "audio-only";
+    avatarState.audioOnlyReady = true;
+    act(() => {
+      rerender(1);
+    });
+
+    expect(getHook().isAvatarConnected).toBe(false); // the orb is still the honest visual
+    expect(questionReads(ws())).toEqual(["Audio-only question."]);
 
     unmount();
     vi.unstubAllGlobals();
@@ -1999,6 +2058,269 @@ describe("useInterviewVoice first-read avatar gate", () => {
  * never noticed. The read is now `pre_generated_assistant_message`: server-side TTS of the exact
  * text, no model inference (Voice Live API, present in the 2026-01-01-preview version in use).
  */
+describe("useInterviewVoice mic-rate drift guard", () => {
+  // The backend declares the rate Azure decodes our PCM at. If the two sides disagree the interviewer
+  // hears a pitch- and speed-shifted candidate and every transcript is garbage — and Azure sends NO
+  // error, so nothing else in the system would ever notice. These lock the guard's three branches.
+  class FakeWebSocket {
+    static last: FakeWebSocket | null = null;
+    static OPEN = 1;
+    readyState = 1;
+    onmessage: ((e: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+    sent: string[] = [];
+    constructor(public url: string) {
+      FakeWebSocket.last = this;
+    }
+    send(data: string) {
+      this.sent.push(data);
+    }
+    close() {
+      this.readyState = 3;
+      this.onclose?.();
+    }
+    receive(msg: unknown) {
+      this.onmessage?.({ data: JSON.stringify(msg) });
+    }
+  }
+
+  /** Connect and deliver a `proxy.connected` whose rate field is whatever the test says. */
+  async function connectWithRate(rateField: Record<string, unknown>) {
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    FakeWebSocket.last = null;
+    const onError = vi.fn();
+    let hook!: ReturnType<typeof useInterviewVoice>;
+    function Harness() {
+      hook = useInterviewVoice("iv-1", { locale: "en-US", tokenProvider: () => "tok", onError });
+      return null;
+    }
+    const { unmount } = render(<Harness />);
+    let connectP!: Promise<void>;
+    act(() => {
+      connectP = hook.connect("en-US");
+      // A refused session REJECTS this promise (the page's startVoice catches it and falls back to
+      // text). Attach a handler here or the rejection is unhandled and fails the whole file.
+      connectP.catch(() => undefined);
+    });
+    await act(async () => {
+      for (let i = 0; i < 20 && !FakeWebSocket.last; i++) await Promise.resolve();
+      FakeWebSocket.last!.receive({ type: "proxy.connected", avatar_enabled: false, ...rateField });
+      FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
+    });
+    return { onError, connectP, unmount, getHook: () => hook };
+  }
+
+  it("stays silent when the backend's rate matches what the page records", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { onError, connectP, unmount } = await connectWithRate({
+      input_audio_sampling_rate: MIC_SAMPLE_RATE,
+    });
+    await act(async () => {
+      await connectP;
+    });
+
+    expect(errSpy.mock.calls.flat().join(" ")).not.toContain("MIC RATE MISMATCH");
+    expect(onError).not.toHaveBeenCalled();
+
+    unmount();
+    vi.unstubAllGlobals();
+    errSpy.mockRestore();
+  });
+
+  it("refuses the session when the backend declares a different rate", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { onError, unmount, getHook } = await connectWithRate({
+      input_audio_sampling_rate: MIC_SAMPLE_RATE === 16_000 ? 24_000 : 16_000,
+    });
+
+    expect(errSpy.mock.calls.flat().join(" ")).toContain("MIC RATE MISMATCH");
+    // Surfaced, not just logged: this repo's rule is that the page must never silently degrade, and a
+    // garbled voice interview is unrecoverable while a text fallback is not.
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(String(onError.mock.calls[0][0])).toContain("mic rate mismatch");
+    expect(getHook().connectionState).toBe("error");
+
+    unmount();
+    vi.unstubAllGlobals();
+    errSpy.mockRestore();
+  });
+
+  it("treats a MISSING rate as Azure's default, so a pre-contract backend is still caught", async () => {
+    // The guard used to skip when the field was absent — which is exactly the version-skew case it
+    // exists for (new page, rolled-back backend that leaves Azure on its 24 kHz default).
+    expect(AZURE_DEFAULT_INPUT_SAMPLE_RATE).not.toBe(MIC_SAMPLE_RATE);
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { onError, unmount } = await connectWithRate({});
+
+    expect(errSpy.mock.calls.flat().join(" ")).toContain("field absent");
+    expect(onError).toHaveBeenCalledTimes(1);
+
+    unmount();
+    vi.unstubAllGlobals();
+    errSpy.mockRestore();
+  });
+});
+
+describe("useInterviewVoice media-mode session rebuild", () => {
+  // Switching the picture on/off needs a whole new Voice Live session (Azure honours
+  // session.avatar.connect once per session). The rebuild must open exactly ONE socket: an earlier
+  // version left the old socket's handlers attached, so its `onclose` fired after connect() had reset
+  // `intentionalCloseRef` and a SECOND connect went out — two avatar sessions per switch, straight
+  // into Azure's avatar rate limit (observed live).
+  class FakeWebSocket {
+    static instances: FakeWebSocket[] = [];
+    static last: FakeWebSocket | null = null;
+    static OPEN = 1;
+    readyState = 1;
+    onmessage: ((e: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+    sent: string[] = [];
+    closed = false;
+    constructor(public url: string) {
+      FakeWebSocket.last = this;
+      FakeWebSocket.instances.push(this);
+    }
+    send(data: string) {
+      this.sent.push(data);
+    }
+    close() {
+      this.closed = true;
+      this.readyState = 3;
+      this.onclose?.();
+    }
+    receive(msg: unknown) {
+      this.onmessage?.({ data: JSON.stringify(msg) });
+    }
+  }
+
+  async function liveSession() {
+    vi.useFakeTimers();
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    FakeWebSocket.instances = [];
+    FakeWebSocket.last = null;
+    let hook!: ReturnType<typeof useInterviewVoice>;
+    function Harness() {
+      hook = useInterviewVoice("iv-1", { locale: "en-US", tokenProvider: () => "tok" });
+      return null;
+    }
+    const { unmount } = render(<Harness />);
+    let connectP!: Promise<void>;
+    act(() => {
+      connectP = hook.connect("en-US");
+    });
+    await act(async () => {
+      for (let i = 0; i < 20 && !FakeWebSocket.last; i++) await Promise.resolve();
+      FakeWebSocket.last!.receive({
+        type: "proxy.connected",
+        avatar_enabled: true,
+        input_audio_sampling_rate: MIC_SAMPLE_RATE,
+      });
+      FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
+      await connectP;
+    });
+    return { unmount, getHook: () => hook };
+  }
+
+  it("opens exactly ONE new session, even when the retired socket's onclose fires late", async () => {
+    const { unmount } = await liveSession();
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    const retired = FakeWebSocket.instances[0];
+
+    // Drive the real callback the media hook would call.
+    expect(avatarOptions.onModeSwitchRequest).toBeTypeOf("function");
+    await act(async () => {
+      avatarOptions.onModeSwitchRequest?.("audio-only");
+      for (let i = 0; i < 20 && FakeWebSocket.instances.length < 2; i++) await Promise.resolve();
+    });
+
+    expect(retired.closed).toBe(true);
+    // The retired socket's handlers must be detached BEFORE it is closed, so a late onclose is inert.
+    expect(retired.onclose).toBeNull();
+    expect(retired.onmessage).toBeNull();
+
+    // Even if something fires it anyway, no third socket may appear.
+    await act(async () => {
+      retired.onclose?.();
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(FakeWebSocket.instances).toHaveLength(2);
+
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps the candidate's in-progress answer across the rebuild", async () => {
+    // The whole point of the feature is that mode switches fire when the network is bad — i.e. mid
+    // answer. An earlier version preserved the draft and then let connect()'s own unconditional reset
+    // wipe it three lines later, losing spoken words every single time.
+    const { unmount, getHook } = await liveSession();
+    await act(async () => {
+      FakeWebSocket.last!.receive({
+        type: "conversation.item.input_audio_transcription.completed",
+        transcript: "I led the EMEA rollout and",
+      });
+    });
+    expect(getHook().peekDraft()).toContain("I led the EMEA rollout");
+
+    await act(async () => {
+      avatarOptions.onModeSwitchRequest?.("audio-only");
+      for (let i = 0; i < 20 && FakeWebSocket.instances.length < 2; i++) await Promise.resolve();
+    });
+
+    expect(getHook().peekDraft()).toContain("I led the EMEA rollout");
+
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("does not spend the WS reconnect budget on an intentional rebuild", async () => {
+    // A rebuild goes through connect(..., isReconnect=false), which zeroes the retry counter — so a
+    // later genuine drop still gets its full set of automatic reconnects.
+    const { unmount } = await liveSession();
+    await act(async () => {
+      avatarOptions.onModeSwitchRequest?.("audio-only");
+      for (let i = 0; i < 20 && FakeWebSocket.instances.length < 2; i++) await Promise.resolve();
+    });
+    const rebuilt = FakeWebSocket.instances[1];
+    await act(async () => {
+      rebuilt.receive({
+        type: "proxy.connected",
+        avatar_enabled: true,
+        input_audio_sampling_rate: MIC_SAMPLE_RATE,
+      });
+      rebuilt.receive({ type: "session.updated", session: {} });
+    });
+
+    // Three real drops in a row must still each earn a reconnect (MAX_RECONNECT = 3). Each dropped
+    // socket has to have gone LIVE first — the hook deliberately does not retry a socket that never
+    // finished its handshake, so dropping a half-open one would prove nothing.
+    for (let drop = 0; drop < 3; drop++) {
+      const before = FakeWebSocket.instances.length;
+      await act(async () => {
+        FakeWebSocket.last!.close();
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(FakeWebSocket.instances.length).toBe(before + 1);
+      await act(async () => {
+        FakeWebSocket.last!.receive({
+          type: "proxy.connected",
+          avatar_enabled: true,
+          input_audio_sampling_rate: MIC_SAMPLE_RATE,
+        });
+        FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
+      });
+    }
+
+    unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+});
+
 describe("useInterviewVoice mouth-mode read is pre-generated TTS, never a model turn", () => {
   class FakeWebSocket {
     static last: FakeWebSocket | null = null;
@@ -2049,6 +2371,7 @@ describe("useInterviewVoice mouth-mode read is pre-generated TTS, never a model 
       // The proxy bootstrap frame: mouth mode ⇒ a non-empty read directive.
       FakeWebSocket.last!.receive({
         type: "proxy.connected",
+        input_audio_sampling_rate: MIC_SAMPLE_RATE,
         mode: "model",
         avatar_enabled: false,
         read_directive: directive ?? "",
@@ -2296,7 +2619,14 @@ describe("useInterviewVoice automatic reconnect resets turn state", () => {
       connectP = hook.connect("en-US");
     });
     const bootstrap = (ws: FakeWebSocket) => {
-      ws.receive({ type: "proxy.connected", mode: "model", avatar_enabled: false, read_directive: DIRECTIVE, linear_turns: true });
+      ws.receive({
+        type: "proxy.connected",
+        mode: "model",
+        avatar_enabled: false,
+        read_directive: DIRECTIVE,
+        linear_turns: true,
+        input_audio_sampling_rate: MIC_SAMPLE_RATE,
+      });
       ws.receive({ type: "session.updated", session: {} });
     };
     await act(async () => {
@@ -2368,7 +2698,12 @@ describe("useInterviewVoice automatic reconnect resets turn state", () => {
     });
     await act(async () => {
       for (let i = 0; i < 20 && !FakeWebSocket.last; i++) await Promise.resolve();
-      if (avatar) FakeWebSocket.last!.receive({ type: "proxy.connected", avatar_enabled: true });
+      if (avatar)
+        FakeWebSocket.last!.receive({
+          type: "proxy.connected",
+          avatar_enabled: true,
+          input_audio_sampling_rate: MIC_SAMPLE_RATE,
+        });
       FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
       await connectP;
     });

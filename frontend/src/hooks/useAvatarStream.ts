@@ -8,9 +8,9 @@
  * `session.avatar.connecting` event (`server_sdp`). ICE servers for this connection are handed to
  * us out-of-band by the caller (extracted from `session.updated`'s `session.avatar.ice_servers`).
  *
- * Ported from the reference Avatar layer's `use-avatar-stream.ts`, trimmed of its getStats
- * telemetry/anomaly-detection polling (not requested here; the core ask is a working handshake) —
- * connection-state logging is kept via plain `console.debug/warn`.
+ * Ported from the reference Avatar layer's `use-avatar-stream.ts`. Its getStats telemetry was trimmed
+ * on the first pass (the core ask was a working handshake) and is now back for a concrete reason —
+ * see WEAK-NETWORK ADAPTATION below.
  *
  * `isConnected` flips true only once the video track delivers real frames (`videoWidth>0`), not
  * merely once the RTCPeerConnection finishes negotiating — matches the existing frame-gate pattern
@@ -27,9 +27,45 @@
  * re-handshake (rebuild the PC, re-send `session.avatar.connect`, await a fresh `server_sdp`) reusing
  * the last ICE servers + WS-send callback, up to MAX_RECOVERY_ATTEMPTS with backoff. The recovery
  * budget resets once real frames paint again, so a later independent drop gets a fresh set of tries.
+ *
+ * WEAK-NETWORK ADAPTATION (`docs/avatar-weaknet-probe.md` §3.8/§3.9, measured on real Azure): the
+ * avatar's video and the interviewer's VOICE ride the SAME RTP transport, so on a lossy link the video
+ * starves its own audio. At 3% loss the 1080p avatar decoded ZERO frames for 30+ s while still pulling
+ * ~1 Mbps, and 31% of the interviewer's speech was invented by packet-loss concealment — the candidate
+ * cannot hear the question. Re-offering the same connection with the video m-line `a=inactive` cut that
+ * to 2.5% (and RTT 876 → 534 ms, because our own video was self-inflicting queuing delay). So this hook
+ * samples `getStats()` and, when the picture is costing us the voice, gives up the picture and keeps the
+ * voice — then takes it back when the link recovers, with hysteresis so it can't strobe. Lowering the
+ * bitrate is deliberately NOT the lever: Azure already adapts on its own, and a mid-session
+ * `session.update` of `avatar.video.bitrate` is accepted-then-ignored (§3.5). The policy itself lives in
+ * `avatarHealth.ts` as pure functions; this file only owns the PeerConnection side effects.
+ *
+ * HOW the picture is switched, and why it isn't cheap: `session.avatar.connect` is honoured exactly
+ * ONCE per Voice Live session, and the API has no disconnect/renegotiate event (the full client event
+ * list is session.update, session.avatar.connect, input_audio_buffer.*, conversation.item.*,
+ * response.create/cancel). Re-offering on a live session is refused with `error: "WebRTC connection is
+ * in connected state"` — measured 2026-09-30. So this hook cannot flip the picture by itself: it tears
+ * the media down and asks its consumer (`useInterviewVoice`) to rebuild the whole Voice Live session
+ * via `onModeSwitchRequest`, and the mode it wants survives into the next `connect()`. That costs a
+ * ~5 s reconnect, which is why the hysteresis in `avatarHealth.ts` is deliberately slow and capped.
+ * The self-heal path above still re-offers directly, because there the old connection is already
+ * broken — Azure accepts a fresh offer then.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
+
+import {
+  HEALTH_THRESHOLDS,
+  type DecisionState,
+  type MediaMode,
+  type VideoPreference,
+  initialDecisionState,
+  isVideoStalled,
+  readHealth,
+  reduceHealth,
+  resetStreaks,
+  type HealthSnapshot,
+} from "./avatarHealth";
 
 /** All candidates gathered within this window before falling back to sending whatever we have. */
 const ICE_GATHERING_TIMEOUT_MS = 8000;
@@ -50,7 +86,21 @@ const MAX_RECOVERY_ATTEMPTS = 3;
 /** Backoff before each re-handshake attempt (index = attempt-1). */
 const RECOVERY_BACKOFF_MS = [500, 1500, 3000];
 
-export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
+export interface AvatarStreamOptions {
+  /** Called when the media policy (or the candidate) wants the picture turned on/off. The consumer must
+   * rebuild the Voice Live session — see HOW the picture is switched in the module header. The hook has
+   * already torn its media down by the time this fires, and remembers the mode it wants. */
+  onModeSwitchRequest?: (next: MediaMode) => void;
+}
+
+export function useAvatarStream(
+  videoRef: RefObject<HTMLVideoElement | null>,
+  options: AvatarStreamOptions = {},
+) {
+  // Held in a ref, never a dep: the options object is a fresh literal on every render of the consumer,
+  // so depending on it would re-create every callback below each render.
+  const onModeSwitchRequestRef = useRef(options.onModeSwitchRequest);
+  onModeSwitchRequestRef.current = options.onModeSwitchRequest;
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const sdpResolverRef = useRef<((sdp: string) => void) | null>(null);
@@ -75,6 +125,53 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
   // detect it's been superseded and bail instead of clobbering the current connection.
   const genRef = useRef(0);
 
+  // --- weak-network adaptation state ---------------------------------------------------------
+  // What the NEXT handshake should offer for the video m-line: recvonly (want the face) vs inactive
+  // (audio-only). Read by runHandshake, flipped by switchMediaMode / setVideoPreference.
+  const wantVideoRef = useRef(true);
+  const statsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** The 250 ms frame poller started inside `attachStream`. Before mode switching existed this only
+   * had to survive until the final disconnect, so it was left to stop itself (its own `settled` flag
+   * or a 15 s cap). Now every downgrade/restore runs teardown → attachStream again, so a switch
+   * inside that 15 s window would leave the OLD poller running against the same <video> element
+   * alongside the new one. Hold the handle so teardown can kill it outright. */
+  const framePollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const snapshotRef = useRef<HealthSnapshot | null>(null);
+  const decisionRef = useRef<DecisionState>(initialDecisionState());
+  /** Mirrors `decisionRef.current.mode` for render. */
+  const [mediaMode, setMediaMode] = useState<MediaMode>("video");
+  const [videoPreference, setVideoPreferenceState] = useState<VideoPreference>("auto");
+  /** The avatar's AUDIO track is live. Only promoted to "ready" in audio-only mode — in video mode the
+   * first-read gate must still wait for painted frames, or the opening words get clipped. */
+  const [audioTrackLive, setAudioTrackLive] = useState(false);
+  /** When the current avatar session was created. Azure rate-limits avatar requests, so switching back
+   * INTO video is held off until enough time has passed (see VIDEO_SWITCH_MIN_INTERVAL_MS). */
+  const avatarConnectedAtRef = useRef<number | null>(null);
+  const [canEnableVideo, setCanEnableVideo] = useState(true);
+
+  const stopSampling = useCallback(() => {
+    if (statsTimerRef.current) {
+      clearInterval(statsTimerRef.current);
+      statsTimerRef.current = null;
+    }
+    snapshotRef.current = null;
+  }, []);
+
+  /** The current mode lives in three places that must never disagree: the policy state, the flag
+   * `runHandshake` reads, and the React state the UI renders. Write them together, once. */
+  const applyMode = useCallback((next: MediaMode) => {
+    decisionRef.current = { ...decisionRef.current, mode: next };
+    wantVideoRef.current = next === "video";
+    setMediaMode(next);
+  }, []);
+
+  const stopFramePolling = useCallback(() => {
+    if (framePollTimerRef.current) {
+      clearInterval(framePollTimerRef.current);
+      framePollTimerRef.current = null;
+    }
+  }, []);
+
   const clearTimers = useCallback(() => {
     if (recoveryTimerRef.current) {
       clearTimeout(recoveryTimerRef.current);
@@ -84,7 +181,35 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
       clearTimeout(graceTimerRef.current);
       graceTimerRef.current = null;
     }
-  }, []);
+    stopSampling();
+    stopFramePolling();
+  }, [stopFramePolling, stopSampling]);
+
+  /** Tear the avatar media down: close the PC, drop the elements' streams, stop sampling, and supersede
+   * any in-flight recovery. Shared by the public `disconnect()` and the media-mode switch. Nulling
+   * `sendOfferRef` is what stops `attemptRecovery` from fighting the teardown. */
+  const teardownMedia = useCallback(() => {
+    genRef.current++;
+    clearTimers();
+    recoveringRef.current = false;
+    recoveryAttemptsRef.current = 0;
+    sendOfferRef.current = null;
+    iceServersRef.current = [];
+    sdpResolverRef.current = null;
+    pendingStreamRef.current = null;
+    if (pcRef.current) {
+      pcRef.current.close();
+      pcRef.current = null;
+    }
+    if (videoRef.current) videoRef.current.srcObject = null;
+    if (audioElRef.current) {
+      audioElRef.current.srcObject = null;
+      audioElRef.current.remove();
+      audioElRef.current = null;
+    }
+    setIsConnected(false);
+    setAudioTrackLive(false);
+  }, [clearTimers, videoRef]);
 
   /** Attach a video MediaStream to the <video> element + flip `isConnected` once it paints real
    * frames. Safe to call repeatedly; a no-op if the element isn't mounted yet (the stream stays in
@@ -105,11 +230,12 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
       // Watch every event that signals a painted frame AND poll briefly, flipping true on the first
       // non-zero reading and then stopping — so the face appears the instant frames arrive.
       let settled = false;
-      let pollId: ReturnType<typeof setInterval> | null = null;
+      // Any poller from a previous attach (a mode switch re-attaches) must go before this one starts.
+      stopFramePolling();
       const stopPolling = () => {
-        if (pollId) {
-          clearInterval(pollId);
-          pollId = null;
+        if (framePollTimerRef.current) {
+          clearInterval(framePollTimerRef.current);
+          framePollTimerRef.current = null;
         }
       };
       const reflectDimensions = () => {
@@ -131,7 +257,7 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
       videoEl.onplaying = reflectDimensions;
       videoEl.ontimeupdate = reflectDimensions;
       // Poll as a backstop for browsers/streams that don't fire a dimension event on the first frame.
-      pollId = setInterval(reflectDimensions, 250);
+      framePollTimerRef.current = setInterval(reflectDimensions, 250);
       setTimeout(stopPolling, 15_000);
       videoEl
         .play()
@@ -143,11 +269,60 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
           void videoEl.play().then(reflectDimensions).catch(() => undefined);
         });
     },
-    [videoRef],
+    [stopFramePolling, videoRef],
   );
 
   // Forward declaration so wirePc (used by both connect and recovery) can call the recovery routine.
   const attemptRecoveryRef = useRef<((reason: string) => void) | null>(null);
+  // Same indirection for the mode switch: the stats sampler (wired inside wirePc) has to be able to
+  // call it, but the switch itself is built on wirePc.
+  const switchMediaModeRef = useRef<((next: MediaMode, reason: string) => void) | null>(null);
+
+  /** Poll `getStats()` on a live PC and act on the media-health verdict (see `avatarHealth.ts`). */
+  const startSampling = useCallback(
+    (pc: RTCPeerConnection) => {
+      stopSampling();
+      const gen = genRef.current;
+      statsTimerRef.current = setInterval(() => {
+        if (gen !== genRef.current || pc !== pcRef.current) {
+          stopSampling();
+          return;
+        }
+        void pc
+          .getStats()
+          .then((report) => {
+            if (gen !== genRef.current || pc !== pcRef.current) return;
+            const now = Date.now();
+            const { snapshot, health } = readHealth(snapshotRef.current, report, now);
+            snapshotRef.current = snapshot;
+            if (!health) return; // first sample: no window to judge yet.
+
+            const { state, action } = reduceHealth(decisionRef.current, health, now);
+            decisionRef.current = state;
+
+            // Honest UI: the probe measured a ~4 s gap between "video bytes hit zero" and ICE
+            // reporting `disconnected`, during which the page still claimed a live avatar frozen on
+            // its last frame. Don't wait for ICE to say it.
+            if (isVideoStalled(state)) setIsConnected(false);
+
+            if (action === "downgrade") {
+              console.warn(
+                `[avatar-stream] media health poor (conceal=${(health.concealmentRatio * 100).toFixed(1)}% ` +
+                  `decoding=${health.videoDecoding} rtt=${health.rttMs ?? "?"}ms) → dropping the picture to save the voice`,
+              );
+              switchMediaModeRef.current?.("audio-only", "health-downgrade");
+            } else if (action === "restore") {
+              console.info(
+                `[avatar-stream] link healthy again (conceal=${(health.concealmentRatio * 100).toFixed(1)}%) → restoring the picture`,
+              );
+              switchMediaModeRef.current?.("video", "health-restore");
+            }
+          })
+          .catch(() => undefined); // getStats can reject on a closing PC; the guards above cover it.
+      }, HEALTH_THRESHOLDS.SAMPLE_INTERVAL_MS);
+    },
+    [stopSampling],
+  );
 
   /** Wire connection/track handlers on a freshly-built PC. Shared by the initial connect and every
    * recovery rebuild. Guards every state-triggered action on `pc === pcRef.current` so a superseded
@@ -167,9 +342,12 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
             clearTimeout(graceTimerRef.current);
             graceTimerRef.current = null;
           }
+          // Media is flowing: start watching whether it's actually doing us any good.
+          startSampling(pc);
           return;
         }
         if (state === "failed") {
+          stopSampling();
           // Terminal: won't self-heal without renegotiation → rebuild now.
           attemptRecoveryRef.current?.("ice-failed");
           return;
@@ -216,19 +394,54 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
           audioElRef.current.remove();
         }
         audioElRef.current = audio;
+        setAudioTrackLive(true);
+        // Audio-only sessions never paint a frame, so `reflectDimensions` — which is where a normal
+        // session clears the recovery bookkeeping and declares itself settled — never runs. The live
+        // audio track is the equivalent milestone here: without this the recovery budget would stay
+        // spent and the first-question read would wait out its full gate on every audio-only turn.
+        if (!wantVideoRef.current) {
+          recoveryAttemptsRef.current = 0;
+          recoveringRef.current = false;
+        }
       };
     },
-    [attachStream],
+    [attachStream, startSampling, stopSampling],
+  );
+
+  /** Build a PeerConnection from the stashed ICE servers and wire its handlers. One place, so a future
+   * config change (ICE transport policy, a new field) cannot land on only one of the two call sites. */
+  const createPeerConnection = useCallback(
+    (iceServers: RTCIceServer[]) => {
+      const pc = new RTCPeerConnection({
+        iceServers: iceServers.length > 0 ? iceServers : undefined,
+        bundlePolicy: "max-bundle",
+      });
+      pcRef.current = pc;
+      wirePc(pc);
+      return pc;
+    },
+    [wirePc],
   );
 
   /** Run one offer/answer handshake on `pc`: gather ICE, send the base64 offer via `sendSdpOffer`,
    * await the server SDP answer, apply it. Rejects on ICE/SDP timeout. Shared by connect + recovery. */
   const runHandshake = useCallback(
-    async (pc: RTCPeerConnection, sendSdpOffer: (clientSdp: string) => Promise<void> | void) => {
+    async (
+      pc: RTCPeerConnection,
+      sendSdpOffer: (clientSdp: string) => Promise<void> | void,
+      wantVideo: boolean,
+    ) => {
       // Two recvonly transceivers, registered BEFORE createOffer — the avatar only streams TO us.
-      pc.addTransceiver("video", { direction: "recvonly" });
+      // For an audio-only session the video m-line is still offered but marked `inactive`: Azure
+      // answers that and sends only the audio track (~100 kbps). DELETING the m-line instead is
+      // REJECTED by Azure ("WebRTC SDP negotiation failed: peer connect created failure: None is not
+      // in list"), which is why this is a direction flip and not a missing transceiver — measured
+      // 2026-09-30, `docs/avatar-weaknet-probe.md` §3.6.
+      pc.addTransceiver("video", { direction: wantVideo ? "recvonly" : "inactive" });
       pc.addTransceiver("audio", { direction: "recvonly" });
-      console.info("[avatar-stream] transceivers added; calling createOffer()");
+      console.info(
+        `[avatar-stream] transceivers added (video=${wantVideo ? "recvonly" : "inactive"}); calling createOffer()`,
+      );
 
       // ICE gate: resolve on whichever fires first — the null-candidate signal, the
       // gathering-state transition, a short settle window after the first USABLE candidate, or an
@@ -287,6 +500,49 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
     [],
   );
 
+  /** Close the current PC and run a fresh handshake on a new one, reusing the stashed ICE servers +
+   * WS-send callback. Shared by the self-heal path (after a backoff) and the deliberate media-mode
+   * switch (immediately) — the only difference between them is the recovery budget, which is the
+   * caller's business. */
+  const rebuildConnection = useCallback(
+    (
+      sendSdpOffer: (clientSdp: string) => Promise<void> | void,
+      wantVideo: boolean,
+      label: string,
+    ) => {
+      const gen = genRef.current;
+      stopSampling();
+
+      if (pcRef.current) {
+        pcRef.current.close();
+        pcRef.current = null;
+      }
+      if (videoRef.current) videoRef.current.srcObject = null;
+      pendingStreamRef.current = null;
+      setAudioTrackLive(false);
+      wantVideoRef.current = wantVideo;
+
+      const pc = createPeerConnection(iceServersRef.current);
+      console.info(`[avatar-stream] ${label}: RTCPeerConnection rebuilt (video=${wantVideo ? "on" : "off"})`);
+
+      runHandshake(pc, sendSdpOffer, wantVideo)
+        .then(() => {
+          // Handshake applied. `recoveringRef` stays true until the session settles (real frames for a
+          // video session, a live audio track for an audio-only one) so overlapping ICE events don't
+          // spawn a second rebuild meanwhile.
+          console.info(`[avatar-stream] ${label} handshake completed`);
+        })
+        .catch((err: unknown) => {
+          if (gen !== genRef.current) return;
+          console.warn(`[avatar-stream] ${label} handshake failed`, err);
+          recoveringRef.current = false;
+          // Retry the next attempt (bounded); attemptRecovery re-checks the budget.
+          attemptRecoveryRef.current?.("recovery-handshake-failed");
+        });
+    },
+    [createPeerConnection, runHandshake, stopSampling, videoRef],
+  );
+
   /** Rebuild the avatar media connection after a drop, reusing the last ICE servers + WS-send
    * callback. Bounded by MAX_RECOVERY_ATTEMPTS with backoff; falls back to the orb when exhausted. */
   const attemptRecovery = useCallback(
@@ -316,40 +572,69 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
       recoveryTimerRef.current = setTimeout(() => {
         recoveryTimerRef.current = null;
         if (gen !== genRef.current) return; // superseded by disconnect()/reconnect — abandon.
-
-        // Tear down the old PC before rebuilding.
-        if (pcRef.current) {
-          pcRef.current.close();
-          pcRef.current = null;
-        }
-        if (videoRef.current) videoRef.current.srcObject = null;
-
-        const pc = new RTCPeerConnection({
-          iceServers: iceServersRef.current.length > 0 ? iceServersRef.current : undefined,
-          bundlePolicy: "max-bundle",
-        });
-        pcRef.current = pc;
-        wirePc(pc);
-        console.info("[avatar-stream] recovery: RTCPeerConnection rebuilt");
-
-        runHandshake(pc, sendSdpOffer)
-          .then(() => {
-            // Handshake applied. `recoveringRef` stays true until real frames paint (reset in
-            // reflectDimensions) so overlapping ICE events don't spawn a second rebuild meanwhile.
-            console.info("[avatar-stream] recovery handshake completed; awaiting frames");
-          })
-          .catch((err: unknown) => {
-            if (gen !== genRef.current) return;
-            console.warn("[avatar-stream] recovery handshake failed", err);
-            recoveringRef.current = false;
-            // Retry the next attempt (bounded); attemptRecovery re-checks the budget.
-            attemptRecoveryRef.current?.("recovery-handshake-failed");
-          });
+        // Rebuild in whatever mode we're currently in: a media drop must not silently hand the
+        // picture back on a link that just proved it can't carry it.
+        rebuildConnection(sendSdpOffer, wantVideoRef.current, "recovery");
       }, backoff);
     },
-    [clearTimers, runHandshake, videoRef, wirePc],
+    [clearTimers, rebuildConnection],
   );
   attemptRecoveryRef.current = attemptRecovery;
+
+  /** Ask for the picture to be turned on/off. Tears the media down immediately (which is the point when
+   * the video is the thing starving the voice) and delegates the rebuild to the consumer, because Azure
+   * will not renegotiate an avatar connection on a live session — see the module header. */
+  const switchMediaMode = useCallback(
+    (next: MediaMode, reason: string) => {
+      if (!sendOfferRef.current) return; // no live avatar session to switch.
+      if (wantVideoRef.current === (next === "video")) return; // already in that mode.
+      if (!onModeSwitchRequestRef.current) {
+        // Nobody can rebuild the session, so tearing the media down here would kill the avatar for
+        // good. Refuse instead — a consumer that wants adaptation must wire the callback.
+        console.warn("[avatar-stream] media mode change requested but no onModeSwitchRequest is wired; ignoring");
+        return;
+      }
+      if (next === "video") {
+        // Asymmetric on purpose: Azure rate-limits avatar session creation, and a refused request
+        // cascades into a dead voice session. Dropping the picture is never delayed; bringing it back
+        // waits. The hysteresis in avatarHealth already spaces AUTOMATIC restores past this, so in
+        // practice this only catches an impatient human on the manual toggle.
+        const since = avatarConnectedAtRef.current;
+        const wait = since === null ? 0 : HEALTH_THRESHOLDS.VIDEO_SWITCH_MIN_INTERVAL_MS - (Date.now() - since);
+        if (wait > 0) {
+          console.info(`[avatar-stream] not restoring the picture yet (${Math.ceil(wait / 1000)}s of Azure avatar rate-limit cooldown left)`);
+          return;
+        }
+      }
+
+      console.info(`[avatar-stream] media mode → ${next} (${reason}); rebuilding the Voice Live session`);
+      // Remember the target BEFORE tearing down: connect() reads it back out of decisionRef, and the
+      // hysteresis counters must survive the restart or a bad link would flap forever.
+      applyMode(next);
+      teardownMedia();
+      onModeSwitchRequestRef.current?.(next);
+    },
+    [applyMode, teardownMedia],
+  );
+  switchMediaModeRef.current = switchMediaMode;
+
+  /** Pin the picture on/off by hand, or hand control back to the health signal (`auto`). A pinned
+   * preference stops the automation from moving the mode, but sampling continues so the UI can keep
+   * telling the truth about the link. */
+  const setVideoPreference = useCallback((preference: VideoPreference) => {
+    const target: MediaMode | null =
+      preference === "off" ? "audio-only" : preference === "on" ? "video" : null;
+    decisionRef.current = { ...decisionRef.current, preference };
+    setVideoPreferenceState(preference);
+    if (!target) return; // back to "auto": leave the current mode, let the health signal take over.
+    if (!sendOfferRef.current) {
+      // No live session yet (e.g. pinned on the pre-flight screen): just decide what the next
+      // connect() will offer. Going through switchMediaMode here would bail and silently drop the pin.
+      applyMode(target);
+      return;
+    }
+    switchMediaModeRef.current?.(target, `user-pinned-${preference}`);
+  }, [applyMode]);
 
   /**
    * Start the avatar WebRTC handshake.
@@ -368,21 +653,39 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
       iceServersRef.current = iceServers;
       sendOfferRef.current = sendSdpOffer;
 
+      // Carry the media policy across the reconnect: only the per-window streaks reset. The mode itself
+      // must survive, because a mode switch IS a reconnect (module header) — deriving it afresh here
+      // would bring the picture straight back and loop. Same for the candidate's manual pin.
+      decisionRef.current = resetStreaks(decisionRef.current);
+      applyMode(decisionRef.current.mode);
+      const wantVideo = decisionRef.current.mode === "video";
+      setAudioTrackLive(false);
+
       pendingStreamRef.current = null;
       if (videoRef.current) videoRef.current.srcObject = null;
 
-      const pc = new RTCPeerConnection({
-        iceServers: iceServers.length > 0 ? iceServers : undefined,
-        bundlePolicy: "max-bundle",
-      });
-      pcRef.current = pc;
-      wirePc(pc);
+      const pc = createPeerConnection(iceServers);
       console.info("[avatar-stream] RTCPeerConnection created");
+      avatarConnectedAtRef.current = Date.now();
+      setCanEnableVideo(false);
 
-      await runHandshake(pc, sendSdpOffer);
+      await runHandshake(pc, sendSdpOffer, wantVideo);
     },
-    [clearTimers, runHandshake, videoRef, wirePc],
+    [applyMode, clearTimers, createPeerConnection, runHandshake, videoRef],
   );
+
+  // Let the UI re-enable "turn the picture on" once Azure's avatar rate-limit cooldown has passed.
+  // Polled rather than a single timer so a mode switch mid-countdown can't leave a stale timeout.
+  useEffect(() => {
+    if (canEnableVideo) return;
+    const id = setInterval(() => {
+      const since = avatarConnectedAtRef.current;
+      if (since === null || Date.now() - since >= HEALTH_THRESHOLDS.VIDEO_SWITCH_MIN_INTERVAL_MS) {
+        setCanEnableVideo(true);
+      }
+    }, 1_000);
+    return () => clearInterval(id);
+  }, [canEnableVideo]);
 
   // Re-attach the avatar stream if the <video> element mounts AFTER `ontrack` already fired. The
   // editor Playground mounts <video> only while voice is live, which can race the async handshake;
@@ -408,26 +711,33 @@ export function useAvatarStream(videoRef: RefObject<HTMLVideoElement | null>) {
   }, []);
 
   const disconnect = useCallback(() => {
-    genRef.current++; // supersede any in-flight recovery so its timer/handshake bails.
-    clearTimers();
-    recoveringRef.current = false;
-    recoveryAttemptsRef.current = 0;
-    sendOfferRef.current = null;
-    iceServersRef.current = [];
-    sdpResolverRef.current = null;
-    pendingStreamRef.current = null;
-    if (pcRef.current) {
-      pcRef.current.close();
-      pcRef.current = null;
-    }
-    if (videoRef.current) videoRef.current.srcObject = null;
-    if (audioElRef.current) {
-      audioElRef.current.srcObject = null;
-      audioElRef.current.remove();
-      audioElRef.current = null;
-    }
-    setIsConnected(false);
-  }, [clearTimers, videoRef]);
+    teardownMedia();
+  }, [teardownMedia]);
 
-  return { connect, disconnect, handleServerSdp, isConnected };
+  return {
+    connect,
+    disconnect,
+    handleServerSdp,
+    /** Video frames are painting. Drives AvatarView's video-vs-orb choice. */
+    isConnected,
+    /** The media path can carry the interviewer's voice: painted frames, OR a live audio track in an
+     * audio-only session. This — not `isConnected` — is what the first-question read must wait for;
+     * an audio-only session never paints a frame, so gating on `isConnected` made every audio-only
+     * turn sit out the full gate timeout before speaking. */
+    isMediaReady: isConnected || (mediaMode === "audio-only" && audioTrackLive),
+    mediaMode,
+    videoPreference,
+    setVideoPreference,
+    /** False while Azure's avatar rate-limit cooldown blocks a switch back into video. The UI should
+     * disable its "turn the picture on" control rather than let the click silently do nothing — and
+     * say WHY, using `videoEnableAtMs`. */
+    canEnableVideo,
+    /** Epoch ms when the cooldown lifts, or null if there is nothing to wait for. Deliberately a fixed
+     * timestamp rather than a ticking countdown: a per-second counter would re-render the whole
+     * interview page once a second for a minute, and the useful information is the reason, not the tick. */
+    videoEnableAtMs:
+      avatarConnectedAtRef.current === null || canEnableVideo
+        ? null
+        : avatarConnectedAtRef.current + HEALTH_THRESHOLDS.VIDEO_SWITCH_MIN_INTERVAL_MS,
+  };
 }

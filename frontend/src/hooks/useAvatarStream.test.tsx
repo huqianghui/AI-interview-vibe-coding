@@ -16,6 +16,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 
+import { HEALTH_THRESHOLDS as T } from "./avatarHealth";
 import { useAvatarStream } from "./useAvatarStream";
 
 /** Minimal controllable RTCPeerConnection stand-in. Captures the hook's event handlers so the test
@@ -34,10 +35,20 @@ class FakePC {
   onconnectionstatechange: (() => void) | null = null;
   ontrack: ((e: unknown) => void) | null = null;
 
+  /** Every addTransceiver call, so a test can assert the video direction (recvonly vs inactive). */
+  transceivers: { kind: string; direction: string }[] = [];
+  /** Rows the next getStats() resolves with. Tests mutate this to drive the health sampler. */
+  statsRows: Record<string, unknown>[] = [];
+
   constructor(public config: RTCConfiguration) {
     FakePC.instances.push(this);
   }
-  addTransceiver() {}
+  addTransceiver(kind: string, init?: RTCRtpTransceiverInit) {
+    this.transceivers.push({ kind, direction: init?.direction ?? "sendrecv" });
+  }
+  async getStats() {
+    return new Map(this.statsRows.map((row) => [String(row.id), row]));
+  }
   async createOffer() {
     return { type: "offer", sdp: "fake-offer-sdp" } as RTCSessionDescriptionInit;
   }
@@ -63,12 +74,52 @@ class FakePC {
   emitCandidate(sdpFragment: string) {
     this.onicecandidate?.({ candidate: { candidate: sdpFragment } as RTCIceCandidate });
   }
+  /** Deliver a remote track, the way Azure does once the answer is applied. */
+  emitTrack(kind: "audio" | "video") {
+    const track = { kind, onended: null } as unknown as MediaStreamTrack;
+    this.ontrack?.({ track, streams: [{ id: `${kind}-stream` } as unknown as MediaStream] });
+  }
 }
 
 function makeVideoRef() {
-  // attachStream only runs when a video track arrives (we don't fire ontrack here), so a bare
-  // srcObject-holder is enough for connect()'s `videoRef.current.srcObject = null` writes.
-  return { current: { srcObject: null } as unknown as HTMLVideoElement };
+  // attachStream needs `play()` and the dimension getters; 0x0 means "no frames yet", so isConnected
+  // stays false unless a test says otherwise.
+  return {
+    current: {
+      srcObject: null,
+      videoWidth: 0,
+      videoHeight: 0,
+      muted: false,
+      play: () => Promise.resolve(),
+    } as unknown as HTMLVideoElement,
+  };
+}
+
+/** Stats rows shaped like a real inbound-rtp report, for the health sampler. */
+function statsRows(opts: {
+  concealed: number;
+  totalSamples: number;
+  framesDecoded: number;
+  videoBytes: number;
+}): Record<string, unknown>[] {
+  return [
+    {
+      id: "A",
+      type: "inbound-rtp",
+      kind: "audio",
+      concealedSamples: opts.concealed,
+      totalSamplesReceived: opts.totalSamples,
+    },
+    {
+      id: "V",
+      type: "inbound-rtp",
+      kind: "video",
+      framesDecoded: opts.framesDecoded,
+      bytesReceived: opts.videoBytes,
+    },
+    { id: "T", type: "transport", selectedCandidatePairId: "P" },
+    { id: "P", type: "candidate-pair", state: "succeeded", nominated: true, currentRoundTripTime: 0.3 },
+  ];
 }
 
 /** Flush pending microtasks (createOffer/setLocalDescription/setRemoteDescription resolutions). */
@@ -101,12 +152,16 @@ async function completeHandshake(
 beforeEach(() => {
   FakePC.instances = [];
   vi.stubGlobal("RTCPeerConnection", FakePC as unknown as typeof RTCPeerConnection);
+  // jsdom's media play() is a not-implemented stub that returns undefined, which would blow up the
+  // hook's `audio.play().catch(...)` when an audio track arrives.
+  HTMLMediaElement.prototype.play = vi.fn().mockResolvedValue(undefined) as never;
   vi.useFakeTimers();
 });
 
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("useAvatarStream ICE gathering gate", () => {
@@ -261,5 +316,248 @@ describe("useAvatarStream self-heal", () => {
     // MAX_RECOVERY_ATTEMPTS = 3 → at most the original + 3 rebuilds, then it gives up (orb).
     expect(FakePC.instances.length).toBeLessThanOrEqual(4);
     expect(result.current.isConnected).toBe(false);
+  });
+});
+
+describe("useAvatarStream weak-network adaptation", () => {
+  /** Cumulative inbound counters; one "step" is one 2 s sampling window. */
+  function counters() {
+    return { concealed: 0, totalSamples: 0, framesDecoded: 0, videoBytes: 0 };
+  }
+  /** A good window: audio arrives nearly intact and frames decode. */
+  function healthyStep(c: ReturnType<typeof counters>) {
+    c.totalSamples += 96_000;
+    c.concealed += 100;
+    c.framesDecoded += 50;
+    c.videoBytes += 250_000;
+    return statsRows(c);
+  }
+  /** The measured 1080p failure: ~1 Mbps of video arriving, not a single frame decoded. */
+  function wastingStep(c: ReturnType<typeof counters>) {
+    c.totalSamples += 96_000;
+    c.concealed += 100;
+    c.videoBytes += 250_000; // frames NOT advanced
+    return statsRows(c);
+  }
+  /** Audio-only: no video counters move at all, and the voice is clean. */
+  function audioOnlyStep(c: ReturnType<typeof counters>) {
+    c.totalSamples += 96_000;
+    c.concealed += 100;
+    return statsRows(c);
+  }
+
+  async function tick(pc: FakePC, rows: Record<string, unknown>[]) {
+    pc.statsRows = rows;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(T.SAMPLE_INTERVAL_MS);
+    });
+  }
+
+  /** Render with a recorder for the mode-switch requests. Azure refuses to renegotiate an avatar
+   * connection on a live session, so the hook can only ASK for a rebuild; `useInterviewVoice` answers
+   * by reconnecting the whole Voice Live session. These tests stand in for that consumer. */
+  function renderStream(videoRef: ReturnType<typeof makeVideoRef>) {
+    const requests: string[] = [];
+    const { result } = renderHook(() =>
+      useAvatarStream(videoRef, { onModeSwitchRequest: (next) => requests.push(next) }),
+    );
+    return { result, requests };
+  }
+
+  /** Bring a fresh connection all the way live: offer out, answer applied, ICE up, tracks delivered. */
+  async function bringUp(
+    result: { current: ReturnType<typeof useAvatarStream> },
+    sendOffer: ReturnType<typeof vi.fn>,
+    pcIndex: number,
+  ) {
+    await act(async () => {
+      void result.current.connect([{ urls: "turn:relay.example.com" }], sendOffer);
+    });
+    const pc = FakePC.instances[pcIndex];
+    await completeHandshake(pc, result.current.handleServerSdp);
+    await act(async () => {
+      pc.fireIce("connected");
+      pc.emitTrack("audio");
+    });
+    return pc;
+  }
+
+  it("offers video recvonly on a normal connect and keeps it while the link is healthy", async () => {
+    const videoRef = makeVideoRef();
+    const sendOffer = vi.fn();
+    const { result, requests } = renderStream(videoRef);
+    const pc = await bringUp(result, sendOffer, 0);
+
+    expect(pc.transceivers).toEqual([
+      { kind: "video", direction: "recvonly" },
+      { kind: "audio", direction: "recvonly" },
+    ]);
+
+    const c = counters();
+    for (let i = 0; i < 10; i++) await tick(pc, healthyStep(c));
+
+    expect(requests).toEqual([]); // nothing to change on a good link
+    expect(FakePC.instances).toHaveLength(1);
+    expect(result.current.mediaMode).toBe("video");
+  });
+
+  it("asks for a session rebuild — never a live re-offer — when the picture stops decoding", async () => {
+    // Bytes in, zero frames out: the picture is pure waste and is starving the voice. Re-offering on the
+    // live session would be refused by Azure ("WebRTC connection is in connected state"), so the hook
+    // must tear its media down and delegate the rebuild upward instead.
+    const videoRef = makeVideoRef();
+    const sendOffer = vi.fn();
+    const { result, requests } = renderStream(videoRef);
+    const pc = await bringUp(result, sendOffer, 0);
+
+    const c = counters();
+    for (let i = 0; i <= T.BAD_WINDOWS; i++) await tick(pc, wastingStep(c));
+
+    expect(requests).toEqual(["audio-only"]);
+    expect(FakePC.instances).toHaveLength(1); // no in-place rebuild
+    expect(pc.closed).toBe(true); // …and the wasteful video stream is stopped immediately
+    expect(sendOffer).toHaveBeenCalledTimes(1);
+    expect(result.current.mediaMode).toBe("audio-only");
+    expect(result.current.isConnected).toBe(false);
+  });
+
+  it("offers video INACTIVE on the rebuilt session, and treats the audio track as ready", async () => {
+    const videoRef = makeVideoRef();
+    const sendOffer = vi.fn();
+    const { result, requests } = renderStream(videoRef);
+    const pc = await bringUp(result, sendOffer, 0);
+
+    const c = counters();
+    for (let i = 0; i <= T.BAD_WINDOWS; i++) await tick(pc, wastingStep(c));
+    expect(requests).toEqual(["audio-only"]);
+
+    // The consumer reconnects (what useInterviewVoice.restartForMediaMode does).
+    const audioPc = await bringUp(result, sendOffer, 1);
+
+    expect(audioPc.transceivers).toEqual([
+      { kind: "video", direction: "inactive" },
+      { kind: "audio", direction: "recvonly" },
+    ]);
+    // Nothing paints, so the orb stays — but the read gate must be released by the live audio track,
+    // otherwise every audio-only question sits out the full 6 s gate in silence.
+    expect(result.current.isConnected).toBe(false);
+    expect(result.current.isMediaReady).toBe(true);
+  });
+
+  it("also asks to drop the picture when the interviewer's voice is being concealed away", async () => {
+    const videoRef = makeVideoRef();
+    const sendOffer = vi.fn();
+    const { result, requests } = renderStream(videoRef);
+    const pc = await bringUp(result, sendOffer, 0);
+
+    // Frames decode fine, but a third of the audio is invented — the measured 31% case.
+    const c = counters();
+    for (let i = 0; i <= T.BAD_WINDOWS; i++) {
+      c.totalSamples += 96_000;
+      c.concealed += 30_000;
+      c.framesDecoded += 50;
+      c.videoBytes += 250_000;
+      await tick(pc, statsRows(c));
+    }
+
+    expect(requests).toEqual(["audio-only"]);
+    expect(result.current.mediaMode).toBe("audio-only");
+  });
+
+  it("honours a preference pinned BEFORE the first connect", async () => {
+    const videoRef = makeVideoRef();
+    const sendOffer = vi.fn();
+    const { result } = renderStream(videoRef);
+
+    await act(async () => {
+      result.current.setVideoPreference("off");
+    });
+    expect(result.current.mediaMode).toBe("audio-only");
+
+    await act(async () => {
+      void result.current.connect([{ urls: "turn:relay.example.com" }], sendOffer);
+    });
+    expect(FakePC.instances[0].transceivers[0]).toEqual({ kind: "video", direction: "inactive" });
+  });
+
+  it("asks to restore the picture once the link has been healthy for the full hold", async () => {
+    const videoRef = makeVideoRef();
+    const sendOffer = vi.fn();
+    const { result, requests } = renderStream(videoRef);
+    const pc = await bringUp(result, sendOffer, 0);
+
+    const c = counters();
+    for (let i = 0; i <= T.BAD_WINDOWS; i++) await tick(pc, wastingStep(c));
+    expect(requests).toEqual(["audio-only"]);
+
+    const audioPc = await bringUp(result, sendOffer, 1);
+    const windows =
+      Math.ceil(Math.max(T.INITIAL_HEALTHY_HOLD_MS, T.MIN_AFTER_DOWNGRADE_MS) / T.SAMPLE_INTERVAL_MS) + 3;
+    const c2 = counters();
+    for (let i = 0; i < windows; i++) await tick(audioPc, audioOnlyStep(c2));
+
+    expect(requests).toEqual(["audio-only", "video"]);
+    expect(result.current.mediaMode).toBe("video");
+
+    // And the rebuilt session asks for the picture again.
+    const videoPc = await bringUp(result, sendOffer, 2);
+    expect(videoPc.transceivers[0]).toEqual({ kind: "video", direction: "recvonly" });
+  });
+
+  it("keeps the picture off for the whole session when the candidate pinned it off", async () => {
+    const videoRef = makeVideoRef();
+    const sendOffer = vi.fn();
+    const { result, requests } = renderStream(videoRef);
+    await bringUp(result, sendOffer, 0);
+
+    await act(async () => {
+      result.current.setVideoPreference("off");
+    });
+    expect(requests).toEqual(["audio-only"]);
+    expect(result.current.mediaMode).toBe("audio-only");
+
+    const audioPc = await bringUp(result, sendOffer, 1);
+    expect(audioPc.transceivers[0]).toEqual({ kind: "video", direction: "inactive" });
+
+    // A long, perfectly healthy stretch must NOT hand the picture back — the human decided.
+    const windows = Math.ceil((T.INITIAL_HEALTHY_HOLD_MS * 3) / T.SAMPLE_INTERVAL_MS);
+    const c = counters();
+    for (let i = 0; i < windows; i++) await tick(audioPc, audioOnlyStep(c));
+
+    expect(requests).toEqual(["audio-only"]); // no restore request
+    expect(result.current.videoPreference).toBe("off");
+  });
+
+  it("keeps the audio-only mode through a media drop, and does not spend the self-heal budget on the switch", async () => {
+    // A policy switch is not a failure: the rebuilt session must still get all three self-heal attempts.
+    // And a link that just proved it can't carry video must not get the picture back via recovery.
+    const videoRef = makeVideoRef();
+    const sendOffer = vi.fn();
+    const { result, requests } = renderStream(videoRef);
+    const pc = await bringUp(result, sendOffer, 0);
+
+    const c = counters();
+    for (let i = 0; i <= T.BAD_WINDOWS; i++) await tick(pc, wastingStep(c));
+    expect(requests).toEqual(["audio-only"]);
+
+    const audioPc = await bringUp(result, sendOffer, 1);
+    expect(FakePC.instances).toHaveLength(2);
+
+    // Now break the media for real and let every rebuilt handshake fail (no server SDP answer).
+    await act(async () => {
+      audioPc.fireIce("failed");
+    });
+    await act(async () => {
+      for (let i = 0; i < 40; i++) {
+        FakePC.instances.forEach((p) => {
+          if (!p.closed && p.localDescription) p.completeGathering();
+        });
+        await vi.advanceTimersByTimeAsync(3000);
+      }
+    });
+
+    // 2 (connect + rebuilt) + MAX_RECOVERY_ATTEMPTS(3) = 5. A consumed budget would stop at 4.
+    expect(FakePC.instances).toHaveLength(5);
+    expect(FakePC.instances[4].transceivers[0]).toEqual({ kind: "video", direction: "inactive" });
   });
 });
