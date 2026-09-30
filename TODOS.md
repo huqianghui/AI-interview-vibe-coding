@@ -23,7 +23,89 @@ mutating transaction and re-run the staleness check before writing.
 **Effort:** S
 **Priority:** P2
 
+### Avatar self-heal retries are not aware of Azure's avatar rate limit
+
+**What:** `useAvatarStream.attemptRecovery` can send three `session.avatar.connect` offers with
+backoffs of 500/1500/3000 ms — about 5 seconds total. Azure refuses a third avatar request inside
+roughly 20 seconds (`"Avatar request was rate-limited. Retry after 43.0s."`, measured 2026-09-30), so a
+link that produces two or three genuine ICE failures in quick succession can have its own recovery
+attempts refused. Once the budget is spent the code stops and shows the orb, and because the getStats
+sampler is torn down with the connection, the weak-network policy can never act either — the avatar is
+stranded picture-less for the rest of the session with no automatic path back (voice keeps working).
+The deliberate mode-switch path IS gated on `VIDEO_SWITCH_MIN_INTERVAL_MS`; the self-heal path is not.
+
+**Why it is not urgent:** the self-heal path predates v0.40.0.0 and in practice a media drop takes one
+attempt. The orb is the designed fallback, so the failure mode is degraded-but-working, not broken.
+
+**Fix shape:** either space the recovery backoffs past the rate-limit window, or — better — when
+recovery is exhausted while in video mode, ask for a downgrade to audio-only so the session is rebuilt
+into a mode the link can actually carry, instead of staying stranded. Needs a decision on how self-heal
+and mode-switch should share one rate-limit budget. Surfaced by the v0.40.0.0 adversarial review.
+
+**Effort:** M
+**Priority:** P2
+
+### A media-mode rebuild resets the WS reconnect budget, which can defer a terminal error
+
+**What:** `restartForMediaMode` calls `connect(..., isReconnect=false)`, which zeroes
+`reconnectAttemptRef` and clears `fatalErrorRef`. That is deliberate — a policy switch must not spend
+the three retries a real drop needs. The inverse was raised by the v0.40.0.0 adversarial review: on a
+sustained bad link, repeated health-driven switches keep handing the WS a fresh budget, so a connection
+that is ALSO failing for unrelated reasons may never reach the terminal "voice unavailable" state.
+
+**Why it is not urgent:** each `connect()` still has to complete or hit its 30 s timeout, so this defers
+the terminal state rather than looping forever; and the hysteresis caps automatic switches at two
+restores per session. It is a UX-honesty question, not a hang.
+
+**Fix shape:** track consecutive failed connects independently of the per-drop retry counter, so the
+terminal error survives a mode switch.
+
+**Effort:** S
+**Priority:** P3
+
+### `useInterviewVoice` has grown to ~1300 lines in one function
+
+**What:** the hook now carries WS lifecycle, mic-rate validation, first-read gating, turn state and
+the media-mode session rebuild in a single function body with 19 inlined callbacks. The sibling change
+in v0.40.0.0 pulled the media *policy* out into `avatarHealth.ts`, but the voice hook itself kept
+accreting. Raised by the maintainability review during v0.40.0.0 and deliberately left out of that PR:
+splitting a 1300-line hook is its own change with its own regression risk, not a rider on a feature.
+
+**Fix shape:** extract cohesive sub-hooks (the mic-rate guard; `restartForMediaMode` plus its
+WS-teardown ordering) the way `avatarHealth.ts` was extracted, one at a time, each with its tests.
+
+**Effort:** M
+**Priority:** P3
+
+### `CONCEAL_GOOD` (the restore threshold) is still unmeasured on a real link
+
+**What:** 5.4.1's run only proved when the picture is given UP. `CONCEAL_GOOD = 0.03` governs when it
+comes BACK and has never been exercised against real Azure, because that run never let the link recover.
+
+**Why it is not urgent:** it only affects how quickly the picture returns, never whether the voice
+survives. Worst case it is too strict (picture stays off longer than needed) or too loose (one extra
+~5 s rebuild, capped at two attempts per session by `MAX_RESTORE_ATTEMPTS`).
+
+**How to measure:** start `avatar-auto-downgrade-live` under shaping, and mid-run
+`sudo frontend/e2e/scripts/netshape.sh off`; then wait out the 60 s cooldown plus the 45 s healthy hold
+and assert `data-media-mode` returns to `video`.
+
+**Effort:** S
+**Priority:** P3
+
 ## Completed
+### Weak-network automatic downgrade verified end-to-end on a throttled link — v0.40.0.0
+
+The policy's live trigger was the one seam unit tests could not cover. Verified 2026-09-30 under
+OS-level shaping (3% loss / 800-400 kbps) via `frontend/e2e/avatar-auto-downgrade-live.spec.ts`: with no
+interaction the session degraded in 41 s, logging `conceal=35.0% decoding=false rtt=933ms`, and the
+rebuilt session carried zero video while audio kept flowing. Both triggers fired together, so the
+threshold-free one stands on its own; 35% concealment independently reproduces the 31% the original
+probe measured by another route.
+
+**Priority:** P1
+**Completed:** v0.40.0.0 (2026-09-30) — see `docs/avatar-weaknet-probe.md` §5.4.1.
+
 ### Automatic voice reconnect bypasses `cleanup()` — speak/turn refs survive a WS drop — fixed v0.39.3.1
 
 `useInterviewVoice.ts`: the unexpected-`onclose` reconnect branch resets only `avatarStartedRef` /

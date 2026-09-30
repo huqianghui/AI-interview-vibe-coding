@@ -75,6 +75,17 @@ living specification is [`../../SPEC.md`](../../SPEC.md) at the repo root — st
   source binding — all into the gitignored DB, with no client content in any committed file.
   Approved via plan mode; shipped v0.31.0.0.
 
+- [`plan-weaknet-media-resilience-20260930.md`](plan-weaknet-media-resilience-20260930.md) — weak-network
+  media resilience: on a lossy link the digital human's video and the interviewer's VOICE share one RTP
+  transport, so the picture starves the voice (measured: 31% of speech synthesised by packet-loss
+  concealment at 3% loss, candidate cannot hear the question). Plan: sample `getStats()` and **give up
+  the picture to keep the voice**, with hysteresis, a manual override, and a 24→16 kHz mic-uplink cut;
+  explicitly rejects bitrate tuning (Azure already adapts and ignores mid-session changes) and
+  `freezeCount` as a health metric (it reads *better* when 1080p decodes nothing). Approved via plan
+  mode; shipped v0.40.0.0. Two Azure constraints found during implementation changed the transition
+  mechanism — see the status banner in the doc, and
+  [`../avatar-weaknet-probe.md`](../avatar-weaknet-probe.md) §5 for what actually shipped.
+
 - [`spec-external-mcp-interviewer-integration.md`](spec-external-mcp-interviewer-integration.md) —
   **analysis / NOT approved, blocked on client answers.** A client-provided MCP result sample
   (`final_session_state_json` / `public_response_json` / `speech_word_count`) turns out to be a

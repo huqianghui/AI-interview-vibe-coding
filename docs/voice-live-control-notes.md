@@ -10,6 +10,8 @@
 > 3. 既要精确控制读题，又要保留一部分 LLM 生成（judge、Playground），代码和 prompt 怎么分工？
 >    附带一个常见混淆：prompt 管的"语气"只是**文字**；语速、表现力、发音是**语音层**，走
 >    `session.voice`，不是 SSML（§1.5）。
+> 4. （2026-09-30 补）"听"的那一层：输入采样率为什么默认 24 kHz 而不是 Azure 语音服务的 16 kHz，
+>    能不能降、降了影响什么（§4）；以及 avatar 协商的两条硬约束：一次性协商、创建速率限制（§4.6）。
 >
 > 代码指向：`frontend/src/hooks/useInterviewVoice.ts`（前端协议层）、
 > `backend/app/services/voice_live_proxy.py`（会话构建 + 中继）、`backend/app/interview/judge.py`。
@@ -22,7 +24,7 @@ Voice Live 一个会话 = 一条 WebSocket，上面跑着五件事：
 
 | 环节 | 谁在做 | 我们能控制的开关 |
 |---|---|---|
-| 听（VAD + STT） | Azure `turn_detection` + `input_audio_transcription` | VAD 类型、`create_response`、EOU 检测 |
+| 听（VAD + STT） | Azure `turn_detection` + `input_audio_transcription` | VAD 类型、`create_response`、EOU 检测、`input_audio_sampling_rate`（§4） |
 | 想（决定说什么） | 会话绑定的 **模型**（`model=` 或 Foundry agent） | `response.create` 发不发、带什么 |
 | 说（TTS） | Azure 语音（`voice`） | 文本从哪来 |
 | 脸（avatar） | Azure avatar 管线（WebRTC 视频） | `avatar` 配置 |
@@ -265,6 +267,121 @@ judged 模式是"保留部分 LLM"的典型：LLM 在**后端**（gpt-5-mini cha
 4. 怎么**证明**它说对了？live spec 抓 WS 帧断言发出的文本 == 期望，转写 == 期望。
 5. 要调的是**字**还是**声**？字 ⇒ prompt / 后端文本；声（语速、表现力、发音）⇒ `session.voice`
    参数，并断言 `session.updated` 回显了你设的值——管理端的旋钮不等于生效。
+
+---
+
+## 4. 听的那一层：输入采样率为什么默认 24 kHz，能不能降到 16 kHz
+
+> 2026-09-30 补记。起因是弱网实测（`docs/avatar-weaknet-probe.md`）发现麦克风上行实测 540 到 680 kbps，
+> 在窄上行的办公网里会把自己的信令挤死。查"能不能降采样率"时撞上一个看起来矛盾的事实：
+> **Azure 语音服务的默认采样率是 16 kHz，而 Voice Live 的输入默认是 24 kHz。**
+
+### 4.1 这个数值是什么意思
+
+采样率 = 每秒对麦克风波形测量多少次。24 kHz 就是每秒 24000 次。它的意义由奈奎斯特定理决定：
+**能记录的最高声音频率 = 采样率的一半。**
+
+| 采样率 | 可记录最高频率 | 典型场景 |
+|---|---|---|
+| 8 kHz | 4 kHz | 传统电话，听起来发闷 |
+| 16 kHz | 8 kHz | 语音识别行业标准；Azure 语音转文字 / 合成的默认值 |
+| 24 kHz | 12 kHz | 我们现在的上行；也是 Azure 合成语音的输出率 |
+| 44.1 kHz | 22 kHz | CD 音乐 |
+
+24 降到 16，扔掉的只有 8 到 12 kHz 这一段。人说话的元音和音高在 1 kHz 以下，区分 s / f / sh / th
+这些辅音的关键信息在 8 kHz 以内；8 kHz 以上基本只剩"空气感"和亮度，对音乐有用，对认字没用。
+
+### 4.2 为什么 Voice Live 默认 24 kHz —— 这是协议继承，不是语音工程选择
+
+`pcm16` 这个格式在 Realtime 协议里**定义上就是 24 kHz**：
+
+- Azure .NET SDK：`InputAudioFormat.Pcm16` = "16-bit PCM audio format at **default sampling rate (24kHz)**"，
+  `OutputAudioFormat.Pcm16` 同样。
+- OpenAI 自己的文档把 `{"type":"audio/pcm","rate":24000}` 标为 default。
+- GPT-Live 文档：音频输入和输出都是 24000 Hz 的无头单声道 PCM。
+
+而 Voice Live 文档开篇就写"除特别说明外，Voice Live 使用与 Azure OpenAI Realtime API 相同的事件"。
+它是这套协议的超集，默认值只能跟着协议走。会话回显里 `input_audio_format` 和 `output_audio_format`
+是同一个 `pcm16` 枚举，把输入单独改成 16 kHz 会破坏对称，也会让从 Realtime 迁过来的客户端全部失效。
+
+**对原生多模态模型，24 kHz 是对的。** Realtime 这一支（`gpt-realtime`、`gpt-4o-realtime`、`gpt-live`）
+音频直接作为 token 进模型、直接作为 token 出模型，中间没有 STT 也没有 TTS：模型本身在 24 kHz 上训练；
+输出方向确实需要 24 kHz（合成语音的自然度靠 12 kHz 以内的高频，16 kHz 输出明显发闷，微软技术答复里
+有原话）；一套格式服务两个方向最简单。
+
+### 4.3 但我们这套配置不属于那一支
+
+| | 原生多模态（`gpt-realtime`） | 级联（我们，`gpt-5-mini`） |
+|---|---|---|
+| 输入路径 | 音频直接进模型 | 音频先过 **Azure 语音转文字** |
+| 输出路径 | 模型直接生成音频 | 文本再过 Azure 语音合成 |
+| 输入的原生采样率 | 24 kHz | **16 kHz** |
+
+Voice Live 官方对 `gpt-5-mini` 的描述是 "audio input through Azure speech to text"，how-to 里也明确
+"使用非多模态模型时 Azure 语音转文字自动生效"。所以我们的 24 kHz 上行走到 Azure 就被降到 16 kHz
+送进识别器 —— **多传的那一段 Azure 自己丢掉了。**
+
+反过来看，`input_audio_sampling_rate` 这个参数**存在**且**只接受 16000 和 24000**，本身就说明 Azure
+清楚级联用户不需要 24 kHz，给了退出开关。默认值照顾协议兼容，开关留给知道自己在做什么的人。
+
+### 4.4 降到 16 kHz 省多少、影响什么
+
+| 采样率 | 原始 | 加 base64 | 实测含 JSON 封装 |
+|---|---|---|---|
+| 24 kHz | 384 kbps | 512 kbps | 540 到 680 kbps |
+| 16 kHz | 256 kbps | 341 kbps | 约 360 到 450 kbps |
+
+**不受影响的**：转写准确率（Azure 识别器本来就是 16 kHz 管线）；VAD 与断句；服务端降噪和回声消除
+（16 kHz 是这些模块的标准工作率）；面试官的声音（下行另一条路，数字人模式下是 WebRTC 的 Opus 48 kHz）。
+
+**本仓库没有任何其它功能消费候选人的原始音频**：打分走转写文本（`scoring_engine`），"我答完了"这类
+口令是字符串匹配（`verbal_cue`），音频不落盘，没有发音评测，没有语调或情绪分析。所以唯一需要关心的
+质量指标就是转写准确率。
+
+顺带一个小好处：浏览器麦克风原生多为 48 kHz，直接重采样到 16 kHz 比先到 24 kHz 再由 Azure 降到
+16 kHz 少一次重采样。
+
+### 4.5 两边必须同时改（已实现 v0.40.0.0）
+
+- 前端麦克风侧：`frontend/src/hooks/useVoiceAudio.ts` 导出的 `MIC_SAMPLE_RATE`（`getUserMedia` 约束和
+  采集用 `AudioContext` 都用它）。真正起作用的是 `AudioContext` 那个 —— `getUserMedia` 的采样率约束
+  是建议性的，`createMediaStreamSource` 会把音频重采样进 context 的速率。
+- 后端会话侧：`Settings.voice_live_input_sampling_rate`（默认 16000）进入 `build_avatar_session` 的
+  **顶层** `input_audio_sampling_rate`。注意 `get_settings()` 原来在 `if has_avatar:` 块内，这个字段对
+  无 avatar 的 persona 也适用，所以调用被上提了（有回归测试守着）。
+- **只改一边会让 Azure 按错误速率解释字节流**，声音变调变速，转写直接废掉，而且没有任何报错。
+  因此后端把生效速率放进 `proxy.connected`（从**已构建的 session 读回**，不重新推导），前端与自己的
+  `MIC_SAMPLE_RATE` 比对，不一致就 `console.error`。漂移在第一次连接就会暴露。
+- **播放侧的 `PLAYBACK_SAMPLE_RATE = 24000` 不能动**，那是 Azure 下发 PCM 的速率，与麦克风无关。
+- 这个参数和 avatar 码率一样，**会话中途不能改**，官方文档明确说明。
+- 探针脚本 `backend/scripts/voice_turn_latency.py` 自建会话，已同步声明 16000；它的 WAV 断言也跟着
+  改成 16 kHz，所以旧的 24 kHz 素材会被明确拒绝而不是静默出错。
+
+**前提提醒**：如果将来把语音模型换成 `gpt-realtime` 这类原生音频模型，本节结论要重新评估 ——
+那时输入降到 16 kHz 可能真的掉准确率。
+
+**实测验证**：`frontend/e2e/scripts/mic-rate-ab.sh` + `frontend/e2e/mic-rate-transcript-ab.spec.ts`
+用 macOS `say` 合成一句富含 s/sh/f/th 的句子（16 kHz 丢掉的正是这些辅音所在频段之上的部分），
+经假麦克风送进真 Azure，分别在 16 kHz 与 24 kHz 会话下各跑一遍，比对与参考文本的词错误率。
+**结果：16 kHz 与 24 kHz 的词错误率都是 0.0%，整句逐字一致** —— 降采样不付出识别代价。
+完整数据见 `docs/avatar-weaknet-probe.md` §5.4。
+
+### 4.6 顺带查实的两条 avatar 硬约束（实现期间踩到，2026-09-30）
+
+这两条不属于采样率，但同属"Voice Live 到底能控制什么"，放在这里免得再踩：
+
+1. **`session.avatar.connect` 每个会话只接受一次，且没有断开/重协商事件。** 客户端事件全集是
+   `session.update`、`session.avatar.connect`、`input_audio_buffer.*`、`conversation.item.*`、
+   `response.create/cancel` —— 没有任何 `session.avatar.disconnect`。在连接健康时再发一次 offer，
+   Azure 回 `error: "WebRTC connection is in connected state"`。
+   **推论**：想改 avatar 的任何协商参数（画面开关、编码方向），必须**重建整条 Voice Live 会话**。
+   只有在旧连接已经坏掉（ICE failed/disconnected）时，重发 offer 才会被接受 —— 这正是现有媒体层
+   自愈能工作的原因。
+2. **Azure 对 avatar 会话创建有速率限制。** 约 20 秒内第三次请求被拒：
+   `error: "Avatar request was rate-limited. Retry after 43.0s."`
+   **推论**：任何"自动切换画面"的策略都必须自带冷却，否则一次抖动就会把候选人的语音会话打死
+   （被拒的请求会走到重连耗尽，页面最终显示"语音不可用"并切文字）。当前实现的做法是不对称的：
+   **关画面从不延迟**（它是救场的动作），**开画面有 60 秒冷却**，且手动按钮在冷却期内禁用。
 
 ---
 
