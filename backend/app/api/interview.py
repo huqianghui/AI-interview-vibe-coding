@@ -345,6 +345,25 @@ async def _owned_interview(
     return session
 
 
+async def _turn_version_changed(db: AsyncSession, session: InterviewSession) -> bool:
+    """Whether `session`'s row has moved (an advancing/completing ``/answer``, or an abandoning
+    ``/restart``) since we loaded it (TODOS.md, "mutation routes race on a stale session
+    snapshot"). ``/judge`` and ``/judge/apply`` already re-check the question id and follow-up
+    count against fresh queries taken close to the write, but neither re-derives
+    ``current_question_index``/``status`` itself, and ``/judge`` in particular holds a slow LLM
+    call open across the gap. ``turn_version`` is the one column both bank-mutating paths
+    (``answer_finalized``, ``abandon_interview``) unconditionally bump on every committed change,
+    so a single comparison here catches every way the session could have moved on without
+    duplicating each route's own staleness logic.
+    """
+    current = (
+        await db.execute(
+            select(InterviewSession.turn_version).where(InterviewSession.id == session.id)
+        )
+    ).scalar_one()
+    return current != session.turn_version
+
+
 @router.get("/questions", response_model=QuestionListOut)
 async def list_questions(
     candidate: AnonymousCandidateSession = Depends(get_anonymous_session),
@@ -515,6 +534,13 @@ async def judge(
             max_follow_ups=current.max_follow_ups,
         )
         result = await judge_mod.run_judge(inp, judge_mod.get_judge_adapter())
+        # The LLM call above is the slow part of this route; re-check freshness now, right before
+        # writing, so a candidate who submitted (or restarted) while it was in flight gets a
+        # silent "wait" instead of a judge_events row + budget slot spent on a question they
+        # already left. No 409: this call is invisible background pacing, not something the
+        # candidate did.
+        if await _turn_version_changed(db, session):
+            return JudgeOut(verdict="wait")
         event = JudgeEvent(
             interview_session_id=session.id,
             question_id=current.id,
@@ -592,6 +618,12 @@ async def judge_apply(
     max_calls = persona.judge_max_calls_per_question if persona else 0
     applied_used, _llm = await _judge_usage(db, session.id, current.id)
     if applied_used >= max_calls:
+        return JudgeOut(verdict="wait", event_id=event.id)
+    # Same freshness re-check as /judge, at the same point relative to the write: the checks
+    # above already re-query question id and follow-up count, but not session-level status/
+    # turn_version, so a /restart that landed between them and here would otherwise still get
+    # delivered as a nudge for an interview the candidate no longer has open.
+    if await _turn_version_changed(db, session):
         return JudgeOut(verdict="wait", event_id=event.id)
     event.applied = True
     await db.commit()
