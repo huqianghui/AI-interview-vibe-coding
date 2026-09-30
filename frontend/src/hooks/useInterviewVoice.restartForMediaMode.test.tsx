@@ -183,4 +183,35 @@ describe("useInterviewVoice restartForMediaMode", () => {
   // feature author's own `useInterviewVoice.test.tsx` ("keeps the candidate's in-progress answer
   // across the rebuild", in the "media-mode session rebuild" describe block) already covers this
   // exact contract, so no duplicate test is added here.
+
+  it("stops handing out fresh retries forever: enough switches without a live session ends in an error", async () => {
+    // A mode rebuild resets the per-drop reconnect budget on purpose. The inverse, raised by the
+    // v0.40.0.0 review: on a link bad enough to force switch after switch, that reset means the page
+    // could retry indefinitely and never tell the candidate the voice is gone. The cross-switch
+    // counter is the backstop. Here NO rebuilt session ever reaches `session.updated`.
+    vi.useFakeTimers();
+    const onError = vi.fn();
+    const { getHook, unmount } = await connectFor({ onError });
+    expect(getHook().connectionState).toBe("connected"); // one live session → counter cleared
+
+    let switchesBeforeError = 0;
+    for (let i = 0; i < 12 && onError.mock.calls.length === 0; i++) {
+      await act(async () => {
+        avatarBridge.onModeSwitchRequest!(i % 2 === 0 ? "audio-only" : "video");
+        // Let the rebuilt connect() open its socket; deliberately never answer with session.updated.
+        for (let k = 0; k < 20; k++) await Promise.resolve();
+      });
+      if (onError.mock.calls.length === 0) switchesBeforeError += 1;
+    }
+
+    expect(onError, "repeated switches on a dead link must eventually surface a terminal error").toHaveBeenCalled();
+    expect((onError.mock.calls[0][0] as Error).message).toMatch(/without a live session/);
+    expect(getHook().connectionState).toBe("error");
+    // And it must not fire so early that an honest flow trips it: a single drop can legitimately
+    // consume 1 + MAX_RECONNECT attempts, and a real switch adds one on top.
+    expect(switchesBeforeError).toBeGreaterThanOrEqual(4);
+
+    unmount();
+  });
+
 });

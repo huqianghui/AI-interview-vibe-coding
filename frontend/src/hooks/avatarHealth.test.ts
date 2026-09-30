@@ -5,7 +5,11 @@
  * future refactor can't quietly undo them:
  *   - "bytes arriving but nothing decodes" must trigger a downgrade WITHOUT relying on any tuned
  *     threshold — that was the measured 1080p failure mode (~1 Mbps in, zero frames out, 30+ s).
- *   - concealment must be measured against samples RECEIVED, so DTX silence is not read as breakage.
+ *   - concealment must exclude the SILENT subset. Measuring against samples received is NOT enough:
+ *     silence-filled samples land in `concealedSamples` AND `totalSamplesReceived`, so the raw ratio
+ *     climbs toward 1.0 whenever the interviewer pauses. This file's original note claimed otherwise
+ *     and the claim was wrong — a live run (2026-09-30) dropped the picture at 58.2% with video
+ *     decoding fine, then could never restore it.
  *   - restoring the picture must be hysteretic: a restore that immediately fails makes the next one
  *     harder, and two failures end the session in audio-only. No strobing.
  */
@@ -28,6 +32,8 @@ function statsReport(rows: Record<string, unknown>[]): Map<string, Record<string
 
 function audioVideoReport(opts: {
   concealed: number;
+  /** The silent subset of `concealed`. Defaults to 0 = every concealed sample was audible damage. */
+  silentConcealed?: number;
   totalSamples: number;
   framesDecoded: number;
   videoBytes: number;
@@ -39,6 +45,7 @@ function audioVideoReport(opts: {
       type: "inbound-rtp",
       kind: "audio",
       concealedSamples: opts.concealed,
+      silentConcealedSamples: opts.silentConcealed ?? 0,
       totalSamplesReceived: opts.totalSamples,
     },
     {
@@ -61,8 +68,12 @@ function audioVideoReport(opts: {
 
 const HEALTHY: MediaHealth = {
   concealmentRatio: 0.005,
+  // Diagnostics-only field; `reduceHealth` must never read it, which the "silence" test below asserts
+  // by setting it high while the audible ratio stays low.
+  rawConcealmentRatio: 0.005,
   videoDecoding: true,
   videoBytesFlowing: true,
+  audioFlowing: true,
   rttMs: 120,
 };
 /** The measured 1080p failure: ~1 Mbps of video arriving, not one frame decoded. */
@@ -180,8 +191,27 @@ describe("reduceHealth downgrade", () => {
     expect(state.mode).toBe("audio-only");
   });
 
-  it("drops the picture when the interviewer's voice is being concealed away", () => {
-    const { state, actions } = feed(initialDecisionState(), VOICE_DAMAGED, T.BAD_WINDOWS, 0);
+  it("does NOT drop the picture on concealment alone — the metric cannot separate a bad link from a good one", () => {
+    // This test asserted the opposite until 2026-09-30, when the calibration run measured what the
+    // audible ratio actually reads. At the moment the policy decided to downgrade under 3% packet loss
+    // it saw 16.9%; minutes later on the SAME link with shaping removed it saw 17.0%, 18.0% and 19.3%.
+    // A signal whose damaged range sits inside its healthy range cannot justify taking the candidate's
+    // picture away, so `USE_VOICE_DAMAGE_TRIGGER` is false and this is now the expected behaviour.
+    // Re-enabling it is a measurement question, not a tuning one — see TODOS.md.
+    const { state, actions } = feed(initialDecisionState(), VOICE_DAMAGED, T.BAD_WINDOWS + 2, 0);
+    expect(actions.filter(Boolean), "no downgrade from concealment alone").toEqual([]);
+    expect(state.mode).toBe("video");
+  });
+
+  it("still drops the picture when the video is decoding nothing, whatever the concealment says", () => {
+    // The trigger that survived measurement: threshold-free, and the one the original 1080p failure
+    // actually exhibited. Concealment is pinned high here to prove the decision does not need it.
+    const { state, actions } = feed(
+      initialDecisionState(),
+      { ...WASTING, concealmentRatio: 0.9, rawConcealmentRatio: 0.9 },
+      T.BAD_WINDOWS,
+      0,
+    );
     expect(actions).toEqual(["downgrade"]);
     expect(state.mode).toBe("audio-only");
   });
@@ -234,17 +264,30 @@ describe("reduceHealth restore", () => {
     expect(state.mode).toBe("video");
   });
 
-  it("restarts the healthy streak when the link wobbles mid-hold", () => {
+  it("restarts the healthy streak when the AUDIO STOPS mid-hold", () => {
+    // The wobble that resets the clock is now an audio outage, not a concealment spike. A spike no
+    // longer counts, because the measured healthy baseline is 8-19% audible concealment — treating that
+    // as a wobble meant the streak reset on almost every window and the hold never completed.
     const down = downgraded();
     const half = Math.floor(T.INITIAL_HEALTHY_HOLD_MS / T.SAMPLE_INTERVAL_MS / 2);
     const first = feed(down.state, HEALTHY, half, down.now);
-    // One damaged window resets the clock…
-    const wobble = reduceHealth(first.state, VOICE_DAMAGED, first.now + T.SAMPLE_INTERVAL_MS);
-    expect(wobble.state.healthySince).toBeNull();
+    const silentStream: MediaHealth = { ...HEALTHY, audioFlowing: false };
+    const wobble = reduceHealth(first.state, silentStream, first.now + T.SAMPLE_INTERVAL_MS);
+    expect(wobble.state.healthySince, "no audio arriving means the stream is not proven alive").toBeNull();
     // …so the remaining half of the hold is no longer enough.
     const second = feed(wobble.state, HEALTHY, half, first.now + T.SAMPLE_INTERVAL_MS);
     expect(second.actions).toEqual([]);
     expect(second.state.mode).toBe("audio-only");
+  });
+
+  it("a concealment spike no longer resets the healthy streak", () => {
+    // The direct regression for the bug this change fixes: with a 13% median baseline on a clean link,
+    // any concealment-based reset made the 45 s hold unreachable in practice.
+    const down = downgraded();
+    const half = Math.floor(T.INITIAL_HEALTHY_HOLD_MS / T.SAMPLE_INTERVAL_MS / 2);
+    const first = feed(down.state, HEALTHY, half, down.now);
+    const spike = reduceHealth(first.state, VOICE_DAMAGED, first.now + T.SAMPLE_INTERVAL_MS);
+    expect(spike.state.healthySince, "the streak survives a spike").toBe(first.state.healthySince);
   });
 
   it("doubles the required hold after a restore that immediately fails, then gives up for good", () => {
@@ -331,3 +374,90 @@ describe("isVideoStalled", () => {
     expect(isVideoStalled({ ...two.state, mode: "audio-only" })).toBe(false);
   });
 });
+
+describe("silent concealment is not damage", () => {
+  // The bug this encodes cost a full live calibration run. `silentConcealedSamples` is a documented
+  // SUBSET of `concealedSamples`: during a pause the sender stops transmitting and the receiver fills
+  // the gap with silence or comfort noise, counted in BOTH `concealedSamples` and
+  // `totalSamplesReceived`. The raw ratio therefore approaches 1.0 whenever the interviewer is quiet —
+  // which is most of an interview. Measured 2026-09-30: the picture was dropped at
+  // `conceal=58.2% decoding=true` (video decoding perfectly) and could never be restored, because a
+  // silent interviewer cannot produce 45 s of unbroken sub-3% readings.
+  it("reads an entirely silent stretch as undamaged, and reports the raw ratio separately", () => {
+    const prev = readHealth(null, audioVideoReport({ concealed: 0, totalSamples: 0, framesDecoded: 0, videoBytes: 0 }), 0).snapshot;
+    // 48000 samples arrived in the window; ALL of them were concealed, and ALL of that was silence.
+    const { health } = readHealth(
+      prev,
+      audioVideoReport({ concealed: 48_000, silentConcealed: 48_000, totalSamples: 48_000, framesDecoded: 30, videoBytes: 50_000 }),
+      2_000,
+    );
+    expect(health!.concealmentRatio, "nobody was talking — that is not a damaged voice").toBe(0);
+    expect(health!.rawConcealmentRatio, "the old metric is kept visible for diagnostics").toBe(1);
+  });
+
+  it("still reports real damage when the concealment is audible", () => {
+    const prev = readHealth(null, audioVideoReport({ concealed: 0, totalSamples: 0, framesDecoded: 0, videoBytes: 0 }), 0).snapshot;
+    // A third of the window concealed, and none of it silent: this is the voice being invented.
+    const { health } = readHealth(
+      prev,
+      audioVideoReport({ concealed: 16_000, silentConcealed: 0, totalSamples: 48_000, framesDecoded: 30, videoBytes: 50_000 }),
+      2_000,
+    );
+    expect(health!.concealmentRatio).toBeCloseTo(1 / 3, 3);
+  });
+
+  it("separates the audible part from a mixed window", () => {
+    const prev = readHealth(null, audioVideoReport({ concealed: 0, totalSamples: 0, framesDecoded: 0, videoBytes: 0 }), 0).snapshot;
+    const { health } = readHealth(
+      prev,
+      audioVideoReport({ concealed: 24_000, silentConcealed: 20_000, totalSamples: 48_000, framesDecoded: 30, videoBytes: 50_000 }),
+      2_000,
+    );
+    expect(health!.concealmentRatio, "only the 4000 audible samples count").toBeCloseTo(4_000 / 48_000, 5);
+    expect(health!.rawConcealmentRatio).toBeCloseTo(0.5, 5);
+  });
+
+  it("a silent pause does not drop the picture while video decodes normally", () => {
+    // The exact shape of the 2026-09-30 false downgrade: quiet interviewer, healthy video.
+    let state: DecisionState = initialDecisionState();
+    const silentButFine: MediaHealth = {
+      concealmentRatio: 0,
+      rawConcealmentRatio: 0.582, // what the log printed on the run that misfired
+      videoDecoding: true,
+      videoBytesFlowing: true,
+      audioFlowing: true,
+      rttMs: 532,
+    };
+    for (let i = 1; i <= T.BAD_WINDOWS + 3; i++) {
+      const out = reduceHealth(state, silentButFine, i * T.SAMPLE_INTERVAL_MS);
+      state = out.state;
+      expect(out.action, "a pause is not a reason to take the picture away").toBeNull();
+    }
+    expect(state.mode).toBe("video");
+  });
+
+  it("lets a quiet-but-recovered link hand the picture back", () => {
+    // The other half of the same bug: with silence counted as damage the healthy streak could never
+    // accumulate, so the picture never returned. It must now.
+    let state: DecisionState = { ...initialDecisionState(), mode: "audio-only", lastDowngradeAt: 0 };
+    const quiet: MediaHealth = {
+      concealmentRatio: 0,
+      rawConcealmentRatio: 0.9, // heavily silent, which used to read as a destroyed link
+      videoDecoding: false,
+      videoBytesFlowing: false,
+      audioFlowing: true,
+      rttMs: 80,
+    };
+    let restored = false;
+    for (let t = T.SAMPLE_INTERVAL_MS; t <= T.MIN_AFTER_DOWNGRADE_MS + T.INITIAL_HEALTHY_HOLD_MS + 10_000; t += T.SAMPLE_INTERVAL_MS) {
+      const out = reduceHealth(state, quiet, t);
+      state = out.state;
+      if (out.action === "restore") {
+        restored = true;
+        break;
+      }
+    }
+    expect(restored, "the picture must come back once the link is quiet and the cooldown has passed").toBe(true);
+  });
+});
+

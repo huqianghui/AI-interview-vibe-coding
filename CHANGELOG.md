@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.40.1.0 (2026-09-30)
+
+### Fixed
+- **The picture now comes back when the network recovers.** v0.40.0.0 could give up the digital
+  human's picture to protect the interviewer's voice, but it could never hand the picture back — a
+  candidate whose link recovered mid-interview stayed in voice-only for the rest of the session.
+  Verified end to end on real Azure under packet shaping: the picture drops by itself after 16
+  seconds and returns 64 seconds after the link clears, into a session that genuinely decodes video
+  again.
+- **Three separate faults were each enough on their own to keep the picture off**, and all three are
+  fixed. A pause in the interviewer's speech was being read as a destroyed voice, because the
+  silence the receiver inserts during a pause was counted as damage; on a link that then looked
+  permanently broken, the picture could never qualify to return. A request to restore that Azure
+  refused for being a second too early was recorded as though it had happened, after which nothing
+  ever asked again. And a candidate who turned the picture back on during the cooldown had that
+  request silently dropped for the rest of the session.
+- **A weak link no longer strands the digital human with no way back.** When the media connection
+  failed repeatedly the app showed the fallback orb and stopped trying, which also killed the
+  monitor that would have adapted — so the session stayed picture-less even after the network
+  recovered. It now rebuilds into voice-only, which is the mode a link that just failed three video
+  handshakes can actually carry.
+- **Automatic retries no longer waste an attempt Azure was always going to refuse.** Azure limits how
+  often an avatar session can be created; the retry timings put all three attempts inside that limit,
+  so the third was spent on a request that could not succeed. All paths that create an avatar session
+  now share one record of what has been sent.
+- **A voice failure can no longer hide behind a picture change.** Switching between picture and
+  voice-only deliberately restores the retry budget, which meant a connection failing for unrelated
+  reasons could keep retrying without ever telling the candidate the voice was gone.
+
+### Changed
+- **The picture is no longer dropped because of audio quality alone.** Measurement showed that signal
+  cannot tell a lossy link from a healthy one: the same reading that triggered a downgrade under 3%
+  packet loss also appeared repeatedly on the same link with the shaping removed, and its normal
+  range depends on which digital human is streaming. The picture is still dropped — reliably — when
+  video is arriving but no frames are being decoded, which needs no threshold and is what every live
+  verification has actually exercised.
+- Earlier published figures for how much of the interviewer's speech was synthesised are corrected in
+  `docs/avatar-weaknet-probe.md`: they included the silence a receiver inserts during pauses. The
+  finding they supported stands on independent evidence (zero frames decoded while consuming about
+  1 Mbps, audio packet loss of 505 against 66, round-trip time of 876 ms against 534 ms).
+
+### Added
+- A one-command verification for the recovery path, `frontend/e2e/scripts/verify-restore.sh`. It
+  shapes the network, waits for the app to give up the picture on its own, removes the shaping at
+  that exact moment, and measures the return — writing a full per-sample report to
+  `frontend/e2e/output/restore-latest.json`. Opt-in, needs sudo, never runs in CI.
+
 ## 0.40.0.0 (2026-09-30)
 
 ### Added
