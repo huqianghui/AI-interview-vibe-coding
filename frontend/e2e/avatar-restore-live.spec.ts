@@ -90,7 +90,8 @@ async function sampleStats(page: import("@playwright/test").Page): Promise<Omit<
 
 test.describe("Weak-network picture RESTORE (real Azure link, shaping removed mid-run)", () => {
   test.skip(!LIVE, "opt-in: set LIVE_VOICE=1");
-  test.setTimeout(DOWNGRADE_BUDGET_MS + RESTORE_BUDGET_MS + 120_000);
+  // +20 s for the post-restore decode observation window below, on top of the two wait budgets.
+  test.setTimeout(DOWNGRADE_BUDGET_MS + RESTORE_BUDGET_MS + 140_000);
 
   test("gives the picture back once the link recovers, and says whether CONCEAL_GOOD earned it", async ({ page }) => {
     const decisions: string[] = [];
@@ -165,6 +166,13 @@ test.describe("Weak-network picture RESTORE (real Azure link, shaping removed mi
     }
     const restoredAt = Date.now();
 
+    // Keep sampling PAST the mode flip. `data-media-mode` turns "video" the moment the policy's switch
+    // is accepted, but the rebuilt session still has to negotiate and decode — roughly five seconds.
+    // Stopping at the flip meant the "the restored session actually decodes frames" assertion below was
+    // judging samples taken before any frame could exist, which would fail a run that in fact worked.
+    if (restored) {
+      await page.waitForTimeout(20_000);
+    }
     sampling = false;
     await sampler;
 
@@ -214,7 +222,9 @@ test.describe("Weak-network picture RESTORE (real Azure link, shaping removed mi
     const videoAfter = samples.filter((s) => s.mode === "video" && s.t > (downgradedAt - started));
     expect(
       videoAfter.some((s) => s.framesDecoded > 0),
-      "the restored session actually decodes frames (not just a video m-line)",
+      `the restored session actually decodes frames (not just a video m-line). ` +
+        `${videoAfter.length} post-restore samples were taken; if that number is tiny the observation ` +
+        `window closed too early rather than the picture failing to come back.`,
     ).toBe(true);
   });
 });
