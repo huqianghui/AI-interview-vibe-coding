@@ -315,3 +315,14 @@ def test_avatar_session_voice_clamps_out_of_range_knobs_instead_of_breaking_the_
         )["voice"]
     )
     assert voice["temperature"] == 0.0 and voice["rate"] == "0.5"
+
+
+def test_avatar_session_voice_carries_the_knobs_in_playground_mode_too():
+    # The editor Playground pins a persona on the same builder; its speech knobs must apply there
+    # exactly as in the candidate interview (coverage audit: parity previously unasserted).
+    voice = _as_dict(
+        build_avatar_session(
+            FakePersona(voice_temperature=0.2, playback_speed=1.3), locale="en-US", playground=True
+        )["voice"]
+    )
+    assert voice["temperature"] == 0.2 and voice["rate"] == "1.3"
