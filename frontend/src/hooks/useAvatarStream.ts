@@ -345,13 +345,15 @@ export function useAvatarStream(
 
             if (action === "downgrade") {
               console.warn(
-                `[avatar-stream] media health poor (conceal=${(health.concealmentRatio * 100).toFixed(1)}% ` +
+                `[avatar-stream] media health poor (audible conceal=${(health.concealmentRatio * 100).toFixed(1)}%, ` +
+                  `raw=${(health.rawConcealmentRatio * 100).toFixed(1)}% incl. silence, ` +
                   `decoding=${health.videoDecoding} rtt=${health.rttMs ?? "?"}ms) → dropping the picture to save the voice`,
               );
               switchMediaModeRef.current?.("audio-only", "health-downgrade");
             } else if (action === "restore") {
               console.info(
-                `[avatar-stream] link healthy again (conceal=${(health.concealmentRatio * 100).toFixed(1)}%) → restoring the picture`,
+                `[avatar-stream] link healthy again (audible conceal=${(health.concealmentRatio * 100).toFixed(1)}%, ` +
+                  `raw=${(health.rawConcealmentRatio * 100).toFixed(1)}% incl. silence) → restoring the picture`,
               );
               switchMediaModeRef.current?.("video", "health-restore");
             }

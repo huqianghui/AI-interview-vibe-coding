@@ -69,14 +69,23 @@ export const HEALTH_THRESHOLDS = {
 export interface HealthSnapshot {
   at: number;
   concealedSamples: number;
+  /** The SILENT subset of `concealedSamples` (comfort noise / silence fill). Tracked separately
+   * because it is the difference between "the voice is being destroyed" and "nobody is talking" —
+   * see `readHealth`. */
+  silentConcealedSamples: number;
   totalSamplesReceived: number;
   framesDecoded: number;
   videoBytesReceived: number;
 }
 
 export interface MediaHealth {
-  /** Fraction of the interviewer's audio that was invented by packet-loss concealment, 0..1. */
+  /** Fraction of the interviewer's audio that was invented by AUDIBLE packet-loss concealment, 0..1.
+   * Silent concealment is excluded — see `readHealth` for why that distinction is the whole ballgame. */
   concealmentRatio: number;
+  /** The raw `concealedSamples / totalSamplesReceived`, silence included. Diagnostics only: it is what
+   * the ratio above used to be, and keeping it visible in the logs is what makes an old measurement
+   * comparable with a new one. Never make a decision on this. */
+  rawConcealmentRatio: number;
   /** The decoder produced at least one new frame during this window. */
   videoDecoding: boolean;
   /** Video RTP bytes are still arriving (whether or not anything decodes). */
@@ -122,6 +131,7 @@ export function readHealth(
   const snapshot: HealthSnapshot = {
     at: now,
     concealedSamples: num(audio?.concealedSamples),
+    silentConcealedSamples: num(audio?.silentConcealedSamples),
     totalSamplesReceived: num(audio?.totalSamplesReceived),
     framesDecoded: num(video?.framesDecoded),
     videoBytesReceived: num(video?.bytesReceived),
@@ -131,14 +141,35 @@ export function readHealth(
 
   const dSamples = snapshot.totalSamplesReceived - prev.totalSamplesReceived;
   const dConcealed = snapshot.concealedSamples - prev.concealedSamples;
-  // No samples arrived at all: the stream is either silent-with-DTX or dead. Concealment is
-  // undefined here, so report 0 and let the video-side signal (or ICE) speak for the link.
-  const concealmentRatio = dSamples > 0 ? Math.max(0, Math.min(1, dConcealed / dSamples)) : 0;
+  const dSilent = snapshot.silentConcealedSamples - prev.silentConcealedSamples;
+  // SILENT concealment is not damage, and subtracting it is the difference between a metric that works
+  // and one that lies. `silentConcealedSamples` is a documented SUBSET of `concealedSamples` (W3C
+  // webrtc-stats): when the sender stops transmitting during a pause, the receiver fills the gap with
+  // silence or comfort noise, and those samples land in BOTH `concealedSamples` and
+  // `totalSamplesReceived`. So the raw ratio climbs toward 1.0 every time the interviewer stops
+  // talking — which is most of an interview, since they are usually waiting for the candidate.
+  //
+  // Measured consequence (2026-09-30, the run that was meant to calibrate CONCEAL_GOOD): the picture
+  // was dropped at `conceal=58.2% decoding=true` — video decoding perfectly well — and then never came
+  // back within 225 s, because "healthy" required 45 s of unbroken sub-3% readings that a silent
+  // interviewer can never produce. Chrome's own legacy `googSpeechExpandRate` excludes the silent
+  // subset for exactly this reason.
+  //
+  // A window with no audible audio at all therefore reports 0: the link's VOICE health is genuinely
+  // unknown, and "unknown" must not read as damaged. For the downgrade that is the safe direction (the
+  // threshold-free video trigger still fires); for the restore it means a quiet stretch can hand the
+  // picture back, which self-corrects — if the link is still bad the video trigger drops it again
+  // within ~4 s. `avatar-restore-live.spec.ts` prints `earned` so a restore that rode on silence is
+  // never mistaken for a calibrated one.
+  const dAudible = Math.max(0, dConcealed - Math.max(0, dSilent));
+  const concealmentRatio = dSamples > 0 ? Math.max(0, Math.min(1, dAudible / dSamples)) : 0;
+  const rawConcealmentRatio = dSamples > 0 ? Math.max(0, Math.min(1, dConcealed / dSamples)) : 0;
 
   return {
     snapshot,
     health: {
       concealmentRatio,
+      rawConcealmentRatio,
       videoDecoding: snapshot.framesDecoded - prev.framesDecoded > 0,
       videoBytesFlowing:
         snapshot.videoBytesReceived - prev.videoBytesReceived >= HEALTH_THRESHOLDS.VIDEO_BYTES_FLOOR,

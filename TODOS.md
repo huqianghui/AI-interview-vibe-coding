@@ -37,33 +37,27 @@ WS-teardown ordering) the way `avatarHealth.ts` was extracted, one at a time, ea
 **Effort:** M
 **Priority:** P3
 
-### `CONCEAL_GOOD` (the restore threshold) is still unmeasured on a real link
+### Both concealment thresholds need re-calibrating on the corrected metric
 
-**What:** 5.4.1's run only proved when the picture is given UP. `CONCEAL_GOOD = 0.03` governs when it
-comes BACK and has never been exercised against real Azure, because that run never let the link recover.
+**What:** `CONCEAL_BAD` (0.15) and `CONCEAL_GOOD` (0.03) were chosen against a metric that counted
+silence as damage. That metric is fixed (audible concealment only — see
+`docs/avatar-weaknet-probe.md` §5.4.2), which means both numbers are now unanchored: the only
+"calibration" they ever had came from readings that included silence fill.
 
-**Why it is not urgent:** it only affects how quickly the picture returns, never whether the voice
-survives. Worst case it is too strict (picture stays off longer than needed) or too loose (one extra
-~5 s rebuild, capped at two attempts per session by `MAX_RESTORE_ATTEMPTS`).
+**Why it is not urgent:** the primary downgrade trigger needs no threshold at all (video bytes
+arriving while nothing decodes), so the feature keeps working while these are un-tuned. The fix also
+moved both errors in the safe direction: a pause no longer looks like damage, so the picture is no
+longer dropped for being quiet, and the healthy streak can actually accumulate so the picture can
+come back.
 
-**How to measure:** one command, which shapes the link, waits for the app to drop the picture by
-itself, removes the shaping at that exact point and measures the return:
-`sudo frontend/e2e/scripts/verify-restore.sh` (spec: `frontend/e2e/avatar-restore-live.spec.ts`).
-
-**Read `earned` in its output before believing a pass.** `readHealth` reports concealment 0 when NO
-audio samples arrive, because DTX silence and a dead stream are indistinguishable at that layer — so a
-silent interviewer also reads as healthy, and the restore can ride on a 0-of-0 reading without ever
-testing `CONCEAL_GOOD`. That behaviour is defensible in production (no voice arriving means no voice to
-protect, and the threshold-free trigger drops the picture again within ~4 s if the link is still bad),
-but it means the threshold needs a run with audio actually flowing: pass `FAKE_AUDIO` so a turn stays
-alive. The spec prints `earned: false` when the run did not exercise the threshold.
-
-A readable `FAKE_AUDIO` is checked before the run starts, because Chromium does not complain about an
-unreadable `--use-file-for-fake-audio-capture` path — it silently falls back to its default tone, so the
-run looks normal and only `earned` hints that the audio never played.
+**How to measure:** `sudo FAKE_AUDIO=<wav> frontend/e2e/scripts/verify-restore.sh` — the spec now
+prints the audible and raw ratios side by side per sample, plus `earned`, which is true only when
+AUDIBLE audio arrived during the hold. One shaped run gives `CONCEAL_BAD` (what the audible ratio
+actually reads under 3% loss) and one recovering run gives `CONCEAL_GOOD`.
 
 **Effort:** S
-**Priority:** P3
+**Priority:** P2 — raised from P3: the metric bug it came from was real and user-visible.
+
 
 ## Completed
 ### Avatar self-heal now shares one rate-limit ledger, and falls back instead of stranding — v0.40.1.0

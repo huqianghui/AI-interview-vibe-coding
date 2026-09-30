@@ -47,6 +47,7 @@ interface Sample {
   mode: string | null;
   audioSamples: number;
   concealed: number;
+  silentConcealed: number;
   videoBytes: number;
   framesDecoded: number;
   rttMs: number | null;
@@ -55,7 +56,14 @@ interface Sample {
 async function sampleStats(page: import("@playwright/test").Page): Promise<Omit<Sample, "t" | "mode">> {
   return page.evaluate(async () => {
     const pcs = (window as unknown as { __pcs: RTCPeerConnection[] }).__pcs ?? [];
-    const acc = { audioSamples: 0, concealed: 0, videoBytes: 0, framesDecoded: 0, rttMs: null as number | null };
+    const acc = {
+      audioSamples: 0,
+      concealed: 0,
+      silentConcealed: 0,
+      videoBytes: 0,
+      framesDecoded: 0,
+      rttMs: null as number | null,
+    };
     for (const pc of pcs) {
       if (pc.connectionState !== "connected") continue;
       const report = await pc.getStats();
@@ -64,6 +72,8 @@ async function sampleStats(page: import("@playwright/test").Page): Promise<Omit<
         if (row.type === "inbound-rtp" && row.kind === "audio") {
           if (typeof row.totalSamplesReceived === "number") acc.audioSamples += row.totalSamplesReceived;
           if (typeof row.concealedSamples === "number") acc.concealed += row.concealedSamples;
+          // The silent subset is what separates "the voice is destroyed" from "nobody is talking".
+          if (typeof row.silentConcealedSamples === "number") acc.silentConcealed += row.silentConcealedSamples;
         }
         if (row.type === "inbound-rtp" && row.kind === "video") {
           if (typeof row.bytesReceived === "number") acc.videoBytes += row.bytesReceived;
@@ -165,26 +175,33 @@ test.describe("Weak-network picture RESTORE (real Azure link, shaping removed mi
     const last = audioOnly[audioOnly.length - 1];
     const samplesDuringHold = first && last ? last.audioSamples - first.audioSamples : 0;
     const concealedDuringHold = first && last ? last.concealed - first.concealed : 0;
-    const earned = samplesDuringHold > 0;
-    const observedRatio = samplesDuringHold > 0 ? concealedDuringHold / samplesDuringHold : null;
+    const silentDuringHold = first && last ? last.silentConcealed - first.silentConcealed : 0;
+    const audibleDuringHold = Math.max(0, concealedDuringHold - silentDuringHold);
+    // AUDIBLE audio is what earns a verdict on CONCEAL_GOOD. Samples alone are not enough: a silent
+    // stretch still grows `totalSamplesReceived`, because the receiver fills the gap with comfort noise.
+    const audibleSamplesDuringHold = samplesDuringHold - silentDuringHold;
+    const earned = audibleSamplesDuringHold > 0;
+    const observedRatio = samplesDuringHold > 0 ? audibleDuringHold / samplesDuringHold : null;
+    const rawRatio = samplesDuringHold > 0 ? concealedDuringHold / samplesDuringHold : null;
 
     console.log("\n===== picture restore, shaping removed mid-run =====");
     console.log(`downgraded at                : ${Math.round((downgradedAt - started) / 1000)}s`);
     console.log(`restored                     : ${restored ? `${Math.round((restoredAt - downgradedAt) / 1000)}s after the downgrade` : `NO — not within ${Math.round(RESTORE_BUDGET_MS / 1000)}s`}`);
     console.log(`policy minimum               : ${HEALTH_THRESHOLDS.MIN_AFTER_DOWNGRADE_MS / 1000}s cooldown + ${HEALTH_THRESHOLDS.INITIAL_HEALTHY_HOLD_MS / 1000}s healthy hold`);
-    console.log(`audio samples during hold    : ${samplesDuringHold}`);
-    console.log(`concealed during hold        : ${concealedDuringHold}`);
-    console.log(`observed concealment ratio   : ${observedRatio === null ? "n/a (no audio arrived)" : observedRatio.toFixed(4)}  (CONCEAL_GOOD=${HEALTH_THRESHOLDS.CONCEAL_GOOD})`);
+    console.log(`audio samples during hold    : ${samplesDuringHold} (${silentDuringHold} of them silence-filled)`);
+    console.log(`concealed during hold        : ${concealedDuringHold} total, ${audibleDuringHold} audible`);
+    console.log(`observed AUDIBLE ratio       : ${observedRatio === null ? "n/a (no audio arrived)" : observedRatio.toFixed(4)}  (CONCEAL_GOOD=${HEALTH_THRESHOLDS.CONCEAL_GOOD})`);
+    console.log(`observed RAW ratio           : ${rawRatio === null ? "n/a" : rawRatio.toFixed(4)}  (silence included — diagnostics only)`);
     console.log(`earned (CONCEAL_GOOD tested) : ${earned}`);
     if (!earned) {
-      console.log("  ⚠ the interviewer was silent for the whole hold, so the restore rode on a 0-of-0");
-      console.log("    concealment reading. CONCEAL_GOOD is still unmeasured — rerun with FAKE_AUDIO so a");
-      console.log("    turn is in progress and the interviewer is actually speaking.");
+      console.log("  ⚠ no AUDIBLE audio arrived during the hold, so the restore rode on silence and");
+      console.log("    CONCEAL_GOOD is still unmeasured. Rerun with FAKE_AUDIO so a turn stays in");
+      console.log("    progress and the interviewer actually speaks.");
     }
-    console.log("\nper-sample trace (t, mode, audioSamples, concealed, videoBytes, framesDecoded, rtt):");
+    console.log("\nper-sample trace (t, mode, audioSamples, concealed, silent, videoBytes, framesDecoded, rtt):");
     samples.forEach((s) =>
       console.log(
-        `  ${String(Math.round(s.t / 1000)).padStart(4)}s  ${String(s.mode).padEnd(11)} ${String(s.audioSamples).padStart(9)} ${String(s.concealed).padStart(8)} ${String(s.videoBytes).padStart(9)} ${String(s.framesDecoded).padStart(6)} ${s.rttMs ?? "-"}`,
+        `  ${String(Math.round(s.t / 1000)).padStart(4)}s  ${String(s.mode).padEnd(11)} ${String(s.audioSamples).padStart(9)} ${String(s.concealed).padStart(8)} ${String(s.silentConcealed).padStart(8)} ${String(s.videoBytes).padStart(9)} ${String(s.framesDecoded).padStart(6)} ${s.rttMs ?? "-"}`,
       ),
     );
     console.log("\ndecision log:");
