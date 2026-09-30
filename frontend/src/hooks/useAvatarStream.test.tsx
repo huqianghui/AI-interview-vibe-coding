@@ -444,24 +444,28 @@ describe("useAvatarStream weak-network adaptation", () => {
     expect(result.current.isMediaReady).toBe(true);
   });
 
-  it("also asks to drop the picture when the interviewer's voice is being concealed away", async () => {
+  it("does NOT drop the picture on concealment alone while the video decodes fine", async () => {
+    // Asserted the opposite until 2026-09-30. The calibration run measured the audible ratio at 16.9%
+    // when the policy decided to downgrade under 3% loss, and 17.0-19.3% on the same link with the
+    // shaping removed — the signal's damaged range sits inside its healthy range, so it cannot justify
+    // taking the picture away. `USE_VOICE_DAMAGE_TRIGGER` is false; the threshold-free video trigger is
+    // what protects the interview. Re-enabling needs a metric that separates the conditions (TODOS.md).
     const videoRef = makeVideoRef();
     const sendOffer = vi.fn();
     const { result, requests } = renderStream(videoRef);
     const pc = await bringUp(result, sendOffer, 0);
 
-    // Frames decode fine, but a third of the audio is invented — the measured 31% case.
     const c = counters();
-    for (let i = 0; i <= T.BAD_WINDOWS; i++) {
+    for (let i = 0; i <= T.BAD_WINDOWS + 2; i++) {
       c.totalSamples += 96_000;
-      c.concealed += 30_000;
-      c.framesDecoded += 50;
+      c.concealed += 30_000; // a third of the audio synthesised, and none of it silent
+      c.framesDecoded += 50; // …but the picture is perfectly fine
       c.videoBytes += 250_000;
       await tick(pc, statsRows(c));
     }
 
-    expect(requests).toEqual(["audio-only"]);
-    expect(result.current.mediaMode).toBe("audio-only");
+    expect(requests, "concealment alone must not cost the candidate the picture").toEqual([]);
+    expect(result.current.mediaMode).toBe("video");
   });
 
   it("honours a preference pinned BEFORE the first connect", async () => {
@@ -504,6 +508,59 @@ describe("useAvatarStream weak-network adaptation", () => {
     expect(videoPc.transceivers[0]).toEqual({ kind: "video", direction: "recvonly" });
   });
 
+  it("retries a restore the actuator vetoed, instead of recording one that never happened", async () => {
+    // Production has a gap the test above does not reproduce: the policy's cooldown is measured from
+    // the moment it DECIDES to downgrade, while the actuator's is measured from when the REBUILT
+    // session connects — about five seconds later. So the first restore decision is always slightly
+    // early and `switchMediaMode` vetoes it. Before the fix `reduceHealth` had already recorded the
+    // mode as "video", and from the video branch an audio-only session can never satisfy a downgrade
+    // trigger (no video bytes to be wasted, no voice being concealed), so nothing ever asked again.
+    // Measured live 2026-09-30: the picture did not come back in 225 s. Deterministic, not a race.
+    const videoRef = makeVideoRef();
+    const sendOffer = vi.fn();
+    const { result, requests } = renderStream(videoRef);
+    const pc = await bringUp(result, sendOffer, 0);
+
+    const c = counters();
+    for (let i = 0; i <= T.BAD_WINDOWS; i++) await tick(pc, wastingStep(c));
+    expect(requests).toEqual(["audio-only"]);
+    const decidedAt = Date.now();
+
+    // The rebuilt session lands later than the decision, as it does live (~5 s of teardown + connect).
+    const REBUILD_LAG_MS = 6_000;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REBUILD_LAG_MS);
+    });
+    const audioPc = await bringUp(result, sendOffer, 1);
+    const connectedAt = Date.now();
+
+    // When each side is willing: the policy from the decision, the actuator from the connect.
+    const policyAllowsAt = decidedAt + Math.max(T.MIN_AFTER_DOWNGRADE_MS, T.INITIAL_HEALTHY_HOLD_MS);
+    const actuatorAllowsAt = connectedAt + T.VIDEO_SWITCH_MIN_INTERVAL_MS;
+    expect(
+      actuatorAllowsAt - policyAllowsAt,
+      "this test only means something while the actuator is stricter than the policy — if a threshold " +
+        "change closed that gap, delete the test rather than let it pass vacuously",
+    ).toBeGreaterThan(T.SAMPLE_INTERVAL_MS);
+
+    // Walk to one window PAST the policy's allowance: it has decided to restore and been refused.
+    const c2 = counters();
+    while (Date.now() < policyAllowsAt + T.SAMPLE_INTERVAL_MS) await tick(audioPc, audioOnlyStep(c2));
+    expect(requests, "the actuator refused, so no rebuild was requested").toEqual(["audio-only"]);
+    expect(
+      result.current.mediaMode,
+      "and the policy must not claim the picture is back when the media is still audio-only",
+    ).toBe("audio-only");
+
+    // Past the actuator's allowance it must ask again — the veto was "not yet", not "no".
+    while (Date.now() < actuatorAllowsAt + T.SAMPLE_INTERVAL_MS) await tick(audioPc, audioOnlyStep(c2));
+    expect(requests, "once the cooldown passes the picture must be asked for again").toEqual([
+      "audio-only",
+      "video",
+    ]);
+    expect(result.current.mediaMode).toBe("video");
+  });
+
   it("keeps the picture off for the whole session when the candidate pinned it off", async () => {
     const videoRef = makeVideoRef();
     const sendOffer = vi.fn();
@@ -526,6 +583,42 @@ describe("useAvatarStream weak-network adaptation", () => {
 
     expect(requests).toEqual(["audio-only"]); // no restore request
     expect(result.current.videoPreference).toBe("off");
+  });
+
+  it('retries a pin the cooldown refused, so "turn the picture on" is not silently dropped', async () => {
+    // `setVideoPreference("on")` records the preference and then asks the actuator, which vetoes while
+    // the cooldown is live. `reduceHealth` short-circuits on any non-"auto" preference, so before the
+    // fix nothing ever asked again and the candidate's request was dropped for the rest of the session.
+    // The UI's own gate usually stops a human reaching this, but that gate only knows about the 60 s
+    // cooldown while the actuator also enforces Azure's request allowance, so the two can disagree.
+    const videoRef = makeVideoRef();
+    const sendOffer = vi.fn();
+    const { result, requests } = renderStream(videoRef);
+    await bringUp(result, sendOffer, 0);
+
+    // Pin OFF first: dropping the picture is never vetoed.
+    await act(async () => {
+      result.current.setVideoPreference("off");
+    });
+    expect(requests).toEqual(["audio-only"]);
+    const audioPc = await bringUp(result, sendOffer, 1);
+
+    // Ask for it back at once. The rebuilt session restarted the cooldown, so this is refused.
+    await act(async () => {
+      result.current.setVideoPreference("on");
+    });
+    expect(requests, "refused while the cooldown is live").toEqual(["audio-only"]);
+    expect(result.current.videoPreference, "but the intent is on record").toBe("on");
+    expect(result.current.mediaMode).toBe("audio-only");
+
+    // Let sampling windows pass. Once the cooldown expires the pin must be honoured with no further
+    // input from the candidate.
+    const windows = Math.ceil(T.VIDEO_SWITCH_MIN_INTERVAL_MS / T.SAMPLE_INTERVAL_MS) + 3;
+    const c = counters();
+    for (let i = 0; i < windows; i++) await tick(audioPc, audioOnlyStep(c));
+
+    expect(requests, "the pin must be retried, not forgotten").toEqual(["audio-only", "video"]);
+    expect(result.current.mediaMode).toBe("video");
   });
 
   it("keeps the audio-only mode through a media drop, and does not spend the self-heal budget on the switch", async () => {

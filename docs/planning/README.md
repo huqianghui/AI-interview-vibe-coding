@@ -86,6 +86,17 @@ living specification is [`../../SPEC.md`](../../SPEC.md) at the repo root — st
   mechanism — see the status banner in the doc, and
   [`../avatar-weaknet-probe.md`](../avatar-weaknet-probe.md) §5 for what actually shipped.
 
+- [`plan-refactor-interview-voice-hook-20260930.md`](plan-refactor-interview-voice-hook-20260930.md) —
+  **planned, not started.** `useInterviewVoice` has accreted to 1608 lines in one function body (WS
+  lifecycle, mic-rate validation, first-read gating, turn state and the media-mode session rebuild),
+  with a 482-line `handleMessage` switch. The case for splitting it is not line count: v0.40.0.0's
+  deterministic draft-loss bug happened precisely because "keep the candidate's answer" lived in two
+  functions 700 lines apart that could not see each other. Step one extracts the **answer draft and
+  commit** cluster (the `keepDraft` semantics included) into `useAnswerDraft.ts`; the read/speak
+  cluster is a separate later PR. Explicitly NOT rewriting the `handleMessage` switch, and the hard
+  line is that the existing 338 frontend tests must pass **unmodified** — a test that needs changing
+  means behaviour changed, which is not a refactor.
+
 - [`spec-external-mcp-interviewer-integration.md`](spec-external-mcp-interviewer-integration.md) —
   **analysis / NOT approved, blocked on client answers.** A client-provided MCP result sample
   (`final_session_state_json` / `public_response_json` / `speech_word_count`) turns out to be a
