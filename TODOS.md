@@ -37,53 +37,34 @@ WS-teardown ordering) the way `avatarHealth.ts` was extracted, one at a time, ea
 **Effort:** M
 **Priority:** P3
 
-### Both concealment thresholds need re-calibrating on the corrected metric
+### The voice-damage trigger needs a metric that can separate a bad link from a good one
 
-**What:** `CONCEAL_BAD` (0.15) and `CONCEAL_GOOD` (0.03) were chosen against a metric that counted
-silence as damage. That metric is fixed (audible concealment only — see
-`docs/avatar-weaknet-probe.md` §5.4.2), which means both numbers are now unanchored: the only
-"calibration" they ever had came from readings that included silence fill.
+**What:** `USE_VOICE_DAMAGE_TRIGGER` is false. Audio concealment no longer drops the picture, because
+measurement (2026-09-30, `docs/avatar-weaknet-probe.md` §5.4.4) showed it cannot tell the two conditions
+apart: 16.9% audible concealment at the moment it decided to downgrade under 3% packet loss, against
+8–19.3% (median ~13%) on the SAME link minutes later with the shaping removed. Its damaged range sits
+inside its healthy range, so at 0.15 it fires on healthy sessions — the downgrade observed in that run
+was a false positive.
 
-**Why it is not urgent:** the primary downgrade trigger needs no threshold at all (video bytes
-arriving while nothing decodes), so the feature keeps working while these are un-tuned. The fix also
-moved both errors in the safe direction: a pause no longer looks like damage, so the picture is no
-longer dropped for being quiet, and the healthy streak can actually accumulate so the picture can
-come back.
+**What still works, and why this is not urgent:** the primary trigger needs no threshold at all (video
+bytes arriving while `framesDecoded` does not grow) and it is the path every v0.40.0.0 live verification
+actually exercised. The feature's proven core is intact.
 
-**How to measure:** `sudo FAKE_AUDIO=<wav> frontend/e2e/scripts/verify-restore.sh` — the spec now
-prints the audible and raw ratios side by side per sample, plus `earned`, which is true only when
-AUDIBLE audio arrived during the hold. One shaped run gives `CONCEAL_BAD` (what the audible ratio
-actually reads under 3% loss) and one recovering run gives `CONCEAL_GOOD`.
+**The open question:** is there a receiver-side signal that separates "this link is damaging the
+interviewer's voice" from "this is what a healthy Opus stream looks like between utterances"? Candidates
+worth measuring, none yet tried: `concealmentEvents` per second rather than a sample ratio (the number of
+distinct gaps may separate better than their total size); `jitterBufferDelay / jitterBufferEmittedCount`;
+`packetsLost` on the audio stream alone; or the audible ratio measured ONLY across windows where speech
+is actually arriving (gated on `audioLevel` or `totalAudioEnergy`) rather than every window.
 
-**First real data point (2026-09-30, third run, corrected metric):** under office-bad (3% loss) the
-downgrade read `audible 37.8% / raw 47.5% / decoding=true`. So 0.15 is not obviously wrong for
-`CONCEAL_BAD` — real audible damage sat well above it while video still decoded — but one sample is
-not a calibration, and nothing has yet measured what the audible ratio reads on a HEALTHY link, which
-is what `CONCEAL_GOOD` needs.
+**How to judge a candidate metric:** it must be recorded on a shaped link AND on the same link unshaped,
+and the two distributions must not overlap. That is the bar 0.15 failed. `verify-restore.sh` already
+captures per-window stats to `frontend/e2e/output/restore-latest.json`; extend the sampled fields rather
+than writing a new harness.
 
-**Effort:** S
-**Priority:** P2 — raised from P3: the metric bug it came from was real and user-visible.
+**Effort:** M — it is a measurement question, not a tuning one.
+**Priority:** P2
 
-
-### `record_follow_up` is dead code, and it actively misleads
-
-**What:** `backend/app/interview/state_machine.py` defines `record_follow_up` (~35 lines) with zero
-callers anywhere in `app/` or `tests/` — the nudge-only judged-turn refactor (v0.39.3.0) retired the
-`follow_up` verdict that was its only caller. Four other places in the same module still describe it
-in prose as the thing that writes interviewer follow-up turns.
-
-**Why it matters more than dead code usually does:** it misled a TODO. The stale-session-snapshot
-entry described its failure as "`judge/apply` writes an orphaned interviewer `follow_up` turn", a
-mechanism that had not existed for two days when it was written, because the docstrings still said
-that was what happens. The underlying race was real; the described symptom was fiction. Dead code
-that documents itself as live is how a reader gets a wrong model of the system.
-
-**Fix shape:** delete the function and correct the four prose references, or — if it is being kept
-deliberately for a future judged mode — say so at the definition and stop describing it in the
-present tense.
-
-**Effort:** S
-**Priority:** P3
 
 ## Completed
 ### Avatar self-heal now shares one rate-limit ledger, and falls back instead of stranding — v0.40.1.0

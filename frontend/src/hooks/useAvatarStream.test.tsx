@@ -444,24 +444,28 @@ describe("useAvatarStream weak-network adaptation", () => {
     expect(result.current.isMediaReady).toBe(true);
   });
 
-  it("also asks to drop the picture when the interviewer's voice is being concealed away", async () => {
+  it("does NOT drop the picture on concealment alone while the video decodes fine", async () => {
+    // Asserted the opposite until 2026-09-30. The calibration run measured the audible ratio at 16.9%
+    // when the policy decided to downgrade under 3% loss, and 17.0-19.3% on the same link with the
+    // shaping removed — the signal's damaged range sits inside its healthy range, so it cannot justify
+    // taking the picture away. `USE_VOICE_DAMAGE_TRIGGER` is false; the threshold-free video trigger is
+    // what protects the interview. Re-enabling needs a metric that separates the conditions (TODOS.md).
     const videoRef = makeVideoRef();
     const sendOffer = vi.fn();
     const { result, requests } = renderStream(videoRef);
     const pc = await bringUp(result, sendOffer, 0);
 
-    // Frames decode fine, but a third of the audio is invented — the measured 31% case.
     const c = counters();
-    for (let i = 0; i <= T.BAD_WINDOWS; i++) {
+    for (let i = 0; i <= T.BAD_WINDOWS + 2; i++) {
       c.totalSamples += 96_000;
-      c.concealed += 30_000;
-      c.framesDecoded += 50;
+      c.concealed += 30_000; // a third of the audio synthesised, and none of it silent
+      c.framesDecoded += 50; // …but the picture is perfectly fine
       c.videoBytes += 250_000;
       await tick(pc, statsRows(c));
     }
 
-    expect(requests).toEqual(["audio-only"]);
-    expect(result.current.mediaMode).toBe("audio-only");
+    expect(requests, "concealment alone must not cost the candidate the picture").toEqual([]);
+    expect(result.current.mediaMode).toBe("video");
   });
 
   it("honours a preference pinned BEFORE the first connect", async () => {

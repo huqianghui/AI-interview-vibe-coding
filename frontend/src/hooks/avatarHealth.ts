@@ -39,12 +39,31 @@ export const HEALTH_THRESHOLDS = {
    * probe measured a ~4 s gap between "video bitrate hit zero" and ICE reporting `disconnected`,
    * during which the page still showed a connected avatar frozen on its last frame. */
   STALL_WINDOWS: 2,
-  /** Concealment ratio above which the interviewer's voice counts as damaged. PROVISIONAL — the probe
-   * recorded `concealedSamples` but not `totalSamplesReceived`, so this wants one calibration run
-   * (`docs/avatar-weaknet-probe.md` §3.9). The primary trigger below needs no threshold at all. */
+  /** MEASURED AND RETIRED as a decision input — see `USE_VOICE_DAMAGE_TRIGGER`. Kept because the
+   * ratio is still worth logging, and because re-enabling the trigger needs a number to start from. */
   CONCEAL_BAD: 0.15,
-  /** Concealment ratio below which the link counts as healthy again. */
+  /** Also retired as a decision input. The calibration run (2026-09-30) measured the AUDIBLE ratio on a
+   * CLEAN link, in audio-only, over 22 consecutive windows: 8% to 19%, median about 13%, minimum 3.1%.
+   * So 3% is below the floor of the healthy distribution — unreachable, which is exactly why the picture
+   * could never come back. Kept for the same reason as above. */
   CONCEAL_GOOD: 0.03,
+  /** Whether audio concealment may DROP the picture on its own.
+   *
+   * False, on measurement rather than taste. The same calibration run recorded 16.9% audible concealment
+   * at the moment it decided to downgrade under 3% packet loss — and 17.0%, 18.0% and 19.3% on the same
+   * link minutes later with the shaping REMOVED. The metric therefore has no demonstrated power to
+   * separate a lossy link from a clean one, and at 0.15 it fires on healthy sessions: that downgrade was
+   * a false positive. Acting on a signal that cannot tell the two conditions apart is worse than not
+   * acting, because the cost is the candidate's picture.
+   *
+   * The PRIMARY trigger is unaffected and keeps the feature honest: video bytes arriving while
+   * `framesDecoded` does not grow needs no threshold, and it is what the original 1080p failure actually
+   * exhibited (`decoding=false`, ~1 Mbps in, zero frames out). Everything v0.40.0.0 verified live went
+   * through that path.
+   *
+   * To re-enable, first find a metric that separates the two conditions — TODOS.md has the open
+   * question and what the run would have to show. */
+  USE_VOICE_DAMAGE_TRIGGER: false,
   /** Never restore the picture sooner than this after dropping it. Sized by a hard Azure limit, not by
    * taste: every mode change creates a NEW avatar session (see `useAvatarStream`'s header) and Azure
    * rate-limits avatar requests — a third one inside ~20 s was refused with
@@ -90,6 +109,10 @@ export interface MediaHealth {
   videoDecoding: boolean;
   /** Video RTP bytes are still arriving (whether or not anything decodes). */
   videoBytesFlowing: boolean;
+  /** Audio samples actually arrived in this window: the stream is alive rather than dead or torn down.
+   * This is what the restore decision uses now — see `reduceHealth`. It is a liveness check, not a
+   * quality one, which is the most the receiver can honestly tell us while there is no video to watch. */
+  audioFlowing: boolean;
   /** Round-trip time on the selected candidate pair, for diagnostics only. */
   rttMs: number | null;
 }
@@ -170,6 +193,7 @@ export function readHealth(
     health: {
       concealmentRatio,
       rawConcealmentRatio,
+      audioFlowing: dSamples > 0,
       videoDecoding: snapshot.framesDecoded - prev.framesDecoded > 0,
       videoBytesFlowing:
         snapshot.videoBytesReceived - prev.videoBytesReceived >= HEALTH_THRESHOLDS.VIDEO_BYTES_FLOOR,
@@ -235,7 +259,9 @@ export function reduceHealth(
     // Primary trigger, threshold-free: bytes are arriving and nothing decodes. Secondary: the
     // interviewer's voice is being invented by the concealment algorithm.
     const wasting = health.videoBytesFlowing && !health.videoDecoding;
-    const voiceDamaged = health.concealmentRatio > HEALTH_THRESHOLDS.CONCEAL_BAD;
+    const voiceDamaged =
+      HEALTH_THRESHOLDS.USE_VOICE_DAMAGE_TRIGGER &&
+      health.concealmentRatio > HEALTH_THRESHOLDS.CONCEAL_BAD;
     const badWindows = wasting || voiceDamaged ? state.badWindows + 1 : 0;
     const stalledWindows = health.videoBytesFlowing ? 0 : state.stalledWindows + 1;
 
@@ -267,7 +293,15 @@ export function reduceHealth(
     return { state: { ...state, healthySince: null }, action: null };
   }
 
-  const healthy = health.concealmentRatio < HEALTH_THRESHOLDS.CONCEAL_GOOD;
+  // The restore used to require the audible concealment ratio under CONCEAL_GOOD. Measurement killed
+  // that: on a CLEAN link the ratio sits at 8-19% (median ~13%, minimum 3.1% over 22 windows), so the
+  // condition was unsatisfiable and the picture could never come back. There is also nothing better to
+  // measure here — with the video off there is no decode signal, and the receiver cannot tell us whether
+  // the link would now carry a video stream. So the restore is an explicit TRIAL, gated on liveness plus
+  // time, and made safe by the hysteresis that already exists: the picture comes back, and if the link
+  // still cannot carry it the threshold-free video trigger drops it again within about four seconds,
+  // which doubles the next hold and, after MAX_RESTORE_ATTEMPTS, settles on audio-only for good.
+  const healthy = health.audioFlowing;
   const healthySince = healthy ? (state.healthySince ?? now) : null;
   const heldLongEnough = healthySince !== null && now - healthySince >= state.healthyHoldMs;
   const pastCooldown =

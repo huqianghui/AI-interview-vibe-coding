@@ -27,6 +27,7 @@
 import { expect, test } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
+import url from "node:url";
 import { enterVoiceChannel, primeCandidateLogin, waitForInterviewStage } from "./helpers/candidateLogin";
 import { HEALTH_THRESHOLDS } from "../src/hooks/avatarHealth";
 
@@ -222,7 +223,10 @@ test.describe("Weak-network picture RESTORE (real Azure link, shaping removed mi
     // Written to disk as well as stdout. The summary and the per-sample trace are the entire point of
     // this spec, and on the first four runs they were lost to terminal scrollback every time while the
     // assertion failure below was the only thing that survived. A file can be read directly.
-    const outDir = path.resolve(__dirname, "output");
+    // `__dirname` does not exist here — this suite is ESM, and referencing it threw AFTER all the
+    // console output, so the fifth run printed everything and still saved nothing. Derive it from the
+    // module URL instead.
+    const outDir = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), "output");
     fs.mkdirSync(outDir, { recursive: true });
     const report = {
       at: new Date().toISOString(),

@@ -73,6 +73,7 @@ const HEALTHY: MediaHealth = {
   rawConcealmentRatio: 0.005,
   videoDecoding: true,
   videoBytesFlowing: true,
+  audioFlowing: true,
   rttMs: 120,
 };
 /** The measured 1080p failure: ~1 Mbps of video arriving, not one frame decoded. */
@@ -190,8 +191,27 @@ describe("reduceHealth downgrade", () => {
     expect(state.mode).toBe("audio-only");
   });
 
-  it("drops the picture when the interviewer's voice is being concealed away", () => {
-    const { state, actions } = feed(initialDecisionState(), VOICE_DAMAGED, T.BAD_WINDOWS, 0);
+  it("does NOT drop the picture on concealment alone — the metric cannot separate a bad link from a good one", () => {
+    // This test asserted the opposite until 2026-09-30, when the calibration run measured what the
+    // audible ratio actually reads. At the moment the policy decided to downgrade under 3% packet loss
+    // it saw 16.9%; minutes later on the SAME link with shaping removed it saw 17.0%, 18.0% and 19.3%.
+    // A signal whose damaged range sits inside its healthy range cannot justify taking the candidate's
+    // picture away, so `USE_VOICE_DAMAGE_TRIGGER` is false and this is now the expected behaviour.
+    // Re-enabling it is a measurement question, not a tuning one — see TODOS.md.
+    const { state, actions } = feed(initialDecisionState(), VOICE_DAMAGED, T.BAD_WINDOWS + 2, 0);
+    expect(actions.filter(Boolean), "no downgrade from concealment alone").toEqual([]);
+    expect(state.mode).toBe("video");
+  });
+
+  it("still drops the picture when the video is decoding nothing, whatever the concealment says", () => {
+    // The trigger that survived measurement: threshold-free, and the one the original 1080p failure
+    // actually exhibited. Concealment is pinned high here to prove the decision does not need it.
+    const { state, actions } = feed(
+      initialDecisionState(),
+      { ...WASTING, concealmentRatio: 0.9, rawConcealmentRatio: 0.9 },
+      T.BAD_WINDOWS,
+      0,
+    );
     expect(actions).toEqual(["downgrade"]);
     expect(state.mode).toBe("audio-only");
   });
@@ -244,17 +264,30 @@ describe("reduceHealth restore", () => {
     expect(state.mode).toBe("video");
   });
 
-  it("restarts the healthy streak when the link wobbles mid-hold", () => {
+  it("restarts the healthy streak when the AUDIO STOPS mid-hold", () => {
+    // The wobble that resets the clock is now an audio outage, not a concealment spike. A spike no
+    // longer counts, because the measured healthy baseline is 8-19% audible concealment — treating that
+    // as a wobble meant the streak reset on almost every window and the hold never completed.
     const down = downgraded();
     const half = Math.floor(T.INITIAL_HEALTHY_HOLD_MS / T.SAMPLE_INTERVAL_MS / 2);
     const first = feed(down.state, HEALTHY, half, down.now);
-    // One damaged window resets the clock…
-    const wobble = reduceHealth(first.state, VOICE_DAMAGED, first.now + T.SAMPLE_INTERVAL_MS);
-    expect(wobble.state.healthySince).toBeNull();
+    const silentStream: MediaHealth = { ...HEALTHY, audioFlowing: false };
+    const wobble = reduceHealth(first.state, silentStream, first.now + T.SAMPLE_INTERVAL_MS);
+    expect(wobble.state.healthySince, "no audio arriving means the stream is not proven alive").toBeNull();
     // …so the remaining half of the hold is no longer enough.
     const second = feed(wobble.state, HEALTHY, half, first.now + T.SAMPLE_INTERVAL_MS);
     expect(second.actions).toEqual([]);
     expect(second.state.mode).toBe("audio-only");
+  });
+
+  it("a concealment spike no longer resets the healthy streak", () => {
+    // The direct regression for the bug this change fixes: with a 13% median baseline on a clean link,
+    // any concealment-based reset made the 45 s hold unreachable in practice.
+    const down = downgraded();
+    const half = Math.floor(T.INITIAL_HEALTHY_HOLD_MS / T.SAMPLE_INTERVAL_MS / 2);
+    const first = feed(down.state, HEALTHY, half, down.now);
+    const spike = reduceHealth(first.state, VOICE_DAMAGED, first.now + T.SAMPLE_INTERVAL_MS);
+    expect(spike.state.healthySince, "the streak survives a spike").toBe(first.state.healthySince);
   });
 
   it("doubles the required hold after a restore that immediately fails, then gives up for good", () => {
@@ -392,6 +425,7 @@ describe("silent concealment is not damage", () => {
       rawConcealmentRatio: 0.582, // what the log printed on the run that misfired
       videoDecoding: true,
       videoBytesFlowing: true,
+      audioFlowing: true,
       rttMs: 532,
     };
     for (let i = 1; i <= T.BAD_WINDOWS + 3; i++) {
@@ -411,6 +445,7 @@ describe("silent concealment is not damage", () => {
       rawConcealmentRatio: 0.9, // heavily silent, which used to read as a destroyed link
       videoDecoding: false,
       videoBytesFlowing: false,
+      audioFlowing: true,
       rttMs: 80,
     };
     let restored = false;
