@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.39.3.3 (2026-09-30)
+
+### Fixed
+- **"Voice temperature" and "Playback speed" in the persona editor now actually change the digital
+  human's speech.** Both knobs existed for months but only reached the retired `/calls` transport;
+  the WebSocket proxy every interview uses sent the voice name alone, so adjusting them did
+  nothing. They now ride the Voice Live session (`voice.temperature`, `voice.rate`) and the live
+  spec asserts Azure echoes the persona's values back. Because the values now matter, the editor and
+  the admin API hold them to Azure's range (temperature 0–1, speed 0.5–1.5) and the session builder
+  clamps anything saved earlier outside it — an old slider value can no longer take the voice
+  channel down.
+- Voice Live control notes (`docs/voice-live-control-notes.md`) gained the speech-layer section: what
+  prompt can and cannot influence (text only), and which session parameters control speed,
+  expressiveness and pronunciation instead of SSML.
+
 ## 0.39.3.2 (2026-09-28)
 
 ### For contributors

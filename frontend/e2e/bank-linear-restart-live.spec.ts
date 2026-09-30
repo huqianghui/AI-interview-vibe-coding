@@ -26,6 +26,7 @@
  */
 import { test, expect, request as pwRequest } from "@playwright/test";
 import {
+  adminApi,
   enterVoiceChannel,
   finishOpenInterview,
   primeCandidateLogin,
@@ -56,6 +57,9 @@ test.describe("Bank linear turns + Start over (real Azure)", () => {
     const proxyConnected: Record<string, unknown>[] = [];
     const createResponseFlags: unknown[] = [];
     const turnDetectionShapes: Record<string, unknown>[] = [];
+    // Azure's echo of session.voice — the persona's speech knobs must actually reach the session
+    // (v0.39.3.3: "Voice temperature" / "Playback speed" were dropped on the proxy path).
+    const voiceShapes: Record<string, unknown>[] = [];
     const created: string[] = [];
     const transcripts: { ws: number; text: string }[] = [];
     const userTranscripts: string[] = [];
@@ -101,6 +105,10 @@ test.describe("Bank linear turns + Start over (real Azure)", () => {
               | undefined;
             createResponseFlags.push(td?.create_response);
             if (td) turnDetectionShapes.push(td);
+            const voice = (msg.session as Record<string, unknown> | undefined)?.voice as
+              | Record<string, unknown>
+              | undefined;
+            if (voice) voiceShapes.push(voice);
           }
           if (type === "response.created") {
             created.push(String((msg.response as Record<string, unknown> | undefined)?.id ?? "?"));
@@ -156,6 +164,25 @@ test.describe("Bank linear turns + Start over (real Azure)", () => {
       expect(turnDetectionShapes[0].end_of_utterance_detection, "EOU block echoed").toBeTruthy();
       expect(proxyConnected[0].turn_detection).toBe("azure_semantic_vad_multilingual");
       console.log(`[live] turn_detection echoed: ${JSON.stringify(turnDetectionShapes[0])}`);
+      // The default persona's voice knobs are on the session Azure accepted (not just in the DB).
+      {
+        const { api: adminReq, headers: adminHeaders } = await adminApi();
+        try {
+          const personas = (await (await adminReq.get("/admin/personas", { headers: adminHeaders })).json()) as Array<{
+            is_default: boolean;
+            voice_temperature: number;
+            playback_speed: number;
+          }>;
+          const persona = personas.find((p) => p.is_default)!;
+          expect(voiceShapes.length, "session.updated carried no voice block").toBeGreaterThan(0);
+          expect(voiceShapes[0].type).toBe("azure-standard");
+          expect(Number(voiceShapes[0].temperature)).toBeCloseTo(persona.voice_temperature, 3);
+          expect(Number(voiceShapes[0].rate)).toBeCloseTo(persona.playback_speed, 3);
+          console.log(`[live] voice echoed: ${JSON.stringify(voiceShapes[0])}`);
+        } finally {
+          await adminReq.dispose();
+        }
+      }
 
       // ---- 2. Q1 read once; the spoken answer produces NO model turn ------------------------
       await page.getByRole("button", { name: /我准备好了|i'm ready/i }).click();

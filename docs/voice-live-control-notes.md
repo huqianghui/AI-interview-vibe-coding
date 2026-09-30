@@ -8,6 +8,8 @@
 > 1. 怎么让 Voice Live 直接 TTS，而不是让模型"回复"？
 > 2. 直接 TTS 之后已经不走 LLM 了，为什么建连还必须配模型？能不配吗？
 > 3. 既要精确控制读题，又要保留一部分 LLM 生成（judge、Playground），代码和 prompt 怎么分工？
+>    附带一个常见混淆：prompt 管的"语气"只是**文字**；语速、表现力、发音是**语音层**，走
+>    `session.voice`，不是 SSML（§1.5）。
 >
 > 代码指向：`frontend/src/hooks/useInterviewVoice.ts`（前端协议层）、
 > `backend/app/services/voice_live_proxy.py`（会话构建 + 中继）、`backend/app/interview/judge.py`。
@@ -107,6 +109,55 @@ assistant item——2026-09-24 实测第 2 题的读题被 agent 变成了一句
 - live spec `bank-linear-restart-live.spec.ts` 抓页面发出的每个 `response.create`，断言
   `pre_generated_assistant_message.content[0].text === 卡片题目`，且 Azure 转写 == 卡片题目。
 
+### 1.5 "怎么发声"是另一层：语速、表现力、发音靠 `session.voice`，不靠 prompt，也不是 SSML
+
+容易混的一点：prompt 只能影响**模型生成出来的字**。在 mouth 模式下读题连字都不是模型生成的，所以
+prompt 对读题的"语气"毫无作用；judge 的 nudge 和 Playground 是仅剩的、prompt 能影响措辞的地方。
+语音层——语速、情绪起伏、某个缩写怎么念——由会话的 `voice` 对象控制（`session.update`）：
+
+```json
+{
+  "voice": {
+    "type": "azure-standard",
+    "name": "en-US-Ava:DragonHDLatestNeural",
+    "temperature": 0.8,
+    "rate": "1.1",
+    "custom_lexicon_url": "https://…/lexicon.xml"
+  }
+}
+```
+
+| 参数 | 作用 | 备注（`azure-ai-voicelive 1.3.0b1` / API 参考核对） |
+|---|---|---|
+| `name` | 选声音（600+ 神经语音，HD 语音更有表现力） | 我们按 locale 从 persona `voice_map` 取 |
+| `temperature` 0–1 | **表现力 / 情绪起伏**：高 = 更有戏剧性，低 = 平稳中性 | HD 语音生效；FAQ 里的 "voice temperature" |
+| `rate` `"0.5"`–`"1.5"` | 语速 | 字符串 |
+| `style` | 说话风格（支持 style 的语音） | SDK 有字段；未在本项目暴露 |
+| `prosody`（pitch / rate / volume） | SSML 式韵律值：`x-low…x-high`、`+10%`、`+50Hz`、`-2st`、`-6dB` | 见 `2026-04-10` 及之后的 API 参考；prod 的 `2026-01-01-preview` 上未验证 |
+| `custom_lexicon_url` | 发音词典（格式同 SSML lexicon）——"TMF"、"EMEA"、"SOP" 这类怎么念 | 对专业术语很有用 |
+| `custom_text_normalization_url` | 数字 / 日期等的读法规则 | |
+
+两个限制要记住：
+
+1. **这些是会话级参数，不是逐句 SSML。** `pre_generated_assistant_message.text` 是纯文本，文档没有声
+   明支持内联 `<speak>` / `<prosody>` 标记。想"这题读慢一点"，路径是在两次读题之间发 `session.update`
+   改 `voice`，而不是往文本里塞标签——会话中途改 voice 是否有切换延迟，需要 live 验证再依赖。
+2. **情绪不能像 SSML `express-as` 那样逐句指定**，只能靠 `temperature`（整体表现力）+ `style`（整体
+   风格）+ 选一个本身有情绪特征的声音。
+
+**本项目里的一个 bug（2026-09-30 发现，v0.39.3.3 修）**：persona 上早就有 `voice_temperature`
+（默认 0.8）和 `playback_speed`（默认 1.0），编辑器里能调，但它们只被老的 `/calls` 元数据构建器
+（`voice_live_metadata.py`）用到；生产实际走的 WS 代理 `voice_live_proxy.build_avatar_session` 只传了
+`name` + `type`——调了没效果。修法是把两者接进 `AzureStandardVoice(temperature=…, rate=str(…))`，
+live spec 断言 `session.updated` 回显的 `voice.temperature` / `voice.rate` 等于 persona 的值（实测
+回显 `temperature: 0.8, rate: "1.0"`）。
+接上之后出现一个**新的**风险（对抗评审抓到）：以前值不生效，所以编辑器把温度放到 0–2、语速放到
+0.5–2 也无害；现在值直达 Azure，超出范围会让 `session.update` 被拒、整条语音通道报 "Voice
+unavailable"。所以同一个 PR 里：管理 API 加了 `Field(ge/le)` 边界（温度 0–1、语速 0.5–1.5）、编辑器
+输入框收到同样范围、会话构建器再做一次 clamp（保护边界生效前存下的旧值）。
+教训和读题那件事同源：**以为在控制，其实那条路径根本没接上；只有抓 WS 帧断言，才知道生效没有。
+而一条路径真接上之后，原本"无害"的输入范围就要重新审一遍。**
+
 ---
 
 ## 2. 不走 LLM 了，为什么建连还必须配模型？能不配吗？
@@ -158,7 +209,8 @@ avatar**（Speech SDK avatar synthesis，WebRTC）是纯 TTS + 数字人，不�
 | nudge 不是变相提问 | 服务端 `probe_guard`：含 `?/？` 或疑问词开头 ⇒ 静音 | prompt 里"不要问问题"是软约束 |
 | 不泄露评分要点 | judge 的 prompt **不放 rubric**；再加 `leak_guard` 兜底 | 模型看不见的东西无从泄露 |
 | 什么时候该说 | 后端状态机 + 页面时序（停顿计时、提交） | 时序不该交给模型判断 |
-| **怎么说**（语气、耐心、用词） | persona 的 `prompt_fragment` / reader prompt | 这才是 prompt 擅长的 |
+| **说什么字**（用词、耐心、是否致谢） | prompt——persona 的 `prompt_fragment` / reader prompt / judge 契约 | 这才是 prompt 擅长的；**只影响模型生成的文本** |
+| **怎么发声**（语速、表现力/情绪、发音） | `session.voice`：`name`、`temperature`、`rate`、`style`、`custom_lexicon_url`（见 §1.5） | prompt 碰不到语音层；这是会话参数，不是 SSML |
 
 ### 3.2 我们现在的三种"嘴"
 
@@ -211,6 +263,8 @@ judged 模式是"保留部分 LLM"的典型：LLM 在**后端**（gpt-5-mini cha
 2. 触发**时机**是谁定的？页面/状态机 ⇒ 用事件与计时器，不要依赖 `create_response=true`。
 3. 有没有**不该说**的情况？写成代码守卫（集合、正则、长度），prompt 只是第一道网。
 4. 怎么**证明**它说对了？live spec 抓 WS 帧断言发出的文本 == 期望，转写 == 期望。
+5. 要调的是**字**还是**声**？字 ⇒ prompt / 后端文本；声（语速、表现力、发音）⇒ `session.voice`
+   参数，并断言 `session.updated` 回显了你设的值——管理端的旋钮不等于生效。
 
 ---
 
@@ -226,4 +280,5 @@ judged 模式是"保留部分 LLM"的典型：LLM 在**后端**（gpt-5-mini cha
   链路计时（#126）。
 
 一句话总结：**Voice Live 里的模型是会话的宿主，不是面试官的脑子。脑子在后端，嘴用 TTS，
-prompt 只管语气。**
+说什么字由 prompt 管、怎么发声由 `session.voice` 管——而且每一条"以为在控制"的路径，都要抓 WS 帧
+证明它真的接上了。**

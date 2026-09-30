@@ -45,6 +45,8 @@ class FakePersona:
     interview_brain: str = "bank"
     bank_turn_mode: str = "linear"
     eou_detection: bool = True
+    voice_temperature: float = 0.8
+    playback_speed: float = 1.0
 
 
 def _as_dict(obj):
@@ -266,3 +268,61 @@ def test_avatar_session_paints_the_requested_avatar_background_only_when_given()
     assert painted["codec"] == "h264"
     plain = _as_dict(_as_dict(build_avatar_session(persona, locale="en-US")["avatar"])["video"])
     assert "background" not in plain
+
+
+def test_avatar_session_voice_carries_the_persona_temperature_and_rate():
+    # The editor's "Voice temperature" / "Playback speed" knobs only ever reached the legacy /calls
+    # metadata builder; on the WS-proxy path production uses they were dropped, so adjusting them
+    # did nothing (2026-09-30). They ride session.voice — the only place speech expressiveness and
+    # speed can be set (prompt text cannot reach them). rate is a string per the Voice Live schema.
+    session = build_avatar_session(
+        FakePersona(voice_temperature=0.35, playback_speed=1.2), locale="zh-CN"
+    )
+    voice = _as_dict(session["voice"])
+    assert voice["type"] == "azure-standard"
+    assert voice["name"] == "zh-CN-XiaoxiaoNeural"
+    assert voice["temperature"] == 0.35
+    assert voice["rate"] == "1.2"
+
+
+def test_avatar_session_voice_defaults_when_the_persona_lacks_the_knobs():
+    # A duck-typed / legacy persona without the fields gets the model defaults, not a crash.
+    @dataclass
+    class Bare:
+        voice_map: str = '{"en-US": "en-US-AvaNeural"}'
+        character: str = ""
+        style: str = ""
+        agent_id: str = ""
+        agent_version: str = ""
+        interview_brain: str = "bank"
+
+    voice = _as_dict(build_avatar_session(Bare(), locale="en-US")["voice"])
+    assert voice["temperature"] == 0.8 and voice["rate"] == "1.0"
+
+
+def test_avatar_session_voice_clamps_out_of_range_knobs_instead_of_breaking_the_session():
+    # Rows saved before the API bounds existed (the editor allowed temperature up to 2 and speed up
+    # to 2) must not make Azure reject session.update — clamp to the documented range.
+    voice = _as_dict(
+        build_avatar_session(
+            FakePersona(voice_temperature=1.8, playback_speed=2.0), locale="zh-CN"
+        )["voice"]
+    )
+    assert voice["temperature"] == 1.0 and voice["rate"] == "1.5"
+    voice = _as_dict(
+        build_avatar_session(
+            FakePersona(voice_temperature=-0.3, playback_speed=0.1), locale="zh-CN"
+        )["voice"]
+    )
+    assert voice["temperature"] == 0.0 and voice["rate"] == "0.5"
+
+
+def test_avatar_session_voice_carries_the_knobs_in_playground_mode_too():
+    # The editor Playground pins a persona on the same builder; its speech knobs must apply there
+    # exactly as in the candidate interview (coverage audit: parity previously unasserted).
+    voice = _as_dict(
+        build_avatar_session(
+            FakePersona(voice_temperature=0.2, playback_speed=1.3), locale="en-US", playground=True
+        )["voice"]
+    )
+    assert voice["temperature"] == 0.2 and voice["rate"] == "1.3"

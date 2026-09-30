@@ -232,23 +232,29 @@ export function ConfigurationRail({
                 onChange={(_, d) => onChange({ echo_cancellation: d.checked })}
                 data-testid="config-echo"
               />
-              <Field label="Voice temperature">
+              {/* Azure Voice Live bounds: temperature 0–1 (expressiveness of HD voices), rate
+                  0.5–1.5. Since v0.39.3.3 these reach the live session, and the API refuses values
+                  outside the range — the inputs advertise the same range. */}
+              <Field
+                label="Voice temperature"
+                hint="0–1. Expressiveness of the voice (HD voices): higher is more dynamic, lower is neutral."
+              >
                 <Input
                   type="number"
                   value={String(form.voice_temperature)}
                   min={0}
-                  max={2}
+                  max={1}
                   step={0.1}
                   onChange={(_, d) => onChange({ voice_temperature: Number(d.value) })}
                   data-testid="config-temperature"
                 />
               </Field>
-              <Field label="Playback speed">
+              <Field label="Playback speed" hint="0.5–1.5. Speaking rate; 1 is the voice's natural pace.">
                 <Input
                   type="number"
                   value={String(form.playback_speed)}
                   min={0.5}
-                  max={2}
+                  max={1.5}
                   step={0.1}
                   onChange={(_, d) => onChange({ playback_speed: Number(d.value) })}
                   data-testid="config-playback-speed"
