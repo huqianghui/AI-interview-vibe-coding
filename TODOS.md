@@ -59,6 +59,26 @@ actually reads under 3% loss) and one recovering run gives `CONCEAL_GOOD`.
 **Priority:** P2 — raised from P3: the metric bug it came from was real and user-visible.
 
 
+### `record_follow_up` is dead code, and it actively misleads
+
+**What:** `backend/app/interview/state_machine.py` defines `record_follow_up` (~35 lines) with zero
+callers anywhere in `app/` or `tests/` — the nudge-only judged-turn refactor (v0.39.3.0) retired the
+`follow_up` verdict that was its only caller. Four other places in the same module still describe it
+in prose as the thing that writes interviewer follow-up turns.
+
+**Why it matters more than dead code usually does:** it misled a TODO. The stale-session-snapshot
+entry described its failure as "`judge/apply` writes an orphaned interviewer `follow_up` turn", a
+mechanism that had not existed for two days when it was written, because the docstrings still said
+that was what happens. The underlying race was real; the described symptom was fiction. Dead code
+that documents itself as live is how a reader gets a wrong model of the system.
+
+**Fix shape:** delete the function and correct the four prose references, or — if it is being kept
+deliberately for a future judged mode — say so at the definition and stop describing it in the
+present tense.
+
+**Effort:** S
+**Priority:** P3
+
 ## Completed
 ### Avatar self-heal now shares one rate-limit ledger, and falls back instead of stranding — v0.40.1.0
 
