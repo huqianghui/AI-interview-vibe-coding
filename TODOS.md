@@ -23,46 +23,6 @@ mutating transaction and re-run the staleness check before writing.
 **Effort:** S
 **Priority:** P2
 
-### Avatar self-heal retries are not aware of Azure's avatar rate limit
-
-**What:** `useAvatarStream.attemptRecovery` can send three `session.avatar.connect` offers with
-backoffs of 500/1500/3000 ms — about 5 seconds total. Azure refuses a third avatar request inside
-roughly 20 seconds (`"Avatar request was rate-limited. Retry after 43.0s."`, measured 2026-09-30), so a
-link that produces two or three genuine ICE failures in quick succession can have its own recovery
-attempts refused. Once the budget is spent the code stops and shows the orb, and because the getStats
-sampler is torn down with the connection, the weak-network policy can never act either — the avatar is
-stranded picture-less for the rest of the session with no automatic path back (voice keeps working).
-The deliberate mode-switch path IS gated on `VIDEO_SWITCH_MIN_INTERVAL_MS`; the self-heal path is not.
-
-**Why it is not urgent:** the self-heal path predates v0.40.0.0 and in practice a media drop takes one
-attempt. The orb is the designed fallback, so the failure mode is degraded-but-working, not broken.
-
-**Fix shape:** either space the recovery backoffs past the rate-limit window, or — better — when
-recovery is exhausted while in video mode, ask for a downgrade to audio-only so the session is rebuilt
-into a mode the link can actually carry, instead of staying stranded. Needs a decision on how self-heal
-and mode-switch should share one rate-limit budget. Surfaced by the v0.40.0.0 adversarial review.
-
-**Effort:** M
-**Priority:** P2
-
-### A media-mode rebuild resets the WS reconnect budget, which can defer a terminal error
-
-**What:** `restartForMediaMode` calls `connect(..., isReconnect=false)`, which zeroes
-`reconnectAttemptRef` and clears `fatalErrorRef`. That is deliberate — a policy switch must not spend
-the three retries a real drop needs. The inverse was raised by the v0.40.0.0 adversarial review: on a
-sustained bad link, repeated health-driven switches keep handing the WS a fresh budget, so a connection
-that is ALSO failing for unrelated reasons may never reach the terminal "voice unavailable" state.
-
-**Why it is not urgent:** each `connect()` still has to complete or hit its 30 s timeout, so this defers
-the terminal state rather than looping forever; and the hysteresis caps automatic switches at two
-restores per session. It is a UX-honesty question, not a hang.
-
-**Fix shape:** track consecutive failed connects independently of the per-drop retry counter, so the
-terminal error survives a mode switch.
-
-**Effort:** S
-**Priority:** P3
-
 ### `useInterviewVoice` has grown to ~1300 lines in one function
 
 **What:** the hook now carries WS lifecycle, mic-rate validation, first-read gating, turn state and
@@ -102,6 +62,42 @@ alive. The spec prints `earned: false` when the run did not exercise the thresho
 **Priority:** P3
 
 ## Completed
+### Avatar self-heal now shares one rate-limit ledger, and falls back instead of stranding — v0.40.1.0
+
+Two faults, one root cause: nothing tracked how many `session.avatar.connect` offers we had sent, and
+Azure refuses a third inside roughly 20 s. The self-heal backoffs (500/1500/3000 ms) put all three
+attempts inside ~5 s, so attempt 3 was spent on a request Azure would never honour; and when the budget
+ran out the code showed the orb and stopped, which stranded the session — the stats sampler dies with
+the connection, so the weak-network policy could not act either and the candidate finished picture-less
+with no automatic way back.
+
+Now one ledger on the hook records every offer and both paths consult it: the self-heal backoff table is
+a floor that the allowance can push later, and the restore path takes `max(cooldown, allowance)` so
+lowering the 60 s cooldown later cannot quietly reintroduce a refused request. An exhausted **video**
+self-heal asks for audio-only rather than giving up, rebuilding into the mode the link just proved it
+can carry; an exhausted **audio-only** self-heal still shows the orb, so the modes cannot bounce. Also
+fixed while in here: when the WS send threw, the SDP-answer promise was left armed and rejected 15 s
+later with nobody listening, surfacing as an unhandled rejection mid-recovery.
+
+**Priority:** P2
+**Completed:** v0.40.1.0 — `frontend/src/hooks/useAvatarStream.rateLimit.test.tsx` (3 tests, each
+verified to fail with the fix reverted).
+
+### A media-mode rebuild no longer hides a terminal voice failure — v0.40.1.0
+
+`restartForMediaMode` resets the per-drop reconnect budget on purpose: a policy switch is not a failure
+and must not spend the retries a real drop needs. The inverse was the problem — on a link bad enough to
+force switch after switch, every switch handed the socket a fresh budget, so a connection also failing
+for unrelated reasons might never reach the terminal state the candidate needs to see.
+
+A second counter now tracks connect attempts since the last session that actually reached
+`session.updated`, and it is the one thing a switch does not reset. Sized at 6, above a full per-drop
+exhaustion (1 + 3 retries) plus a couple of legitimate switches, so no honest flow trips it.
+
+**Priority:** P3
+**Completed:** v0.40.1.0 — covered in `useInterviewVoice.restartForMediaMode.test.tsx`, including an
+assertion that it does NOT fire early enough to break an honest flow.
+
 ### Weak-network automatic downgrade verified end-to-end on a throttled link — v0.40.0.0
 
 The policy's live trigger was the one seam unit tests could not cover. Verified 2026-09-30 under

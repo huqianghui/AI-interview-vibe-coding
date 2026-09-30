@@ -83,8 +83,19 @@ const DISCONNECTED_GRACE_MS = 3000;
 /** Cap re-handshake attempts per drop so a persistently-broken media path can't loop forever (the
  * orb is the honest fallback once we give up). Budget resets when real frames paint again. */
 const MAX_RECOVERY_ATTEMPTS = 3;
-/** Backoff before each re-handshake attempt (index = attempt-1). */
+/** Backoff before each re-handshake attempt (index = attempt-1). Treated as a FLOOR, not the whole
+ * story: the rate-limit ledger below can push an attempt later, because an offer Azure refuses is an
+ * attempt spent for nothing. */
 const RECOVERY_BACKOFF_MS = [500, 1500, 3000];
+/** Azure rate-limits avatar SESSION CREATION, and every path that offers `session.avatar.connect`
+ * spends from the same allowance: a self-heal re-handshake, a deliberate media-mode switch, and a
+ * brand-new session all look identical to Azure. A third request inside roughly 20 s was refused with
+ * `"Avatar request was rate-limited. Retry after 43.0s."` (measured 2026-09-30). The old backoffs put
+ * all three self-heal attempts inside ~5 s, so attempt 3 was being spent on a request Azure would
+ * never honour. One shared ledger, consulted by both paths, is the only way they stop defeating each
+ * other — the alternative (two independent budgets) is what produced that wasted attempt. */
+const AVATAR_REQUEST_WINDOW_MS = 20_000;
+const AVATAR_REQUESTS_PER_WINDOW = 2;
 
 export interface AvatarStreamOptions {
   /** Called when the media policy (or the candidate) wants the picture turned on/off. The consumer must
@@ -118,6 +129,10 @@ export function useAvatarStream(
   const iceServersRef = useRef<RTCIceServer[]>([]);
   const sendOfferRef = useRef<((clientSdp: string) => Promise<void> | void) | null>(null);
   const recoveryAttemptsRef = useRef(0);
+  /** Timestamps of avatar offers we have sent, pruned to AVATAR_REQUEST_WINDOW_MS. Lives on the hook,
+   * not in a session, so it survives the full session rebuild a mode switch performs — which is the
+   * whole point: Azure counts those requests across our session boundaries. */
+  const avatarRequestsRef = useRef<number[]>([]);
   const recoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const graceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recoveringRef = useRef(false);
@@ -148,6 +163,29 @@ export function useAvatarStream(
    * INTO video is held off until enough time has passed (see VIDEO_SWITCH_MIN_INTERVAL_MS). */
   const avatarConnectedAtRef = useRef<number | null>(null);
   const [canEnableVideo, setCanEnableVideo] = useState(true);
+
+  /** How long until one more avatar request would be inside Azure's allowance. 0 = go now. */
+  const avatarRequestWaitMs = useCallback(() => {
+    const now = Date.now();
+    const recent = avatarRequestsRef.current.filter((t) => now - t < AVATAR_REQUEST_WINDOW_MS);
+    avatarRequestsRef.current = recent;
+    if (recent.length < AVATAR_REQUESTS_PER_WINDOW) return 0;
+    // The request that has to age out is the one that would leave exactly (allowance - 1) behind. Written
+    // generally rather than as `recent[0]` because a consumer-driven connect can push us over the
+    // allowance without asking us first, and the wait must still be correct when it does.
+    const blocking = recent[recent.length - AVATAR_REQUESTS_PER_WINDOW];
+    return Math.max(0, AVATAR_REQUEST_WINDOW_MS - (now - blocking));
+  }, []);
+
+  /** Record that an avatar offer just went out. Called at the send, not at the decision, so a request
+   * that never left (a handshake that failed earlier) does not consume the allowance. */
+  const noteAvatarRequest = useCallback(() => {
+    const now = Date.now();
+    avatarRequestsRef.current = [
+      ...avatarRequestsRef.current.filter((t) => now - t < AVATAR_REQUEST_WINDOW_MS),
+      now,
+    ];
+  }, []);
 
   const stopSampling = useCallback(() => {
     if (statsTimerRef.current) {
@@ -487,9 +525,16 @@ export function useAvatarStream(
           reject(new Error("Avatar SDP answer timeout"));
         }, SERVER_SDP_TIMEOUT_MS);
       });
+      // The await below is not always reached: if the WS send throws, this promise is left armed and
+      // rejects 15 s later with nobody listening, which the browser reports as an unhandled rejection
+      // in the middle of a recovery the user can already see failing. Attaching an observer here does
+      // not consume the rejection — the real `await` still receives it — it only stops the orphan case
+      // from looking like a crash.
+      serverSdpPromise.catch(() => undefined);
 
       const encodedOffer = await offerReadyPromise;
       console.info("[avatar-stream] offer ready, sending session.avatar.connect");
+      noteAvatarRequest();
       await sendSdpOffer(encodedOffer);
 
       const serverSdp = await serverSdpPromise;
@@ -497,7 +542,7 @@ export function useAvatarStream(
       await pc.setRemoteDescription({ type: "answer", sdp: serverSdp });
       console.info("[avatar-stream] setRemoteDescription success; awaiting first video frame");
     },
-    [],
+    [noteAvatarRequest],
   );
 
   /** Close the current PC and run a fresh handshake on a new one, reusing the stashed ICE servers +
@@ -552,18 +597,48 @@ export function useAvatarStream(
       if (recoveringRef.current) return; // a rebuild is already in flight.
 
       if (recoveryAttemptsRef.current >= MAX_RECOVERY_ATTEMPTS) {
+        recoveringRef.current = false;
+        setIsConnected(false);
+        // Showing the orb and stopping here STRANDED the session: the stats sampler dies with the
+        // connection, so the weak-network policy could never act either, and the candidate spent the
+        // rest of the interview picture-less with no automatic way back (voice kept working, which is
+        // why it went unnoticed). A link that just failed three video handshakes is precisely the link
+        // audio-only exists for, so rebuild into the mode it can actually carry instead of giving up.
+        if (wantVideoRef.current && onModeSwitchRequestRef.current) {
+          const wait = avatarRequestWaitMs();
+          console.warn(
+            `[avatar-stream] recovery exhausted after ${MAX_RECOVERY_ATTEMPTS} attempts (${reason}); ` +
+              `switching to audio-only${wait > 0 ? ` in ${Math.ceil(wait / 1000)}s (avatar rate-limit allowance)` : ""}`,
+          );
+          const gen = genRef.current;
+          recoveryTimerRef.current = setTimeout(() => {
+            recoveryTimerRef.current = null;
+            if (gen !== genRef.current) return; // superseded by disconnect()/reconnect — abandon.
+            // The audio-only session is a different proposition and gets its own self-heal budget; if it
+            // also fails three times, `wantVideoRef` is false by then and we fall through to the orb, so
+            // this cannot bounce between modes.
+            recoveryAttemptsRef.current = 0;
+            switchMediaModeRef.current?.("audio-only", "recovery-exhausted");
+          }, wait);
+          return;
+        }
         console.warn(
           `[avatar-stream] recovery exhausted after ${MAX_RECOVERY_ATTEMPTS} attempts (${reason}); showing orb`,
         );
-        recoveringRef.current = false;
-        setIsConnected(false);
         return;
       }
 
       recoveringRef.current = true;
       const attempt = ++recoveryAttemptsRef.current;
-      const backoff = RECOVERY_BACKOFF_MS[attempt - 1] ?? 3000;
-      console.warn(`[avatar-stream] recovery attempt ${attempt}/${MAX_RECOVERY_ATTEMPTS} (${reason}) in ${backoff}ms`);
+      // The table is a floor. If we have already spent the allowance, waiting is strictly better than
+      // offering: a refused request still costs the attempt, and the refusal cascades into the page
+      // showing "voice unavailable" and dropping the candidate to text.
+      const budgetWait = avatarRequestWaitMs();
+      const backoff = Math.max(RECOVERY_BACKOFF_MS[attempt - 1] ?? 3000, budgetWait);
+      console.warn(
+        `[avatar-stream] recovery attempt ${attempt}/${MAX_RECOVERY_ATTEMPTS} (${reason}) in ${backoff}ms` +
+          (budgetWait > backoff - 1 && budgetWait > 0 ? " (held by the avatar rate-limit allowance)" : ""),
+      );
       // Show the orb while we rebuild — the frozen last frame would otherwise masquerade as live.
       setIsConnected(false);
       clearTimers();
@@ -577,7 +652,7 @@ export function useAvatarStream(
         rebuildConnection(sendSdpOffer, wantVideoRef.current, "recovery");
       }, backoff);
     },
-    [clearTimers, rebuildConnection],
+    [avatarRequestWaitMs, clearTimers, rebuildConnection],
   );
   attemptRecoveryRef.current = attemptRecovery;
 
@@ -600,9 +675,16 @@ export function useAvatarStream(
         // waits. The hysteresis in avatarHealth already spaces AUTOMATIC restores past this, so in
         // practice this only catches an impatient human on the manual toggle.
         const since = avatarConnectedAtRef.current;
-        const wait = since === null ? 0 : HEALTH_THRESHOLDS.VIDEO_SWITCH_MIN_INTERVAL_MS - (Date.now() - since);
+        const cooldown = since === null ? 0 : HEALTH_THRESHOLDS.VIDEO_SWITCH_MIN_INTERVAL_MS - (Date.now() - since);
+        // Both bounds, not just the cooldown. The 60 s cooldown does cover Azure's ~20 s window today,
+        // but only by arithmetic coincidence — consulting the ledger as well makes the guarantee
+        // explicit, so lowering the cooldown later cannot quietly reintroduce a refused request.
+        const wait = Math.max(cooldown, avatarRequestWaitMs());
         if (wait > 0) {
-          console.info(`[avatar-stream] not restoring the picture yet (${Math.ceil(wait / 1000)}s of Azure avatar rate-limit cooldown left)`);
+          console.info(
+            `[avatar-stream] not restoring the picture yet (${Math.ceil(wait / 1000)}s left on the Azure avatar ` +
+              `rate-limit ${cooldown >= wait ? "cooldown" : "allowance"})`,
+          );
           return;
         }
       }
@@ -614,7 +696,7 @@ export function useAvatarStream(
       teardownMedia();
       onModeSwitchRequestRef.current?.(next);
     },
-    [applyMode, teardownMedia],
+    [applyMode, avatarRequestWaitMs, teardownMedia],
   );
   switchMediaModeRef.current = switchMediaMode;
 

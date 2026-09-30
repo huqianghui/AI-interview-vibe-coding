@@ -128,6 +128,15 @@ export interface UseInterviewVoiceOptions {
 
 const MAX_RECONNECT = 3;
 const RECONNECT_DELAYS = [1000, 2000, 4000];
+/** Ceiling on connect attempts that never produced a live session, counted ACROSS mode switches.
+ * `MAX_RECONNECT` is a per-drop budget and a media-mode rebuild resets it on purpose (a policy switch
+ * is not a failure, and must not spend the retries a real drop needs). The inverse of that, raised by
+ * the v0.40.0.0 review: on a link bad enough to force switch after switch, each switch hands the socket
+ * a fresh budget, so a connection that is ALSO failing for unrelated reasons may never reach the
+ * terminal "voice unavailable" state the candidate has to see. This counter is the one thing a switch
+ * does not reset. Sized above a full per-drop exhaustion (1 + MAX_RECONNECT) plus a couple of
+ * legitimate switches, so no honest flow trips it. */
+const MAX_CONNECTS_WITHOUT_LIVE = 6;
 const CONNECT_TIMEOUT_MS = 30_000;
 // Upper bound on how long `commitAnswer()` waits for the STT round-trip after "I'm done": the
 // user transcript only arrives asynchronously via `conversation.item.input_audio_transcription
@@ -239,6 +248,9 @@ export function useInterviewVoice(
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttemptRef = useRef(0);
+  /** Connect attempts since the last session that actually went live. Survives mode switches (see
+   * MAX_CONNECTS_WITHOUT_LIVE); cleared by `session.updated`, the only proof a session works. */
+  const connectsSinceLiveRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const intentionalCloseRef = useRef(false);
   // Set when a PRE-CONNECT Azure `error` frame (e.g. `invalid_model` — the configured Voice Live
@@ -648,6 +660,8 @@ export function useInterviewVoice(
           const iceServers = toRtcIceServers(avatarConf?.ice_servers);
 
           sessionLiveRef.current = true;
+          // A session that reached `session.updated` works, whatever it took to get here.
+          connectsSinceLiveRef.current = 0;
           setConn("connected");
           setAudioState("idle");
           onConnected();
@@ -992,6 +1006,19 @@ export function useInterviewVoice(
     async (locale?: string, isReconnect = false, keepDraft = false): Promise<void> => {
       const effectiveLocale = locale ?? optionsRef.current.locale ?? "en-US";
       lastLocaleRef.current = effectiveLocale;
+      // Counted before the branch below, because that branch is exactly what this survives: the
+      // `!isReconnect` reset is what a media-mode rebuild uses to get its retries back.
+      connectsSinceLiveRef.current += 1;
+      if (connectsSinceLiveRef.current > MAX_CONNECTS_WITHOUT_LIVE) {
+        const error = new Error(
+          `Voice connection failed after ${MAX_CONNECTS_WITHOUT_LIVE} attempts without a live session`,
+        );
+        // Latch it so a later `onclose` does not start the retry loop again on the way out.
+        fatalErrorRef.current = true;
+        setConn("error");
+        optionsRef.current.onError?.(error);
+        throw error;
+      }
       if (!isReconnect) {
         reconnectAttemptRef.current = 0;
         fatalErrorRef.current = false;
