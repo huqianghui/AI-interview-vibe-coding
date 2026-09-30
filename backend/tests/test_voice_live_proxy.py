@@ -298,3 +298,20 @@ def test_avatar_session_voice_defaults_when_the_persona_lacks_the_knobs():
 
     voice = _as_dict(build_avatar_session(Bare(), locale="en-US")["voice"])
     assert voice["temperature"] == 0.8 and voice["rate"] == "1.0"
+
+
+def test_avatar_session_voice_clamps_out_of_range_knobs_instead_of_breaking_the_session():
+    # Rows saved before the API bounds existed (the editor allowed temperature up to 2 and speed up
+    # to 2) must not make Azure reject session.update — clamp to the documented range.
+    voice = _as_dict(
+        build_avatar_session(
+            FakePersona(voice_temperature=1.8, playback_speed=2.0), locale="zh-CN"
+        )["voice"]
+    )
+    assert voice["temperature"] == 1.0 and voice["rate"] == "1.5"
+    voice = _as_dict(
+        build_avatar_session(
+            FakePersona(voice_temperature=-0.3, playback_speed=0.1), locale="zh-CN"
+        )["voice"]
+    )
+    assert voice["temperature"] == 0.0 and voice["rate"] == "0.5"

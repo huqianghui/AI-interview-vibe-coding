@@ -149,8 +149,14 @@ prompt 对读题的"语气"毫无作用；judge 的 nudge 和 Playground 是仅�
 （默认 0.8）和 `playback_speed`（默认 1.0），编辑器里能调，但它们只被老的 `/calls` 元数据构建器
 （`voice_live_metadata.py`）用到；生产实际走的 WS 代理 `voice_live_proxy.build_avatar_session` 只传了
 `name` + `type`——调了没效果。修法是把两者接进 `AzureStandardVoice(temperature=…, rate=str(…))`，
-live spec 断言 `session.updated` 回显的 `voice.temperature` / `voice.rate` 等于 persona 的值。
-教训和读题那件事同源：**以为在控制，其实那条路径根本没接上；只有抓 WS 帧断言，才知道生效没有。**
+live spec 断言 `session.updated` 回显的 `voice.temperature` / `voice.rate` 等于 persona 的值（实测
+回显 `temperature: 0.8, rate: "1.0"`）。
+接上之后出现一个**新的**风险（对抗评审抓到）：以前值不生效，所以编辑器把温度放到 0–2、语速放到
+0.5–2 也无害；现在值直达 Azure，超出范围会让 `session.update` 被拒、整条语音通道报 "Voice
+unavailable"。所以同一个 PR 里：管理 API 加了 `Field(ge/le)` 边界（温度 0–1、语速 0.5–1.5）、编辑器
+输入框收到同样范围、会话构建器再做一次 clamp（保护边界生效前存下的旧值）。
+教训和读题那件事同源：**以为在控制，其实那条路径根本没接上；只有抓 WS 帧断言，才知道生效没有。
+而一条路径真接上之后，原本"无害"的输入范围就要重新审一遍。**
 
 ---
 

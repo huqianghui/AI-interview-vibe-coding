@@ -293,11 +293,14 @@ def build_avatar_session(
         # proxy path — the one production uses — the editor's "Voice temperature" / "Playback speed"
         # did nothing (found 2026-09-30). Prompt text cannot reach these; only session.voice can.
         # Duck-typed like ``eou_detection`` above (the pure builder is unit-tested with a stand-in).
+        # Clamped to Azure's documented bounds (temperature 0–1, rate 0.5–1.5): the admin API now
+        # refuses out-of-range values, but rows saved before that (the editor used to allow up to 2)
+        # must not make Azure reject session.update and mute the persona.
         "voice": AzureStandardVoice(
             name=voice_name,
             type="azure-standard",
-            temperature=float(getattr(persona, "voice_temperature", 0.8)),
-            rate=str(getattr(persona, "playback_speed", 1.0)),
+            temperature=min(1.0, max(0.0, float(getattr(persona, "voice_temperature", 0.8)))),
+            rate=str(min(1.5, max(0.5, float(getattr(persona, "playback_speed", 1.0))))),
         ),
         # Server VAD detects when the user stops speaking (AI Foundry portal parity). Whether it
         # also AUTO-generates the model's reply is the linear-turns decision above (model-turn bank

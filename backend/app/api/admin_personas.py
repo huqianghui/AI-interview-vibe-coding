@@ -56,8 +56,11 @@ class VoiceKnobs(BaseModel):
     echo_cancellation: bool = True
     interim_response: bool = True
     proactive_engagement: bool = False
-    voice_temperature: float = 0.8
-    playback_speed: float = 1.0
+    # Azure Voice Live bounds (session.voice): temperature 0–1, speaking rate "0.5"–"1.5". Since
+    # v0.39.3.3 these reach the live session, so an out-of-range value would make Azure reject
+    # session.update and take the persona's whole voice channel down — refuse it at the API.
+    voice_temperature: float = Field(default=0.8, ge=0.0, le=1.0)
+    playback_speed: float = Field(default=1.0, ge=0.5, le=1.5)
     # Voice answer auto-submit after silence — one independent pair per engine (owner directive:
     # bank OFF by default because a fixed window fired while candidates were still thinking;
     # external keeps its hands-free ON default). The windows are bounded so a typo can't make the
@@ -139,8 +142,8 @@ class PersonaUpdate(BaseModel):
     echo_cancellation: bool | None = None
     interim_response: bool | None = None
     proactive_engagement: bool | None = None
-    voice_temperature: float | None = None
-    playback_speed: float | None = None
+    voice_temperature: float | None = Field(default=None, ge=0.0, le=1.0)
+    playback_speed: float | None = Field(default=None, ge=0.5, le=1.5)
     bank_auto_submit_enabled: bool | None = None
     bank_auto_submit_silence_seconds: int | None = Field(
         default=None, ge=VOICE_AUTO_SUBMIT_MIN_SECONDS, le=VOICE_AUTO_SUBMIT_MAX_SECONDS

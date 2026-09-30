@@ -509,3 +509,31 @@ async def test_create_prefills_the_single_prompt(client):
         )
     ).json()
     assert custom["prompt_fragment"] == "be kind"
+
+
+@pytest.mark.asyncio
+async def test_voice_knobs_are_bounded_to_the_voice_live_range(client):
+    # v0.39.3.3: voice_temperature / playback_speed now reach the live Voice Live session, so the
+    # API refuses what Azure would reject (temperature 0–1, rate 0.5–1.5) instead of letting a
+    # slider value mute the persona with "Voice unavailable". Edges are accepted.
+    plain = (await client.post("/admin/personas", headers=AUTH, json={"name": "Knobs"})).json()
+    for field, bad in (
+        ("voice_temperature", 1.2),
+        ("voice_temperature", -0.1),
+        ("playback_speed", 0.4),
+        ("playback_speed", 1.6),
+    ):
+        assert (
+            await client.post("/admin/personas", headers=AUTH, json={"name": "K2", field: bad})
+        ).status_code == 422
+        assert (
+            await client.put(f"/admin/personas/{plain['id']}", headers=AUTH, json={field: bad})
+        ).status_code == 422
+    ok = (
+        await client.put(
+            f"/admin/personas/{plain['id']}",
+            headers=AUTH,
+            json={"voice_temperature": 1.0, "playback_speed": 1.5},
+        )
+    ).json()
+    assert ok["voice_temperature"] == 1.0 and ok["playback_speed"] == 1.5
