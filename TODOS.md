@@ -37,44 +37,60 @@ WS-teardown ordering) the way `avatarHealth.ts` was extracted, one at a time, ea
 **Effort:** M
 **Priority:** P3
 
-### The voice-damage trigger needs a metric that can separate a bad link from a good one
+### Re-enabling the voice-damage trigger: gate it on the video actually being expensive
 
-**What:** `USE_VOICE_DAMAGE_TRIGGER` is false. Audio concealment no longer drops the picture, because
-measurement (2026-09-30, `docs/avatar-weaknet-probe.md` §5.4.4) showed it cannot tell the two conditions
-apart: 16.9% audible concealment at the moment it decided to downgrade under 3% packet loss, against
-8–19.3% (median ~13%) on the SAME link minutes later with the shaping removed. Its damaged range sits
-inside its healthy range, so at 0.15 it fires on healthy sessions — the downgrade observed in that run
-was a false positive.
+**What:** `USE_VOICE_DAMAGE_TRIGGER` is false. The calibration is now DONE (see
+`docs/avatar-weaknet-probe.md` §5.4.5/§5.4.6) and it says the metric is fine — the problem is that its
+healthy baseline depends on which avatar is streaming, while the threshold is global:
 
-**What still works, and why this is not urgent:** the primary trigger needs no threshold at all (video
-bytes arriving while `framesDecoded` does not grow) and it is the path every v0.40.0.0 live verification
-actually exercised. The feature's proven core is intact.
+| avatar | healthy audible concealment | under 3% loss |
+|---|---|---|
+| `lisa` (1080p video) | 0.3 – 0.5% | 21.9% |
+| `amira` (512² photo) | 8 – 19.3% | 16.9% |
 
-**The open question:** is there a receiver-side signal that separates "this link is damaging the
-interviewer's voice" from "this is what a healthy Opus stream looks like between utterances"? Candidates
-worth measuring, none yet tried: `concealmentEvents` per second rather than a sample ratio (the number of
-distinct gaps may separate better than their total size); `jitterBufferDelay / jitterBufferEmittedCount`;
-`packetsLost` on the audio stream alone; or the audible ratio measured ONLY across windows where speech
-is actually arriving (gated on `audioLevel` or `totalAudioEnergy`) rather than every window.
+On lisa the two are ~45x apart and `CONCEAL_BAD = 0.15` sits cleanly between them. On amira the healthy
+range swallows the threshold, so the trigger fires on healthy sessions. One global number cannot serve
+both.
 
-**Scope limit on the measurement that retired it:** all five runs used `amira`, the 512x512 photo
-avatar, because `verify-restore.sh` did not control the persona and that happened to be the machine's
-default. A 512-square stream decodes fine at 3% loss, so the video load was an order of magnitude below
-the 1080p case. The "cannot separate" finding is a valid within-run comparison and holds for that
-condition, but it has NOT been tested on `lisa` (1080p), where the video load is far heavier and the two
-distributions may well separate. So the first thing to do is repeat the measurement on lisa — the script
-now defaults to it.
+**Why the current state is not a gap:** on lisa, where the video is genuinely expensive, the
+threshold-free primary trigger fires anyway — the passing run of 2026-09-30 downgraded on
+`decoding=false`, not on concealment. On amira the video is 512² and cheap, so dropping the picture buys
+almost nothing. Retiring the trigger costs no real failure scenario.
 
-**How to judge a candidate metric:** it must be recorded on a shaped link AND on the same link unshaped,
-and the two distributions must not overlap. That is the bar 0.15 failed on amira. `verify-restore.sh` already
-captures per-window stats to `frontend/e2e/output/restore-latest.json`; extend the sampled fields rather
-than writing a new harness.
+**Proposed shape (not implemented — needs a decision):** make it a conjunction rather than a second
+independent trigger. Only let concealment speak when the video is actually consuming bandwidth worth
+reclaiming (say, video bytes above some rate per window). Then amira is silent for free, lisa can act,
+and no per-avatar threshold table is needed. Verify the same way: shaped and unshaped distributions on
+BOTH avatars, and neither may overlap the threshold.
 
-**Effort:** M — it is a measurement question, not a tuning one.
-**Priority:** P2
+**Effort:** S to implement, M to verify (two avatars × two shaping states).
+**Priority:** P3 — downgraded from P2: the measurement is done and the current behaviour is correct.
 
 
 ## Completed
+### Picture restore verified end-to-end on a recovering link — v0.40.1.0
+
+The run the whole calibration effort was for. Under OS-level shaping with the 1080p avatar, the session
+dropped the picture by itself at 16 s on the threshold-free trigger (`decoding=false rtt=872ms`), the
+shaping was removed at that moment, and the picture came back **64 seconds later** into a session that
+genuinely decodes (`framesDecoded` 357, 3.0 MB of video across 10 post-restore windows). `earned: true`
+— 2.83 M audio samples arrived during the hold, so `CONCEAL_GOOD` was exercised rather than ridden past
+on silence: 0.475% audible concealment against a 3% threshold.
+
+It also caught the desync fix doing its job in production, by one second: the first restore decision was
+vetoed with `1s left on the Azure avatar rate-limit cooldown`, and the retry two seconds later landed.
+Before that fix the policy would have recorded itself as being in video mode at that first decision and
+never asked again, which is exactly why four earlier runs ended with the picture gone for good.
+
+Six runs were needed, and five of them were inconclusive for reasons that were mine: a placeholder audio
+path Chromium accepted silently, a metric that counted silence as damage, `__dirname` in an ESM spec, and
+— the expensive one — not pinning the avatar, so every run used a 512² stream whose video decodes fine at
+3% loss and therefore could never exercise the trigger under test.
+
+**Priority:** P1
+**Completed:** v0.40.1.0 (2026-09-30) — `frontend/e2e/avatar-restore-live.spec.ts`, report at
+`frontend/e2e/output/restore-latest.json`, write-up in `docs/avatar-weaknet-probe.md` §5.4.5.
+
 ### Avatar self-heal now shares one rate-limit ledger, and falls back instead of stranding — v0.40.1.0
 
 Two faults, one root cause: nothing tracked how many `session.avatar.connect` offers we had sent, and
