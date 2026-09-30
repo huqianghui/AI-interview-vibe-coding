@@ -2,26 +2,55 @@
 
 ## Interview (voice)
 
-### `useInterviewVoice` has grown to 1608 lines in one function
+### `useInterviewVoice` is still 1602 lines — step two of the split
 
-**Plan:** `docs/planning/plan-refactor-interview-voice-hook-20260930.md` — step one extracts the
-answer-draft/commit cluster (where the v0.40.0.0 draft-loss bug lived); the read/speak cluster and the
-482-line `handleMessage` switch are explicitly out of scope. Hard line: the existing frontend tests must
-pass unmodified.
+**Step one is done (v0.40.4.0):** the answer-draft cluster moved to `useAnswerDraft.ts`, which now owns
+the `keepDraft` rule that caused v0.40.0.0's deterministic draft loss. 1682 → 1602 lines, and the
+existing 351 tests passed unmodified, which was the hard line for calling it a refactor.
 
-**What:** the hook now carries WS lifecycle, mic-rate validation, first-read gating, turn state and
-the media-mode session rebuild in a single function body with 19 inlined callbacks. The sibling change
-in v0.40.0.0 pulled the media *policy* out into `avatarHealth.ts`, but the voice hook itself kept
-accreting. Raised by the maintainability review during v0.40.0.0 and deliberately left out of that PR:
-splitting a 1300-line hook is its own change with its own regression risk, not a rider on a feature.
+**What is left, in the order the plan wants it:**
+- **The read/speak cluster** (~300 lines): `speakWatchRef`, `firstReadGateRef`, `readDirectiveRef`,
+  `resumeSpeakTextRef`, `avatarReadyRef`, plus `emitSpeak` / `speakAside` / `speakQuestion`. Bigger than
+  step one and more tangled with Azure's response lifecycle, so it wants its own PR.
+- **The WebSocket lifecycle**, which is where `connect`'s options object and the `connectRef` forward
+  reference should end up with one owner, along with the re-entrancy guard added in v0.40.3.0.
+- **NOT the `handleMessage` switch.** Still explicitly out of scope: it is long but it is a flat
+  dispatch table on Azure event type, and every case touches several refs.
 
-**Fix shape:** extract cohesive sub-hooks (the mic-rate guard; `restartForMediaMode` plus its
-WS-teardown ordering) the way `avatarHealth.ts` was extracted, one at a time, each with its tests.
+**Hard line, unchanged:** existing tests must pass unmodified. A test that needs changing means
+behaviour changed, which means it stopped being a refactor.
 
-**Effort:** M
+**Plan:** `docs/planning/plan-refactor-interview-voice-hook-20260930.md`, with step one's two deviations
+from the original plan recorded there.
+
+**Effort:** M per remaining cluster
 **Priority:** P3
 
 ## Completed
+### Answer-draft cluster extracted from the voice hook — v0.40.4.0
+
+Step one of the split. `useAnswerDraft.ts` now owns the candidate's in-progress answer: the buffered
+segments, the streaming partials, an armed commit's promise, and the two end-of-utterance timers. The
+`keepDraft` rule — the one that lived in two functions 700 lines apart and cost v0.40.0.0 a
+deterministic draft loss — has one owner and 29 unit tests.
+
+Two deliberate deviations from the plan, both only visible once the code was in hand. `commitAnswer`
+did NOT move: it also depends on `activeResponseRef` and `linearTurns`, which are WebSocket turn
+protocol rather than draft state, so moving it would have hidden the coupling instead of removing it.
+The boundary landed at "the module owns state and its invariants, the hook owns protocol decisions",
+which is why the module needs no `send` and no session refs. And `assistantLiveTranscriptRef` was
+excluded: it accumulates the INTERVIEWER's transcript, so it is not part of the candidate's answer.
+
+The test suite was mutation-checked rather than assumed: nine deliberate breakages, seven caught
+immediately. Of the two that were not, one was a bad mutation on my part (the real call still ran) and
+the other was an equivalent mutant — removing the commit's `clearTimeout` is invisible through
+`resolve`, because the stray timer finds nothing armed. Two timer-count assertions were added so it is
+detectable, since a leaked timeout per turn is a real leak across a long interview.
+
+**Priority:** P3
+**Completed:** v0.40.4.0 — 1682 → 1602 lines, 380 frontend tests, and the 351 that existed before pass
+UNMODIFIED.
+
 ### `connect()` re-entrancy guarded, without breaking the paths that re-enter on purpose — v0.40.3.0
 
 Two affordances reach `connect()` and are deliberately never disabled: the mic-permission dialog's

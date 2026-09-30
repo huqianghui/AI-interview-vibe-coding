@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.40.4.0 (2026-09-30)
+
+### Changed
+- Internal only, with no change to how the interview behaves: the candidate's in-progress answer now
+  lives in its own module instead of being spread through the voice hook. The rule that decides what
+  "I'm done" submits — including keeping the answer when the connection is rebuilt mid-sentence — had
+  been split across two functions far enough apart that neither could see the other, which is how an
+  earlier release lost a candidate's answer on every network-triggered rebuild. It now has one owner
+  and its own tests. The 351 tests that existed before this change pass unmodified, which is the
+  evidence that nothing observable moved.
+
 ## 0.40.3.0 (2026-09-30)
 
 ### Fixed
