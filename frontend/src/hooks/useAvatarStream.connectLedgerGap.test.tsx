@@ -116,14 +116,20 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("avatar-request ledger — consumer-driven connect() bypass", () => {
-  it("does not throttle a burst of connect() calls the way it throttles self-heal/switch", async () => {
+describe("avatar-request ledger — every offer path, including consumer-driven connect()", () => {
+  it("throttles a burst of connect() calls the way it throttles self-heal and mode switches", async () => {
     const videoRef = makeVideoRef();
-    // Never resolves the WS send / answer — irrelevant to this probe, which only cares whether the
-    // OFFER (the thing Azure rate-limits) goes out, not whether the handshake completes.
+    // Never answers the handshake — irrelevant here, since this asserts only whether the OFFER (the
+    // thing Azure rate-limits) goes out, not whether the handshake completes.
     const sendOffer = vi.fn(() => Promise.resolve());
     const { result } = renderHook(() => useAvatarStream(videoRef));
 
+    // Each connect() is caught, and that is load-bearing rather than defensive habit: this test never
+    // answers a handshake, and the 20 s advance at the end blows past each earlier handshake's own 15 s
+    // SDP-answer timeout. Those rejections propagate out through connect(), so a bare `void` leaves two
+    // unhandled rejections — which vitest reports as "348 passed" and then exits 1. Found by the ship
+    // coverage audit checking the process exit code instead of trusting the summary line.
+    //
     // Three WS-level reconnects landing inside Azure's ~20s avatar rate-limit window — exactly what
     // RECONNECT_DELAYS = [1000, 2000, 4000] in useInterviewVoice.ts produces on a flaky link (a fresh
     // avatarStream.connect() fires on every new WS session, at roughly 1s/3s/7s of wall-clock time,
@@ -131,20 +137,20 @@ describe("avatar-request ledger — consumer-driven connect() bypass", () => {
     // awaits the previous handshake to completion first, because in production nothing does either
     // — the next WS session can open before the avatar handshake for the last one even settles.
     await act(async () => {
-      void result.current.connect(ICE_SERVERS, sendOffer);
+      void result.current.connect(ICE_SERVERS, sendOffer).catch(() => undefined);
     });
     await pushOfferOut();
     expect(sendOffer).toHaveBeenCalledTimes(1); // request 1 of the allowance
 
     await act(async () => {
-      void result.current.connect(ICE_SERVERS, sendOffer);
+      void result.current.connect(ICE_SERVERS, sendOffer).catch(() => undefined);
     });
     await pushOfferOut();
     expect(sendOffer).toHaveBeenCalledTimes(2); // request 2 — still inside the allowance either way
 
     // The THIRD request inside the window is the one Azure refuses. It must be HELD, not sent.
     await act(async () => {
-      void result.current.connect(ICE_SERVERS, sendOffer);
+      void result.current.connect(ICE_SERVERS, sendOffer).catch(() => undefined);
     });
     await pushOfferOut();
 
