@@ -108,6 +108,22 @@ class Settings(BaseSettings):
     # "Classic foundry agent is not supported" (live-verified 2026-08-11, swedencentral). The GA
     # 2026-07-15 value only works for model mode / migrated new-type agents.
     voice_live_api_version: str = "2026-01-01-preview"
+    # Mic uplink sample rate (Hz) declared as the session's ``input_audio_sampling_rate``. Azure
+    # accepts only 16000 or 24000 for pcm16 and DEFAULTS to 24000 — a value inherited from the
+    # OpenAI Realtime wire format, where ``pcm16`` IS 24 kHz and the model ingests audio natively.
+    # We run the CASCADED path (gpt-5-mini = "audio input through Azure speech to text"), whose
+    # recogniser is a 16 kHz pipeline, so 24 kHz is downsampled by Azure and the extra 8-12 kHz band
+    # discarded. Dropping to 16 kHz costs no transcription accuracy and cuts the uplink by a third
+    # (measured 540-680 kbps at 24 kHz, which starved our own avatar signalling on a narrow office
+    # uplink — docs/avatar-weaknet-probe.md §3.8, rationale docs/voice-live-control-notes.md §4).
+    # MUST match the frontend's MIC_SAMPLE_RATE (frontend/src/hooks/useVoiceAudio.ts); the value is
+    # echoed in ``proxy.connected`` so the page can detect drift. Cannot be changed mid-session.
+    voice_live_input_sampling_rate: int = 16000
+    # Optional cap on the avatar VIDEO bitrate (bits/s) sent in session.avatar.video.bitrate.
+    # Azure's default is 2 Mbps for 1080p video avatars; the weak-network probe (2026-09-30) showed
+    # the sender does NOT honour a receiver-side SDP b=AS cap, so this server-side knob is the only
+    # bandwidth lever. None ⇒ omit the field (Azure default). Unset until the probe settles a value.
+    voice_live_avatar_video_bitrate: int | None = None
 
     # External interview API/server (SPEC Phase 2, vendor-neutral). The backend drives the client's
     # interview brain turn-by-turn as an API client (never a Foundry-agent tool). Empty in CI/dev →
@@ -140,6 +156,26 @@ class Settings(BaseSettings):
                 "SECRET_KEY is not set. It signs JWTs and derives the seeded candidate passwords, "
                 "so a public default is not allowed. Generate one with `openssl rand -hex 32` and "
                 "put it in backend/.env (see .env.example) or the deployment's secret store."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _require_supported_input_sampling_rate(self) -> "Settings":
+        """Refuse to boot on a rate Azure will not accept.
+
+        Azure takes only 16000 or 24000 for pcm16. A typo (22050) would boot fine and then
+        break EVERY voice connection at ``session.update`` time, which reads as "voice is
+        broken" rather than "config is wrong". The value must also match the browser's
+        MIC_SAMPLE_RATE, so changing it live without a coordinated frontend build reproduces
+        exactly the mismatch the page's drift guard exists to catch — which is why this field
+        is deliberately NOT part of the DB ``service_configs`` overlay other Azure fields use.
+        """
+        allowed = (16000, 24000)
+        if self.voice_live_input_sampling_rate not in allowed:
+            raise ValueError(
+                f"VOICE_LIVE_INPUT_SAMPLING_RATE={self.voice_live_input_sampling_rate} is not "
+                f"supported. Azure accepts only {allowed[0]} or {allowed[1]} for pcm16, and the "
+                "value must match MIC_SAMPLE_RATE in frontend/src/hooks/useVoiceAudio.ts."
             )
         return self
 

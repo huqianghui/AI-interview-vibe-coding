@@ -5,7 +5,7 @@
  * into one hook (this project has no separate `voice-logger`/`voice-utils` modules, so logging is
  * plain `console.debug` and the base64 PCM encode/decode lives here rather than a shared lib).
  *
- * Mic side: `getUserMedia` → `AudioContext(24kHz)` → `AudioWorkletNode` (see
+ * Mic side: `getUserMedia` → `AudioContext(MIC_SAMPLE_RATE)` → `AudioWorkletNode` (see
  * `public/audio-processor.js`) → `startRecording(onFrame)` delivers each captured frame as a
  * base64-encoded PCM16 string, ready to send verbatim as `input_audio_buffer.append`'s `audio`
  * field over the Voice Live WS.
@@ -16,6 +16,35 @@
  * without clicks/gaps.
  */
 import { useCallback, useEffect, useRef } from "react";
+
+/**
+ * Mic capture rate, in Hz. MUST equal the backend's `input_audio_sampling_rate`
+ * (`Settings.voice_live_input_sampling_rate`) — Azure interprets the raw PCM byte stream at whatever
+ * the session declared, so a mismatch makes the interviewer hear a pitch-shifted, time-warped
+ * candidate and transcription collapses. `useInterviewVoice` cross-checks this against the rate the
+ * backend echoes in `proxy.connected` and screams if they ever drift.
+ *
+ * 16 kHz, not Voice Live's 24 kHz default, because we run a CASCADED model (`gpt-5-mini` = "audio
+ * input through Azure speech to text"), and Azure's recogniser is a 16 kHz pipeline — it downsamples
+ * our 24 kHz and throws the 8–12 kHz band away. That band carries no phonemic information (consonant
+ * cues live below 8 kHz), so this costs nothing in accuracy and saves a third of the uplink: measured
+ * 540–680 kbps at 24 kHz, which on a narrow office uplink starved our own `session.avatar.connect`
+ * signalling until the avatar handshake timed out (`docs/avatar-weaknet-probe.md` §3.8, finding 5).
+ * Background and the protocol-inheritance reason for Azure's 24 kHz default:
+ * `docs/voice-live-control-notes.md` §4. REVISIT if the voice model ever becomes a native-audio one
+ * (`gpt-realtime`): those are trained at 24 kHz and downsampling could genuinely cost accuracy.
+ */
+export const MIC_SAMPLE_RATE = 16_000;
+
+/** Azure's PCM16 output rate for `response.audio.delta`. Independent of the mic rate — do not fold
+ * these two constants together. */
+const PLAYBACK_SAMPLE_RATE = 24_000;
+
+/** Voice Live's own default for `input_audio_sampling_rate` when a session does not declare one
+ * (inherited from the Realtime wire format, where `pcm16` IS 24 kHz). Used by the drift guard to
+ * interpret a `proxy.connected` frame that carries no rate: that means a backend older than this
+ * contract, which leaves Azure on this default. */
+export const AZURE_DEFAULT_INPUT_SAMPLE_RATE = 24_000;
 
 /** Clip to [-1,1], scale to Int16, and base64-encode — the inverse of playAudio's decode. */
 function encodePcmToBase64(audioData: Float32Array): string {
@@ -44,11 +73,19 @@ export function useVoiceAudio() {
    * distinguishes that as MicAccessError) or on worklet-module load failure. */
   const initMic = useCallback(async (): Promise<void> => {
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { sampleRate: 24000, channelCount: 1, echoCancellation: true, noiseSuppression: true },
+      audio: {
+        sampleRate: MIC_SAMPLE_RATE,
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+      },
     });
     micStreamRef.current = stream;
 
-    const ctx = new AudioContext({ sampleRate: 24000 });
+    // The AudioContext rate is the load-bearing one: the getUserMedia constraint is advisory (Chrome
+    // often hands back the device's native rate anyway), and `createMediaStreamSource` resamples into
+    // the context's rate, which is what the worklet — and therefore Azure — actually sees.
+    const ctx = new AudioContext({ sampleRate: MIC_SAMPLE_RATE });
     await ctx.audioWorklet.addModule("/audio-processor.js");
     micContextRef.current = ctx;
 
@@ -95,10 +132,11 @@ export function useVoiceAudio() {
     workletNodeRef.current = null;
   }, [stopRecording]);
 
-  /** Lazily create the playback AudioContext (24kHz, matches Voice Live's PCM16 output rate). */
+  /** Lazily create the playback AudioContext (matches Voice Live's PCM16 OUTPUT rate, which is
+   * unaffected by the mic rate above). */
   const ensurePlaybackContext = useCallback((): AudioContext => {
     if (!playbackContextRef.current) {
-      playbackContextRef.current = new AudioContext({ sampleRate: 24000 });
+      playbackContextRef.current = new AudioContext({ sampleRate: PLAYBACK_SAMPLE_RATE });
     }
     return playbackContextRef.current;
   }, []);
@@ -116,7 +154,7 @@ export function useVoiceAudio() {
       const float32 = new Float32Array(int16.length);
       for (let i = 0; i < int16.length; i++) float32[i] = (int16[i] ?? 0) / 32768;
 
-      const buffer = ctx.createBuffer(1, float32.length, 24000);
+      const buffer = ctx.createBuffer(1, float32.length, PLAYBACK_SAMPLE_RATE);
       buffer.getChannelData(0).set(float32);
       const src = ctx.createBufferSource();
       src.buffer = buffer;

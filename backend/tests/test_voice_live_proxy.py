@@ -134,6 +134,85 @@ def test_avatar_session_text_audio_only_when_no_character():
         _ = session["avatar"]
 
 
+# --- input audio sampling rate (weak-network uplink cut) ----------------------
+
+
+def test_session_declares_the_configured_input_sampling_rate():
+    """Azure decodes our raw PCM16 at whatever the session declares, so this field is not an
+    optimisation but a correctness contract with the browser's MIC_SAMPLE_RATE."""
+    from app.config import get_settings
+
+    session = build_avatar_session(FakePersona(), locale="zh-CN")
+    assert session["input_audio_sampling_rate"] == get_settings().voice_live_input_sampling_rate
+
+
+def test_avatar_less_persona_also_declares_the_input_sampling_rate():
+    """Regression guard for the settings hoist: the rate is a TOP-LEVEL session field, but
+    ``get_settings()`` used to be read only inside the ``if has_avatar`` branch. An avatar-less
+    persona must still tell Azure the uplink rate, or its transcripts come out garbled."""
+    from app.config import get_settings
+
+    session = build_avatar_session(FakePersona(character=""), locale="zh-CN")
+    assert session["input_audio_sampling_rate"] == get_settings().voice_live_input_sampling_rate
+
+
+def test_an_unsupported_input_sampling_rate_refuses_to_boot(monkeypatch):
+    """Azure takes only 16000/24000 for pcm16. A typo used to boot fine and then break every
+    voice connection at session.update time — reading as "voice is broken", not "bad config"."""
+    import pytest as _pytest
+
+    from app.config import Settings
+
+    monkeypatch.setenv("VOICE_LIVE_INPUT_SAMPLING_RATE", "22050")
+    with _pytest.raises(ValueError, match="VOICE_LIVE_INPUT_SAMPLING_RATE"):
+        Settings()
+
+    monkeypatch.setenv("VOICE_LIVE_INPUT_SAMPLING_RATE", "24000")
+    assert Settings().voice_live_input_sampling_rate == 24000
+
+
+# --- avatar video params (bitrate escape hatch) -------------------------------
+
+
+def test_avatar_video_omits_bitrate_when_the_setting_is_unset():
+    """Default is "let Azure decide": Azure adapts its own bitrate, so the key must be
+    ABSENT rather than sent as None (which Azure would reject)."""
+    session = build_avatar_session(FakePersona(), locale="zh-CN")
+    video = _as_dict(_as_dict(session["avatar"])["video"])
+    assert video["codec"] == "h264"
+    assert "bitrate" not in video
+
+
+def test_avatar_video_carries_the_configured_bitrate_cap(monkeypatch):
+    """The one server-side bandwidth lever Azure honours (a client-side SDP b=AS cap is ignored —
+    measured 2026-09-30), so a configured value must actually reach the session."""
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("VOICE_LIVE_AVATAR_VIDEO_BITRATE", "500000")
+    try:
+        session = build_avatar_session(FakePersona(), locale="zh-CN")
+        video = _as_dict(_as_dict(session["avatar"])["video"])
+        assert video["bitrate"] == 500000
+    finally:
+        get_settings.cache_clear()
+
+
+def test_avatar_video_keeps_background_alongside_a_bitrate_cap(monkeypatch):
+    """Both optional keys are built by separate branches now; neither may clobber the other."""
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("VOICE_LIVE_AVATAR_VIDEO_BITRATE", "300000")
+    try:
+        session = build_avatar_session(FakePersona(), locale="zh-CN", background="c09d75")
+        video = _as_dict(_as_dict(session["avatar"])["video"])
+        assert video["bitrate"] == 300000
+        assert video["background"] == {"color": "#C09D75FF"}
+    finally:
+        get_settings.cache_clear()
+
+
 # --- photo vs video avatars (issue #103) --------------------------------------
 
 

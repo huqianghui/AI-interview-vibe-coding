@@ -26,7 +26,7 @@ python scripts/brain_turn_rtt.py --server http://127.0.0.1:8000 --runs 5 --max-t
 
 ## `voice_turn_latency.py` — Voice Live turn latency at the WS-proxy level
 
-Streams 24 kHz PCM16 mono `u*.wav` utterances into `/voice-live/ws` exactly like the mic
+Streams 16 kHz PCM16 mono `u*.wav` utterances into `/voice-live/ws` exactly like the mic
 (100 ms chunks, silence between), and records VAD start/stop, STT final, `response.created`,
 first text/audio delta, `response.done`.
 
@@ -58,4 +58,6 @@ Caveat: with an avatar-enabled persona the assistant AUDIO rides the WebRTC trac
 the audio deltas.
 
 Making an utterance file from macOS: `say -v Samantha -o u1.aiff "…"` then
-`afconvert -f WAVE -d LEI16@24000 -c 1 u1.aiff u1.wav`.
+`afconvert -f WAVE -d LEI16@16000 -c 1 u1.aiff u1.wav`. (16 kHz, not 24: the session now
+declares `input_audio_sampling_rate: 16000` to match the browser — see
+`docs/voice-live-control-notes.md` §4. A 24 kHz file trips the frame-rate assert.)

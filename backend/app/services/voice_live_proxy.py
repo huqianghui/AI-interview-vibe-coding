@@ -27,6 +27,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from app.config import get_settings
 from app.models.persona import (
     InterviewerPersona,
     build_read_directive,
@@ -285,6 +286,10 @@ def build_avatar_session(
     # Guarded by test_voice_live_proxy.py (bank linear ⇒ False, bank model ⇒ True, external ⇒
     # False).
     linear_turns = linear_turns_for_persona(persona, playground=playground)
+    # Hoisted above the avatar guard below: ``input_audio_sampling_rate`` is a TOP-LEVEL session
+    # field and applies to avatar-less personas too, so it cannot read settings from inside the
+    # ``if has_avatar`` block.
+    settings = get_settings()
     session_kwargs: dict[str, Any] = {
         "modalities": modalities,
         # The persona's two speech knobs ride the session voice: ``temperature`` (expressiveness of
@@ -320,6 +325,12 @@ def build_avatar_session(
         ),
         "input_audio_noise_reduction": AudioNoiseReduction(type="azure_deep_noise_suppression"),
         "input_audio_echo_cancellation": AudioEchoCancellation(type="server_echo_cancellation"),
+        # Declares how Azure must interpret the raw PCM16 the browser uploads. Kept in lockstep
+        # with the frontend's MIC_SAMPLE_RATE: a mismatch is not a quality regression but a total
+        # failure (pitch/speed-shifted audio, garbage transcripts), so the value is echoed back
+        # to the page in ``proxy.connected`` for a runtime drift check.
+        # See Settings.voice_live_input_sampling_rate.
+        "input_audio_sampling_rate": settings.voice_live_input_sampling_rate,
     }
     if has_avatar:
         # build_avatar_config owns the PHOTO-vs-VIDEO split (issue #103): a photo avatar (adrian,
@@ -330,19 +341,26 @@ def build_avatar_session(
         # azure-ai-voicelive models are MutableMappings that accept ONE positional mapping of
         # wire-format keys ("type"/"model", not the Python attr `avatar_type`) — this is the
         # documented azure-core Model pattern, not a hack; don't "fix" it into kwargs.
+        # Built with plain statements rather than nested conditional dict-spreads: the previous
+        # one-liner buried "codec, optional bitrate, optional background" under three layers.
+        video_params: dict[str, Any] = dict(VideoParams(codec="h264"))
+        if settings.voice_live_avatar_video_bitrate:
+            # Escape hatch only (see Settings.voice_live_avatar_video_bitrate): unset means
+            # Azure's own default, and Azure already adapts its bitrate on its own.
+            video_params["bitrate"] = settings.voice_live_avatar_video_bitrate
+        if background:
+            # 6-hex RGB from the page's ``avatar_bg``: Azure paints it behind the digital
+            # human. The page sends the photo avatar's own thumbnail backdrop (the frontend
+            # roster's PHOTO_BACKDROPS) so the live video matches the editor preview exactly —
+            # Azure's live synthesis otherwise uses a different (grey) wall than the official
+            # thumbnail (measured 2026-09-24).
+            video_params["background"] = {"color": f"#{background.upper()}FF"}
+
         session_kwargs["avatar"] = AvatarConfig(
             build_avatar_config(
                 persona.character,
                 persona.style,
-                # ``background`` (6-hex RGB from the page's ``avatar_bg``): Azure paints it behind
-                # the digital human. The page sends the photo avatar's own thumbnail backdrop (the
-                # frontend roster's PHOTO_BACKDROPS) so the live video matches the editor preview
-                # exactly — Azure's live synthesis otherwise uses a different (grey) wall than the
-                # official thumbnail (measured 2026-09-24). None ⇒ Azure's default backdrop.
-                video={
-                    **dict(VideoParams(codec="h264")),
-                    **({"background": {"color": f"#{background.upper()}FF"}} if background else {}),
-                },
+                video=video_params,
             )
         )
 
@@ -481,6 +499,10 @@ async def run_proxy(
                         # API's ``voice_linear_turns``, not from here).
                         "linear_turns": linear_turns_for_persona(persona, playground=playground),
                         "turn_detection": dict(session["turn_detection"]).get("type", ""),
+                        # Read back off the built session (like turn_detection above, unlike the
+                        # re-derived avatar_enabled) so this can never disagree with what Azure was
+                        # actually told. The page compares it with its own mic capture rate.
+                        "input_audio_sampling_rate": session["input_audio_sampling_rate"],
                     }
                 )
             )
