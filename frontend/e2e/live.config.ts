@@ -15,7 +15,7 @@ const BASE = process.env.BASE || "http://localhost:5173";
 
 export default defineConfig({
   testDir: ".",
-  testMatch: /(candidate-login|voice-live-azure|avatar-diagnostic|avatar-stability-probe|audio-diagnostic|audio-turn2-diagnostic|anon-recovery|readme-live-screenshots|external-interview-live|external-voice-live|bank-linear-restart-live|bank-judged-live)\.spec\.ts/,
+  testMatch: /(candidate-login|voice-live-azure|avatar-diagnostic|avatar-stability-probe|avatar-weaknet-probe|avatar-audio-only-live|avatar-auto-downgrade-live|mic-rate-transcript-ab|audio-diagnostic|audio-turn2-diagnostic|anon-recovery|readme-live-screenshots|external-interview-live|external-voice-live|bank-linear-restart-live|bank-judged-live)\.spec\.ts/,
   timeout: 120_000,
   expect: { timeout: 15_000 },
   fullyParallel: false,
@@ -35,6 +35,9 @@ export default defineConfig({
         // STRICT_AUTOPLAY=1 drops the permissive flag to reproduce real-Chrome autoplay policy
         // (the hidden avatar <audio> element's play() can be rejected there).
         ...(process.env.STRICT_AUTOPLAY === "1" ? [] : ["--autoplay-policy=no-user-gesture-required"]),
+        // CHROME_ARGS: extra Chromium flags for probes, e.g. the built-in WebRTC fake-network field trial
+        // (avatar-weaknet-probe): --force-fieldtrials=WebRTC-FakeNetworkReceiveConfig/link_capacity_kbps:500/
+        ...(process.env.CHROME_ARGS ? process.env.CHROME_ARGS.split(/\s+/).filter(Boolean) : []),
       ],
     },
   },
