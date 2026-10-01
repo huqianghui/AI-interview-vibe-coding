@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.40.7.0 (2026-10-01)
+
+### Changed
+- Internal only, no change to how the interview behaves: the rules deciding which question may be sent
+  to be read, which one waits behind an in-flight response, and which was last attempted now live in one
+  module. Each of those rules exists because of a shipped bug — the same question read two or three
+  times, a legitimate retry blocked by the guard meant to stop duplicates, and two questions both read
+  because a queued one was not superseded. The 434 tests that existed before pass unmodified.
+
 ## 0.40.6.0 (2026-10-01)
 
 ### Changed

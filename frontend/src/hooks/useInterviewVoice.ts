@@ -33,6 +33,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAnswerDraft } from "./useAnswerDraft";
 import { useFirstReadGate } from "./useFirstReadGate";
 import { useQuestionReadWatch } from "./useQuestionReadWatch";
+import { useSpeakQueue } from "./useSpeakQueue";
 import type { RefObject } from "react";
 import { _internal as clientInternal, type VoiceSession } from "../api/client";
 import { AZURE_DEFAULT_INPUT_SAMPLE_RATE, MIC_SAMPLE_RATE, useVoiceAudio } from "./useVoiceAudio";
@@ -309,22 +310,11 @@ export function useInterviewVoice(
   // auto-response and our verbatim question read was dropped. This ref lets speakQuestion cancel
   // the in-flight response and defer the real question until it ends.
   const activeResponseRef = useRef(false);
-  // A question text queued by speakQuestion while a response was active. Flushed (as an assistant
-  // item + response.create) once `response.done` clears the active response. Latest-wins: a newer
-  // question supersedes an older queued one (the backend only ever advances forward).
-  const pendingSpeakTextRef = useRef<string | null>(null);
-  // The question text of the most recent speakQuestion attempt, kept so a collision rejection
-  // (`conversation_already_has_active_response`) can re-queue exactly that text for retry.
-  const lastSpokenAttemptRef = useRef<string | null>(null);
-  // The question text most recently handed to a real `response.create` for reading. This is the
-  // per-text idempotency guard for the verbatim path (the "读三遍" fix): the cancel/queue/flush and
-  // collision-retry machinery below has SEVERAL routes into `emitSpeak` (the idle path, the
-  // `response.done` flush, the collision re-queue), and every `response.done` fires the flush — so
-  // without this guard the same backend question was re-emitted on successive done events and Azure
-  // read it 2–3 times as separate responses (each a separate transcript bubble). emitSpeak refuses
-  // to re-read a text equal to this ref; a collision rejection clears it so exactly ONE retry of a
-  // genuinely-rejected attempt is still allowed.
-  const spokenTextRef = useRef<string | null>(null);
+  /** Which question text may be sent to be read, which is queued behind an active response, and which
+   * was last attempted. Extracted to `useSpeakQueue`: the per-text idempotency guard (the read-three-
+   * times fix), the single retry a collision rejection is allowed, and latest-wins queueing were three
+   * refs cross-referencing each other from five places. */
+  const speakQueue = useSpeakQueue();
   // Holds the in-flight `initMic()` promise for THIS connect. The mic is initialized CONCURRENTLY
   // with the WS open (they're independent — mic frames don't start until `session.updated`), so the
   // few-hundred-ms getUserMedia + worklet load overlaps the multi-second WS/Azure handshake instead
@@ -423,9 +413,7 @@ export function useInterviewVoice(
     // would make the first speakQuestion needlessly cancel, and no queued question from a dead
     // session leaking into the new one).
     activeResponseRef.current = false;
-    pendingSpeakTextRef.current = null;
-    lastSpokenAttemptRef.current = null;
-    spokenTextRef.current = null;
+    speakQueue.reset();
     // Stop the question-read watchdog — its retry would hit a closed/next WS with stale state.
     // Stash the unconfirmed text so the next session's `session.updated` re-speaks it (the page
     // has already latched it as "spoken" and won't ask again).
@@ -447,7 +435,7 @@ export function useInterviewVoice(
     // The INTERVIEWER's live transcript is not part of the candidate's answer, so it stays here: its
     // item ids belong to the dead Azure session either way.
     assistantLiveTranscriptRef.current.clear();
-  }, [draft, firstReadGate, readWatch]);
+  }, [draft, firstReadGate, readWatch, speakQueue]);
 
   const cleanup = useCallback(() => {
     if (wsRef.current) {
@@ -732,7 +720,7 @@ export function useInterviewVoice(
           // rejected). Clear the retry slot so a later, unrelated collision error can't re-queue an
           // already-read question — that clear-then-retry cycle was a duplicate-read path feeding
           // the "读三遍" symptom. Only a collision `error` re-arms a retry.
-          lastSpokenAttemptRef.current = null;
+          speakQueue.noteAccepted();
           // Claim this response for the read attempt that is waiting for one — its transcripts
           // then confirm delivery BY ID (immune to paraphrasing). If this `created` actually
           // belongs to a colliding auto-response, the collision `error` that follows resets the
@@ -778,7 +766,7 @@ export function useInterviewVoice(
               // text. Delivery is confirmed by id (above) so a drift never retried; this makes it
               // visible instead of silent (see speechMatchesText). Agent mode is exempt: there the
               // agent's own turn contract may paraphrase the assistant item and that is tolerated.
-              const wanted = spokenTextRef.current;
+              const wanted = speakQueue.lastEmitted();
               if (
                 readDirectiveRef.current &&
                 wanted &&
@@ -834,16 +822,9 @@ export function useInterviewVoice(
               // belongs to the colliding auto-response, not our read — revoke the delivery proof.
               // The watch stays armed: it still owns the retry.
               readWatch.releaseClaim();
-              if (lastSpokenAttemptRef.current) {
-                pendingSpeakTextRef.current = lastSpokenAttemptRef.current;
-                // This attempt was REJECTED — it was never actually read, so clear the per-text
-                // idempotency guard for it. That lets the single re-queued retry through emitSpeak
-                // (the guard only blocks re-reading a text that a live response.create accepted).
-                if (spokenTextRef.current === lastSpokenAttemptRef.current) {
-                  spokenTextRef.current = null;
-                }
-                lastSpokenAttemptRef.current = null;
-              }
+              // The attempt was REJECTED, so it was never read: re-queue exactly that text and clear
+              // its idempotency guard, which is what lets the single retry through.
+              speakQueue.requeueRejectedAttempt();
             } else if (readWatch.isExpectingResponse()) {
               // Any OTHER rejection of OUR read attempt (no `response.created` has claimed it yet —
               // e.g. an api-version that lacks `pre_generated_assistant_message`): nothing of ours
@@ -889,6 +870,7 @@ export function useInterviewVoice(
       settlePendingCommit,
       draft,
       readWatch,
+      speakQueue,
     ],
   );
 
@@ -1277,9 +1259,9 @@ export function useInterviewVoice(
   // becomes a genuine no-op instead of a duplicate read.
   const emitSpeak = useCallback(
     (text: string) => {
-      if (spokenTextRef.current === text) return;
-      lastSpokenAttemptRef.current = text;
-      spokenTextRef.current = text;
+      // Refuses a text already handed to a live response — several routes reach here and every
+      // `response.done` fires the flush, so without this the same question was read two or three times.
+      if (!speakQueue.claimEmit(text)) return;
       // The next `response.created` belongs to THIS attempt — its id becomes the delivery proof.
       readWatch.expectResponse();
       // Optimistically mark active so a rapid second speakQuestion (or a commit nudge) defers
@@ -1320,7 +1302,7 @@ export function useInterviewVoice(
         send({ type: "response.create" });
       }
     },
-    [readWatch, send],
+    [readWatch, send, speakQueue],
   );
 
   /**
@@ -1333,11 +1315,11 @@ export function useInterviewVoice(
   const speakAside = useCallback(
     (text: string): boolean => {
       if (!text.trim() || activeResponseRef.current) return false;
-      spokenTextRef.current = null;
+      speakQueue.clearGuard();
       emitSpeak(text);
       return true;
     },
-    [emitSpeak],
+    [emitSpeak, speakQueue],
   );
 
   /** The candidate's buffered, not-yet-committed transcript (what the judge reads). */
@@ -1397,8 +1379,7 @@ export function useInterviewVoice(
         );
         // The retry must get PAST the per-text idempotency guard: by now that guard can only be
         // blocking a read that never played, since a real one would have confirmed and disarmed.
-        if (spokenTextRef.current === unread) spokenTextRef.current = null;
-        if (pendingSpeakTextRef.current === unread) pendingSpeakTextRef.current = null;
+        speakQueue.allowRetry(unread);
         speakQuestionRef.current?.(unread);
       });
       if (attempts === null) {
@@ -1422,23 +1403,22 @@ export function useInterviewVoice(
       if (activeResponseRef.current && attempts === 1) {
         // A response (usually the server-VAD auto-response) is in flight — cancel it and queue this
         // question to be spoken when the resulting `response.done` lands. Latest-wins.
-        pendingSpeakTextRef.current = text;
+        speakQueue.queue(text);
         send({ type: "response.cancel" });
         return true;
       }
       emitSpeak(text);
       return true;
     },
-    [emitSpeak, firstReadGate, readWatch, send],
+    [emitSpeak, firstReadGate, readWatch, send, speakQueue],
   );
   speakQuestionRef.current = speakQuestion;
 
   // Flush a queued question once the conversation goes idle (`response.done`). Held in a ref so
   // handleMessage's `response.done` case can call it without a declaration-order cycle.
   flushPendingSpeakRef.current = () => {
-    const text = pendingSpeakTextRef.current;
+    const text = speakQueue.takeQueued();
     if (!text) return;
-    pendingSpeakTextRef.current = null;
     emitSpeak(text);
   };
 
