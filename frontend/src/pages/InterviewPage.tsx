@@ -222,6 +222,18 @@ const useStyles = makeStyles({
     minHeight: 0,
     "@media (max-width: 900px)": { gridTemplateColumns: "1fr" },
   },
+  // Below the breakpoint the two columns stack, and the stage comes first in DOM order — which put the
+  // question's TEXT entirely off screen on a phone (measured: 144px off a 390x844 iPhone, 76px off a
+  // 899px-wide desktop window, so this is a narrow-viewport problem and not a phone one). The question
+  // a candidate was just asked is the one thing they must be able to read without scrolling, and the
+  // digital human does not need watching while they answer. Order only; the desktop two-column layout,
+  // where both fit comfortably, is untouched.
+  stageOrderNarrow: {
+    "@media (max-width: 900px)": { order: 2 },
+  },
+  controlsOrderNarrow: {
+    "@media (max-width: 900px)": { order: 1 },
+  },
   // Left: the dark "stage" the digital human / orb sits on.
   stage: {
     position: "relative",
@@ -1346,7 +1358,10 @@ export function InterviewPage() {
                 video inside is `contain`-fit (see AvatarView): photo avatars stream a 512×512
                 square, so the full head-and-shoulders framing is kept whatever the stage's shape
                 and the stage gradient fills the letterbox. */}
-            <div className={styles.stage} data-testid="interview-stage">
+            <div
+              className={mergeClasses(styles.stage, styles.stageOrderNarrow)}
+              data-testid="interview-stage"
+            >
               <div className={styles.stageAvatar}>
                 {/* Once the digital human is streaming, keep it visible — do NOT gate on the
                     channel tab. Gating on voiceActive hid a LIVE avatar the moment the candidate
@@ -1362,7 +1377,10 @@ export function InterviewPage() {
             </div>
 
             {/* Right: the control column. Transcript flex-grows to fill the leftover height. */}
-            <div className={styles.controls} data-testid="interview-controls">
+            <div
+              className={mergeClasses(styles.controls, styles.controlsOrderNarrow)}
+              data-testid="interview-controls"
+            >
               {answerControls}
               <div className={styles.transcriptFill}>
                 <Transcript segments={segments} />

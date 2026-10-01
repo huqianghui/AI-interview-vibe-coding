@@ -27,27 +27,26 @@ real risk of changing behaviour, and it should be specified before it is attempt
 **Effort:** — (no action planned)
 **Priority:** P4 — leave unless a case starts owning state.
 
-### On a phone the orb still pushes the question off the first screen
-
-**What:** with the status strip fixed (v0.40.9.0), the remaining obstacle on a 390x844 phone is the
-stage holding the digital human or its fallback orb: 360 pixels tall, placed above the question card, so
-the card's heading sits at y=808 of an 844-pixel viewport. The candidate still has to scroll to read the
-question they were just asked.
-
-**Measured, not estimated:** card heading top 808, viewport 844, stage top/height 412/360. Taken at the
-same moment as the screenshot that shows it, after a layout settle — an earlier measurement taken at a
-different moment, and a case-insensitive selector that matched the progress bar instead of the card
-heading, each produced numbers that disagreed with the picture.
-
-**Why it is not a quick fix:** the stage is the digital human, which is the product's point, so shrinking
-or moving it is a design decision rather than a CSS tweak. Options worth weighing: a shorter stage below
-some breakpoint; question above stage on narrow screens; or a compact sticky question line that stays
-visible while the stage scrolls. Each changes what a candidate looks at while being interviewed.
-
-**Effort:** S to implement whichever shape is chosen, M to choose it.
-**Priority:** P2 — a candidate on a phone cannot see the question without scrolling.
-
 ## Completed
+### Narrow viewports: question readable without scrolling — v0.40.9.0
+
+Two changes, both measured before and after. The voice-status strip explained all four states at once
+(248 of the first 486 pixels on a 390px phone); only the live state explains itself now, and below the
+900px breakpoint only the live state shows at all — 248 → 68 pixels. And the stacked layout put the
+stage before the question, so the question's TEXT was 144 pixels off an iPhone 14 and 76 off a desktop
+window dragged under 900px; narrow screens now order the question first.
+
+Worth recording: this was never a phone problem. A desktop window at 899px was just as broken, which is
+what the width sweep showed and what a "mobile layout" framing would have missed.
+
+Also worth recording: my first measurement said the question sat at y=319 and was fine. The selector was
+case-insensitive and had matched the progress bar's "Question 1 of 2" instead of the card heading, and
+the number disagreed with the screenshot. Taking both at the same moment, with a case-sensitive
+leaf-only selector, gave 808 for the heading and 860-988 for the text.
+
+**Priority:** P2
+**Completed:** v0.40.9.0 — verified readable at 390x844, 899x800 and 1280x800.
+
 ### Connection policy extracted — the planned split is complete — v0.40.8.0
 
 Step five, and the last of the planned clusters. `useConnectionPolicy.ts` owns who may open a session,

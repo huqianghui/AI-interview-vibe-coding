@@ -9,6 +9,11 @@
   scrolled past three explanations of things that were not happening before reaching what they had just
   been asked. The live state still explains itself; the others keep their dot and name, and on a narrow
   screen only the live one is shown. The strip went from 248 pixels to 68.
+- **On a narrow screen the question now comes before the digital human.** Below 900 pixels the two
+  columns stack, and the stage came first, which put the question's text entirely off screen — 144
+  pixels off an iPhone 14, and 76 off a desktop window merely dragged narrow, so this was never a
+  phone-only problem. The question a candidate was just asked is the one thing they must be able to
+  read without scrolling. Verified readable at 390, 899 and 1280 pixels wide.
 
 ## 0.40.8.0 (2026-10-01)
 
