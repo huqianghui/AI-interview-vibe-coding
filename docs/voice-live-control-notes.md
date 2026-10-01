@@ -396,6 +396,99 @@ Voice Live 官方对 `gpt-5-mini` 的描述是 "audio input through Azure speech
   nudge-only + `probe_guard`（#124）；重连状态重置 + 麦克风释放（#125）；延迟探针改为按真实
   链路计时（#126）。
 
+## 5. 传的那一层：三条音频通路，哪条能走 WebRTC，哪条不能（2026-10-01 实测）
+
+> 起因是一个看起来简单的问题：纯音频能不能走 WebRTC。架构图把 SDK / WebSocket / WebRTC / SIP 并列为接口，
+> 所以答案应该是"能"。实测确认能，但过程中有两条通路被混为一谈，而它们的行为完全相反。
+
+### 5.1 三条通路，不是一条的开关
+
+| 通路 | 端点 | 上行（麦克风） | 下行（回复） | 数字人 |
+|---|---|---|---|---|
+| **A. 我们在用的** | `/voice-live/realtime` + `session.avatar.connect` | WebSocket，base64 PCM | **WebRTC RTP**（数字人音视频同流） | 支持 |
+| **B. 完全不配形象** | `/voice-live/realtime` | WebSocket，base64 PCM | **WebSocket**，`response.audio.delta` | 无 |
+| **C. 原生 WebRTC** | `/voice-live/realtime/calls` | **WebRTC RTP** | **WebRTC RTP** | **不支持** |
+
+关键是 A 和 C 不是同一条路的开关，而是两个入口。实测佐证：
+
+- **B 根本不创建 WebRTC**：清空 persona 的形象后跑完整面试，浏览器构造 `RTCPeerConnection` **0 次**，
+  `session.avatar.connect` 发送 0 次，WS 上收到 10 帧 `response.audio.delta`。所以"不开数字人"不会自动变成
+  WebRTC——WebRTC 在这条链路里是**由数字人握手创建的**，不是由语音会话创建的。
+- **A 可以只走音频**：在会话建立之前把画面钉成关，第一次 `session.avatar.connect` 就是纯音频的。实测
+  PeerConnection 1 个、RTP 音频 5704 字节、RTP 视频 **0** 字节，逐轮约 1 秒。但它**仍然分配一个 avatar**，
+  只是不推视频。
+- **C 真的双向走 RTP**（见 5.2）。
+
+### 5.2 原生 WebRTC（`/calls`）的实测矩阵
+
+照官方文档的 standalone 示例实现（`frontend/e2e/native-webrtc-voice-live.spec.ts`），我们自己的区域资源，
+无数字人，带假麦克风由服务端 VAD 驱动轮次：
+
+| 模型 | voice 类型 | 结果 |
+|---|---|---|
+| `azure-realtime` | `azure-realtime-native`（ava） | **通**，下行 1212 B |
+| `gpt-realtime` | `azure-standard`（en-US-AvaNeural） | **通**，下行 2802 B |
+| `gpt-5-mini` | `azure-standard` | **通**，下行 2262 B |
+| `gpt-realtime` | `azure-realtime-native` | 不通，Azure 报 `invalid_voice_type` |
+| `azure-realtime` | `azure-standard` | 不通，Azure 报 `invalid_voice_type` |
+
+建连开销：offer → SDP answer 511～1519 ms，answer → PC 连上稳定约 0.8 s。data channel 上回来的事件齐全：
+`input_audio_buffer.speech_stopped`、`committed`、`conversation.item.created`、`response.created`、
+`response.output_item.added`、`response.audio_transcript.delta`、`output_audio_buffer.started`。
+
+**voice 类型与模型的配对是硬约束**，Azure 会直接告诉你允许哪些：
+
+- `azure-realtime` → 只允许 `azure-realtime-native`
+- `gpt-realtime` → 允许 `openai`、`azure-standard`、`azure-platform`、`azure-custom`、`custom`、
+  `azure-personal`、`avatar-voice-sync`，**不允许** `azure-realtime-native`
+
+### 5.3 数字人在场时，上行能不能也走 WebRTC？不能，而且是静默失败
+
+通路 A 的 WebRTC 连接上，音频 transceiver 现在是 `recvonly`。把它改成 `sendrecv` 并挂上麦克风轨、
+**同时关掉 WS 上行**，做对照实验：
+
+| | 对照组（现状） | 实验组（麦克风走 RTP） |
+|---|---|---|
+| PC 上音频发送端 | 0 | 1 |
+| 出向 RTP 音频 | 0 字节 | **156473 字节 / 2300 包** |
+| 下行 RTP（数字人） | 53847 字节 | 63075 字节 |
+| WS 上 `input_audio_buffer.append` | 5932 帧 | **0 帧** |
+| 用户转写 | 正常 | **没有** |
+| 错误 | 无 | **无** |
+
+Azure **接受**了 `sendrecv` 的 offer，连接正常，数字人照样说话，我们真的发出去 156 KB 的 RTP 音频，
+而**转写一个字都没有、也没有任何错误**。原因不是"不支持"这么笼统：数字人那条连接是**下行通道**
+（TTS Avatar 的媒体投递），不是会话的输入路径，灌进去的音频不会被送进识别器。
+
+所以"要数字人就得把上行留在 WebSocket"这个结论成立。它不是文档的转述，是两边都测过的。
+
+> 限制：只测了最自然的实现（`addTrack` → 音频 `sendrecv`）。是否存在某个 session 字段能让 avatar 会话
+> 从 RTP 收输入，没有穷举。
+
+### 5.4 方法学：协商成功不等于会话可用
+
+这一条值得单独记，因为今天同一形状踩了两次：
+
+1. **voice 类型配错**：`rtc.call.error` 在控制 WS 上回来了，但 SDP answer 照样返回、PeerConnection 照样
+   连上、我们的音频照样发出去，只是永远不会有回复。
+2. **往数字人连接灌麦克风**：连错误都没有，156 KB 发出去，静默丢弃。
+
+两次都容易把"协商通了"读成"链路通了"。**判据必须是业务信号**——转写出现、`response.created` 到达、
+下行 RTP 字节增长——而不是 `connectionState === "connected"`。
+
+还有一条与此同形的坑：**判断"有没有声音"不能用累积计数器**。`totalSamplesReceived` 在静音期照涨；
+`totalAudioEnergy` 的"有增长"在冷会话可用、温会话失效（上一句话垫高了累积值）。可用的是瞬时
+`audioLevel` 跨底噪：静音期 0.0000～0.0010，声音一到跳到 0.09～0.47。
+
+### 5.5 这些探针在哪
+
+| 探针 | 测什么 |
+|---|---|
+| `frontend/e2e/native-webrtc-voice-live.spec.ts` | 通路 C，照官方示例；带模型/voice 矩阵开关 |
+| `frontend/e2e/audio-only-webrtc-live.spec.ts` | 通路 A 的纯音频形态，从第一次握手就不要画面 |
+| `frontend/e2e/avatar-speak-start-live.spec.ts` | 通路 A：Azure 确认读题 → 真正听见（amira 806 ms、lisa 988 ms） |
+| `frontend/e2e/turn-latency-live.spec.ts` + `scripts/turn-latency.sh` | 通路 A 的逐轮延迟，带画面 vs 关画面 |
+
 一句话总结：**Voice Live 里的模型是会话的宿主，不是面试官的脑子。脑子在后端，嘴用 TTS，
 说什么字由 prompt 管、怎么发声由 `session.voice` 管——而且每一条"以为在控制"的路径，都要抓 WS 帧
 证明它真的接上了。**
