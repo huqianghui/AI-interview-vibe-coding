@@ -27,6 +27,26 @@ real risk of changing behaviour, and it should be specified before it is attempt
 **Effort:** — (no action planned)
 **Priority:** P4 — leave unless a case starts owning state.
 
+### On a phone the orb still pushes the question off the first screen
+
+**What:** with the status strip fixed (v0.40.9.0), the remaining obstacle on a 390x844 phone is the
+stage holding the digital human or its fallback orb: 360 pixels tall, placed above the question card, so
+the card's heading sits at y=808 of an 844-pixel viewport. The candidate still has to scroll to read the
+question they were just asked.
+
+**Measured, not estimated:** card heading top 808, viewport 844, stage top/height 412/360. Taken at the
+same moment as the screenshot that shows it, after a layout settle — an earlier measurement taken at a
+different moment, and a case-insensitive selector that matched the progress bar instead of the card
+heading, each produced numbers that disagreed with the picture.
+
+**Why it is not a quick fix:** the stage is the digital human, which is the product's point, so shrinking
+or moving it is a design decision rather than a CSS tweak. Options worth weighing: a shorter stage below
+some breakpoint; question above stage on narrow screens; or a compact sticky question line that stays
+visible while the stage scrolls. Each changes what a candidate looks at while being interviewed.
+
+**Effort:** S to implement whichever shape is chosen, M to choose it.
+**Priority:** P2 — a candidate on a phone cannot see the question without scrolling.
+
 ## Completed
 ### Connection policy extracted — the planned split is complete — v0.40.8.0
 

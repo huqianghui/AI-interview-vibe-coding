@@ -91,9 +91,9 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalXS,
     marginBottom: tokens.spacingVerticalL,
   },
-  // Status legend under the header: the four voice states shown side-by-side as tip cards, so the
-  // candidate can read what each state means AND see which one is live right now (the active card is
-  // lifted out of the dimmed row). Educational + a live indicator in one strip.
+  // Status legend under the header: the four voice states side by side, with the LIVE one lifted out of
+  // the dimmed row and explaining itself. Only the active state carries its sentence — see the comment
+  // at the render site for the measurement that decided it.
   statusLegend: {
     display: "flex",
     flexWrap: "wrap",
@@ -115,10 +115,21 @@ const useStyles = makeStyles({
     background: tokens.colorNeutralBackground2,
     // Inactive states recede; the active one is restored to full presence below.
     opacity: 0.55,
+    // On a phone the four cards stack, so the three inactive ones cost about 150px of the first screen
+    // and push the question the candidate was just asked into the bottom third (measured at 390px
+    // wide). A narrow screen cannot usefully show a four-state reference strip anyway, so it shows the
+    // live state only. The strip keeps its educational job where there is room for it.
+    "@media (max-width: 900px)": {
+      display: "none",
+    },
     transition:
       "opacity 200ms ease, border-color 200ms ease, box-shadow 200ms ease",
   },
   statusItemActive: {
+    // Overrides the narrow-screen hide above: whatever the width, the live state is shown.
+    "@media (max-width: 900px)": {
+      display: "flex",
+    },
     opacity: 1,
     border: `1px solid ${tokens.colorBrandStroke1}`,
     boxShadow: tokens.shadow4,
@@ -1293,9 +1304,17 @@ export function InterviewPage() {
                     <Text size={200} className={styles.statusItemLabel}>
                       {t(`voice.${state}`)}
                     </Text>
-                    <Text size={100} className={styles.statusItemTip}>
-                      {t(`voice.statusTips.${state}`)}
-                    </Text>
+                    {/* The explanation belongs to the state you are IN. Rendering all four cost 248 of
+                        the first 486 pixels on a 390px phone (measured), pushing the question itself
+                        into the bottom third of the screen — the candidate scrolled past three
+                        sentences about things that were not happening to read what they were asked.
+                        Inactive states keep their dot and name, which is what carries the colour
+                        vocabulary; only the live one explains itself. */}
+                    {active && (
+                      <Text size={100} className={styles.statusItemTip}>
+                        {t(`voice.statusTips.${state}`)}
+                      </Text>
+                    )}
                   </span>
                 </div>
               );

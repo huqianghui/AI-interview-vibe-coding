@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.40.9.0 (2026-10-01)
+
+### Fixed
+- **On a phone, the status strip no longer crowds out the question.** The voice-status row explained all
+  four states at once — Ready, Listening, Speaking, Muted — each with a full sentence, even though only
+  one is ever happening. On a 390-pixel screen that took 248 of the first 486 pixels, so a candidate
+  scrolled past three explanations of things that were not happening before reaching what they had just
+  been asked. The live state still explains itself; the others keep their dot and name, and on a narrow
+  screen only the live one is shown. The strip went from 248 pixels to 68.
+
 ## 0.40.8.0 (2026-10-01)
 
 ### Changed

@@ -821,9 +821,19 @@ describe("InterviewPage", () => {
     expect(active[0].getAttribute("data-state")).toBe("listening");
     expect(active[0].getAttribute("aria-current")).toBe("true");
 
-    // Tips are rendered (proves the i18n keys resolve for the current locale).
+    // Only the LIVE state explains itself. Rendering all four sentences cost 248 of the first 486
+    // pixels on a 390px phone and pushed the question into the bottom third of the screen, so the
+    // inactive cards keep their dot and name only. This still proves the i18n keys resolve: the active
+    // tip is present, and an inactive state's label is too.
     expect(screen.getByText(/your voice is being picked up/i)).toBeInTheDocument();
-    expect(screen.getByText(/your mic is off/i)).toBeInTheDocument();
+    expect(screen.queryByText(/your mic is off/i), "an inactive state must not spend a sentence").toBeNull();
+    expect(screen.getByText(/^Muted$/)).toBeInTheDocument();
+
+    // Exactly ONE explanation on screen, always the live state's. Measured on a 390px phone: rendering
+    // all four cost 248 of the first 486 pixels and left the question the candidate had just been asked
+    // off the first screen. Asserted by count so adding a second sentence back fails here.
+    const tips = legend.querySelectorAll('[data-active="true"] span > span:nth-child(2)');
+    expect(tips.length, "only the live state explains itself").toBe(1);
   });
 
   it("falls back to text when the voice connection fails (P5/P6b)", async () => {
