@@ -2,30 +2,55 @@
 
 ## Interview (voice)
 
-### `useInterviewVoice` is still 1505 lines — the split continues
+### `useInterviewVoice` is still 1485 lines — one cluster left
 
-**Done:** answer draft (v0.40.4.0), first-read gate (v0.40.5.0), read-delivery watch (v0.40.6.0).
-1682 → 1505 lines, every step with the existing tests passing unmodified.
+**Done:** answer draft (v0.40.4.0), first-read gate (v0.40.5.0), read-delivery watch (v0.40.6.0), speak
+queue and idempotency guard (v0.40.7.0). 1682 → 1485 lines, every step with the existing tests passing
+unmodified and each module mutation-checked.
 
 **What is left:**
-- **The speak queue and its idempotency guard** — `pendingSpeakTextRef`, `lastSpokenAttemptRef`,
-  `spokenTextRef` (~25 references). Deliberately left behind by v0.40.6.0: the watch module decides
-  WHEN to retry, and these decide WHETHER a given text may be sent again. Related but separable, and
-  the retry path reaches into them from the watch's callback, so extracting them means designing that
-  seam rather than moving refs.
-- **The WebSocket lifecycle**, where `connect`'s options object, the `connectRef` forward reference and
-  the v0.40.3.0 re-entrancy guard should end up with one owner.
-- **NOT the `handleMessage` switch** (~460 lines). Still out of scope.
+- **The WebSocket lifecycle** — `wsRef`, `reconnectAttemptRef`, `connectsSinceLiveRef`,
+  `connectInFlightRef`, `intentionalCloseRef`, `fatalErrorRef`, plus `openSession`/`connect` and the
+  `connectRef` forward reference. This is the largest remaining piece and the only one that owns an
+  external resource rather than pure state, so it wants its own careful pass: the re-entrancy guard
+  (v0.40.3.0), the per-drop retry budget and the cross-switch ceiling all have to keep their exact
+  current relationship, and three of them were separately the subject of a shipped bug.
+- **NOT the `handleMessage` switch** (~460 lines). Still out of scope: long, but a flat dispatch table
+  on Azure event type where every case touches several refs.
 
-**Hard line, unchanged:** existing tests pass unmodified, and each module is mutation-checked. That
-practice has now found four blind spots in my own suites across three steps.
+**Hard line, unchanged:** existing tests pass unmodified, and each module is mutation-checked. Across
+four steps that practice has found five blind spots in my own suites and two provable equivalent
+mutants, all recorded in the test files rather than left as unexplained gaps.
 
 **Plan:** `docs/planning/plan-refactor-interview-voice-hook-20260930.md`.
 
-**Effort:** S to M per cluster
+**Effort:** M
 **Priority:** P3
 
 ## Completed
+### Speak queue and idempotency guard extracted — v0.40.7.0
+
+Step four. `useSpeakQueue.ts` owns which question text may be sent to be read, which waits behind an
+in-flight response, and which was last attempted — three refs that cross-referenced each other from five
+places. Each rule it now holds exists because of a shipped bug: the per-text guard stops the same
+question being read two or three times (several routes reach the read path and every `response.done`
+fires the flush), the single retry after a collision stops that same guard blocking the one legitimate
+re-send, and latest-wins queueing stops a question the candidate has already left being read.
+
+Two things worth recording. My first test for the rejection path asserted a contract that does not
+exist — nothing tracks per-text rejections, here or in the original code; there is one outstanding
+attempt and the rejection is about that. The wrong version looked reasonable, so it is rewritten as the
+real contract with a note rather than quietly deleted. And one mutation could not be caught: making the
+guard-clear unconditional is provably equivalent, because the guard is only ever set equal to the
+attempt or to null, so a differing non-null value cannot arise. The proof is in the test file so a
+future reader who mutates it and sees nothing fail knows why.
+
+23 tests, 15 of 16 mutations caught, the sixteenth proved equivalent.
+
+**Priority:** P3
+**Completed:** v0.40.7.0 — 1505 → 1485 lines, 457 frontend tests, and the 434 that existed before pass
+UNMODIFIED.
+
 ### Read-delivery watch extracted from the voice hook — v0.40.6.0
 
 Step three. `useQuestionReadWatch.ts` owns making sure a question handed to the voice session actually
