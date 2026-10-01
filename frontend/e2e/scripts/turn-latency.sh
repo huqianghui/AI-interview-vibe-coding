@@ -3,9 +3,15 @@
 #
 #   frontend/e2e/scripts/turn-latency.sh
 #
-# Measures turn 1 / 2 / 3 twice: once with the avatar (WebRTC) and once with no avatar at all (reply audio
-# as PCM over the WebSocket). Performance work runs on the bank, never the external brain persona, so a
-# third-party gateway cannot sit inside the numbers (owner directive 2026-10-01).
+# Measures three answer turns twice, both with the reply audio on WebRTC:
+#   MODE=avatar  avatar video + audio on one WebRTC connection
+#   MODE=audio   the audio-only downgrade — same connection, video m-line a=inactive
+# Performance work runs on the built-in bank, never the external brain persona, so a third-party gateway
+# cannot sit inside the numbers (owner directive 2026-10-01).
+#
+# Both modes use the SAME persona: audio-only is reached by dropping the picture at runtime, not by
+# unconfiguring the avatar. An earlier revision cleared interviewer_personas.character for the audio run,
+# which measured a different transport entirely (PCM over the WebSocket) and read as silence.
 #
 # Mutates two rows in the LOCAL dev DB and restores them. The restore trap is armed BEFORE the first
 # mutation: arming it afterwards is how an earlier run left a temporary avatar pinned with no cleanup.
@@ -52,23 +58,30 @@ ADMIN_U=$(grep '^SEED_ADMIN_USERNAME' backend/.env | cut -d= -f2-)
 ADMIN_P=$(grep '^SEED_ADMIN_PASSWORD' backend/.env | cut -d= -f2-)
 
 run_mode() {
-  local mode="$1" char="$2" style="$3"
-  sqlite3 "$DB" "update interviewer_personas set character='$char', style='$style' where is_default=1;"
-  local applied
-  applied=$(sqlite3 "$DB" "select coalesce(character,'') from interviewer_personas where is_default=1;")
-  if [ "$applied" != "$char" ]; then
-    echo "avatar column did not take (wanted '$char', got '$applied') — skipping MODE=$mode rather than mislabelling it"
-    return 1
-  fi
+  local mode="$1"
   echo ""
-  echo "######## MODE=$mode  (avatar='${char:-none}') ########"
+  echo "######## MODE=$mode  (avatar='$AVATAR_PIN') ########"
   ( cd frontend && MODE="$mode" TURNS="$TURNS" LIVE_VOICE=1 FAKE_AUDIO="$WAV" \
       E2E_API=http://127.0.0.1:8000/api E2E_ADMIN_USERNAME="$ADMIN_U" E2E_ADMIN_PASSWORD="$ADMIN_P" \
       npx playwright test turn-latency-live --config=e2e/live.config.ts ) 2>&1 \
-    | grep -E 'turn [0-9]|PER-TURN|answer heard|errors:|passed|failed' || true
+    | grep -E 'turn [0-9]|cold start|PER-TURN|answer heard|downgrade|errors:|passed|failed' || true
 }
 
-run_mode avatar "${AVATAR:-amira}" "" || true
-# Azure rate-limits avatar session creation; leave room before the next session.
-sleep 25
-run_mode audio "" "" || true
+# Pin the avatar once, for both runs. Which avatar is load-bearing — lisa streams 1080p video, amira a
+# 512x512 photo — and leaving it to whatever the persona happens to hold is what made five weak-network
+# runs inconclusive. Verified by read-back, because a silent failure here mislabels every number below.
+AVATAR_PIN="${AVATAR:-amira}"
+case "$AVATAR_PIN" in
+  lisa)  sqlite3 "$DB" "update interviewer_personas set character='lisa', style='casual-sitting' where is_default=1;" ;;
+  amira) sqlite3 "$DB" "update interviewer_personas set character='amira', style='' where is_default=1;" ;;
+  *) echo "unknown AVATAR '$AVATAR_PIN' (use lisa or amira)"; exit 1 ;;
+esac
+APPLIED=$(sqlite3 "$DB" "select coalesce(character,'') from interviewer_personas where is_default=1;")
+[ "$APPLIED" = "$AVATAR_PIN" ] || { echo "avatar pin failed: wanted '$AVATAR_PIN', got '$APPLIED'"; exit 1; }
+echo "avatar pinned to $AVATAR_PIN"
+
+run_mode avatar || true
+# Azure rate-limits avatar session creation, and the audio run rebuilds a session of its own on top of
+# the one it starts with. Leave room, or the downgrade is refused and the run measures nothing.
+sleep 30
+run_mode audio || true

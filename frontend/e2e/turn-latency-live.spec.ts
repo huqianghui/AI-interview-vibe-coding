@@ -2,32 +2,20 @@
  * Per-turn speak-start latency: turn 1, 2 and 3, not just the first one.
  *
  * Series 03 §6 reported "多轮无退化" from a WS-level probe on a direct, avatar-less session. This measures
- * the product's own path turn by turn, in the browser, with audibility as the end point — so it answers
- * what the candidate experiences on their second and third answer, not only their first.
+ * the product's own path turn by turn, in the browser, ending at AUDIBILITY — so it answers what the
+ * candidate experiences on their second and third answer, not only their first.
  *
- * Two configurations, selected by MODE (the runner script flips the persona's avatar column between them):
- *   MODE=avatar  the default product path — avatar over WebRTC
- *   MODE=audio   no avatar at all, so the reply audio comes back as PCM over the WebSocket. There is no
- *                ICE, no avatar session creation, and no rate limit. This is "audio from the start",
- *                which is NOT the same thing as the audio-only DOWNGRADE (that one keeps the WebRTC
- *                connection and only marks the video m-line inactive).
+ * Two configurations, both carrying the reply audio over WebRTC:
+ *   MODE=avatar  the default path — avatar video + audio on one WebRTC connection
+ *   MODE=audio   the audio-only downgrade — the SAME WebRTC connection with the video m-line marked
+ *                a=inactive. Audio still rides an RTP track, so getStats() can see it directly.
+ *
+ * An earlier revision made MODE=audio mean "a persona with no avatar at all", where the reply comes back
+ * as PCM on the WebSocket and plays through WebAudio. getStats() is blind there, and the probe reported
+ * silence that a frame count disproved. That path is a real product fallback but it is NOT the WebRTC
+ * audio-only mode, and conflating the two is what produced an unreadable measurement.
  *
  * Needs a looping FAKE_AUDIO WAV so every turn has an answer to submit.
- *
- * STATE: MODE=avatar is trustworthy (turn 1 / 2 / 3 measured at 6487 / 970 / 1067 ms on amira, no
- * degradation across turns). MODE=audio is NOT yet trustworthy: it reported "NOT HEARD" on all three
- * turns while a separate check proved the session was healthy — 10 `response.audio.delta` frames, an
- * `response.audio.done`, and no console errors. Without an avatar the reply audio arrives as PCM on the
- * WebSocket and is played through WebAudio, where `getStats()` has nothing to report, and the
- * AudioNode.prototype.connect tap below does not reliably catch that graph. Fix the tap before reading
- * any MODE=audio number: as it stands the probe cannot tell silence from its own blindness.
- *
- * Worth knowing before extending this: for a pure-audio session the native WebRTC interface is available
- * (Voice Live offers SDK / WebSocket / WebRTC / SIP). The standing decision to keep the uplink on the
- * WebSocket is conditioned on wanting the avatar, which the WebRTC mode does not support — so it does not
- * apply to an audio-only mode. Per series 01 §4.5.2 the payoff there is weak-network behaviour, not
- * average latency: no TCP head-of-line blocking, loss degrading to brief distortion instead of a latency
- * spike. That path is not implemented here, and "no avatar over WebSocket PCM" is not a stand-in for it.
  */
 import { expect, test } from "@playwright/test";
 
@@ -85,12 +73,12 @@ test.describe(`Per-turn speak-start, MODE=${MODE} (real Azure)`, () => {
      *  arrives as PCM on the WebSocket and is played through WebAudio, where getStats knows nothing — so
      *  that path is measured from the page's own output analyser instead. Measuring only the WebRTC side
      *  would have reported "never audible" for MODE=audio and looked like a product failure. */
+    /** Audible level on the inbound WebRTC audio track. Both modes keep that track, so this one reading
+     *  serves both. The 0.05 floor is measured, not guessed: through the silence before a voice, level
+     *  sits at 0.0000-0.0010; once speech starts it jumps to 0.09-0.47. */
     const level = async (): Promise<number> =>
       page.evaluate(async () => {
-        const w = window as unknown as {
-          __pcs: RTCPeerConnection[];
-          __probeAnalyser?: { node: AnalyserNode; buf: Uint8Array };
-        };
+        const w = window as unknown as { __pcs: RTCPeerConnection[] };
         let best = 0;
         for (const pc of w.__pcs) {
           if (pc.connectionState !== "connected") continue;
@@ -102,49 +90,8 @@ test.describe(`Per-turn speak-start, MODE=${MODE} (real Azure)`, () => {
             }
           });
         }
-        const a = w.__probeAnalyser;
-        if (a) {
-          a.node.getByteTimeDomainData(a.buf);
-          let peak = 0;
-          for (const v of a.buf) peak = Math.max(peak, Math.abs(v - 128) / 128);
-          best = Math.max(best, peak);
-        }
         return best;
       });
-
-    // Tap every AudioContext's destination so the WS/PCM playback path is observable too.
-    await page.addInitScript(() => {
-      const w = window as unknown as { __probeAnalyser?: { node: AnalyserNode; buf: Uint8Array } };
-      const Orig = window.AudioContext;
-      window.AudioContext = class extends Orig {
-        constructor(...a: unknown[]) {
-          // @ts-expect-error passthrough
-          super(...a);
-          try {
-            const node = this.createAnalyser();
-            node.fftSize = 512;
-            node.connect(this.destination);
-            const origConnect = AudioNode.prototype.connect;
-            const dest = this.destination;
-            // Mirror anything connected to the destination into the analyser.
-            AudioNode.prototype.connect = function (this: AudioNode, target: AudioNode | AudioParam, ...rest: unknown[]) {
-              if (target === dest) {
-                try {
-                  origConnect.call(this, node);
-                } catch {
-                  /* some nodes refuse a second connection; the WebRTC path still covers those */
-                }
-              }
-              // @ts-expect-error passthrough
-              return origConnect.call(this, target, ...rest);
-            } as typeof AudioNode.prototype.connect;
-            w.__probeAnalyser = { node, buf: new Uint8Array(node.frequencyBinCount) };
-          } catch {
-            /* no analyser: the WebRTC path above still answers for MODE=avatar */
-          }
-        }
-      } as unknown as typeof AudioContext;
-    });
 
     const waitForVoice = async (budgetMs: number): Promise<number | null> => {
       const until = Date.now() + budgetMs;
@@ -174,13 +121,62 @@ test.describe(`Per-turn speak-start, MODE=${MODE} (real Azure)`, () => {
 
     const results: { turn: number; from: string; ms: number | null }[] = [];
 
-    // Turn 1: the cold start — click to hearing the first question.
+    // The cold start is always a video session: the downgrade can only be requested once the avatar is up.
+    // Reported separately for that reason, rather than being labelled a turn of whichever mode follows.
     const firstVoice = await waitForVoice(120_000);
-    results.push({ turn: 1, from: '"I\'m ready" click', ms: firstVoice === null ? null : firstVoice - t0 });
+    const coldStartMs = firstVoice === null ? null : firstVoice - t0;
     await waitForQuiet(60_000);
 
+    if (MODE === "audio") {
+      const view = page.locator('[data-testid="avatar-view"]');
+      await expect(view).toHaveAttribute("data-avatar-connected", "true", { timeout: 90_000 });
+      const tToggle = Date.now();
+      await page.getByTestId("voice-video-toggle").click();
+      await expect(view).toHaveAttribute("data-media-mode", "audio-only", { timeout: 60_000 });
+      // Azure honours session.avatar.connect once per session, so dropping the picture rebuilds the whole
+      // session. Wait for audio to flow on the NEW connection before timing anything on it.
+      const samplesNow = async (): Promise<number> =>
+        page.evaluate(async () => {
+          const w = window as unknown as { __pcs: RTCPeerConnection[] };
+          let n = 0;
+          for (const pc of w.__pcs) {
+            if (pc.connectionState !== "connected") continue;
+            const r = await pc.getStats();
+            r.forEach((st) => {
+              const row = st as unknown as Record<string, unknown>;
+              if (row.type === "inbound-rtp" && row.kind === "audio" && typeof row.totalSamplesReceived === "number") {
+                n = Math.max(n, row.totalSamplesReceived as number);
+              }
+            });
+          }
+          return n;
+        });
+      const base = await samplesNow();
+      await expect.poll(samplesNow, { timeout: 120_000, intervals: [250] }).toBeGreaterThan(base);
+      console.log(`  [downgrade] picture dropped, audio back after ${Date.now() - tToggle}ms`);
+      // Prove the claim: an audio-only session must carry zero video bytes.
+      const videoBytes = await page.evaluate(async () => {
+        const w = window as unknown as { __pcs: RTCPeerConnection[] };
+        let n = 0;
+        for (const pc of w.__pcs) {
+          if (pc.connectionState !== "connected") continue;
+          const r = await pc.getStats();
+          r.forEach((st) => {
+            const row = st as unknown as Record<string, unknown>;
+            if (row.type === "inbound-rtp" && row.kind === "video" && typeof row.bytesReceived === "number") {
+              n += row.bytesReceived as number;
+            }
+          });
+        }
+        return n;
+      });
+      console.log(`  [downgrade] video bytes on the rebuilt connection: ${videoBytes}`);
+      expect(videoBytes, "an audio-only session must carry no video").toBe(0);
+      await waitForQuiet(30_000);
+    }
+
     const doneBtn = page.getByRole("button", { name: /我说完了|i'm done answering/i });
-    for (let turn = 2; turn <= TURNS; turn++) {
+    for (let turn = 1; turn <= TURNS; turn++) {
       // Wait for THIS turn's answer: the counter must advance, not merely be non-zero from a prior turn.
       const seen = heardCount;
       await expect
@@ -196,12 +192,14 @@ test.describe(`Per-turn speak-start, MODE=${MODE} (real Azure)`, () => {
     }
 
     console.log(`\n===== PER-TURN SPEAK-START, MODE=${MODE} =====`);
+    console.log(`  cold start (always with video): click → voice audible   ${coldStartMs === null ? "NOT HEARD" : `${coldStartMs}ms`}`);
     results.forEach((r) =>
       console.log(`  turn ${r.turn}: ${r.from} → voice audible   ${r.ms === null ? "NOT HEARD" : `${r.ms}ms`}`),
     );
     if (errors.length) console.log(`  errors: ${errors.length} → ${errors[0]}`);
     console.log("==========================================\n");
 
+    expect(coldStartMs, "the first question never became audible").not.toBeNull();
     results.forEach((r) => expect(r.ms, `turn ${r.turn} never became audible`).not.toBeNull());
   });
 });
