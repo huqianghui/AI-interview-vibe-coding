@@ -2,32 +2,56 @@
 
 ## Interview (voice)
 
-### `useInterviewVoice` is still 1485 lines — one cluster left
+### `useInterviewVoice` is 1481 lines — the planned split is DONE; what remains is a judgement call
 
-**Done:** answer draft (v0.40.4.0), first-read gate (v0.40.5.0), read-delivery watch (v0.40.6.0), speak
-queue and idempotency guard (v0.40.7.0). 1682 → 1485 lines, every step with the existing tests passing
-unmodified and each module mutation-checked.
+**All five planned clusters are extracted:** answer draft (v0.40.4.0), first-read gate (v0.40.5.0),
+read-delivery watch (v0.40.6.0), speak queue (v0.40.7.0), connection policy (v0.40.8.0). Every step
+landed with the existing tests passing unmodified and each module mutation-checked.
 
-**What is left:**
-- **The WebSocket lifecycle** — `wsRef`, `reconnectAttemptRef`, `connectsSinceLiveRef`,
-  `connectInFlightRef`, `intentionalCloseRef`, `fatalErrorRef`, plus `openSession`/`connect` and the
-  `connectRef` forward reference. This is the largest remaining piece and the only one that owns an
-  external resource rather than pure state, so it wants its own careful pass: the re-entrancy guard
-  (v0.40.3.0), the per-drop retry budget and the cross-switch ceiling all have to keep their exact
-  current relationship, and three of them were separately the subject of a shipped bug.
-- **NOT the `handleMessage` switch** (~460 lines). Still out of scope: long, but a flat dispatch table
-  on Azure event type where every case touches several refs.
+**The line count barely moved on the last step and that is expected**, not a disappointment: it replaced
+five refs and their scattered arithmetic with named calls of similar length. The win is that the three
+limits whose DIFFERENCES carry the behaviour now sit together with tests asserting they stay distinct —
+conflating any two reintroduces a shipped bug.
 
-**Hard line, unchanged:** existing tests pass unmodified, and each module is mutation-checked. Across
-four steps that practice has found five blind spots in my own suites and two provable equivalent
-mutants, all recorded in the test files rather than left as unexplained gaps.
+**What is left is `handleMessage`, ~460 lines, and the standing decision is NOT to rewrite it.** It is a
+flat dispatch table on Azure event type. Each case is short; the length comes from the number of events
+and from comments recording what each one cost to learn. Splitting it would spread one lookup table
+across several files without reducing what a reader must hold in their head. Reopen only if a specific
+case grows its own state worth owning — which is how all five extracted clusters announced themselves.
 
-**Plan:** `docs/planning/plan-refactor-interview-voice-hook-20260930.md`.
+**If the file's size is still the concern**, the honest next lever is not another extraction: it is that
+`useInterviewVoice` returns 19 members and is consumed by two very different callers (the interview page
+and the editor Playground). Splitting by CONSUMER rather than by state is a different exercise, with a
+real risk of changing behaviour, and it should be specified before it is attempted.
 
-**Effort:** M
-**Priority:** P3
+**Effort:** — (no action planned)
+**Priority:** P4 — leave unless a case starts owning state.
 
 ## Completed
+### Connection policy extracted — the planned split is complete — v0.40.8.0
+
+Step five, and the last of the planned clusters. `useConnectionPolicy.ts` owns who may open a session,
+how often a drop is retried, and when to stop and surface a terminal error: five refs whose DIFFERENCES
+carry the behaviour. Each was separately a shipped bug — a media-mode rebuild spending the retries a real
+drop needs, that same reset hiding a terminal failure for ever, and two clicks on a deliberately
+always-clickable affordance opening rival sessions sharing one set of refs.
+
+The socket itself stayed in the hook on purpose: this owns the policy, not the resource. Routing `send`
+through a module would have been a bigger, riskier change in the wrong direction.
+
+Two test gaps found by mutation, both the same class — inputs with no discriminating power. A
+single-entry backoff table cannot tell "hold the last interval" from "restart at the first", and one
+counted attempt cannot tell whether teardown cleared a ceiling of six. Both replaced with inputs that
+discriminate, and both mutations re-verified as caught.
+
+Also fixed: two comments still named `intentionalCloseRef` after it ceased to exist. Dead names in live
+prose are how a reader gets a wrong model — the same failure this release recorded for
+`record_follow_up`.
+
+**Priority:** P3
+**Completed:** v0.40.8.0 — 1485 → 1481 lines, 481 frontend tests, and the 457 that existed before pass
+UNMODIFIED. Cumulative across five steps: 1682 → 1481.
+
 ### Speak queue and idempotency guard extracted — v0.40.7.0
 
 Step four. `useSpeakQueue.ts` owns which question text may be sent to be read, which waits behind an

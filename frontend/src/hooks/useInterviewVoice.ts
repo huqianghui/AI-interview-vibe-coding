@@ -33,6 +33,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAnswerDraft } from "./useAnswerDraft";
 import { useFirstReadGate } from "./useFirstReadGate";
 import { useQuestionReadWatch } from "./useQuestionReadWatch";
+import { useConnectionPolicy } from "./useConnectionPolicy";
 import { useSpeakQueue } from "./useSpeakQueue";
 import type { RefObject } from "react";
 import { _internal as clientInternal, type VoiceSession } from "../api/client";
@@ -266,19 +267,16 @@ export function useInterviewVoice(
   });
 
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectAttemptRef = useRef(0);
-  /** Connect attempts since the last session that actually went live. Survives mode switches (see
-   * MAX_CONNECTS_WITHOUT_LIVE); cleared by `session.updated`, the only proof a session works. */
-  const connectsSinceLiveRef = useRef(0);
-  /** The connect attempt currently in flight, if any. Set synchronously at the top of `connect` so a
-   * second caller cannot slip past it during the async work before the socket is even created. */
-  const connectInFlightRef = useRef<Promise<void> | null>(null);
+  /** Who may open a session, how often a drop is retried, and when to stop and say the voice is gone.
+   * Extracted to `useConnectionPolicy`: the per-drop budget, the attempts-since-live ceiling and the
+   * in-flight guard were five refs whose DIFFERENCES carry the behaviour — each was separately a shipped
+   * bug, and conflating any two of them reintroduces one. */
+  const policy = useConnectionPolicy(MAX_RECONNECT, RECONNECT_DELAYS, MAX_CONNECTS_WITHOUT_LIVE);
   /** Forward reference to the guarded `connect`, so the two internal callers below (the onclose retry
    * and the media-mode rebuild) go through the same bookkeeping instead of around it. Same pattern the
    * rest of this hook uses to break the useCallback dependency cycle. */
   const connectRef = useRef<((locale?: string, opts?: ConnectOptions) => Promise<void>) | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const intentionalCloseRef = useRef(false);
   // Set when a PRE-CONNECT Azure `error` frame (e.g. `invalid_model` — the configured Voice Live
   // model isn't supported in this region) rejects the initial connect. Such a session never went
   // live, so retrying is futile: Azure will reject the same model every time. Without this flag the
@@ -286,7 +284,6 @@ export function useInterviewVoice(
   // 3-attempt reconnect loop, and the terminal "failed after 3 attempts" error OVERWRITES the real
   // Azure message the page already surfaced. Checked in onclose to skip reconnect and preserve the
   // verbatim error.
-  const fatalErrorRef = useRef(false);
   const lastLocaleRef = useRef<string | undefined>(undefined);
   const transcriptIdCounter = useRef(0);
   const avatarEnabledRef = useRef(false);
@@ -527,12 +524,12 @@ export function useInterviewVoice(
               // (a retry would hit the same mismatch) and reject the in-flight connect, otherwise the
               // `session.updated` frame right behind this one flips the state back to "connected".
               const mismatch = new Error(detail);
-              fatalErrorRef.current = true;
+              policy.latchFatal();
               // Azure is not the one at fault here, so it will never close this socket — WE have to,
               // or the `session.updated` frame right behind this one resolves the connect and flips
               // the state back to "connected" while the mic keeps streaming at the wrong rate.
-              // `intentionalCloseRef` keeps `onclose` from treating it as a drop worth retrying.
-              intentionalCloseRef.current = true;
+              // Marking the close intentional keeps `onclose` from treating it as a drop worth retrying.
+              policy.markIntentionalClose();
               const doomed = wsRef.current;
               wsRef.current = null;
               if (doomed) {
@@ -572,7 +569,7 @@ export function useInterviewVoice(
 
           sessionLiveRef.current = true;
           // A session that reached `session.updated` works, whatever it took to get here.
-          connectsSinceLiveRef.current = 0;
+          policy.noteLive();
           setConn("connected");
           setAudioState("idle");
           onConnected();
@@ -842,7 +839,7 @@ export function useInterviewVoice(
           // here flipped the page to "语音不可用" even when the very next retry succeeded — the
           // "face visible but voice-unavailable notice" contradiction. Reject the attempt (so the
           // loop advances) but don't call onError.
-          if (reconnectAttemptRef.current > 0) {
+          if (policy.isRetrying()) {
             console.warn(
               "[voice] error during reconnect attempt (will retry):",
               error.message,
@@ -853,7 +850,7 @@ export function useInterviewVoice(
           // Pre-connect fatal (never went live): mark it so onclose does NOT reconnect. Retrying an
           // invalid_model / unsupported-region rejection is futile and its terminal generic error
           // would overwrite this verbatim Azure message on the page.
-          fatalErrorRef.current = true;
+          policy.latchFatal();
           setConn("error");
           optionsRef.current.onError?.(error);
           onFatalError(error);
@@ -871,6 +868,7 @@ export function useInterviewVoice(
       draft,
       readWatch,
       speakQueue,
+      policy,
     ],
   );
 
@@ -883,20 +881,18 @@ export function useInterviewVoice(
       lastLocaleRef.current = effectiveLocale;
       // Counted before the branch below, because that branch is exactly what this survives: the
       // `!isReconnect` reset is what a media-mode rebuild uses to get its retries back.
-      connectsSinceLiveRef.current += 1;
-      if (connectsSinceLiveRef.current > MAX_CONNECTS_WITHOUT_LIVE) {
+      if (!policy.countAttempt()) {
         const error = new Error(
           `Voice connection failed after ${MAX_CONNECTS_WITHOUT_LIVE} attempts without a live session`,
         );
         // Latch it so a later `onclose` does not start the retry loop again on the way out.
-        fatalErrorRef.current = true;
+        policy.latchFatal();
         setConn("error");
         optionsRef.current.onError?.(error);
         throw error;
       }
       if (!isReconnect) {
-        reconnectAttemptRef.current = 0;
-        fatalErrorRef.current = false;
+        policy.resetDropBudget();
         // A manual (re)connect starts from a clean slate: whatever the previous session left
         // (a draft, a phantom in-flight mark, a pending commit) belongs to a turn that is over.
         // Idempotent after cleanup(); protects the path where no cleanup ran.
@@ -907,7 +903,7 @@ export function useInterviewVoice(
         // draft `restartForMediaMode` carefully preserved was wiped three lines later, every time.
         resetTurnState(keepDraft ? { keepDraft: true } : undefined);
       }
-      intentionalCloseRef.current = false;
+      policy.clearIntentionalClose();
       setConn("connecting");
 
       // Step 0: unlock autoplay for the assistant-audio AudioContext inside this user gesture,
@@ -984,17 +980,16 @@ export function useInterviewVoice(
             );
             return;
           }
-          if (intentionalCloseRef.current) return;
+          if (policy.wasIntentionalClose()) return;
           // A pre-connect fatal error (invalid_model / unsupported region) already surfaced the real
           // Azure message and rejected the connect. The reject set `resolved` (hence wasConnected),
           // but the session never actually went live — do NOT reconnect: retrying is futile and the
           // terminal "failed after 3 attempts" would overwrite the verbatim error on the page.
-          if (fatalErrorRef.current) return;
-          // Reconnect on unexpected close: 3 attempts, 1s/2s/4s backoff.
-          if (reconnectAttemptRef.current < MAX_RECONNECT) {
-            reconnectAttemptRef.current++;
-            const delay =
-              RECONNECT_DELAYS[reconnectAttemptRef.current - 1] ?? 4000;
+          if (policy.isFatal()) return;
+          // Reconnect on unexpected close: a bounded number of attempts with backoff. Null means the
+          // per-drop budget is spent, and the terminal branch below runs instead.
+          const delay = policy.takeRetryDelay();
+          if (delay !== null) {
             setConn("reconnecting");
             avatarStream.disconnect();
             // Release the mic fully: connect() re-acquires it (initMic — permission is already
@@ -1059,7 +1054,7 @@ export function useInterviewVoice(
         throw error;
       }
     },
-    [audio, avatarStream, cleanup, handleMessage, resetTurnState, setConn],
+    [audio, avatarStream, cleanup, handleMessage, policy, resetTurnState, setConn],
   );
 
   /**
@@ -1085,26 +1080,22 @@ export function useInterviewVoice(
    */
   const connect = useCallback(
     async (locale?: string, opts: ConnectOptions = {}): Promise<void> => {
-      if (connectInFlightRef.current && !opts.replaceInFlight) {
+      const joined = policy.inFlight(Boolean(opts.replaceInFlight));
+      if (joined) {
         console.info("[voice] connect already in flight — joining it instead of opening a second session");
-        return connectInFlightRef.current;
+        return joined;
       }
-      const attempt = openSession(locale, opts);
-      connectInFlightRef.current = attempt;
-      try {
-        await attempt;
-      } finally {
-        // Only clear if this attempt still owns the slot: a `replaceInFlight` caller may have started a
-        // newer one while this was settling, and clearing then would let a click open a rival session.
-        if (connectInFlightRef.current === attempt) connectInFlightRef.current = null;
-      }
+      // `track` both records this attempt and frees the slot when it settles, so the two cannot drift
+      // apart — and it frees the slot only if this attempt still owns it, since a replaceInFlight caller
+      // may have started a newer one meanwhile.
+      await policy.track(openSession(locale, opts));
     },
-    [openSession],
+    [openSession, policy],
   );
   connectRef.current = connect;
 
   const disconnect = useCallback(async () => {
-    intentionalCloseRef.current = true;
+    policy.markIntentionalClose();
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
@@ -1115,7 +1106,7 @@ export function useInterviewVoice(
     setAudioState("idle");
     setIsMuted(false);
     isMutedRef.current = false;
-  }, [audio, cleanup, setConn]);
+  }, [audio, cleanup, policy, setConn]);
 
   /**
    * Rebuild the Voice Live session because the avatar media mode changed (weak-network degrade, or the
@@ -1128,14 +1119,14 @@ export function useInterviewVoice(
   const restartForMediaMode = useCallback(
     (next: "video" | "audio-only") => {
       console.info(`[voice] rebuilding the session for media mode ${next}`);
-      intentionalCloseRef.current = true; // our own close must not trip the auto-reconnect path
+      policy.markIntentionalClose(); // our own close must not trip the auto-reconnect path
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
       }
       if (wsRef.current) {
         // Detach BEFORE closing: `onclose` fires on a later tick, by which time connect() below has
-        // already reset `intentionalCloseRef`, so the old socket's handler would sail past the
+        // already cleared the intentional-close mark, so the old socket's handler would sail past the
         // intentional-close guard and fire a SECOND connect (observed live — two "opening WS proxy"
         // lines per switch, two avatar sessions, straight into Azure's avatar rate limit).
         wsRef.current.onclose = null;
@@ -1162,7 +1153,7 @@ export function useInterviewVoice(
     // No resetTurnState here on purpose: connect() runs the keepDraft-preserving reset itself, so
     // listing it would claim a dependency this callback does not have. `connect` is reached through
     // `connectRef` rather than captured, which is what keeps this out of a dependency cycle with it.
-    [audio, setConn],
+    [audio, policy, setConn],
   );
   restartForMediaModeRef.current = restartForMediaMode;
 
@@ -1434,10 +1425,15 @@ export function useInterviewVoice(
   cleanupRef.current = cleanup;
   useEffect(() => {
     return () => {
-      intentionalCloseRef.current = true;
+      policy.markIntentionalClose();
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       cleanupRef.current();
     };
+    // Deliberately empty: this teardown must run ONLY on unmount. `policy` is left out rather than
+    // added even though its handle is referentially stable, because relying on that here is the exact
+    // shape that once tore the avatar connection down mid-handshake — an effect that re-ran because it
+    // depended on something rebuilt per render. The omission is the safer statement of intent.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
