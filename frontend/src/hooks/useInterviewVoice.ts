@@ -31,6 +31,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useAnswerDraft } from "./useAnswerDraft";
+import { useFirstReadGate } from "./useFirstReadGate";
 import type { RefObject } from "react";
 import { _internal as clientInternal, type VoiceSession } from "../api/client";
 import { AZURE_DEFAULT_INPUT_SAMPLE_RATE, MIC_SAMPLE_RATE, useVoiceAudio } from "./useVoiceAudio";
@@ -384,20 +385,11 @@ export function useInterviewVoice(
   // once the next session reaches `session.updated`. Without this, a drop-during-reconnect is
   // unrecoverable — the page latched "spoken" and never asks again.
   const resumeSpeakTextRef = useRef<string | null>(null);
-  // First-read avatar gate (see FIRST_READ_AVATAR_GATE_MS). `firstReadDone` flips true once the
-  // opening question has actually been emitted; until then, when the avatar is enabled but not yet
-  // painting frames, the read is held in `firstReadGate` (text + a fallback timer) so its opening
-  // words aren't clipped by the still-loading avatar media pipeline. Latest-wins: a newer question
-  // supersedes a held one. `avatarReady` mirrors avatarStream.isMediaReady for the callback — NOT
-  // `isConnected`: on a weak link the session degrades to audio-only (`docs/avatar-weaknet-probe.md`
-  // §3.9), which never paints a frame, so gating on painted frames made every audio-only question sit
-  // out the full gate timeout in silence before being read.
-  const firstReadDoneRef = useRef(false);
-  const firstReadGateRef = useRef<{
-    text: string;
-    timer: ReturnType<typeof setTimeout>;
-  } | null>(null);
-  const avatarReadyRef = useRef(false);
+  /** Holds the FIRST question read until the digital human can actually be heard — the interviewer's
+   * audio rides the avatar's WebRTC track, so reading before that track flows clipped the opening
+   * words. Extracted to `useFirstReadGate`: the rule about which of its four pieces of state wins was
+   * spread across `speakQuestion`, the readiness effect and the turn reset. */
+  const firstReadGate = useFirstReadGate(FIRST_READ_AVATAR_GATE_MS);
 
   // Settle any armed commit with whatever transcript has accumulated so far (usually ""). Called from
   // the transcription handler (with the just-arrived text already recorded) and from teardown paths
@@ -453,14 +445,10 @@ export function useInterviewVoice(
     // Cancel a held first-read gate — its timer would fire a read at a closed/next WS. Stash its
     // text (unless the watchdog above already stashed a later one) so the next session re-speaks it,
     // and reset firstReadDone so that next session re-gates the opening read behind its avatar.
-    if (firstReadGateRef.current) {
-      clearTimeout(firstReadGateRef.current.timer);
-      if (!resumeSpeakTextRef.current)
-        resumeSpeakTextRef.current = firstReadGateRef.current.text;
-      firstReadGateRef.current = null;
-    }
-    firstReadDoneRef.current = false;
-    avatarReadyRef.current = false;
+    // A held read is stashed for the next session unless the watchdog above already stashed a later
+    // one: the page latched it as spoken, so dropping it would lose the question outright.
+    const heldFirstRead = firstReadGate.reset();
+    if (heldFirstRead && !resumeSpeakTextRef.current) resumeSpeakTextRef.current = heldFirstRead;
     // The answer side of a turn reset — dropping or keeping the draft, folding partials under
     // keepDraft, disarming both silence timers, and settling an armed commit — belongs to
     // `useAnswerDraft` and lives there with its own tests.
@@ -468,7 +456,7 @@ export function useInterviewVoice(
     // The INTERVIEWER's live transcript is not part of the candidate's answer, so it stays here: its
     // item ids belong to the dead Azure session either way.
     assistantLiveTranscriptRef.current.clear();
-  }, [draft]);
+  }, [draft, firstReadGate]);
 
   const cleanup = useCallback(() => {
     if (wsRef.current) {
@@ -1438,35 +1426,13 @@ export function useInterviewVoice(
       // short bound elapses (handshake stalled / avatar off despite the flag),
       // so we never leave the candidate in silence. Only gates the first read of a session, and only
       // when the avatar is enabled but not yet painting; every later question reads immediately.
-      if (
-        !firstReadDoneRef.current &&
-        avatarEnabledRef.current &&
-        !avatarReadyRef.current
-      ) {
-        if (firstReadGateRef.current)
-          clearTimeout(firstReadGateRef.current.timer);
-        console.info(
-          "[voice] holding first question read until avatar is ready",
-        );
-        firstReadGateRef.current = {
-          text,
-          timer: setTimeout(() => {
-            firstReadGateRef.current = null;
-            console.warn(
-              "[voice] avatar-ready gate elapsed; reading first question anyway",
-            );
-            firstReadDoneRef.current = true;
-            speakQuestionRef.current?.(text);
-          }, FIRST_READ_AVATAR_GATE_MS),
-        };
+      if (firstReadGate.shouldHold(avatarEnabledRef.current)) {
+        console.info("[voice] holding first question read until avatar is ready");
+        firstReadGate.hold(text, (held) => speakQuestionRef.current?.(held));
         return true; // held — the page latches "spoken"; the gate guarantees it's read.
       }
       // Past the gate (or not gated): this read is (or supersedes) the first read.
-      firstReadDoneRef.current = true;
-      if (firstReadGateRef.current) {
-        clearTimeout(firstReadGateRef.current.timer);
-        firstReadGateRef.current = null;
-      }
+      firstReadGate.markRead();
 
       // Arm (or re-arm) the delivery watchdog BEFORE attempting: the page latches "spoken" on a
       // true return, so from here on WE own making the read actually happen. Confirmed by the
@@ -1523,7 +1489,7 @@ export function useInterviewVoice(
       emitSpeak(text);
       return true;
     },
-    [emitSpeak, send],
+    [emitSpeak, firstReadGate, send],
   );
   speakQuestionRef.current = speakQuestion;
 
@@ -1566,15 +1532,12 @@ export function useInterviewVoice(
   // the moment the avatar starts painting frames — so the opening question is read as soon as its
   // audio can actually be heard, without waiting out the full gate timeout.
   useEffect(() => {
-    avatarReadyRef.current = avatarStream.isMediaReady;
-    if (avatarStream.isMediaReady && firstReadGateRef.current) {
-      const { text, timer } = firstReadGateRef.current;
-      clearTimeout(timer);
-      firstReadGateRef.current = null;
+    const release = firstReadGate.noteAvatarReady(avatarStream.isMediaReady);
+    if (release) {
       console.info("[voice] avatar ready → releasing held first question read");
-      speakQuestionRef.current?.(text);
+      speakQuestionRef.current?.(release);
     }
-  }, [avatarStream.isMediaReady]);
+  }, [avatarStream.isMediaReady, firstReadGate]);
 
   return {
     connect,
