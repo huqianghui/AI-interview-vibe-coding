@@ -5,3 +5,4 @@ dist/
 coverage/
 *.tsbuildinfo
 e2e/output/
+e2e/output/
