@@ -2,25 +2,23 @@
 
 ## Interview (voice)
 
-### `useInterviewVoice` is still 1565 lines — the split continues
+### `useInterviewVoice` is still 1505 lines — the split continues
 
-**Done so far:** the answer-draft cluster (v0.40.4.0, `useAnswerDraft.ts`) and the first-read gate
-(v0.40.5.0, `useFirstReadGate.ts`). 1682 → 1565 lines. Both landed with the existing tests passing
-unmodified, which is the line that keeps these refactors honest.
+**Done:** answer draft (v0.40.4.0), first-read gate (v0.40.5.0), read-delivery watch (v0.40.6.0).
+1682 → 1505 lines, every step with the existing tests passing unmodified.
 
-**What is left, smallest-first, one PR each:**
-- **Read confirmation** — `awaitingReadResponseRef`, `readResponseIdRef`, `readDirectiveRef` (~25
-  references). Tracks whether the verbatim read Azure was asked for actually happened.
-- **The speak queue and its watchdog** — `pendingSpeakTextRef`, `lastSpokenAttemptRef`, `spokenTextRef`,
-  `speakWatchRef` (~39 references). The largest remaining cluster and the most tangled with Azure's
-  response lifecycle, since a collision rejection has to re-queue the same text without re-reading it.
+**What is left:**
+- **The speak queue and its idempotency guard** — `pendingSpeakTextRef`, `lastSpokenAttemptRef`,
+  `spokenTextRef` (~25 references). Deliberately left behind by v0.40.6.0: the watch module decides
+  WHEN to retry, and these decide WHETHER a given text may be sent again. Related but separable, and
+  the retry path reaches into them from the watch's callback, so extracting them means designing that
+  seam rather than moving refs.
 - **The WebSocket lifecycle**, where `connect`'s options object, the `connectRef` forward reference and
   the v0.40.3.0 re-entrancy guard should end up with one owner.
-- **NOT the `handleMessage` switch** (465 lines). Still out of scope: long, but a flat dispatch table on
-  Azure event type where every case touches several refs.
+- **NOT the `handleMessage` switch** (~460 lines). Still out of scope.
 
-**Hard line, unchanged:** existing tests pass unmodified, and each new module is mutation-checked rather
-than assumed — that practice has already found two blind spots in my own test suites.
+**Hard line, unchanged:** existing tests pass unmodified, and each module is mutation-checked. That
+practice has now found four blind spots in my own suites across three steps.
 
 **Plan:** `docs/planning/plan-refactor-interview-voice-hook-20260930.md`.
 
@@ -28,6 +26,31 @@ than assumed — that practice has already found two blind spots in my own test 
 **Priority:** P3
 
 ## Completed
+### Read-delivery watch extracted from the voice hook — v0.40.6.0
+
+Step three. `useQuestionReadWatch.ts` owns making sure a question handed to the voice session actually
+got read: the retry budget and its timer, the response-id claim that proves delivery, and the
+text-similarity fallback for paths that carry no id.
+
+That fallback is where the "read twice" regression lived, twice. A prefix-only check never confirmed a
+paraphrase, so the watchdog re-read a question the candidate had already heard. It is now a plain
+exported function with eight tests of its own.
+
+One design correction found while wiring it: arming the watchdog and expecting a response are
+*different* moments — `speakQuestion` arms before deciding how to deliver, and `emitSpeak` sets the
+expectation when the request actually goes out. My first version collapsed them, which would have
+claimed a response for a read that was never sent. Split into `arm` and `expectResponse`, with a test
+asserting arming alone expects nothing.
+
+36 tests. Fifteen deliberate mutations: thirteen caught, and the two misses were chased to a cause
+rather than assumed — one was a real gap (my short-question case left an EMPTY word list, so it could
+not tell whether the guard existed; replaced with a two-word case that discriminates) and one was a
+genuine equivalent mutant, recorded in the test file instead of papered over.
+
+**Priority:** P3
+**Completed:** v0.40.6.0 — 1565 → 1505 lines, 434 frontend tests, and the 398 that existed before pass
+UNMODIFIED.
+
 ### First-read gate extracted from the voice hook — v0.40.5.0
 
 The rule that holds the opening question until the digital human can be heard: four pieces of state read

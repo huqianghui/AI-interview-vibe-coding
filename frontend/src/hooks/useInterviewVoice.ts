@@ -32,6 +32,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useAnswerDraft } from "./useAnswerDraft";
 import { useFirstReadGate } from "./useFirstReadGate";
+import { useQuestionReadWatch } from "./useQuestionReadWatch";
 import type { RefObject } from "react";
 import { _internal as clientInternal, type VoiceSession } from "../api/client";
 import { AZURE_DEFAULT_INPUT_SAMPLE_RATE, MIC_SAMPLE_RATE, useVoiceAudio } from "./useVoiceAudio";
@@ -354,21 +355,14 @@ export function useInterviewVoice(
   // the question was silently dropped somewhere in the queue/cancel/flush machinery — retry from
   // the top. Single latest-wins watch: the backend only moves forward, so a newer question always
   // supersedes the watch on an older one.
-  const speakWatchRef = useRef<{
-    text: string;
-    attempts: number;
-    timer: ReturnType<typeof setTimeout>;
-  } | null>(null);
-  // Forward ref so the watchdog timer can re-enter speakQuestion (declared below).
+  /** Makes sure a question handed to the voice session actually got read, and retries when it did not.
+   * Extracted to `useQuestionReadWatch`: delivery is confirmed by response id (immune to the agent
+   * paraphrasing) with a text-similarity fallback, and getting that fallback wrong shipped the
+   * "read twice" regression twice. The handle is referentially stable. */
+  const readWatch = useQuestionReadWatch(SPEAK_CONFIRM_TIMEOUT_MS, SPEAK_MAX_ATTEMPTS);
+  // Forward ref so the watchdog's retry can re-enter speakQuestion (declared below). Stays here rather
+  // than in the watch module: the module decides WHEN to retry, the hook owns the read path itself.
   const speakQuestionRef = useRef<((text: string) => boolean) | null>(null);
-  // Tracks the response born from OUR read attempt: emitSpeak arms `awaiting`, the next
-  // `response.created` claims its id. Any transcript arriving under that id proves the attempt
-  // produced a PLAYING response — the strongest delivery confirmation, immune to the agent
-  // paraphrasing (or outright ignoring) the injected text. Without this, the text-match check
-  // below false-negatived on paraphrases and the watchdog re-read questions that had played
-  // (the "读两遍" regression, live-observed twice).
-  const awaitingReadResponseRef = useRef(false);
-  const readResponseIdRef = useRef<string | null>(null);
   // MOUTH-mode marker from `proxy.connected`: the backend sends a non-empty read-directive template
   // (the admin-configurable reader prompt + a `{text}` placeholder) for every MOUTH session
   // (external, or linear/judged bank since v0.38.3.1 — see is_mouth_persona in
@@ -435,13 +429,10 @@ export function useInterviewVoice(
     // Stop the question-read watchdog — its retry would hit a closed/next WS with stale state.
     // Stash the unconfirmed text so the next session's `session.updated` re-speaks it (the page
     // has already latched it as "spoken" and won't ask again).
-    if (speakWatchRef.current) {
-      clearTimeout(speakWatchRef.current.timer);
-      resumeSpeakTextRef.current = speakWatchRef.current.text;
-      speakWatchRef.current = null;
-    }
-    awaitingReadResponseRef.current = false;
-    readResponseIdRef.current = null;
+    // A read still unconfirmed when the session tears down is stashed for the next one to re-speak:
+    // the page latched it as spoken and will never ask again.
+    const unconfirmedRead = readWatch.reset();
+    if (unconfirmedRead) resumeSpeakTextRef.current = unconfirmedRead;
     // Cancel a held first-read gate — its timer would fire a read at a closed/next WS. Stash its
     // text (unless the watchdog above already stashed a later one) so the next session re-speaks it,
     // and reset firstReadDone so that next session re-gates the opening read behind its avatar.
@@ -456,7 +447,7 @@ export function useInterviewVoice(
     // The INTERVIEWER's live transcript is not part of the candidate's answer, so it stays here: its
     // item ids belong to the dead Azure session either way.
     assistantLiveTranscriptRef.current.clear();
-  }, [draft, firstReadGate]);
+  }, [draft, firstReadGate, readWatch]);
 
   const cleanup = useCallback(() => {
     if (wsRef.current) {
@@ -508,31 +499,11 @@ export function useInterviewVoice(
       // question's content words; an unrelated server-VAD auto-response does not — so ≥60% of the
       // question's words appearing in the spoken text confirms delivery without false-confirming
       // on auto-responses.
+      // Confirm a read by text similarity, for paths that carry no response id. The rule itself lives
+      // in `readWasDelivered` (useQuestionReadWatch) where it is unit-tested — a prefix-only version
+      // false-negatived on paraphrases and re-read questions that had played.
       const confirmSpeakWatch = (assistantText: string) => {
-        const watch = speakWatchRef.current;
-        if (!watch || !assistantText) return;
-        const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
-        const spoken = norm(assistantText);
-        const wanted = norm(watch.text);
-        const probe = spoken.slice(0, Math.min(24, wanted.length));
-        let delivered = Boolean(probe) && wanted.startsWith(probe);
-        if (!delivered) {
-          const words = (s: string) =>
-            s
-              .replace(/[^\p{L}\p{N}\s]/gu, " ")
-              .split(/\s+/)
-              .filter((w) => w.length >= 3);
-          const wantedWords = [...new Set(words(wanted))];
-          if (wantedWords.length >= 3) {
-            const spokenWords = new Set(words(spoken));
-            const hit = wantedWords.filter((w) => spokenWords.has(w)).length;
-            delivered = hit / wantedWords.length >= 0.6;
-          }
-        }
-        if (delivered) {
-          clearTimeout(watch.timer);
-          speakWatchRef.current = null;
-        }
+        readWatch.confirmByText(assistantText);
       };
 
       switch (msg.type as string | undefined) {
@@ -766,12 +737,9 @@ export function useInterviewVoice(
           // then confirm delivery BY ID (immune to paraphrasing). If this `created` actually
           // belongs to a colliding auto-response, the collision `error` that follows resets the
           // claim and re-queues the read.
-          if (awaitingReadResponseRef.current) {
-            awaitingReadResponseRef.current = false;
-            readResponseIdRef.current =
-              ((msg.response as Record<string, unknown> | undefined)?.id as
-                string | undefined) ?? null;
-          }
+          readWatch.claimResponse(
+            ((msg.response as Record<string, unknown> | undefined)?.id as string | undefined) ?? null,
+          );
           setAudio("speaking");
           break;
         case "response.audio.delta":
@@ -790,15 +758,8 @@ export function useInterviewVoice(
             emit("assistant", running, false, key);
             // A transcript under the response OUR read attempt created = delivery confirmed by
             // id, regardless of wording. Text similarity is the fallback for id-less paths.
-            if (
-              msg.response_id &&
-              msg.response_id === readResponseIdRef.current
-            ) {
-              const watch = speakWatchRef.current;
-              if (watch) {
-                clearTimeout(watch.timer);
-                speakWatchRef.current = null;
-              }
+            if (readWatch.ownsResponse(msg.response_id as string | undefined)) {
+              readWatch.confirm();
             } else {
               confirmSpeakWatch(running);
             }
@@ -810,15 +771,8 @@ export function useInterviewVoice(
           assistantLiveTranscriptRef.current.delete(key);
           if (msg.transcript) {
             emit("assistant", msg.transcript as string, true, key);
-            if (
-              msg.response_id &&
-              msg.response_id === readResponseIdRef.current
-            ) {
-              const watch = speakWatchRef.current;
-              if (watch) {
-                clearTimeout(watch.timer);
-                speakWatchRef.current = null;
-              }
+            if (readWatch.ownsResponse(msg.response_id as string | undefined)) {
+              readWatch.confirm();
               // Verbatim guard (MOUTH mode only): OUR read response finished — its transcript must
               // BE the text we handed to emitSpeak, since the read is server-side TTS of exactly that
               // text. Delivery is confirmed by id (above) so a drift never retried; this makes it
@@ -878,8 +832,8 @@ export function useInterviewVoice(
               activeResponseRef.current = true;
               // Our response.create was REJECTED, so any response id claimed since emitSpeak
               // belongs to the colliding auto-response, not our read — revoke the delivery proof.
-              awaitingReadResponseRef.current = false;
-              readResponseIdRef.current = null;
+              // The watch stays armed: it still owns the retry.
+              readWatch.releaseClaim();
               if (lastSpokenAttemptRef.current) {
                 pendingSpeakTextRef.current = lastSpokenAttemptRef.current;
                 // This attempt was REJECTED — it was never actually read, so clear the per-text
@@ -890,15 +844,14 @@ export function useInterviewVoice(
                 }
                 lastSpokenAttemptRef.current = null;
               }
-            } else if (awaitingReadResponseRef.current) {
+            } else if (readWatch.isExpectingResponse()) {
               // Any OTHER rejection of OUR read attempt (no `response.created` has claimed it yet —
               // e.g. an api-version that lacks `pre_generated_assistant_message`): nothing of ours
               // is in flight, so release the optimistic in-flight marks emitSpeak set. Otherwise
               // `activeResponseRef` stays true with no `response.done` ever coming, and the next
               // speakQuestion cancels-and-queues behind a phantom response (silent interview). The
               // read watchdog still owns the retry.
-              awaitingReadResponseRef.current = false;
-              readResponseIdRef.current = null;
+              readWatch.releaseClaim();
               activeResponseRef.current = false;
             }
             break;
@@ -935,6 +888,7 @@ export function useInterviewVoice(
       setConn,
       settlePendingCommit,
       draft,
+      readWatch,
     ],
   );
 
@@ -1326,10 +1280,8 @@ export function useInterviewVoice(
       if (spokenTextRef.current === text) return;
       lastSpokenAttemptRef.current = text;
       spokenTextRef.current = text;
-      // The next `response.created` belongs to THIS attempt — its id becomes the delivery proof
-      // for the watchdog (see readResponseIdRef).
-      awaitingReadResponseRef.current = true;
-      readResponseIdRef.current = null;
+      // The next `response.created` belongs to THIS attempt — its id becomes the delivery proof.
+      readWatch.expectResponse();
       // Optimistically mark active so a rapid second speakQuestion (or a commit nudge) defers
       // instead of colliding; the real `response.created` confirms it, `response.done` clears it.
       activeResponseRef.current = true;
@@ -1368,7 +1320,7 @@ export function useInterviewVoice(
         send({ type: "response.create" });
       }
     },
-    [send],
+    [readWatch, send],
   );
 
   /**
@@ -1439,40 +1391,28 @@ export function useInterviewVoice(
       // assistant transcript matching (confirmSpeakWatch); on timeout, retry the whole attempt —
       // clearing the per-text idempotency guard, which by then can only be blocking a read that
       // never played (a REAL read would have confirmed and disarmed this watch within the window).
-      const prior = speakWatchRef.current;
-      if (prior) clearTimeout(prior.timer);
-      const attempts = prior?.text === text ? prior.attempts + 1 : 1;
-      if (attempts > SPEAK_MAX_ATTEMPTS) {
-        // Retries exhausted — stop; the question card remains the fallback. Also drop the
-        // optimistic in-flight marks the failed attempts left behind: every attempt set
-        // `activeResponseRef` before sending and nothing ever cleared it (no `response.created`,
-        // no `response.done`). Left `true`, EVERY later speakQuestion would see a phantom active
-        // response, send `response.cancel` and queue on a `response.done` that never comes — the
-        // rest of the interview silent with no user-facing signal (adversarial review, v0.39.2.3).
-        speakWatchRef.current = null;
-        activeResponseRef.current = false;
-        awaitingReadResponseRef.current = false;
-        readResponseIdRef.current = null;
+      const attempts = readWatch.arm(text, (unread, nextAttempt) => {
         console.warn(
-          "[voice] question read retries exhausted; giving up on voice read",
+          `[voice] question read unconfirmed after ${SPEAK_CONFIRM_TIMEOUT_MS}ms — retrying (attempt ${nextAttempt})`,
         );
+        // The retry must get PAST the per-text idempotency guard: by now that guard can only be
+        // blocking a read that never played, since a real one would have confirmed and disarmed.
+        if (spokenTextRef.current === unread) spokenTextRef.current = null;
+        if (pendingSpeakTextRef.current === unread) pendingSpeakTextRef.current = null;
+        speakQuestionRef.current?.(unread);
+      });
+      if (attempts === null) {
+        // Retries exhausted — stop; the question card remains the fallback. Also drop the optimistic
+        // in-flight marks the failed attempts left behind: every attempt set `activeResponseRef`
+        // before sending and nothing ever cleared it (no `response.created`, no `response.done`).
+        // Left true, EVERY later speakQuestion would see a phantom active response, send
+        // `response.cancel` and queue on a `response.done` that never comes — the rest of the
+        // interview silent with no user-facing signal (adversarial review, v0.39.2.3). The watch
+        // clears its own claim; `activeResponseRef` is the hook's and is cleared here.
+        activeResponseRef.current = false;
+        console.warn("[voice] question read retries exhausted; giving up on voice read");
         return true;
       }
-      speakWatchRef.current = {
-        text,
-        attempts,
-        timer: setTimeout(() => {
-          // Leave the watch in place — the re-entry below reads it as `prior` to carry the
-          // attempt count forward (its timer has already fired; re-clearing it is a no-op).
-          console.warn(
-            `[voice] question read unconfirmed after ${SPEAK_CONFIRM_TIMEOUT_MS}ms — retrying (attempt ${attempts + 1})`,
-          );
-          if (spokenTextRef.current === text) spokenTextRef.current = null;
-          if (pendingSpeakTextRef.current === text)
-            pendingSpeakTextRef.current = null;
-          speakQuestionRef.current?.(text);
-        }, SPEAK_CONFIRM_TIMEOUT_MS),
-      };
 
       // Watchdog retries (attempts > 1) EMIT DIRECTLY instead of queueing on the active-response
       // flag: a silently-dropped read leaves that flag stale-true forever (its response.done never
@@ -1489,7 +1429,7 @@ export function useInterviewVoice(
       emitSpeak(text);
       return true;
     },
-    [emitSpeak, firstReadGate, send],
+    [emitSpeak, firstReadGate, readWatch, send],
   );
   speakQuestionRef.current = speakQuestion;
 
