@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.40.6.0 (2026-10-01)
+
+### Changed
+- Internal only, no change to how the interview behaves: the machinery that checks a question was
+  actually read aloud — and retries when it was not — now lives in its own module. Getting its
+  "was this delivered?" test wrong is what made the interviewer read the same question twice on two
+  separate occasions, so that rule is now a plain function with its own tests. The 398 tests that
+  existed before pass unmodified.
+
 ## 0.40.5.0 (2026-10-01)
 
 ### Changed
