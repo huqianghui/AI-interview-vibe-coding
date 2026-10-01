@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.40.8.0 (2026-10-01)
+
+### Changed
+- Internal only, no change to how the interview behaves: the rules deciding who may open a voice
+  session, how often a dropped connection is retried, and when to stop retrying and tell the candidate
+  the voice is gone now live in one module. Those three limits are easy to confuse with each other, and
+  each was separately the cause of a shipped bug — a connection rebuild spending the retries a real
+  drop needs, that same reset hiding a failure for ever, and two clicks on a deliberately
+  always-clickable button opening two competing sessions. The 457 tests that existed before pass
+  unmodified.
+
 ## 0.40.7.0 (2026-10-01)
 
 ### Changed
