@@ -28,7 +28,7 @@ import path from "node:path";
 import url from "node:url";
 
 import { expect, test } from "@playwright/test";
-import { primeCandidateLogin } from "./helpers/candidateLogin";
+import { enterVoiceChannel, primeCandidateLogin, waitForInterviewStage } from "./helpers/candidateLogin";
 
 /** import.meta.url, not __dirname: this is an ESM spec, and __dirname throws here — AFTER all the console
  *  output, which is how it silently voided a weak-network run (docs/avatar-weaknet-probe.md §5.4.4). */
@@ -101,9 +101,11 @@ test.describe("Avatar speak-start latency (real Azure)", () => {
       const w = window as unknown as {
         __pcs: RTCPeerConnection[];
         __pcMarks: { name: string; t: number }[];
+        __cands: { t: number; type: string; proto: string }[];
       };
       w.__pcs = [];
       w.__pcMarks = [];
+      w.__cands = [];
       const note = (name: string) => {
         if (!w.__pcMarks.some((m) => m.name === name)) w.__pcMarks.push({ name, t: Date.now() });
       };
@@ -124,6 +126,19 @@ test.describe("Avatar speak-start latency (real Azure)", () => {
           this.addEventListener("track", (e) => {
             const ev = e as RTCTrackEvent;
             note(`pc_track_${ev.track.kind}`);
+          });
+          // Every gathered candidate, with its arrival time and type. The handshake waits for the first
+          // usable (relay/srflx) one and then holds a fixed settle window before sending the offer; that
+          // window is only worth its cost if a candidate arriving INSIDE it can end up winning. Recording
+          // arrivals here, and reading the nominated pair afterwards, answers that with evidence.
+          const cands = (w as unknown as { __cands: { t: number; type: string; proto: string }[] }).__cands;
+          this.addEventListener("icecandidate", (e) => {
+            const c = (e as RTCPeerConnectionIceEvent).candidate;
+            if (!c) {
+              note("ice_gathering_null_candidate");
+              return;
+            }
+            cands.push({ t: Date.now(), type: c.type ?? "?", proto: c.protocol ?? "?" });
           });
         }
       } as unknown as typeof RTCPeerConnection;
@@ -165,9 +180,34 @@ test.describe("Avatar speak-start latency (real Azure)", () => {
       }
     })();
 
+    // The external-brain persona puts a third-party gateway (measured elsewhere at ~3.9s median) inside
+    // the very segments being timed here. Owner directive: performance work runs on the built-in bank.
+    // Asserted, not assumed — the default persona has been external-brain at times in this project's
+    // history, and a silent switch would corrupt every number below without failing anything.
+    let engine: string | null = null;
+    page.on("response", (r) => {
+      if (/\/candidate\/interview\/start$/.test(r.url()) && r.ok()) {
+        void r
+          .json()
+          .then((j: Record<string, unknown>) => {
+            engine = (j.engine as string) ?? (j.external_engine ? "external" : "bank");
+          })
+          .catch(() => undefined);
+      }
+    });
+
     await primeCandidateLogin(page);
     await page.goto(`${BASE}/interview`);
     mark("page_ready");
+
+    // Timestamped handshake logs: the hook already logs each step, so the sub-breakdown of our own
+    // segments comes free — no extra instrumentation in production code.
+    const logs: { t: number; text: string }[] = [];
+    page.on("console", (m) => {
+      const text = m.text();
+      if (/avatar-stream|voice/.test(text)) logs.push({ t: Date.now(), text: text.slice(0, 120) });
+    });
+
     await page.getByRole("button", { name: /开始面试|start interview/i }).click();
     await page.getByRole("button", { name: /我准备好了|i'm ready/i }).click();
     mark("ready_clicked");
@@ -283,6 +323,63 @@ test.describe("Avatar speak-start latency (real Azure)", () => {
         });
     }
 
+    // Which candidate actually won, and when did each arrive?
+    const cands = await page.evaluate(
+      () => (window as unknown as { __cands?: { t: number; type: string; proto: string }[] }).__cands ?? [],
+    );
+    const winner = await page.evaluate(async () => {
+      const w = window as unknown as { __pcs: RTCPeerConnection[] };
+      for (const pc of w.__pcs) {
+        if (pc.connectionState !== "connected") continue;
+        const report = await pc.getStats();
+        let pair: Record<string, unknown> | null = null;
+        const locals = new Map<string, Record<string, unknown>>();
+        report.forEach((st) => {
+          const row = st as unknown as Record<string, unknown>;
+          if (row.type === "local-candidate") locals.set(row.id as string, row);
+          if (row.type === "candidate-pair" && (row.nominated === true || row.state === "succeeded")) pair = row;
+        });
+        if (pair) {
+          const l = locals.get((pair as Record<string, unknown>).localCandidateId as string);
+          return { type: (l?.candidateType as string) ?? "?", proto: (l?.protocol as string) ?? "?" };
+        }
+      }
+      return null;
+    });
+
+    const gatherStart = logs.find((l) => /gathering ICE for offer/.test(l.text))?.t ?? null;
+    const offerReady = logs.find((l) => /offer ready, sending/.test(l.text))?.t ?? null;
+    console.log("\n===== ICE CANDIDATES: is the settle window buying anything? =====");
+    console.log(`  winning local candidate: ${winner ? `${winner.type}/${winner.proto}` : "not resolved"}`);
+    if (gatherStart !== null) {
+      cands.forEach((c) => {
+        const rel = c.t - gatherStart;
+        const usable = c.type === "relay" || c.type === "srflx";
+        console.log(
+          `  +${String(rel).padStart(5)}ms  ${c.type}/${c.proto}${usable ? "  ← usable" : ""}${winner && c.type === winner.type && c.proto === winner.proto ? "  ← same type as the winner" : ""}`,
+        );
+      });
+      const firstUsable = cands.find((c) => c.type === "relay" || c.type === "srflx");
+      if (firstUsable && offerReady !== null) {
+        console.log(`  first usable at +${firstUsable.t - gatherStart}ms; offer sent at +${offerReady - gatherStart}ms`);
+        console.log(`  → held ${offerReady - firstUsable.t}ms after it (the settle window)`);
+        const during = cands.filter((c) => c.t > firstUsable.t && c.t <= offerReady);
+        console.log(`  → candidates that arrived during the hold: ${during.length}${during.length ? ` (${during.map((c) => c.type).join(", ")})` : " — the hold added nothing this run"}`);
+      }
+    }
+
+    const sessionUpdated = marks.find((m) => m.name === "session_updated")?.t ?? null;
+    const avatarSent = marks.find((m) => m.name === "avatar_connect_sent")?.t ?? null;
+    if (sessionUpdated !== null && avatarSent !== null) {
+      console.log("\n===== INSIDE OUR OWN SEGMENT: session.updated → avatar.connect =====");
+      const inRange = logs.filter((l) => l.t >= sessionUpdated - 150 && l.t <= avatarSent + 150);
+      inRange.forEach((l, i) => {
+        const d = i === 0 ? 0 : l.t - inRange[i - 1].t;
+        console.log(`  +${String(l.t - sessionUpdated).padStart(5)}ms  (+${String(d).padStart(4)}ms)  ${l.text}`);
+      });
+      if (inRange.length === 0) console.log("  (no handshake logs in range)");
+    }
+
     console.log("\n===== MARKER TIMELINE =====");
     marks.forEach((m, i) => {
       const d = i === 0 ? 0 : m.t - marks[i - 1].t;
@@ -310,6 +407,7 @@ test.describe("Avatar speak-start latency (real Azure)", () => {
     console.log(`  response.created → first video FRAME      ${gap(readCreated, tFrames)}${preExisting(tFrames)}`);
     console.log(`  stream start → voice (silence on the wire) ${gap(tSamples, tEnergy)}`);
     console.log("");
+    console.log(`  engine: ${engine ?? "unknown"}`);
     console.log(`  speech detected via: ${speech.via}`);
     if (voided) {
       console.log("  *** VOID: no speech onset could be timed for this run. ***");
@@ -347,11 +445,184 @@ test.describe("Avatar speak-start latency (real Azure)", () => {
 
     // The probe is only worth reading if audible audio actually happened. Assert that, and nothing about
     // the durations themselves — this is a measurement, and a threshold here would just invent one.
+    expect(engine, "performance runs must use the built-in bank, not the external gateway").not.toBe(
+      "external",
+    );
     expect(
       tEnergy,
       voided
         ? "audio was already playing when the read was requested — re-run against a quiet session"
         : "no audible audio energy followed the read request — the measurement is void",
     ).not.toBeNull();
+  });
+});
+
+/**
+ * Line B: the audio-only timeline.
+ *
+ * videoPreference always starts at "auto", so an audio-only session cannot be reached cold — the real
+ * route is the downgrade, which is also how a candidate on a weak link gets there. This times the two
+ * segments that differ from Line A: what the session rebuild costs, and what a read costs once no video
+ * is negotiated (no transceiver to carry it, no first frame to wait for).
+ *
+ * Needs FAKE_AUDIO to supply a spoken answer, because the read being timed is the NEXT question's.
+ */
+test.describe("Audio-only speak-start (real Azure, after a deliberate downgrade)", () => {
+  test.skip(!LIVE, "opt-in: set LIVE_VOICE=1");
+  test.skip(!process.env.FAKE_AUDIO, "needs FAKE_AUDIO: the next question's read requires an answer");
+
+  test("times the rebuild and the read once the picture is gone", async ({ page }) => {
+    test.setTimeout(420_000);
+    const marks: { name: string; t: number }[] = [];
+    const mark = (name: string) => {
+      if (!marks.some((m) => m.name === name)) marks.push({ name, t: Date.now() });
+    };
+    /** The WAV carries 45s of leading silence, so the button being ENABLED does not mean anything was
+     *  said yet — submitting then sends an empty answer, no next question is read, and the read being
+     *  timed never happens. Wait for a real transcript instead. */
+    let heardAnswer = "";
+
+    page.on("websocket", (ws) => {
+      if (!/voice-live\/ws/.test(ws.url())) return;
+      ws.on("framesent", (f) => {
+        const d = typeof f.payload === "string" ? f.payload : "";
+        if (!d) return;
+        try {
+          const m = JSON.parse(d) as Record<string, unknown>;
+          if (m.type === "session.avatar.connect") mark(`avatar_connect_${marks.filter((x) => x.name.startsWith("avatar_connect")).length + 1}`);
+          if (m.type === "response.create") mark(`read_sent_${marks.filter((x) => x.name.startsWith("read_sent")).length + 1}`);
+        } catch {
+          /* binary */
+        }
+      });
+      ws.on("framereceived", (f) => {
+        const d = typeof f.payload === "string" ? f.payload : "";
+        if (!d) return;
+        try {
+          const m = JSON.parse(d) as Record<string, unknown>;
+          if (m.type === "session.avatar.connecting") mark(`avatar_answer_${marks.filter((x) => x.name.startsWith("avatar_answer")).length + 1}`);
+          if (m.type === "response.created") mark(`read_created_${marks.filter((x) => x.name.startsWith("read_created")).length + 1}`);
+          if (m.type === "conversation.item.input_audio_transcription.completed") {
+            heardAnswer = String((m as { transcript?: string }).transcript ?? "");
+          }
+        } catch {
+          /* binary */
+        }
+      });
+    });
+
+    await page.addInitScript(() => {
+      const w = window as unknown as { __pcs: RTCPeerConnection[] };
+      w.__pcs = [];
+      const O = window.RTCPeerConnection;
+      window.RTCPeerConnection = class extends O {
+        constructor(...a: unknown[]) {
+          // @ts-expect-error passthrough
+          super(...a);
+          w.__pcs.push(this);
+        }
+      } as unknown as typeof RTCPeerConnection;
+    });
+
+    const level = async (): Promise<number> =>
+      page.evaluate(async () => {
+        const w = window as unknown as { __pcs: RTCPeerConnection[] };
+        let best = 0;
+        for (const pc of w.__pcs) {
+          if (pc.connectionState !== "connected") continue;
+          const r = await pc.getStats();
+          r.forEach((st) => {
+            const row = st as unknown as Record<string, unknown>;
+            if (row.type === "inbound-rtp" && row.kind === "audio" && typeof row.audioLevel === "number") {
+              best = Math.max(best, row.audioLevel as number);
+            }
+          });
+        }
+        return best;
+      });
+
+    /** Wait for an audible voice, same 0.05 floor and same reasoning as Line A. */
+    const waitForVoice = async (budgetMs: number): Promise<number | null> => {
+      const until = Date.now() + budgetMs;
+      while (Date.now() < until) {
+        if ((await level()) > 0.05) return Date.now();
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      return null;
+    };
+
+    await primeCandidateLogin(page);
+    await page.goto(`${BASE}/interview`);
+    await page.getByRole("button", { name: /开始面试|start interview/i }).click();
+    await page.getByRole("button", { name: /我准备好了|i'm ready/i }).click();
+    await waitForInterviewStage(page);
+    await enterVoiceChannel(page);
+
+    const view = page.locator('[data-testid="avatar-view"]');
+    await expect(view).toHaveAttribute("data-avatar-connected", "true", { timeout: 90_000 });
+    // Let the first (video) read finish so the downgrade does not land mid-utterance.
+    await page.waitForTimeout(8_000);
+
+    mark("toggle_clicked");
+    await page.getByTestId("voice-video-toggle").click();
+    await expect(view).toHaveAttribute("data-media-mode", "audio-only", { timeout: 60_000 });
+    mark("mode_is_audio_only");
+    // "Audio is back" = samples flowing again on the rebuilt connection. Polling the level instead would
+    // only report silence until the avatar happens to speak, which is a different question.
+    const samples = async (): Promise<number> =>
+      page.evaluate(async () => {
+        const w = window as unknown as { __pcs: RTCPeerConnection[] };
+        let n = 0;
+        for (const pc of w.__pcs) {
+          if (pc.connectionState !== "connected") continue;
+          const r = await pc.getStats();
+          r.forEach((st) => {
+            const row = st as unknown as Record<string, unknown>;
+            if (row.type === "inbound-rtp" && row.kind === "audio" && typeof row.totalSamplesReceived === "number") {
+              n = Math.max(n, row.totalSamplesReceived as number);
+            }
+          });
+        }
+        return n;
+      });
+    const base = await samples();
+    await expect.poll(async () => await samples(), { timeout: 90_000, intervals: [250] }).toBeGreaterThan(base);
+    mark("audio_ready_after_rebuild");
+
+    // Answer so the next question gets read, and time THAT read with no video in the session.
+    const doneBtn = page.getByRole("button", { name: /我说完了|i'm done answering/i });
+    await expect
+      .poll(() => heardAnswer.length, { timeout: 180_000, intervals: [1000] })
+      .toBeGreaterThan(10);
+    console.log(`  [line B] answer heard: ${JSON.stringify(heardAnswer.slice(0, 70))}`);
+    await expect(doneBtn).toBeEnabled({ timeout: 60_000 });
+    mark("answer_submittable");
+    await doneBtn.click();
+    mark("answer_submitted");
+    const voiceAt = await waitForVoice(90_000);
+    if (voiceAt !== null) marks.push({ name: "voice_audible", t: voiceAt });
+
+    const at = (n: string) => marks.find((m) => m.name === n)?.t ?? null;
+    const gap = (a: string, b: string) => {
+      const x = at(a);
+      const y = at(b);
+      return x !== null && y !== null ? `${y - x}ms` : "—";
+    };
+
+    console.log("\n===== AUDIO-ONLY TIMELINE (real Azure) =====");
+    marks
+      .slice()
+      .sort((a, b) => a.t - b.t)
+      .forEach((m, i, arr) => {
+        const d = i === 0 ? 0 : m.t - arr[i - 1].t;
+        console.log(`  +${String(m.t - arr[0].t).padStart(6)}ms  (+${String(d).padStart(5)}ms)  ${m.name}`);
+      });
+    console.log("");
+    console.log(`  rebuild: toggle → audio-only mode          ${gap("toggle_clicked", "mode_is_audio_only")}`);
+    console.log(`  rebuild: toggle → audio flowing again      ${gap("toggle_clicked", "audio_ready_after_rebuild")}`);
+    console.log(`  read (no video): submit → voice audible    ${gap("answer_submitted", "voice_audible")}`);
+    console.log("============================================\n");
+
+    expect(at("voice_audible"), "no audible voice after the audio-only read").not.toBeNull();
   });
 });
