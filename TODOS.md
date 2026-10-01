@@ -2,31 +2,50 @@
 
 ## Interview (voice)
 
-### `useInterviewVoice` is still 1602 lines — step two of the split
+### `useInterviewVoice` is still 1565 lines — the split continues
 
-**Step one is done (v0.40.4.0):** the answer-draft cluster moved to `useAnswerDraft.ts`, which now owns
-the `keepDraft` rule that caused v0.40.0.0's deterministic draft loss. 1682 → 1602 lines, and the
-existing 351 tests passed unmodified, which was the hard line for calling it a refactor.
+**Done so far:** the answer-draft cluster (v0.40.4.0, `useAnswerDraft.ts`) and the first-read gate
+(v0.40.5.0, `useFirstReadGate.ts`). 1682 → 1565 lines. Both landed with the existing tests passing
+unmodified, which is the line that keeps these refactors honest.
 
-**What is left, in the order the plan wants it:**
-- **The read/speak cluster** (~300 lines): `speakWatchRef`, `firstReadGateRef`, `readDirectiveRef`,
-  `resumeSpeakTextRef`, `avatarReadyRef`, plus `emitSpeak` / `speakAside` / `speakQuestion`. Bigger than
-  step one and more tangled with Azure's response lifecycle, so it wants its own PR.
-- **The WebSocket lifecycle**, which is where `connect`'s options object and the `connectRef` forward
-  reference should end up with one owner, along with the re-entrancy guard added in v0.40.3.0.
-- **NOT the `handleMessage` switch.** Still explicitly out of scope: it is long but it is a flat
-  dispatch table on Azure event type, and every case touches several refs.
+**What is left, smallest-first, one PR each:**
+- **Read confirmation** — `awaitingReadResponseRef`, `readResponseIdRef`, `readDirectiveRef` (~25
+  references). Tracks whether the verbatim read Azure was asked for actually happened.
+- **The speak queue and its watchdog** — `pendingSpeakTextRef`, `lastSpokenAttemptRef`, `spokenTextRef`,
+  `speakWatchRef` (~39 references). The largest remaining cluster and the most tangled with Azure's
+  response lifecycle, since a collision rejection has to re-queue the same text without re-reading it.
+- **The WebSocket lifecycle**, where `connect`'s options object, the `connectRef` forward reference and
+  the v0.40.3.0 re-entrancy guard should end up with one owner.
+- **NOT the `handleMessage` switch** (465 lines). Still out of scope: long, but a flat dispatch table on
+  Azure event type where every case touches several refs.
 
-**Hard line, unchanged:** existing tests must pass unmodified. A test that needs changing means
-behaviour changed, which means it stopped being a refactor.
+**Hard line, unchanged:** existing tests pass unmodified, and each new module is mutation-checked rather
+than assumed — that practice has already found two blind spots in my own test suites.
 
-**Plan:** `docs/planning/plan-refactor-interview-voice-hook-20260930.md`, with step one's two deviations
-from the original plan recorded there.
+**Plan:** `docs/planning/plan-refactor-interview-voice-hook-20260930.md`.
 
-**Effort:** M per remaining cluster
+**Effort:** S to M per cluster
 **Priority:** P3
 
 ## Completed
+### First-read gate extracted from the voice hook — v0.40.5.0
+
+The rule that holds the opening question until the digital human can be heard: four pieces of state read
+from `speakQuestion`, the readiness effect and the turn reset, with the precedence between them spread
+across all three. Two shipped bugs came out of that spread — the opening words clipped because the read
+beat the audio track, and every audio-only session sitting out the full timeout in silence because the
+gate waited for painted frames rather than media readiness.
+
+It owns one more thing worth naming: at teardown it RETURNS the text it was holding instead of dropping
+it, because the page has already latched that question as spoken and will never ask again.
+
+18 tests, and all ten deliberate mutations of the module were caught — including the two that matter
+most, holding a read a second time after the bound elapsed, and losing the held text at teardown.
+
+**Priority:** P3
+**Completed:** v0.40.5.0 — 1602 → 1565 lines, 398 frontend tests, and the 380 that existed before pass
+UNMODIFIED.
+
 ### Answer-draft cluster extracted from the voice hook — v0.40.4.0
 
 Step one of the split. `useAnswerDraft.ts` now owns the candidate's in-progress answer: the buffered

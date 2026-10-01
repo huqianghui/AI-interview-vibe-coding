@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.40.5.0 (2026-10-01)
+
+### Changed
+- Internal only, no change to how the interview behaves: the rule that holds the opening question until
+  the digital human can actually be heard now lives in its own module. It had been four pieces of state
+  read from three different places, with the question of which one wins spread across all three. Two
+  earlier bugs came out of that spread — the opening words being clipped, and every voice-only session
+  waiting out the full timeout in silence — so it now has one owner and 18 tests. The 380 tests that
+  existed before pass unmodified.
+
 ## 0.40.4.0 (2026-09-30)
 
 ### Changed
