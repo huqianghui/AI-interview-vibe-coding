@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.40.9.0 (2026-10-02)
+
+### Fixed
+- **The interview page now loads about three and a half times less data.** Its code was being sent
+  uncompressed: 975 KB where the same bytes compress to 279 KB. Nothing was misconfigured in an obvious
+  way — the web server's own default is to compress HTML and nothing else, so the one file that mattered,
+  the application itself, went out raw. Measured against the live deployment before and after. This is
+  not only a faster first screen: the voice session starts connecting the moment the page loads, so every
+  second the code spent in transit was a second the digital human had not begun to connect.
+- **On a phone, the status strip no longer crowds out the question.** The voice-status row explained all
+  four states at once — Ready, Listening, Speaking, Muted — each with a full sentence, even though only
+  one is ever happening. On a 390-pixel screen that took 248 of the first 486 pixels, so a candidate
+  scrolled past three explanations of things that were not happening before reaching what they had just
+  been asked. The live state still explains itself; the others keep their dot and name, and on a narrow
+  screen only the live one is shown. The strip went from 248 pixels to 68.
+- **On a narrow screen the question now comes before the digital human.** Below 900 pixels the two
+  columns stack, and the stage came first, which put the question's text entirely off screen — 144
+  pixels off an iPhone 14, and 76 off a desktop window merely dragged narrow, so this was never a
+  phone-only problem. The question a candidate was just asked is the one thing they must be able to
+  read without scrolling. Verified readable at 390, 899 and 1280 pixels wide.
+
+### Changed
+- Internal only, no change to how the interview behaves: the per-turn and start-up delays a candidate
+  actually experiences are now **measured on real Azure instead of estimated**. Seven new opt-in probes
+  time the one hop no protocol-level instrument could see — Azure accepting a question to read versus the
+  candidate genuinely hearing it — and compare the digital human's two transports turn by turn. What they
+  settled: that hop is 806 ms for a photo avatar and 988 ms for the 1080p one; turns two and three do not
+  degrade; and turning the picture off does **not** make a turn faster (it protects the voice on a weak
+  link, which is a different job). The probes need a real Azure session and a microphone recording, so
+  they stay switched off unless explicitly opted into, and the automated test run skips them.
+- Two engineering notes were written up from those runs: the start-up delay now has a measured
+  eight-segment breakdown, and the three audio paths are documented with which can carry the microphone
+  over WebRTC and which cannot — the last one matters because sending the microphone into the digital
+  human's own connection is accepted, carries real traffic, and transcribes nothing, with no error.
+- A performance and architecture review of the whole interview path is now in the repository, ranked by
+  measured or computed effect, together with what was deliberately ruled out and why.
+
 ## 0.40.8.0 (2026-10-01)
 
 ### Changed
