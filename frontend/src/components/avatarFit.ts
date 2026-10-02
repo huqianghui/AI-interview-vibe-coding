@@ -27,3 +27,18 @@ export function fitBox(parentW: number, parentH: number, ratio: number) {
   const width = Math.min(parentW, parentH * ratio);
   return { width: Math.round(width), height: Math.round(width / ratio) };
 }
+
+/**
+ * The aspect the avatar box should HUG, or null to fill its column instead.
+ *
+ * Hugging means sizing the box to the media's exact shape, which is what removes the letterbox around
+ * a square photo avatar. For a WIDE stream in a tall column it does the opposite of what is wanted:
+ * measured on the live site, a 16:9 stream in an 826x829 column hugged to 826x465 and left the bottom
+ * 364px empty, so the stage lined up with the question card at the top and nowhere near it at the
+ * bottom. A cover-fit stream fills the column and crops its own margins instead — which is what
+ * `fitFor` already says to do with it, since those margins are empty wall either side of a centred
+ * person. So: hug only what we keep whole.
+ */
+export function hugRatioFor(fit: AvatarFit, ratio: number | null): number | null {
+  return fit === "contain" ? ratio : null;
+}

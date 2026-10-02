@@ -26,7 +26,7 @@ import { makeStyles, mergeClasses, Text } from "@fluentui/react-components";
 import { useTranslation } from "react-i18next";
 import type { MediaMode } from "../hooks/avatarHealth";
 import { AudioOrb } from "./AudioOrb";
-import { fitBox, fitFor } from "./avatarFit";
+import { fitBox, fitFor, hugRatioFor } from "./avatarFit";
 import {
   BLANK_SAMPLE_HEIGHT,
   BLANK_SAMPLE_INTERVAL_MS,
@@ -68,9 +68,6 @@ const useStyles = makeStyles({
     minHeight: 0,
     borderRadius: "12px",
     overflow: "hidden",
-  },
-  hugBox: {
-    boxShadow: "0 18px 48px -24px rgba(0,0,0,0.45)",
   },
   video: {
     position: "absolute",
@@ -336,11 +333,22 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
   const showVideo = isAvatarConnected && !pictureDead;
   const showPortrait = !showVideo && !audioOnly && portrait !== null;
   const mediaRatio = showVideo ? videoRatio : showPortrait ? portraitRatio : null;
-  const hug = useHugBox(rootEl, mediaRatio);
+  // Which fit the showing media wants. A wide (>=1.4) stream is `cover`: the frame is a centred person
+  // on wide empty margins, so filling the column and cropping those margins never touches the figure.
+  // A square/portrait photo avatar is `contain`: cropping it cuts the shoulders and chin (issue1).
+  const mediaFit = showVideo ? videoFit : showPortrait ? portraitFit : "contain";
+  // HUG ONLY WHAT WE KEEP WHOLE. Sizing the box to the stream's exact aspect is what removes the
+  // letterbox for a photo avatar — but for a 16:9 stream in this column it is also what left the
+  // bottom 364px empty (measured on the live site: column 829px tall, box 826x465), so the stage
+  // lined up with the question card at the top and nowhere near it at the bottom. A cover-fit stream
+  // therefore fills the column instead and crops its own margins, which is what `fitFor` has always
+  // said to do with it. Owner, 2026-10-02: "the top lines up, the bottom doesn't — is it the aspect
+  // ratio?" It was.
+  const hug = useHugBox(rootEl, hugRatioFor(mediaFit, mediaRatio));
   return (
     <div
       ref={setRootEl}
-      className={mergeClasses(styles.root, hug ? styles.hugBox : undefined)}
+      className={styles.root}
       style={hug ? { width: hug.width, height: hug.height } : undefined}
       data-testid="avatar-view"
       data-avatar-connected={isAvatarConnected}
