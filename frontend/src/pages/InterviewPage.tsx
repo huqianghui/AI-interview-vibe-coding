@@ -35,6 +35,7 @@ import {
   makeStyles,
   mergeClasses,
   tokens,
+  webLightTheme,
 } from "@fluentui/react-components";
 import {
   CandidateAuthError,
@@ -60,7 +61,6 @@ import { useExternalMicAutoPause } from "../hooks/useExternalMicAutoPause";
 import { MicAccessError, useInterviewVoice } from "../hooks/useInterviewVoice";
 import type { AudioState, TranscriptSegment } from "../types/voice";
 import { AvatarView } from "../components/AvatarView";
-import { AVATAR_CHARACTER_MAP } from "../data/avatarCharacters";
 import { LoginCard } from "../components/LoginCard";
 import { QuestionProgress } from "../components/QuestionProgress";
 import { MicPermissionDialog } from "../components/MicPermissionDialog";
@@ -261,7 +261,12 @@ const useStyles = makeStyles({
     width: "100%",
     flex: 1,
     display: "flex",
-    alignItems: "center",
+    // TOP-aligned, not centred (owner, 2026-10-02: "it needs to line up with the question"). The
+    // avatar box is sized to the stream's exact aspect by `AvatarView`, so centring it left a gap
+    // above the figure and the stage started ~96px BELOW the question card on the right — the two
+    // columns visibly disagreed about where the content began. Flex-start puts the top edge of the
+    // media on the same line as the card's top. Horizontal centring is kept.
+    alignItems: "flex-start",
     justifyContent: "center",
   },
   // Right: the control column — a flex column so the transcript can grow to fill leftover height.
@@ -306,7 +311,20 @@ const useStyles = makeStyles({
     flexDirection: "column",
     gap: tokens.spacingVerticalS,
   },
-  voiceButtons: { display: "flex", gap: tokens.spacingHorizontalS },
+  // BUTTONS ONLY — nothing else goes in this row. The video cooldown reason used to render as a
+  // sibling BETWEEN the buttons, and on a weak network that text stole enough horizontal space to
+  // force "Turn on video" and "I'm done answering" to wrap onto two lines: the controls visibly
+  // changed shape at the exact moment the candidate needed them to be familiar (owner, 2026-10-02 —
+  // the buttons must not change at all). The reason now renders BELOW the row. `wrap` plus the
+  // per-button `flexShrink: 0` / `nowrap` below make the old failure structurally impossible rather
+  // than merely absent: anything added here moves to a new line instead of squeezing a button.
+  voiceButtons: { display: "flex", flexWrap: "wrap", gap: tokens.spacingHorizontalS },
+  voiceButton: { flexShrink: 0, whiteSpace: "nowrap" },
+  // The cooldown reason, on its own line under the buttons. Deliberately NOT red: this is a wait,
+  // not a fault — the automation is working as designed and the picture comes back on its own, so
+  // the error colour would claim something is broken. Same reasoning as AvatarView refusing to reuse
+  // the `voiceUnavailable` path for a media downgrade.
+  voiceHint: { color: tokens.colorNeutralForeground3 },
   // External-brain (Phase 2) awaiting overlay: a quiet "interviewer is thinking" row shown in place
   // of the answer inputs while the next turn is produced, so the candidate waits instead of typing.
   externalThinking: {
@@ -447,9 +465,24 @@ export function InterviewPage() {
   }, [interview?.voice_judge_silence_seconds]);
   const judgeSeconds = judgeSecondsReported ?? 0;
 
-  // Stage backdrop: the default persona's avatar character (entry points only, latched like the
-  // flags above) → the photo's measured backdrop colour, so the stage and the live video are ONE
-  // colour and the editor preview shows the same one. Video avatars / no avatar: navy fallback.
+  // Stage backdrop. Azure paints THIS colour behind the digital human (WS `avatar_bg`), and since
+  // the stage is transparent and hugs the video with no frame, that colour is the only thing the
+  // candidate sees around the figure — so it must BE the page's colour or the stage reads as a
+  // mismatched rectangle sitting on the page.
+  //
+  // It is now sent for EVERY avatar type (owner, 2026-10-02: "video or photo, the digital human's
+  // background must not differ from the UI"). It used to come only from the photo roster's measured
+  // thumbnail backdrop, which left video avatars with NOTHING — Azure then kept its own studio wall,
+  // which is whatever the recording session happened to be lit on. Guaranteeing the match beats
+  // hoping the studio colour is close. (The editor preview keeps the roster's thumbnail colour: there
+  // the point is matching the thumbnail beside it, not the page.)
+  //
+  // The value is the theme's own surface colour rather than a literal, so there is one source of
+  // truth with App.tsx's `webLightTheme`. Verified against the live deployment 2026-10-02: `html` and
+  // `body` paint nothing; the only element with a background behind the stage is `.fui-FluentProvider`
+  // at `rgb(255,255,255)` — i.e. exactly `colorNeutralBackground1`. If a dark theme is ever added,
+  // this line is where it follows. `buildWsUrl` strips the '#' and validates six hex digits.
+  //
   // Latched SYNCHRONOUSLY during render (a ref, not an effect): the voice hook may open the WS in
   // the same commit that delivers the start/resume payload, and it reads its options at connect
   // time — an effect-based latch would arrive one render too late and the URL would miss `avatar_bg`.
@@ -457,12 +490,7 @@ export function InterviewPage() {
   if (typeof interview?.voice_avatar_character === "string") {
     avatarCharacterRef.current = interview.voice_avatar_character;
   }
-  const avatarCharacter = avatarCharacterRef.current;
-  // Photo avatars: Azure paints THIS colour behind the digital human (WS `avatar_bg`), the same
-  // value the editor preview uses — so the live video IS the thumbnail's colour, and since the
-  // stage hugs the video (no frame around it) there is exactly one colour on screen.
-  const avatarBackground =
-    (avatarCharacter && AVATAR_CHARACTER_MAP.get(avatarCharacter)?.backdrop) || undefined;
+  const avatarBackground = webLightTheme.colorNeutralBackground1;
   const judgeInFlightRef = useRef(false);
   const submitSeqRef = useRef(0);
   const [nudgeText, setNudgeText] = useState<string | null>(null);
@@ -1196,8 +1224,8 @@ export function InterviewPage() {
               {t("voice.stillListening")}
             </Text>
           )}
-          <div className={styles.voiceButtons}>
-            <Button onClick={voice.toggleMute}>
+          <div className={styles.voiceButtons} data-testid="voice-buttons">
+            <Button className={styles.voiceButton} onClick={voice.toggleMute}>
               {voice.isMuted ? t("voice.unmute") : t("voice.mute")}
             </Button>
             {/* Manual override of the automatic weak-network degrade. Our thresholds cannot be right
@@ -1213,6 +1241,7 @@ export function InterviewPage() {
               onClick={() =>
                 voice.setVideoPreference(voice.mediaMode === "audio-only" ? "on" : "off")
               }
+              className={styles.voiceButton}
               disabled={videoToggleBlocked}
               title={videoToggleBlocked ? videoCooldownReason : undefined}
               aria-describedby={videoToggleBlocked ? "voice-video-cooldown" : undefined}
@@ -1220,25 +1249,29 @@ export function InterviewPage() {
             >
               {voice.mediaMode === "audio-only" ? t("voice.showAvatar") : t("voice.hideAvatar")}
             </Button>
-            {videoToggleBlocked && (
-              <Text
-                id="voice-video-cooldown"
-                size={200}
-                style={{ opacity: 0.7 }}
-                data-testid="voice-video-cooldown"
-              >
-                {videoCooldownReason}
-              </Text>
-            )}
             {/* Manual end-of-answer control (P13) */}
             <Button
               appearance="primary"
+              className={styles.voiceButton}
               disabled={busy || voice.connectionState !== "connected"}
               onClick={onVoiceDone}
             >
               {t("voice.imDone")}
             </Button>
           </div>
+          {/* BELOW the row, never inside it. `aria-describedby` on the disabled button still points
+              here — association does not need DOM adjacency — so the screen-reader behaviour the
+              comment above demands is unchanged while the buttons keep their shape. */}
+          {videoToggleBlocked && (
+            <Text
+              id="voice-video-cooldown"
+              size={200}
+              className={styles.voiceHint}
+              data-testid="voice-video-cooldown"
+            >
+              {videoCooldownReason}
+            </Text>
+          )}
         </div>
       )}
     </Card>

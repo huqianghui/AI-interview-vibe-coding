@@ -9,7 +9,7 @@
  * exact `voiceMock`/`vi.spyOn` pattern already used throughout `InterviewPage.test.tsx`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import "../i18n";
@@ -144,5 +144,43 @@ describe("InterviewPage manual video/audio-only toggle", () => {
     expect(screen.getByTestId("voice-video-cooldown")).not.toHaveTextContent(
       "Video can be turned back on again shortly.",
     );
+  });
+  it("keeps the cooldown reason OUT of the button row, so a weak network cannot reshape the buttons", async () => {
+    // The regression this locks (owner, 2026-10-02): the reason used to render as a sibling BETWEEN
+    // the buttons, and its width forced "Turn on video" and "I'm done answering" to wrap onto two
+    // lines — the controls changed shape the moment the network degraded. Asserting on the DOM
+    // STRUCTURE rather than on pixels: nothing but buttons may live in that row, so the squeeze
+    // cannot come back by any route (a wider string, a new locale, another hint).
+    await startOnVoiceQuestion(
+      baseVoiceMock({
+        mediaMode: "audio-only",
+        canEnableVideo: false,
+        videoEnableAtMs: Date.now() + 43_000,
+      }),
+    );
+    const row = screen.getByTestId("voice-buttons");
+    // The reason is on screen...
+    expect(screen.getByTestId("voice-video-cooldown")).toBeInTheDocument();
+    // ...but NOT inside the row...
+    expect(within(row).queryByTestId("voice-video-cooldown")).toBeNull();
+    // ...and the row still holds exactly the three controls.
+    expect(within(row).getAllByRole("button")).toHaveLength(3);
+    // The accessible association survives the move (describedby needs no DOM adjacency).
+    expect(screen.getByTestId("voice-video-toggle")).toHaveAttribute(
+      "aria-describedby",
+      "voice-video-cooldown",
+    );
+  });
+
+  it("asks Azure to paint the stage colour behind EVERY avatar, not just photo ones", async () => {
+    // Before this, `avatar_bg` came only from the photo roster's measured thumbnail backdrop, so a
+    // VIDEO avatar got nothing and Azure kept its own studio wall — a rectangle in a colour the page
+    // never chose. The value is the theme's surface colour, which is what actually paints behind the
+    // transparent stage (verified against the live deployment: only `.fui-FluentProvider` has a
+    // background, `rgb(255,255,255)`).
+    const { hookSpy } = await startOnVoiceQuestion(baseVoiceMock());
+    // `useInterviewVoice(sessionId, options)` — the options are the SECOND argument.
+    const options = hookSpy.mock.calls.at(-1)?.[1] as { avatarBackground?: string } | undefined;
+    expect(options?.avatarBackground).toBe(webLightTheme.colorNeutralBackground1);
   });
 });

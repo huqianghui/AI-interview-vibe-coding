@@ -27,12 +27,28 @@ import { useTranslation } from "react-i18next";
 import type { MediaMode } from "../hooks/avatarHealth";
 import { AudioOrb } from "./AudioOrb";
 import { fitBox, fitFor } from "./avatarFit";
+import {
+  BLANK_SAMPLE_HEIGHT,
+  BLANK_SAMPLE_INTERVAL_MS,
+  BLANK_SAMPLE_WIDTH,
+  isBlankFrame,
+  isPictureDead,
+  meanLuma,
+  nextBlankStreak,
+} from "./avatarFrameHealth";
 import type { AudioState } from "../types/voice";
 
 /** Single-slot portrait cache. This deployment runs ONE default interviewer persona, so the slot
  * isn't keyed by character; a persona/avatar change self-corrects on the next successful session
- * (the capture below overwrites the slot). Bump the suffix if the stored format ever changes. */
-export const AVATAR_PORTRAIT_STORAGE_KEY = "avatar-portrait-v1";
+ * (the capture below overwrites the slot). Bump the suffix if the stored format ever changes.
+ *
+ * v1 → v2 (2026-10-02): the MEANING changed, not the format. Portraits captured before the page
+ * started sending `avatar_bg` for every avatar type carry whatever studio wall Azure happened to
+ * use, so a stale slot shows the figure on a colour that no longer matches the page — and it is
+ * shown FIRST on every visit, before the live stream arrives, which is exactly when a mismatched
+ * rectangle is most visible. Bumping the key discards those instead of waiting for a successful
+ * session to overwrite them. */
+export const AVATAR_PORTRAIT_STORAGE_KEY = "avatar-portrait-v2";
 /** Give the stream a beat after the first frames so the captured pose is settled, not mid-fade. */
 const PORTRAIT_CAPTURE_DELAY_MS = 2000;
 /** Downscale the 1080p frame for storage — a stage-quality still at a fraction of the quota. */
@@ -211,6 +227,78 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
     [ref],
   );
 
+  // The picture is arriving but EMPTY. Separate from `isAvatarConnected` on purpose: that flag means
+  // frames exist, which a black stream also satisfies. See avatarFrameHealth for why this is a
+  // readable/blank streak rather than a brightness judgement.
+  const [pictureDead, setPictureDead] = useState(false);
+  const blankStreakRef = useRef(0);
+
+  /** Draw the current frame small and read its mean luminance. `readable: false` when there was no
+   * frame to read — which is NOT the same as a blank one. */
+  const sampleLuma = useCallback((): { readable: boolean; luma: number } => {
+    const video = innerRef.current;
+    // HAVE_CURRENT_DATA; below this there is no frame yet and a canvas read returns transparent black.
+    if (!video || video.readyState < 2 || video.videoWidth === 0) return { readable: false, luma: 0 };
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = BLANK_SAMPLE_WIDTH;
+      canvas.height = BLANK_SAMPLE_HEIGHT;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return { readable: false, luma: 0 };
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      return { readable: true, luma: meanLuma(data) };
+    } catch {
+      // A tainted or unavailable canvas is a read failure, not a verdict.
+      return { readable: false, luma: 0 };
+    }
+  }, []);
+
+  // Watch for the picture going empty while we are still claiming it works. When it does, the stage
+  // falls back to the cached still or the orb — the three-state contract (owner, 2026-10-02: "it is
+  // either the cached frame, the digital human, or the audio orb; a black screen is not our design").
+  useEffect(() => {
+    if (!isAvatarConnected || mediaMode === "audio-only") {
+      blankStreakRef.current = 0;
+      setPictureDead(false);
+      return;
+    }
+    const tick = () => {
+      const { readable, luma } = sampleLuma();
+      const streak = nextBlankStreak(blankStreakRef.current, readable, luma);
+      blankStreakRef.current = streak;
+      const dead = isPictureDead(streak);
+      setPictureDead((was) => {
+        if (dead && !was) {
+          // EVIDENCE, not just a symptom. A screenshot of a black box cannot say whether the pixels
+          // came from the media or from our own DOM, nor whether the remote end was still sending.
+          // This records what the element and its track actually were at the moment of the verdict,
+          // so the next occurrence is explainable. getStats-level detail (bytes, framesDecoded) is
+          // sampled by useAvatarStream on the same connection.
+          const video = innerRef.current;
+          const track = (video?.srcObject as MediaStream | null)?.getVideoTracks?.()[0];
+          console.warn(
+            "[avatar] picture is EMPTY while frames are arriving — falling back to the still/orb",
+            {
+              meanLuma: Number(luma.toFixed(2)),
+              blankSamples: streak,
+              videoSize: video ? `${video.videoWidth}x${video.videoHeight}` : "none",
+              videoReadyState: video?.readyState,
+              trackId: track?.id,
+              trackMuted: track?.muted,
+              trackReadyState: track?.readyState,
+              trackEnabled: track?.enabled,
+            },
+          );
+        }
+        return dead;
+      });
+    };
+    tick();
+    const timer = setInterval(tick, BLANK_SAMPLE_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [isAvatarConnected, mediaMode, sampleLuma]);
+
   // Refresh the portrait slot from the LIVE stream so the next visit shows the person instantly.
   // Best-effort: a failed capture (no frames yet, canvas unavailable, storage quota) just keeps
   // whatever the slot already holds. MediaStream frames never taint the canvas, so toDataURL is
@@ -220,6 +308,10 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
     const timer = setTimeout(() => {
       const video = innerRef.current;
       if (!video || video.videoWidth === 0) return;
+      // Never cache an empty frame: the still is shown FIRST on the next visit, so storing a black one
+      // would turn a transient fault into a permanent black screen for that candidate.
+      const probe = sampleLuma();
+      if (!probe.readable || isBlankFrame(probe.luma)) return;
       try {
         const canvas = document.createElement("canvas");
         canvas.width = PORTRAIT_CAPTURE_WIDTH;
@@ -235,12 +327,15 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
       }
     }, PORTRAIT_CAPTURE_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [isAvatarConnected]);
+  }, [isAvatarConnected, sampleLuma]);
 
   // Deliberately picture-less: say so, and don't also claim to be "connecting".
   const audioOnly = mediaMode === "audio-only";
-  const showPortrait = !isAvatarConnected && !audioOnly && portrait !== null;
-  const mediaRatio = isAvatarConnected ? videoRatio : showPortrait ? portraitRatio : null;
+  // An empty picture counts as NO picture everywhere below, so the stage can only ever be showing the
+  // live figure, the cached still, or the orb.
+  const showVideo = isAvatarConnected && !pictureDead;
+  const showPortrait = !showVideo && !audioOnly && portrait !== null;
+  const mediaRatio = showVideo ? videoRatio : showPortrait ? portraitRatio : null;
   const hug = useHugBox(rootEl, mediaRatio);
   return (
     <div
@@ -249,6 +344,7 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
       style={hug ? { width: hug.width, height: hug.height } : undefined}
       data-testid="avatar-view"
       data-avatar-connected={isAvatarConnected}
+      data-picture-dead={pictureDead}
       data-media-mode={mediaMode}
     >
       <video
@@ -259,7 +355,7 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
         className={mergeClasses(
           styles.video,
           videoFit === "cover" ? styles.fitCover : styles.fitContain,
-          isAvatarConnected ? styles.shown : styles.hidden,
+          showVideo ? styles.shown : styles.hidden,
         )}
         data-fit={videoFit}
         data-testid="avatar-video"
@@ -287,7 +383,7 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
           </div>
         </>
       )}
-      {!isAvatarConnected && !showPortrait && <AudioOrb audioState={audioState} />}
+      {!showVideo && !showPortrait && <AudioOrb audioState={audioState} />}
       {audioOnly && (
         // role=status + aria-live so a screen-reader user is TOLD the picture was dropped. Losing the
         // digital human mid-interview is a bigger state change than anything the orb announces, so it
