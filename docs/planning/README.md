@@ -217,3 +217,24 @@ and `CHANGELOG.md`.
   `follow_up`/`redirect` — the judge is nudge-only**, and `max_follow_ups` is kept but inert. Owner
   decisions: no template fallback on judge failure, submit never blocked, no judge auto-advance in
   v1. Follows v0.38.2.0/v0.38.3.1 (PRs #111, #113).
+
+- [`perf-review-20261002.md`](perf-review-20261002.md) — **草稿，未实测**：一次覆盖网络 / 声音 / 视频 /
+  文字 / 流式的性能与架构 review，结论来自代码阅读 + 算术，锚点是项目自己已测的数字
+  (`../avatar-latency-ice-gathering.md`、`../avatar-weaknet-probe.md`、obsidian Voice Live 系列 00–12)。
+  核心判断：**Azure 侧的旋钮已摸干净，剩下的问题几乎全在"我们自己这一跳"**。最大一条是上行分帧——
+  AudioWorklet 的 128 样本回调被 1:1 绑死成 125 个 WS 消息/秒，使上行 **397 kbps 里有 35% 不是音频**
+  (base64 88 + JSON 信封 45 + 帧头 8)；聚合到 40 ms 并在"我们这一跳"改二进制 (Azure 那跳仍是 base64
+  JSON，系列 01 §4.5.1 的约束只约束那一跳) 可降到 **258 kbps**，同时帧数 −80%，直接针对系列 12
+  「结论五：麦克风上行会把自己挤死」那两轮均失败的档。其余按影响排序：纯音频播放路径无抖动缓冲
+  (正是 §5.6 UDP 全封兜底要走的那条路)、音频编解码压在画视频的主线程上、转写 delta 触发全页重渲染
+  (全仓零 `React.memo`)、评分串行 30–50 s 可并行到 10–15 s、默认形象改照片数字人 (零代码，每轮快
+  180 ms、带宽少 4–5 倍)、语音 WS 绕过 0.5 vCPU 的 nginx 中转、`permessage-deflate` 默认开着做无效压缩。
+  **不翻**系列 00 §四任何一条已定决策 (过渡语、码率自适应、`b=AS`、`freezeCount`、网络档位、上行走
+  WebRTC、换编码)。§2.1 单独澄清"上行是流式的、而且必须是" —— P0-1 调的是颗粒度不是模型，攒到候选人
+  说完再发会同时废掉静音自动提交 / judge 窗口 / barge-in (三者都建立在 Azure 服务端实时判停上)，并把
+  整段上传挪进关键路径。一条附条件：下一题乐观朗读 (先量生产 RTT；朗读路径是本仓库 bug 史的集中地)。
+  一条**已否** (owner 2026-10-02)：外部 brain 的 EOU 投机执行，不在考虑范围内，§6.4 记录在案以免重提。
+  **一条已在本 PR 修掉**：线上 JS 实测**完全没有压缩** (975 KB，gzip/br 请求字节数一字不差、无
+  `content-encoding`)，根因是 nginx 默认 `gzip_types` 只含 `text/html`；`frontend/nginx.conf` 已加
+  `gzip on` + 显式类型 + `gzip_vary`，首屏 975.24 kB → 278.51 kB（Vite 构建输出自带这两个数），而预热是页面加载即开始的，所以这直接缩短
+  候选人冷启动。末尾是 7 项待验清单（第 6 项已由实测关闭）。

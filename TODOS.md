@@ -27,6 +27,80 @@ real risk of changing behaviour, and it should be specified before it is attempt
 **Effort:** — (no action planned)
 **Priority:** P4 — leave unless a case starts owning state.
 
+## Interview (transcript UX)
+
+### The candidate's own words do not stream onto the page
+
+Owner, 2026-10-02: speaking produces nothing until a whole utterance finishes, then the text appears
+at once. The frontend for this is already built and correctly isolated (`useInterviewVoice.ts:651`
+accumulates `input_audio_transcription.delta` per item and re-emits a non-final segment; partials
+never reach the submitted answer).
+
+**Cause established by measurement (2026-10-02, real Azure).** Of the two hypotheses — (a) Azure does
+not send it, (b) it sends it and our handler drops it (`:651` needs both `item_id` and `delta`) —
+(a) holds and (b) is ruled out. A throwaway probe captured every frame on `/api/voice-live/ws`:
+`input_audio_transcription.delta` = **0 frames**; a single `.completed` carried the whole utterance.
+The frontend path is correct; nothing feeds it.
+
+Second finding from the same run, unanticipated: `response.audio_transcript.delta` = **1** as well.
+The interviewer's text also arrives in one piece, because mouth mode reads via
+`pre_generated_assistant_message` (server-side TTS of our exact text, no inference) — there is nothing
+to stream. So neither side streams today.
+
+Two things are established and one is not. Established: the Voice Live reference defines
+`conversation.item.input_audio_transcription.delta` as streaming partial results, across three API
+versions; and this repo has never asserted that frame anywhere, so the path has never been verified
+against real Azure. Not established: whether OUR configuration emits it. The code's own comment
+names the suspect — "delta events off or absent, e.g. plain azure-speech configs" — and
+`azure-speech` is exactly what `build_avatar_session` sends.
+
+Voice Live lets the input transcription model be chosen, and the choice does not force a chat-model
+change: with a text model like `gpt-5-mini` the alternatives are `azure-speech` (current) and
+`mai-transcribe`/`mai-transcribe-2` (preview). The `gpt-4o-transcribe` family needs a multimodal chat
+model, so it is off this path.
+
+**What remains:** whether `mai-transcribe` streams deltas. Testing it means changing
+`input_audio_transcription.model` in `build_avatar_session` and restarting — and that field feeds the
+TRANSCRIPT, which is the scoring input. So the order is: measure whether deltas arrive; only if they
+do, run a WAV word-error-rate A/B (same method as the 24→16 kHz change); switch only if both pass. `voice-live-azure.spec.ts` already
+asserts on proxy frames. Reading the docs is what produced the wrong confidence in the first place.
+
+Calibrate the expectation first: a cascaded recogniser revises phrase-sized partials, so the result
+is text appearing and being rewritten, not a typewriter.
+
+Two pieces worth doing regardless, neither needing anything from Azure: `speech_started`/
+`speech_stopped` already arrive, so "listening" with a live level meter can be built today; and
+`isFinal` exists on `TranscriptSegment` but `Transcript.tsx` ignores it, so there is no cue that a
+line is still provisional — which is a prerequisite for the streaming version not looking like a bug.
+
+**Effort:** the `azure-speech` half is measured (done). The `mai-transcribe` half is CC ~30 min to
+measure plus a WAV A/B before it could ship.
+**Priority:** P2 — the owner's stated goal is that the interview feel natural, and watching your own
+words appear is a large part of that.
+
+## E2E harness
+
+### `admin-and-report.spec.ts` fails on any machine whose Chromium cannot capture audio
+
+Measured 2026-10-02 on macOS: Playwright's bundled Chromium returns `NotSupportedError` from
+`getUserMedia({audio:true})` — with `permissions: ["microphone"]` granted AND with
+`--use-fake-device-for-media-stream`. So `initMic()` rejects, the page shows `MicPermissionDialog`,
+and line 68's `expect(getByRole("textbox")).toBeVisible()` fails with "element(s) not found".
+
+**The failure names the wrong thing.** The real cause is "this browser has no audio capture"; the
+message a developer sees is "no textbox", which sends them into the layout code. CI is green
+(Linux Chromium does support it), so this only ever bites locally — which is exactly when a
+developer is trying to decide whether their own change broke something. It cost a bisect run and a
+standalone `getUserMedia` probe to clear this branch.
+
+**Fix:** before the textbox assertion, dismiss the dialog when it is present — the page already
+offers the affordance (`Use text instead`), so the test should take the same path a candidate
+without a mic takes. One conditional, and the spec then exercises the documented F9 AC #4 fallback
+on EVERY machine instead of only on machines that happen to lack a mic by accident.
+
+**Effort:** CC ~10 min.
+**Priority:** P3 — local-only, but it mislabels its own cause, which is the expensive part.
+
 ## Completed
 ### Narrow viewports: question readable without scrolling — v0.40.9.0
 
