@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.40.9.2 (2026-10-02)
+
+### Fixed
+- **The digital human now fills the column instead of stopping two thirds of the way down.** Its box was
+  sized to the video's exact shape, which lines the top up with the question beside it and then — for a
+  wide stream in a tall column — leaves the bottom empty: measured on the live site, an 826x829 column
+  held an 826x465 picture, so 364 pixels of nothing. A wide stream now fills the column and crops its
+  own margins, which is what it was always meant to do with them: the frame is a centred person on wide
+  empty wall, so the crop never reaches the figure, and it appears getting on for twice the size. Square
+  photo avatars still keep their whole frame, because cropping those cuts the shoulders and chin.
+- **The faint frame around the digital human is gone.** With the backdrop now painted in the page's own
+  colour, the drop shadow under the box was the only thing left drawing a rectangle on screen — measured
+  from a screenshot: pure white on both sides of the edge, then a step to 210 where the shadow sat. It
+  made sense while the avatar stood on a colour of its own; it does not now.
+
 ## 0.40.9.1 (2026-10-02)
 
 ### Fixed
