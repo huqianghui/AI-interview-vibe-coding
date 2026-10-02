@@ -3,6 +3,17 @@
 ## 0.40.9.1 (2026-10-02)
 
 ### Fixed
+- **A black video no longer passes as a working digital human.** The stage shows one of three things —
+  the cached still, the digital human, or the audio orb — but a stream that was alive and EMPTY counted
+  as the second: frames were arriving, bytes were flowing, so nothing fell back and the candidate was
+  shown a black rectangle while the interviewer was speaking. "Frames exist" is now separated from "the
+  picture works": the frame itself is sampled, and an empty one falls back to the still or the orb
+  instead. A single blank reading is not a verdict (a decoder hiccup looks the same) and an unreadable
+  frame is not counted as blank at all, so the fallback cannot flash while the element re-attaches. The
+  still is never cached from an empty frame either — it is shown first on the next visit, so storing one
+  would have turned a transient fault into a lasting black screen. When the verdict fires it records what
+  the element and its track actually were, so the next occurrence can be explained instead of
+  screenshotted.
 - **The digital human now starts level with the question.** The stage sized itself to the video's exact
   shape and then centred it, so the figure began about 80 pixels below the question card beside it and
   the two columns visibly disagreed about where the content started (seen on the live site). The media's
