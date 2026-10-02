@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.40.9.1 (2026-10-02)
+
+### Fixed
+- **The digital human now starts level with the question.** The stage sized itself to the video's exact
+  shape and then centred it, so the figure began about 80 pixels below the question card beside it and
+  the two columns visibly disagreed about where the content started (seen on the live site). The media's
+  top edge now lines up with the card's.
+- **The interviewer's background is the page's colour for every avatar, not just photo ones.** The page
+  asked Azure to paint a chosen colour behind the digital human only when the avatar was one of the
+  photo characters; a video avatar got nothing and kept whatever wall its studio session was lit on. The
+  stage is transparent and hugs the video with no frame, so that wall IS the only thing seen around the
+  figure — it has to be the page's colour rather than happen to be close to it. Portraits cached from
+  earlier sessions are discarded rather than shown on a colour the page no longer uses.
+- **A weak network no longer reshapes the answer controls.** When the picture was dropped to protect the
+  voice, the "video can be turned back on in …" line rendered *between* the buttons and took enough room
+  to wrap "Turn on video" and "I'm done answering" onto two lines each — the controls changed shape at
+  the moment the candidate most needed them to look familiar. The reason now sits on its own line below
+  the buttons, which keep their size; the screen-reader association between the dimmed button and its
+  reason is unchanged.
+
+### Removed
+- Dead code: a stage colour constant left behind when the flat-navy avatar backdrop was retired, unused
+  anywhere since.
+
 ## 0.40.9.0 (2026-10-02)
 
 ### Fixed

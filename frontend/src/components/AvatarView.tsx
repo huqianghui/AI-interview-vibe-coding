@@ -31,8 +31,15 @@ import type { AudioState } from "../types/voice";
 
 /** Single-slot portrait cache. This deployment runs ONE default interviewer persona, so the slot
  * isn't keyed by character; a persona/avatar change self-corrects on the next successful session
- * (the capture below overwrites the slot). Bump the suffix if the stored format ever changes. */
-export const AVATAR_PORTRAIT_STORAGE_KEY = "avatar-portrait-v1";
+ * (the capture below overwrites the slot). Bump the suffix if the stored format ever changes.
+ *
+ * v1 → v2 (2026-10-02): the MEANING changed, not the format. Portraits captured before the page
+ * started sending `avatar_bg` for every avatar type carry whatever studio wall Azure happened to
+ * use, so a stale slot shows the figure on a colour that no longer matches the page — and it is
+ * shown FIRST on every visit, before the live stream arrives, which is exactly when a mismatched
+ * rectangle is most visible. Bumping the key discards those instead of waiting for a successful
+ * session to overwrite them. */
+export const AVATAR_PORTRAIT_STORAGE_KEY = "avatar-portrait-v2";
 /** Give the stream a beat after the first frames so the captured pose is settled, not mid-fade. */
 const PORTRAIT_CAPTURE_DELAY_MS = 2000;
 /** Downscale the 1080p frame for storage — a stage-quality still at a fraction of the quota. */
