@@ -9,6 +9,7 @@ import json
 from dataclasses import dataclass
 
 from app.services.agents.voice_live_metadata import (
+    PHOTO_AVATAR_SCENE_ZOOM,
     VOICE_LIVE_CONFIG_KEY,
     VOICE_LIVE_ENABLED_KEY,
     build_cleared_voice_metadata,
@@ -269,6 +270,7 @@ def test_build_avatar_config_photo_has_type_model_and_no_style():
         "model": "vasa-1",
         "character": "adrian",
         "customized": False,
+        "scene": {"zoom": PHOTO_AVATAR_SCENE_ZOOM},
     }
     # A stale style left over from a video pick must NOT leak onto a photo avatar (Azure rejects
     # "Avatar with character [adrian] and style [casual-sitting] not found").
@@ -307,6 +309,7 @@ def test_build_session_photo_avatar_wire_shape():
         "model": "vasa-1",
         "character": "adrian",
         "customized": False,
+        "scene": {"zoom": PHOTO_AVATAR_SCENE_ZOOM},
     }
 
 
@@ -361,6 +364,7 @@ def test_build_avatar_config_unknown_character_uses_style_heuristic():
         "model": "vasa-1",
         "character": "newface",
         "customized": False,
+        "scene": {"zoom": PHOTO_AVATAR_SCENE_ZOOM},
     }
     assert build_avatar_config("newface", "formal") == {
         "character": "newface",
@@ -395,3 +399,38 @@ def test_agent_metadata_photo_avatar_with_long_voice_name_stays_single_key():
     )
     assert [k for k in md if k.startswith(VOICE_LIVE_CONFIG_KEY)] == [VOICE_LIVE_CONFIG_KEY]
     assert len(md[VOICE_LIVE_CONFIG_KEY]) <= 512
+
+
+def test_photo_avatar_is_pulled_back_in_frame_and_video_is_not():
+    """A photo avatar carries `scene.zoom` < 1; a video avatar carries no scene at all.
+
+    Azure's default framing for a VASA-1 photo avatar is a head-only crop — tighter than the CDN
+    portrait the editor previews, so the two pages showed the same person framed differently and
+    the interview was the tighter one (owner, 2026-10-03: the shoulders and the top are gone).
+    Nothing on our side crops it; `scene` is the only lever that moves it. A video avatar is
+    already a standing figure, so zooming it out would only shrink the person.
+    """
+    photo = build_avatar_config("amira", "")
+    assert photo["scene"] == {"zoom": PHOTO_AVATAR_SCENE_ZOOM}
+    # Below 1 zooms OUT; at or above 1 would crop in further.
+    assert 0 < PHOTO_AVATAR_SCENE_ZOOM < 1
+    assert "scene" not in build_avatar_config("lisa", "casual-sitting")
+
+
+def test_agent_metadata_drops_scene_to_protect_the_single_512_char_key():
+    """`scene` must not reach the agent metadata, for the same reason `customized` does not.
+
+    The metadata config has to fit ONE ~512-char value: a split key fails agent initialization
+    outright (verified live 2026-08-12). `scene` shapes how a SESSION looks rather than whether the
+    agent can do voice, and it reaches Azure through `session.update` like the other runtime knobs —
+    so spending that budget on it would risk the split for nothing.
+    """
+    md = build_voice_live_metadata(FakePersona(character="amira", style=""), locale="en-US")
+    assert [k for k in md if k.startswith(VOICE_LIVE_CONFIG_KEY)] == [VOICE_LIVE_CONFIG_KEY]
+    assert len(md[VOICE_LIVE_CONFIG_KEY]) <= 512
+    avatar = decode_voice_live_metadata(md)["avatar"]
+    assert "scene" not in avatar
+    # ...while the runtime session that Azure actually renders from DOES carry it.
+    assert build_session(FakePersona(character="amira", style=""))["avatar"]["scene"] == {
+        "zoom": PHOTO_AVATAR_SCENE_ZOOM
+    }
