@@ -1,23 +1,23 @@
-/** App shell: Fluent provider + router + language switcher. */
-import { FluentProvider, webLightTheme } from "@fluentui/react-components";
+/** App root: the themed Fluent provider + router. The header band lives in AppShell, per route. */
+import { FluentProvider, makeStyles } from "@fluentui/react-components";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { InterviewPage } from "./pages/InterviewPage";
 import { AdminPage } from "./pages/AdminPage";
 import { AgentEditorPage } from "./pages/AgentEditorPage";
-import { LanguageSwitcher } from "./components/LanguageSwitcher";
+import { appTheme } from "./theme";
+import "./styles/global.css";
+
+const useStyles = makeStyles({
+  /** FluentProvider paints `colorNeutralBackground1` on its own root, and that token is the warm
+   *  CARD surface in this theme — left alone it would cover the whole page and hide the sand
+   *  ground set on html/body in global.css. So the provider root is made transparent. */
+  provider: { backgroundColor: "transparent" },
+});
 
 export function App() {
+  const styles = useStyles();
   return (
-    <FluentProvider theme={webLightTheme}>
-      <header
-        style={{
-          display: "flex",
-          justifyContent: "flex-end",
-          padding: "12px 24px",
-        }}
-      >
-        <LanguageSwitcher />
-      </header>
+    <FluentProvider theme={appTheme} className={styles.provider}>
       <Routes>
         <Route path="/" element={<Navigate to="/interview" replace />} />
         <Route path="/interview" element={<InterviewPage />} />

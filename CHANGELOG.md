@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.41.0.0 (2026-10-03)
+
+### Changed
+- **The candidate-facing app has a design language now, instead of Fluent's factory defaults.** The
+  old screens read neither professional nor current, and about half the reason was not taste. Three
+  independent decisions about content width were nested inside each other — the non-live phases were
+  locked to a 760px column, a 420px sign-in card centred itself *inside* that column, and the live
+  interview centred a 1400px strip — so the page title and the card never shared a left edge, and on
+  a wide screen the content filled 38% of it. There is one measure per route now, decided in one
+  place: 1320px for the two-column screens, 760px for prose, 440px for the sign-in form, and a
+  one-viewport mode for the live interview.
+- **A real header band, with the app's name in it.** The old header was a bare flex row holding
+  nothing but the language dropdown, pushed to the right edge, so the control floated in about 150px
+  of nothing with no bar and no divider under it. The band now carries the wordmark and the tagline,
+  which also means pages stopped rendering their own copy of the title — the candidate page used to
+  ship with two `<h1>`s.
+- **Session controls moved to where session controls belong.** Start over and Sign out sat in a bare
+  `<div>` directly under the tagline, with no gap between them and nothing above them, one size
+  smaller than every other button on the page. They read as debug buttons that had leaked into the
+  layout. They are in the header band now, at the same size as everything else.
+- **The interviewer's voice orb matches the app again.** Its four states were painted in one-off
+  colours that belonged to no palette, including two cool greys for the muted state. The orb is what
+  a candidate sees when the picture is off, so it appeared mid-interview as a foreign object pasted
+  onto the page. Each state keeps its own hue — that colour vocabulary is what the status strip
+  teaches — but they are drawn from the palette now.
+
+### Added
+- **Both typefaces are served from our own origin, not a font CDN.** Candidates sit behind networks
+  where fonts.googleapis.com does not resolve, and that failure is silent: the page does not error,
+  it quietly renders in a system font and the whole typographic direction collapses — precisely for
+  the people it was least likely to be noticed by. Three latin-subset variable files, 206 KB, with
+  their OFL licences. Neither face carries Chinese, so Chinese text falls through a declared
+  fallback to the platform's own PingFang SC or Microsoft YaHei rather than to whatever the browser
+  picks.
+
+### Fixed
+- **The "I'm ready" button is no longer the width of the whole card.** Fluent's Card stretches its
+  children, so a plain button inside one was being silently blown up to banner size, matching
+  nothing else on screen.
+- **A long conversation can no longer push the controls off the bottom of the screen.** The live
+  interview divides one viewport between the interviewer and the controls, but the grid row was
+  sized from its content first, so a growing transcript pushed both columns past the viewport by
+  about 23px and left a 1px gutter at the bottom. The transcript absorbs its own overflow now.
+- **A short window no longer hides the "I'm done answering" button where it cannot be reached.** The
+  live screen pins itself to one viewport with no scrollbar, which is right on a normal display and
+  a trap on a wide-but-short one — a laptop with devtools open, a half-height tiled window, a
+  1280x600 projector. Below roughly 500px of viewport height the page now scrolls normally instead
+  of clipping the controls into unreachable space.
+- **An autofilled username and password keep the page's own colours.** Chrome repaints autofilled
+  fields in its own light blue and overrides every theme value to do it, which was most of what made
+  the sign-in screen look like a system dialog in the first place.
+
 ## 0.40.9.5 (2026-10-03)
 
 ### Fixed

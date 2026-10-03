@@ -77,4 +77,19 @@ describe("LoginCard", () => {
     renderCard({ error: null });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
+
+  it("defaults its title to h2, so the page keeps exactly one h1", () => {
+    // AppShell's header band owns the app wordmark as the page's only <h1>. This default used to
+    // be "h1", which meant the sign-in screen shipped with TWO <h1>s — an accessibility defect and
+    // a visible duplicate title. Both callers now rely on the default being h2, so a silent flip
+    // back here would reintroduce it on the candidate AND the admin gate at once.
+    renderCard({ title: "Candidate sign-in" });
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Candidate sign-in");
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+  });
+
+  it("still honours an explicit titleAs override", () => {
+    renderCard({ title: "Candidate sign-in", titleAs: "h1" });
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Candidate sign-in");
+  });
 });

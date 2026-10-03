@@ -53,14 +53,12 @@ import type {
   ExternalConfig,
 } from "../api/admin";
 import * as auth from "../api/auth";
+import { AppShell } from "../components/AppShell";
 import { LoginCard } from "../components/LoginCard";
 
 const useStyles = makeStyles({
-  loginPage: { maxWidth: "420px", margin: "0 auto", padding: "24px" },
+  // Width and padding moved to AppShell (one measure per route). What is left is the stack.
   page: {
-    maxWidth: "960px",
-    margin: "0 auto",
-    padding: "24px",
     display: "flex",
     flexDirection: "column",
     gap: tokens.spacingVerticalL,
@@ -424,29 +422,33 @@ export function AdminPage() {
 
   if (authChecking) {
     return (
-      <div className={styles.loginPage}>
+      <AppShell measure="narrow">
         <Body1>{t("admin.checkingAuth")}</Body1>
-      </div>
+      </AppShell>
     );
   }
 
   if (!authed) {
     return (
-      <LoginCard
-        title={t("admin.loginTitle")}
-        body={t("admin.loginBody")}
-        error={error}
-        busy={loginBusy}
-        onSubmit={onLogin}
-        testIdPrefix="admin"
-      />
+      <AppShell measure="narrow">
+        <LoginCard
+          title={t("admin.loginTitle")}
+          body={t("admin.loginBody")}
+          error={error}
+          busy={loginBusy}
+          onSubmit={onLogin}
+          testIdPrefix="admin"
+        />
+      </AppShell>
     );
   }
 
   return (
-    <div className={styles.page}>
+    <AppShell>
+      <div className={styles.page}>
       <div className={styles.topBar}>
-        <Title2 as="h1">{t("admin.pageTitle")}</Title2>
+        {/* h2, not h1: AppShell's header band carries the app wordmark as the page's only h1. */}
+        <Title2 as="h2">{t("admin.pageTitle")}</Title2>
         <Link to="/admin/agent" className={styles.navLink} data-testid="admin-nav-agent">
           <Button appearance="secondary">{t("admin.navAgent")}</Button>
         </Link>
@@ -1070,6 +1072,7 @@ export function AdminPage() {
           {error}
         </Body1>
       )}
-    </div>
+      </div>
+    </AppShell>
   );
 }

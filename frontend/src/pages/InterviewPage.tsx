@@ -31,11 +31,9 @@ import {
   Spinner,
   Text,
   Textarea,
-  Title2,
   makeStyles,
   mergeClasses,
   tokens,
-  webLightTheme,
 } from "@fluentui/react-components";
 import {
   CandidateAuthError,
@@ -61,7 +59,9 @@ import { useExternalMicAutoPause } from "../hooks/useExternalMicAutoPause";
 import { MicAccessError, useInterviewVoice } from "../hooks/useInterviewVoice";
 import type { AudioState, TranscriptSegment } from "../types/voice";
 import { AvatarView } from "../components/AvatarView";
+import { AppShell } from "../components/AppShell";
 import { LoginCard } from "../components/LoginCard";
+import { palette } from "../theme";
 import { QuestionProgress } from "../components/QuestionProgress";
 import { MicPermissionDialog } from "../components/MicPermissionDialog";
 import { Transcript } from "../components/Transcript";
@@ -83,13 +83,22 @@ type Phase =
 type Channel = "text" | "voice";
 
 const useStyles = makeStyles({
-  // Centered container for the non-live phases (idle / orientation / scoring / report).
-  page: { maxWidth: "760px", margin: "0 auto", padding: "24px" },
-  header: {
+  // Stack for the non-live phases (idle / orientation / scoring / report). WIDTH AND PADDING ARE
+  // NOT SET HERE any more: this used to be `maxWidth: 760px; margin: 0 auto; padding: 24px`, and
+  // because LoginCard centred its own 420px box inside it, the page title and the card ended up on
+  // two different left edges. AppShell decides the measure for every route now.
+  page: {
     display: "flex",
     flexDirection: "column",
-    gap: tokens.spacingVerticalXS,
-    marginBottom: tokens.spacingVerticalL,
+    gap: tokens.spacingVerticalL,
+  },
+  // An action row inside a Card. Fluent's Card stretches its children, so every in-card button
+  // needs a row wrapper or it renders full-width by accident.
+  cardActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalS,
+    flexWrap: "wrap",
   },
   // Status legend under the header: the four voice states side by side, with the LIVE one lifted out of
   // the dimmed row and explaining itself. Only the active state carries its sentence — see the comment
@@ -98,10 +107,10 @@ const useStyles = makeStyles({
     display: "flex",
     flexWrap: "wrap",
     gap: tokens.spacingHorizontalS,
-    width: "100%",
-    maxWidth: "1400px",
-    margin: "0 auto",
+    // No width/margin here: AppShell owns the measure. This strip used to centre itself at 1400px
+    // while the same route's other phases centred at 760px.
     marginBottom: tokens.spacingVerticalL,
+    flexShrink: 0,
   },
   statusItem: {
     display: "flex",
@@ -156,18 +165,15 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     lineHeight: tokens.lineHeightBase200,
   },
-  // Full-width stage for the live Q&A: a title, a global top bar, then a two-column body.
+  // Live Q&A body: status strip, global top bar, then the two-column stage.
   stageWrap: {
-    padding: `${tokens.spacingVerticalL} ${tokens.spacingHorizontalXXL}`,
-    boxSizing: "border-box",
-    width: "100%",
-    // Pin to the viewport height (not just a min) so the stage + transcript stay ON screen: the
-    // grid gets a bounded height to divide, the transcript scrolls internally, and neither the
-    // avatar video nor a long dialogue can push the top bar off-screen or balloon the page.
-    height: "calc(100vh - 56px)",
-    overflow: "hidden",
+    // Padding, width and the `calc(100vh - 56px)` height all moved to AppShell's `fill` measure —
+    // the one-viewport rule belongs to the shell, not to this page, so the admin and agent-editor
+    // routes cannot drift to a different answer. This is now purely the vertical stack.
     display: "flex",
     flexDirection: "column",
+    minHeight: 0,
+    flex: 1,
   },
   // Global top bar (P11 rule #3): progress + live voice state + channel switch, spanning the full
   // width above both columns. Frosted-glass surface so it reads as a control strip, not content.
@@ -177,18 +183,18 @@ const useStyles = makeStyles({
     justifyContent: "space-between",
     gap: tokens.spacingHorizontalL,
     flexWrap: "wrap",
-    width: "100%",
-    maxWidth: "1400px",
-    margin: "0 auto",
     marginBottom: tokens.spacingVerticalL,
     padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalXL}`,
     boxSizing: "border-box",
     borderRadius: tokens.borderRadiusXLarge,
-    background:
-      "linear-gradient(135deg, rgba(124,58,237,0.10) 0%, rgba(168,85,247,0.05) 100%)",
+    // Re-tinted onto the approved purple ramp (the old literal rgba(124,58,237) was a one-off
+    // violet that belonged to no palette). Kept as a gradient so the bar still reads as a control
+    // strip rather than content.
+    background: `linear-gradient(135deg, ${palette.violet}1A 0%, ${palette.magenta}0D 100%)`,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     backdropFilter: "blur(10px)",
     boxShadow: tokens.shadow4,
+    flexShrink: 0,
   },
   topBarSlot: {
     display: "flex",
@@ -213,14 +219,24 @@ const useStyles = makeStyles({
   grid: {
     display: "grid",
     gridTemplateColumns: "minmax(0, 3fr) minmax(380px, 2fr)",
+    // minmax(0, 1fr), NOT the default `auto` row: an auto row is sized from its content FIRST, so
+    // a long transcript pushed the row past the available height and both columns overflowed the
+    // viewport (measured at 23px while building the mockup, with the bottom gutter down to 1px).
+    // Capping the row makes the transcript's own scroller absorb the overflow instead.
+    gridTemplateRows: "minmax(0, 1fr)",
     gap: tokens.spacingHorizontalXXL,
     alignItems: "stretch",
-    width: "100%",
-    maxWidth: "1400px",
-    margin: "0 auto",
+    // Width comes from AppShell; this used to centre itself at 1400px independently.
     flex: 1,
     minHeight: 0,
-    "@media (max-width: 900px)": { gridTemplateColumns: "1fr" },
+    "@media (max-width: 900px)": {
+      gridTemplateColumns: "1fr",
+      gridTemplateRows: "auto",
+    },
+    // Matches AppShell's height escape (max-height: 560px): once the page is allowed to scroll,
+    // capping the row would still squeeze the question card against a height the page no longer
+    // has to respect. Let it size from content instead.
+    "@media (max-height: 560px)": { gridTemplateRows: "auto" },
   },
   // Below the breakpoint the two columns stack, and the stage comes first in DOM order — which put the
   // question's TEXT entirely off screen on a phone (measured: 144px off a 390x844 iPhone, 76px off a
@@ -276,6 +292,16 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalL,
     minWidth: 0,
     minHeight: 0,
+    // SAFETY NET, and it is load-bearing. Capping the grid row at minmax(0, 1fr) stops a long
+    // transcript from pushing the columns past the viewport, but a capped row plus the shell's
+    // `overflow: hidden` means anything that still does not fit is not cramped, it is CLIPPED AND
+    // UNREACHABLE. CI caught exactly that: at Playwright's 1280x720 the resumed interview (whose
+    // transcript already holds the first answer) pushed the answer textarea out of the row, and
+    // `candidate-interview.spec.ts:171` could not see it. The transcript shrinking is the intended
+    // relief valve (see transcriptFill), but it cannot cover the case where the question card and
+    // the answer controls alone exceed the row. Letting this column scroll means the question and
+    // the answer box are always reachable, whatever the viewport.
+    overflowY: "auto",
   },
   questionCard: {
     display: "flex",
@@ -295,7 +321,13 @@ const useStyles = makeStyles({
   // Wrapper that lets the transcript flex-grow and scroll internally (auto-fit, no fixed height).
   transcriptFill: {
     flex: 1,
-    minHeight: "120px",
+    // Was a hard `minHeight: 120px`, which fought the whole point of capping the grid row: the
+    // transcript is the column's relief valve (P11 rule #4 — transcript is SECONDARY to the
+    // question and the controls), and a floor stops it relieving anything. It keeps a comfortable
+    // 120px wherever there is room via flex-basis, but it is now allowed to collapse rather than
+    // squeeze the answer box out of a short viewport.
+    flexBasis: "120px",
+    minHeight: 0,
     display: "flex",
     flexDirection: "column",
   },
@@ -478,10 +510,18 @@ export function InterviewPage() {
   // the point is matching the thumbnail beside it, not the page.)
   //
   // The value is the theme's own surface colour rather than a literal, so there is one source of
-  // truth with App.tsx's `webLightTheme`. Verified against the live deployment 2026-10-02: `html` and
-  // `body` paint nothing; the only element with a background behind the stage is `.fui-FluentProvider`
-  // at `rgb(255,255,255)` — i.e. exactly `colorNeutralBackground1`. If a dark theme is ever added,
-  // this line is where it follows. `buildWsUrl` strips the '#' and validates six hex digits.
+  // truth with App.tsx. Verified against the live deployment 2026-10-02: `html` and `body` painted
+  // nothing and the only element with a background behind the stage was `.fui-FluentProvider` at
+  // `rgb(255,255,255)` — i.e. exactly `colorNeutralBackground1`.
+  //
+  // CHANGED with the 2026-10-03 theme refresh: the provider root is now TRANSPARENT (App.tsx) and
+  // the ground is painted on html/body in styles/global.css, so the colour behind the stage is the
+  // sand ground, not `colorNeutralBackground1` (which is now the warm card surface #FFFDF9).
+  // Reading the card token here would send Azure a wall one shade lighter than the page and put a
+  // visible rectangle back around the digital human — the exact defect this whole mechanism exists
+  // to prevent. It therefore reads `palette.ground`, which global.css paints.
+  // If a dark theme is ever added, this line is where it follows.
+  // `buildWsUrl` strips the '#' and validates six hex digits.
   //
   // Latched SYNCHRONOUSLY during render (a ref, not an effect): the voice hook may open the WS in
   // the same commit that delivers the start/resume payload, and it reads its options at connect
@@ -490,7 +530,7 @@ export function InterviewPage() {
   if (typeof interview?.voice_avatar_character === "string") {
     avatarCharacterRef.current = interview.voice_avatar_character;
   }
-  const avatarBackground = webLightTheme.colorNeutralBackground1;
+  const avatarBackground = palette.ground;
   const judgeInFlightRef = useRef(false);
   const submitSeqRef = useRef(0);
   const [nudgeText, setNudgeText] = useState<string | null>(null);
@@ -1057,7 +1097,6 @@ export function InterviewPage() {
     interview?.status === "in_progress" && (phase === "orientation" || phase === "interviewing");
   const restartButton = canRestart ? (
     <Button
-      size="small"
       disabled={busy}
       onClick={() => setRestartDialogOpen(true)}
       data-testid="candidate-restart"
@@ -1065,6 +1104,23 @@ export function InterviewPage() {
       {t("candidate.restart")}
     </Button>
   ) : null;
+  /**
+   * Session controls, rendered in AppShell's header band.
+   *
+   * These used to sit in a bare `<div>` directly under the tagline, with no gap between them and
+   * no spacing above, at `size="small"` while every other button on the page was default size —
+   * so they read as debug buttons that had leaked into the layout. They belong to the session, not
+   * to the page content, which is what the header band is for. Size is now default like everything
+   * else, and AppShell supplies the gap.
+   */
+  const candidateActions = (
+    <>
+      {restartButton}
+      <Button onClick={onSignOut} data-testid="candidate-sign-out">
+        {t("candidate.signOut")}
+      </Button>
+    </>
+  );
   const restartDialog = (
     <Dialog open={restartDialogOpen} onOpenChange={(_, d) => setRestartDialogOpen(d.open)}>
       <DialogSurface>
@@ -1281,11 +1337,7 @@ export function InterviewPage() {
   // header + login card — nothing else renders (no stale interview state peeking through).
   if (!candidateAuthed) {
     return (
-      <div className={styles.page}>
-        <div className={styles.header}>
-          <Title2 as="h1">{t("appTitle")}</Title2>
-          <Body1 style={{ display: "block", opacity: 0.7 }}>{t("tagline")}</Body1>
-        </div>
+      <AppShell measure="narrow">
         <LoginCard
           title={t("candidate.loginTitle")}
           body={t("candidate.loginBody")}
@@ -1295,7 +1347,7 @@ export function InterviewPage() {
           testIdPrefix="candidate"
           titleAs="h2"
         />
-      </div>
+      </AppShell>
     );
   }
 
@@ -1305,18 +1357,8 @@ export function InterviewPage() {
     const badgeState: AudioState = voiceActive ? voice.audioState : "idle";
     return (
       <>
-        <div className={styles.stageWrap}>
-          <div className={styles.header}>
-            <Title2 as="h1">{t("appTitle")}</Title2>
-            <Body1 style={{ opacity: 0.7 }}>{t("tagline")}</Body1>
-            <div>
-              {restartButton}
-              <Button size="small" onClick={onSignOut} data-testid="candidate-sign-out">
-                {t("candidate.signOut")}
-              </Button>
-            </div>
-          </div>
-
+        <AppShell measure="fill" actions={candidateActions}>
+          <div className={styles.stageWrap}>
           {/* Status legend: describe each state as a tip AND highlight the current one. Shown in
               both channels — in voice mode it tracks the live audio state (listening/speaking/muted);
               in text mode there is no live audio, so the "idle/ready" card stays highlighted as a
@@ -1422,29 +1464,19 @@ export function InterviewPage() {
             </div>
           </div>
           {errorBanner}
-        </div>
+          </div>
+        </AppShell>
         {micDialog}
-      {restartDialog}
+        {restartDialog}
       </>
     );
   }
 
-  // All non-live phases: a centered, readable column.
+  // All non-live phases: the shared reading measure (orientation / review / scoring / report).
   return (
     <>
-      <div className={styles.page}>
-        <div className={styles.header}>
-          <Title2 as="h1">{t("appTitle")}</Title2>
-          <Body1 style={{ display: "block", opacity: 0.7 }}>
-            {t("tagline")}
-          </Body1>
-          <div>
-            {restartButton}
-            <Button size="small" onClick={onSignOut} data-testid="candidate-sign-out">
-              {t("candidate.signOut")}
-            </Button>
-          </div>
-        </div>
+      <AppShell measure="reading" actions={candidateActions}>
+        <div className={styles.page}>
 
         {phase === "idle" && (
           <Button appearance="primary" disabled={busy} onClick={onStart}>
@@ -1463,12 +1495,18 @@ export function InterviewPage() {
                 ? t("orientation.bodyExternal")
                 : t("orientation.body", { total: q.total })}
             </Body1>
-            <Button
-              appearance="primary"
-              onClick={() => setPhase("interviewing")}
-            >
-              {t("orientation.begin")}
-            </Button>
+            {/* Fluent's Card is a flex COLUMN with `align-items: stretch`, so a bare button here
+                was silently stretched to the card's full width — a giant banner-sized primary
+                action that matched nothing else on the page. The row wrapper gives it its natural
+                width back, and any sibling action added later lands beside it with a real gap. */}
+            <div className={styles.cardActions}>
+              <Button
+                appearance="primary"
+                onClick={() => setPhase("interviewing")}
+              >
+                {t("orientation.begin")}
+              </Button>
+            </div>
           </Card>
         )}
 
@@ -1563,7 +1601,8 @@ export function InterviewPage() {
         {phase === "scored" && report && <ReportView report={report} />}
 
         {errorBanner}
-      </div>
+        </div>
+      </AppShell>
       {micDialog}
       {restartDialog}
     </>

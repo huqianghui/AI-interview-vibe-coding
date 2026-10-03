@@ -1,0 +1,108 @@
+/**
+ * Self-hosted fonts + the few global rules Fluent tokens cannot express.
+ *
+ * WHY SELF-HOSTED and not a fonts.googleapis.com <link>: this product is delivered into client
+ * tenants whose candidates sit in mainland China, where Google Fonts is unreachable. A CDN link
+ * there silently falls back to a system font, which collapses the whole typographic direction
+ * exactly where the client is. The two latin-subset variable fonts total ~206 KB and are served
+ * from our own origin, so there is no third-party request and no regional failure mode.
+ *
+ * CJK COVERAGE: neither face carries CJK glyphs, so Chinese text resolves through the fallback
+ * chain in theme.ts by design — Latin gets Bricolage Grotesque / Literata, Chinese gets the
+ * platform's own PingFang SC / Microsoft YaHei. The `unicode-range` below makes that handoff
+ * explicit rather than accidental, and stops the browser downloading a latin face to render a
+ * string that has no latin in it.
+ */
+
+@font-face {
+  font-family: "Bricolage Grotesque";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url("/fonts/bricolage-grotesque-latin-var.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Literata";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("/fonts/literata-latin-var.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Literata";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/literata-latin-italic-var.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+
+/* The page ground. FluentProvider paints colorNeutralBackground1 on its own root, and that token
+   is the warm card surface here, so the sand ground is set on html/body and the provider root is
+   made transparent (see AppShell). Setting it on html too covers overscroll bounce on macOS. */
+html,
+body {
+  margin: 0;
+  background-color: #f5f1ea;
+  /* Mirrors theme.ts `fonts.body` / `fontFamilyBase`. Fluent applies fontFamilyBase to the
+     FluentProvider ROOT, so `document.body` itself keeps the UA default (measured: "Times").
+     Anything rendered outside the provider subtree — a portal mounted on body, a third-party
+     overlay, text painted before React hydrates — would land in that default serif. Declared here
+     so there is no path to an unstyled font. Keep the two lists identical. */
+  font-family: "Literata", Georgia, "PingFang SC", "Microsoft YaHei", serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Chrome repaints an autofilled field with its own light-blue background (#E8F0FE) and its own
+   text colour, overriding every Fluent token. Two prefilled fields on the sign-in screen were
+   enough to make the whole page read like a Windows form. There is no way to disable the repaint,
+   so it is overridden the only way that works: a huge inset box-shadow in the surface colour,
+   plus -webkit-text-fill-color for the text, both held across hover/focus/active. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #fffdf9 inset !important;
+  box-shadow: 0 0 0 1000px #fffdf9 inset !important;
+  -webkit-text-fill-color: #241f1a !important;
+  caret-color: #241f1a;
+  /* Chrome animates the fill in; a long delay on a no-op transition keeps our colour instead. */
+  transition: background-color 9999s ease-in-out 0s;
+}
+
+/* Faint paper texture on the ground. Fixed so it does not scroll with content, and non-blocking. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  background-image: repeating-linear-gradient(
+      28deg,
+      rgba(36, 31, 26, 0.013) 0 1px,
+      transparent 1px 4px
+    ),
+    repeating-linear-gradient(-54deg, rgba(36, 31, 26, 0.01) 0 1px, transparent 1px 6px);
+}
+
+/* Respect a reduced-motion preference for the pulsing live indicators added with this theme. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

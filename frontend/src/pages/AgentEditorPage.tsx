@@ -9,9 +9,17 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Body1, Button, Input, Title2 } from "@fluentui/react-components";
+import {
+  Body1,
+  Button,
+  Input,
+  Title2,
+  makeStyles,
+  tokens,
+} from "@fluentui/react-components";
 import * as auth from "../api/auth";
 import * as personas from "../api/personas";
+import { AppShell } from "../components/AppShell";
 import { AgentEditorLayout } from "../components/agent-editor/AgentEditorLayout";
 import { PersonaSwitcher } from "../components/agent-editor/PersonaSwitcher";
 import { AgentDefinitionPanel } from "../components/agent-editor/AgentDefinitionPanel";
@@ -25,9 +33,25 @@ import {
   type PersonaFormState,
 } from "./agentEditorForm";
 
+const useStyles = makeStyles({
+  // Was an inline `color: "#b00"` — an off-palette red that belonged to no theme. The token
+  // follows the app theme (warmed to #A33D2E) like every other error on the page.
+  loginError: {
+    display: "block",
+    marginTop: tokens.spacingVerticalM,
+    color: tokens.colorPaletteRedForeground1,
+  },
+  loginBody: {
+    display: "block",
+    marginBlock: `${tokens.spacingVerticalS} ${tokens.spacingVerticalL}`,
+    color: tokens.colorNeutralForeground2,
+  },
+});
+
 const NEW = "__new__";
 
 export function AgentEditorPage() {
+  const styles = useStyles();
   const { t } = useTranslation();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -198,17 +222,17 @@ export function AgentEditorPage() {
 
   if (authChecking) {
     return (
-      <div style={{ maxWidth: 420, margin: "0 auto", padding: 24 }}>
+      <AppShell measure="narrow">
         <Body1>{t("admin.checkingAuth")}</Body1>
-      </div>
+      </AppShell>
     );
   }
 
   if (!authed) {
     return (
-      <div style={{ maxWidth: 420, margin: "0 auto", padding: 24 }}>
-        <Title2 as="h1">{t("admin.agentLoginTitle")}</Title2>
-        <Body1 style={{ display: "block", margin: "12px 0" }}>{t("admin.agentLoginBody")}</Body1>
+      <AppShell measure="narrow">
+        <Title2 as="h2">{t("admin.agentLoginTitle")}</Title2>
+        <Body1 className={styles.loginBody}>{t("admin.agentLoginBody")}</Body1>
         <Input
           value={username}
           placeholder={t("admin.username")}
@@ -231,11 +255,11 @@ export function AgentEditorPage() {
           </Button>
         </div>
         {error && (
-          <Body1 role="alert" style={{ display: "block", marginTop: 12, color: "#b00" }}>
+          <Body1 role="alert" className={styles.loginError}>
             {error}
           </Body1>
         )}
-      </div>
+      </AppShell>
     );
   }
 

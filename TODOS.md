@@ -166,6 +166,75 @@ on EVERY machine instead of only on machines that happen to lack a mic by accide
 **Effort:** CC ~10 min.
 **Priority:** P3 — local-only, but it mislabels its own cause, which is the expensive part.
 
+## Design system (frontend/src/theme.ts, AppShell.tsx)
+
+### The 8 appearance invariants that only a real browser can hold
+
+Shipped v0.41.0.0. Unit tests cover the theme contracts and AppShell's structure, but eight things
+are E2E-shaped by nature — jsdom has no autofill, no real font loading and no viewport — so they are
+currently held by nothing but a manual check done once at ship time.
+
+**Highest value first, because this one has bug history:** the FluentProvider root must stay
+transparent. The page ground is painted on `html`/`body` in `styles/global.css`, and `avatar_bg`
+tells Azure to paint the digital human's wall the same colour. If the `provider` class in
+`App.tsx` is ever dropped, the provider repaints the page in the warm CARD surface, the two stop
+matching, and a visible rectangle reappears around the interviewer — which is exactly the defect
+the `avatar_bg` mechanism was built to prevent, and CI would be entirely green. Assert
+`getComputedStyle(document.querySelector('.fui-FluentProvider')).backgroundColor` is transparent
+and `document.body`'s is `rgb(245, 241, 234)`.
+
+The other seven: an autofilled field keeps the warm surface (this was most of the original
+complaint); both faces report `status: "loaded"` and nothing requests fonts.googleapis.com; zh-CN
+renders Chinese in PingFang SC / Microsoft YaHei rather than SimSun (only ever visible to Chinese
+candidates, which is the client's whole user base); 390px has no horizontal page scroll and shows
+only the live voice state; the live screen fits exactly one viewport at 1440x900; and below 560px of
+viewport height it scrolls instead of clipping the controls.
+
+Same backend dependency, same trip: **all 8 README screenshots now predate v0.41.0.0** and show
+the previous appearance (`e2e/readme-screenshots.spec.ts` regenerates them; README carries a note
+saying so in the meantime). One of them was already annotated as stale since v0.39.3.0.
+
+**Effort:** human: ~1 day / CC: ~1h once a seeded candidate account and a running backend are available.
+**Priority:** P1 — the provider-transparency one is a silent regression into a user-visible defect.
+
+### Fluent's type SIZES were never overridden, only the family
+
+Shipped v0.41.0.0 wires `fontFamilyBase` to Literata and uses the display face explicitly where the
+shell and cards need it, but `fontSizeBase*` / `lineHeightBase*` are still Fluent's defaults. So any
+heading rendered by a Fluent component — the admin page titles, dialog titles, table headers — comes
+out as the new family at the old size ramp. It does not look broken; it looks slightly uncomposed.
+
+Deliberately not done in that PR: overriding the type ramp changes every Fluent component at once,
+including the admin tables, so it wants to land with the `/admin` design pass rather than ahead of it.
+
+**Effort:** human: ~half a day / CC: ~20 min, but needs a visual pass over /admin afterwards.
+**Priority:** P2 — land it with the /admin design pass.
+
+### Measure the fixed gradient overlay and the header's backdrop-filter
+
+`global.css` paints a full-viewport `position: fixed` paper texture (two repeating gradients), and
+the header band uses `backdrop-filter: blur(14px)`. Both composite on every frame, and both are on
+screen during a live interview alongside the WebRTC video stream. This repo has a long measured
+history of weak-network and dropped-frame problems on exactly that path, so the cost should be a
+number rather than an assumption. If either is expensive, the texture can drop to a static
+background-image and the blur to a solid tint with no visible loss.
+
+**Effort:** human: ~2h / CC: ~30 min with the existing avatar-weaknet probe.
+**Priority:** P2 — cheap to measure, and the one path in this app where paint cost has bitten before.
+
+## Release hygiene
+
+### CHANGELOG is missing five shipped versions
+
+`0.40.10.0`, `0.40.11.0`, `0.40.11.1`, `0.40.11.2` and `0.40.11.3` all landed on `main` with no
+CHANGELOG entry — the file was last touched in `c8bd980`, which is before the `0.40.10.0` bump in
+`afcecb1`. Their PR bodies (#143, #145, #147, #149, #151) carry the real descriptions, so the
+backfill should be written from those rather than from commit subjects, which is why v0.41.0.0 did
+not attempt it: inventing changelog prose for work you did not do is how a changelog starts lying.
+
+**Effort:** human: ~1h / CC: ~15 min reading the five PR bodies.
+**Priority:** P1 — a changelog with holes in it is the one artifact a client reads to understand what changed.
+
 ## Completed
 ### Narrow viewports: question readable without scrolling — v0.40.9.0
 

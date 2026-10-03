@@ -16,6 +16,13 @@ answers comply with the client's *own* SOP, and every judgment points back to it
 
 ## Key scenarios
 
+> **Every screenshot below predates v0.41.0.0.** That release replaced Fluent's factory
+> defaults with the project's own design language ("Warm Editorial / Foundry Purple": a warm sand
+> ground, Bricolage Grotesque + Literata, a purple action colour, and a real header band) and
+> rebuilt the page shell, so the layouts and colours shown here are the previous appearance. The
+> flows, controls and copy are unchanged. Regenerating them needs a live backend plus a seeded
+> candidate account — see `e2e/readme-screenshots.spec.ts` and the TODOS.md entry.
+
 ### 1. The interview — digital-human interviewer, voice mode
 
 In voice mode the candidate is interviewed face-to-face: Azure Voice Live streams a live 1080p
