@@ -37,10 +37,16 @@ timestamp + 60 s. The ledger is now 3 per 60 s (v0.40.11.2); it was 2 per 20 s, 
 `Microsoft.Quota` provider, regional usages API: 287 items, none avatar or speech). Treat it as a fixed
 service-side throttle, not an allocatable quota.
 
-**It is a RATE limit, not a concurrency limit** — measured: three avatar sessions held open, then a
-fourth accepted once the window had room, all four live at once. So releasing is irrelevant, and a
-cohort CAN all be interviewing simultaneously; they just cannot all START inside one minute (3 per
-minute, ~20 s apart).
+**TWO independent limits**, measured: **5 concurrent** avatar sessions
+(`avatar_service_resource_exhausted`, and closing one frees a slot immediately) and **3 new connections
+per 60 s** (`rate_limit_exceeded`, closing refunds nothing). Near the concurrency ceiling the retries
+burn the rate allowance, so the message the user sees can be the rate one while the cause is capacity —
+that is what sent the 2026-10-03 investigation at the wrong limit first.
+
+A support request now has something concrete to name: raise **concurrent avatar rendering requests**
+(currently 5) on `ai-foundary-hu-sweden-central2` (AIServices / S0 / swedencentral), citing
+`avatar_service_resource_exhausted`. That is what the MS Q&A thread "Increase the limit of concurrent
+users in Speech Services avatar" is about; the quota APIs still expose no row for it.
 
 **Turning the avatar off avoids it entirely, and voice-only has no practical ceiling**: measured 40
 voice-only sessions launched in 20 s (~120 new connections/minute, 4x the documented 30) with zero
