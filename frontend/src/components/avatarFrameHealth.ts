@@ -64,20 +64,56 @@ export function isBlankFrame(luma: number): boolean {
   return luma <= BLANK_LUMA_MAX;
 }
 
-/**
- * Advance the blank-sample streak.
- *
- * `readable` is false when the frame could not be sampled at all (element not ready, canvas refused,
- * zero dimensions). That is NOT evidence of blankness — treating it as such would flash the fallback
- * every time the element re-attaches — so it leaves the streak untouched rather than growing it.
- * A readable, non-blank frame resets to 0: one good frame is proof the picture works.
- */
-export function nextBlankStreak(streak: number, readable: boolean, luma: number): number {
-  if (!readable) return streak;
-  return isBlankFrame(luma) ? streak + 1 : 0;
+/** What a sampling attempt produced. The three are NOT interchangeable, and conflating two of them was
+ * a real defect: `not-ready` (no frame to read yet — the element just attached) must keep the stage
+ * waiting, while `unsupported` (this browser cannot give us pixels at all: no 2-D context, a privacy
+ * mode, a tainted surface) must NOT, or requiring proof would mean never showing the interviewer there.
+ * Both used to be a single `readable: false`. */
+export type SampleStatus = "ok" | "not-ready" | "unsupported";
+
+/** What we currently believe about the picture. `waiting` is the state the stage STARTS in once frames
+ * arrive: frames existing is not yet evidence that they contain anything. */
+export type PictureVerdict = "waiting" | "content" | "blank";
+
+export interface PictureState {
+  verdict: PictureVerdict;
+  blankStreak: number;
 }
 
-/** Has the picture been empty long enough to stop claiming it works? */
-export function isPictureDead(streak: number): boolean {
-  return streak >= BLANK_STREAK_TO_FAIL;
+export const initialPictureState: PictureState = { verdict: "waiting", blankStreak: 0 };
+
+/**
+ * Advance the picture verdict. Deliberately ASYMMETRIC, and that is the whole fix.
+ *
+ * The first version demoted after three blank samples, which means it SHOWED the picture first and
+ * retracted ~3 s later. Measured on real Azure 2026-10-03: the black frame arrives at session START, so
+ * those three seconds are exactly the ones the candidate spends looking at it. Withholding an unproven
+ * picture costs nothing — the cached still or the orb is a perfectly good thing to show — while
+ * retracting one is a visible flip. So:
+ *
+ * - promotion needs ONE frame with content; a blank frame while `waiting` just keeps waiting;
+ * - demotion from `content` needs a RUN of blanks, so a decoder hiccup is not a verdict;
+ * - `not-ready` changes nothing: there was no frame to judge;
+ * - `unsupported` promotes immediately, because "we cannot check" must not become "never show".
+ */
+export function nextPictureState(
+  state: PictureState,
+  status: SampleStatus,
+  luma: number,
+): PictureState {
+  if (status === "not-ready") return state;
+  if (status === "unsupported") {
+    return state.verdict === "waiting" ? { verdict: "content", blankStreak: 0 } : state;
+  }
+  // One good frame is proof, from any state — including back from `blank` when the avatar recovers.
+  if (!isBlankFrame(luma)) return { verdict: "content", blankStreak: 0 };
+  const blankStreak = state.blankStreak + 1;
+  const verdict: PictureVerdict =
+    state.verdict === "content" && blankStreak >= BLANK_STREAK_TO_FAIL ? "blank" : state.verdict;
+  return { verdict, blankStreak };
+}
+
+/** Whether the picture may be shown. Only a proven one may. */
+export function pictureIsShowable(state: PictureState): boolean {
+  return state.verdict === "content";
 }

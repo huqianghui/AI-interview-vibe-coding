@@ -6,10 +6,11 @@ import { describe, expect, it } from "vitest";
 import {
   BLANK_LUMA_MAX,
   BLANK_STREAK_TO_FAIL,
+  initialPictureState,
   isBlankFrame,
-  isPictureDead,
   meanLuma,
-  nextBlankStreak,
+  nextPictureState,
+  pictureIsShowable,
 } from "./avatarFrameHealth";
 
 /** RGBA pixel data of `n` pixels, all the same colour. */
@@ -69,42 +70,66 @@ describe("isBlankFrame", () => {
   });
 });
 
-describe("nextBlankStreak", () => {
-  it("grows on a readable blank frame", () => {
-    expect(nextBlankStreak(0, true, 0)).toBe(1);
-    expect(nextBlankStreak(1, true, 0)).toBe(2);
+describe("nextPictureState", () => {
+  const S = initialPictureState;
+
+  it("starts unproven — frames existing is not yet evidence they contain anything", () => {
+    expect(S.verdict).toBe("waiting");
+    expect(pictureIsShowable(S)).toBe(false);
   });
 
-  it("resets on a readable frame with content — one good frame proves the picture works", () => {
-    expect(nextBlankStreak(5, true, 200)).toBe(0);
+  it("promotes on ONE frame with content", () => {
+    const next = nextPictureState(S, "ok", 180);
+    expect(next.verdict).toBe("content");
+    expect(pictureIsShowable(next)).toBe(true);
   });
 
-  it("LEAVES the streak alone when the frame could not be read at all", () => {
-    // The distinction that stops the fallback flashing every time the element re-attaches: "no frame
-    // to read" is not evidence of blankness. If this returned streak+1, a detached element would
-    // eventually be declared dead while the stream was fine.
-    expect(nextBlankStreak(2, false, 0)).toBe(2);
-    expect(nextBlankStreak(0, false, 0)).toBe(0);
-  });
-});
-
-describe("isPictureDead", () => {
-  it("needs more than one blank sample, so a single decoder hiccup is not a verdict", () => {
-    expect(BLANK_STREAK_TO_FAIL).toBeGreaterThan(1);
-    expect(isPictureDead(BLANK_STREAK_TO_FAIL - 1)).toBe(false);
-    expect(isPictureDead(BLANK_STREAK_TO_FAIL)).toBe(true);
+  it("KEEPS WAITING on a blank frame instead of showing it — this is the whole fix", () => {
+    // Measured on real Azure 2026-10-03: the black frame arrives at session START. The old policy
+    // showed it and retracted ~3 s later, which is exactly the window the candidate is looking at.
+    let st = S;
+    for (let i = 0; i < BLANK_STREAK_TO_FAIL + 3; i++) st = nextPictureState(st, "ok", 0);
+    expect(st.verdict).toBe("waiting");
+    expect(pictureIsShowable(st)).toBe(false);
   });
 
-  it("walks from a healthy stream to a verdict only through consecutive blanks", () => {
-    let streak = 0;
-    // Two blanks, then one good frame: not dead, and the count is back to zero.
-    streak = nextBlankStreak(streak, true, 0);
-    streak = nextBlankStreak(streak, true, 0);
-    expect(isPictureDead(streak)).toBe(false);
-    streak = nextBlankStreak(streak, true, 180);
-    expect(streak).toBe(0);
-    // Now an uninterrupted run reaches the verdict.
-    for (let i = 0; i < BLANK_STREAK_TO_FAIL; i++) streak = nextBlankStreak(streak, true, 0);
-    expect(isPictureDead(streak)).toBe(true);
+  it("demotes a PROVEN picture only after a run of blanks, so a hiccup is not a verdict", () => {
+    let st = nextPictureState(S, "ok", 200);
+    for (let i = 0; i < BLANK_STREAK_TO_FAIL - 1; i++) st = nextPictureState(st, "ok", 0);
+    expect(st.verdict).toBe("content");
+    st = nextPictureState(st, "ok", 0);
+    expect(st.verdict).toBe("blank");
+  });
+
+  it("recovers from blank on a single good frame", () => {
+    let st = nextPictureState(S, "ok", 200);
+    for (let i = 0; i < BLANK_STREAK_TO_FAIL; i++) st = nextPictureState(st, "ok", 0);
+    expect(st.verdict).toBe("blank");
+    expect(nextPictureState(st, "ok", 150).verdict).toBe("content");
+  });
+
+  it("treats `not-ready` as no information at all", () => {
+    // There was no frame to judge. Growing the blank streak here would eventually declare a perfectly
+    // good stream empty just because the element kept re-attaching.
+    let st = S;
+    for (let i = 0; i < 10; i++) st = nextPictureState(st, "not-ready", 0);
+    expect(st).toEqual(S);
+    const proven = nextPictureState(S, "ok", 200);
+    expect(nextPictureState(proven, "not-ready", 0)).toEqual(proven);
+  });
+
+  it("shows an unproven picture when the browser CANNOT be asked — immediately, not after a wait", () => {
+    // "We cannot check this" must never become "never show the interviewer". And it must not cost a
+    // delay either, or every browser without a readable canvas pays for a guard it cannot run.
+    const next = nextPictureState(S, "unsupported", 0);
+    expect(next.verdict).toBe("content");
+    expect(pictureIsShowable(next)).toBe(true);
+  });
+
+  it("does not let `unsupported` resurrect a picture already proven blank", () => {
+    let st = nextPictureState(S, "ok", 200);
+    for (let i = 0; i < BLANK_STREAK_TO_FAIL; i++) st = nextPictureState(st, "ok", 0);
+    expect(st.verdict).toBe("blank");
+    expect(nextPictureState(st, "unsupported", 0).verdict).toBe("blank");
   });
 });

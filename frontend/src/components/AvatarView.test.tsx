@@ -1,7 +1,7 @@
 /** AvatarView (SPEC F5/F9): shows the avatar video when connected, the audio orb otherwise. */
 import { createRef } from "react";
 import { describe, expect, it } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import "../i18n";
 import { AvatarView } from "./AvatarView";
@@ -17,6 +17,15 @@ function renderView(isAvatarConnected: boolean) {
       <AvatarView ref={ref} audioState="listening" isAvatarConnected={isAvatarConnected} />
     </FluentProvider>,
   );
+  if (isAvatarConnected && ref.current) {
+    // `isAvatarConnected` is only ever true because frames PAINTED, so the element really does have one.
+    // Tests used to leave it at 0x0, which since 2026-10-03 is a distinguishable state: the frame
+    // sampler reports "not ready" and correctly refuses to judge, so the picture stays unproven for ever.
+    // Individual cases below redefine these for their own aspect.
+    Object.defineProperty(ref.current, "videoWidth", { value: 1920, configurable: true });
+    Object.defineProperty(ref.current, "videoHeight", { value: 1080, configurable: true });
+    Object.defineProperty(ref.current, "readyState", { value: 2, configurable: true });
+  }
   return ref;
 }
 
@@ -63,11 +72,17 @@ describe("AvatarView", () => {
     expect(screen.getByTestId<HTMLVideoElement>("avatar-video").muted).toBe(true);
   });
 
-  it("shows the avatar video and hides the orb once connected", () => {
+  it("shows the avatar video once a frame has been JUDGED, not merely once frames arrive", async () => {
+    // Contract change (2026-10-03): `isAvatarConnected` means frames are arriving, which a black stream
+    // also satisfies, so the video layer is withheld until a frame is judged to contain something. jsdom
+    // has no 2-D canvas, so the judgement here is "this browser cannot be asked" — which promotes rather
+    // than withholds, because "cannot check" must never become "never show the interviewer".
     renderView(true);
-    expect(screen.getByTestId("avatar-video")).toBeInTheDocument();
+    await waitFor(
+      () => expect(screen.getByTestId("avatar-view")).toHaveAttribute("data-picture", "content"),
+      { timeout: 3000 },
+    );
     expect(screen.queryByTestId("audio-orb")).not.toBeInTheDocument();
-    expect(screen.getByTestId("avatar-view")).toHaveAttribute("data-avatar-connected", "true");
   });
 
   it("exposes the video element via ref for the voice hook to attach a stream", () => {
@@ -92,14 +107,18 @@ describe("AvatarView", () => {
     }
   });
 
-  it("hides the portrait and its connecting hint once the live video is up", () => {
+  it("hides the portrait and its connecting hint once the live video is judged", async () => {
     localStorage.setItem(
       portraitKeyFor(null),
       "data:image/jpeg;base64,aGVsbG8=",
     );
     try {
       renderView(true);
-      expect(screen.queryByTestId("avatar-portrait")).not.toBeInTheDocument();
+      // Same contract change: the still stays up until the picture is judged, then gives way.
+      await waitFor(
+        () => expect(screen.queryByTestId("avatar-portrait")).not.toBeInTheDocument(),
+        { timeout: 3000 },
+      );
       expect(screen.queryByTestId("avatar-connecting-hint")).not.toBeInTheDocument();
     } finally {
       localStorage.removeItem(portraitKeyFor(null));
