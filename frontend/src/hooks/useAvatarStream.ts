@@ -89,12 +89,25 @@ const MAX_RECOVERY_ATTEMPTS = 3;
 const RECOVERY_BACKOFF_MS = [500, 1500, 3000];
 /** Azure rate-limits avatar SESSION CREATION, and every path that offers `session.avatar.connect`
  * spends from the same allowance: a self-heal re-handshake, a deliberate media-mode switch, and a
- * brand-new session all look identical to Azure. A third request inside roughly 20 s was refused with
- * `"Avatar request was rate-limited. Retry after 43.0s."` (measured 2026-09-30). The old backoffs put
- * all three self-heal attempts inside ~5 s, so attempt 3 was being spent on a request Azure would
- * never honour. One shared ledger, consulted by both paths, is the only way they stop defeating each
- * other — the alternative (two independent budgets) is what produced that wasted attempt. */
-const AVATAR_REQUEST_WINDOW_MS = 20_000;
+ * brand-new session all look identical to Azure. One shared ledger, consulted by every path, is the
+ * only way they stop defeating each other — two independent budgets is what spent a self-heal attempt
+ * on a request Azure would never honour.
+ *
+ * THE WINDOW IS THE DOCUMENTED ONE, and it used to be wrong. Azure publishes **2 new connections per
+ * minute** for real-time text-to-speech avatar on S0, and says in the same place that "avatars used in
+ * Voice Live follow the quotas and limits described in Real-time text-to-speech avatar" — so the
+ * avatar rides the Speech quota, NOT Voice Live's much larger 30/minute. See
+ * `docs/avatar-rate-limit.md`.
+ *
+ * This was 20_000, inferred from "a third request inside roughly 20 s was refused" (measured
+ * 2026-09-30). That inference was invalid: three requests landing close together says nothing about
+ * the window's length. At 2 per 20 s the ledger allowed SIX per minute and happily sent requests Azure
+ * was certain to refuse — which is exactly what the owner hit in production on 2026-10-03, closing a
+ * session and reconnecting after ~25 s.
+ *
+ * Both observations fit 2-per-60s once you read `Retry after` as "how long until the oldest connection
+ * ages out of the window": 43.0s ⇒ the oldest was 17 s old; 7.0s ⇒ 53 s old. */
+const AVATAR_REQUEST_WINDOW_MS = 60_000;
 const AVATAR_REQUESTS_PER_WINDOW = 2;
 
 export interface AvatarStreamOptions {

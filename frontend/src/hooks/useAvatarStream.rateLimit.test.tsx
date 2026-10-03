@@ -20,9 +20,13 @@ import { act, renderHook } from "@testing-library/react";
 import { useAvatarStream } from "./useAvatarStream";
 
 const ICE_SERVERS = [{ urls: "stun:stun.example.com" }];
-/** Mirrors the module constants under test. Kept local on purpose: if someone widens the allowance in
- * the hook, these tests should fail and make them re-justify it against the measurement. */
-const WINDOW_MS = 20_000;
+/** Mirrors the module constant under test. Kept local on purpose: if someone widens the allowance in
+ * the hook, these tests should fail and make them re-justify it — which is exactly what happened on
+ * 2026-10-03. It was 20_000 here, mirroring an inference from "a third request inside roughly 20 s was
+ * refused"; that inference was invalid (requests landing close together says nothing about the
+ * window). Azure publishes **2 new connections per minute** for real-time avatar on S0, and Voice Live
+ * avatars ride that quota rather than Voice Live's own 30/minute. See `docs/avatar-rate-limit.md`. */
+const WINDOW_MS = 60_000;
 
 class FakePC {
   static instances: FakePC[] = [];

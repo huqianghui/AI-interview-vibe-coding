@@ -162,7 +162,8 @@ describe("avatar-request ledger — every offer path, including consumer-driven 
 
     // …and released once the window has passed, so the hold is a delay and not a silent drop.
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(20_000);
+      // One full documented window (2 new connections per minute — docs/avatar-rate-limit.md).
+      await vi.advanceTimersByTimeAsync(60_000);
     });
     await pushOfferOut();
     expect(
