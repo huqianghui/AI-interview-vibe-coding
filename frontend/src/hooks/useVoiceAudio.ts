@@ -46,6 +46,20 @@ const PLAYBACK_SAMPLE_RATE = 24_000;
  * contract, which leaves Azure on this default. */
 export const AZURE_DEFAULT_INPUT_SAMPLE_RATE = 24_000;
 
+/** What the playback worklet reports back about its own queue.
+ *
+ * `underruns` counts GAPS, not silent samples — one per time the queue ran dry mid-speech, which is
+ * exactly the number the perf review asked for as the measure of whether the buffer works. */
+export interface PlaybackStats {
+  underruns: number;
+  bufferedMs: number;
+  /** How long the most recent counted gap lasted. Reported separately from `bufferedMs` because the
+   * buffer depth when the warning is POSTED says nothing about the gap — the audio that ended it has
+   * already arrived by then (measured live: "buffer 757ms" about a gap that happened at depth 0). */
+  lastGapMs: number;
+  state: "filling" | "playing" | "ramping-out";
+}
+
 /** Chunk size for the base64 encode. `String.fromCharCode.apply` is far faster than appending one
  * character at a time, but it spreads the chunk onto the call stack, so the chunk must stay well
  * under the engine's argument limit (~65k in V8) — 8 KB is comfortable and still only a handful
@@ -80,7 +94,21 @@ export function useVoiceAudio() {
 
   // ── Playback ─────────────────────────────────────────────────────────────
   const playbackContextRef = useRef<AudioContext | null>(null);
-  const nextPlayTimeRef = useRef(0);
+  const playbackNodeRef = useRef<AudioWorkletNode | null>(null);
+  /** In flight while the playback worklet module loads. `playAudio` can be called before it
+   * resolves (the first `response.audio.delta` races the module fetch), so chunks that arrive
+   * meanwhile wait in `pendingPlaybackRef` instead of being dropped. */
+  const playbackReadyRef = useRef<Promise<void> | null>(null);
+  const pendingPlaybackRef = useRef<ArrayBuffer[]>([]);
+  /** Last stats frame from the worklet: how deep the buffer is and how many gaps it has had. Read
+   * by `getPlaybackStats` — the only way the main thread can see inside the worklet's queue, and
+   * what makes the jitter buffer measurable rather than merely plausible. */
+  const playbackStatsRef = useRef<PlaybackStats>({
+    underruns: 0,
+    bufferedMs: 0,
+    lastGapMs: 0,
+    state: "filling",
+  });
 
   /** Request mic access and load the recorder worklet. Throws on getUserMedia denial (the caller
    * distinguishes that as MicAccessError) or on worklet-module load failure. */
@@ -155,14 +183,75 @@ export function useVoiceAudio() {
 
   /** Lazily create the playback AudioContext (matches Voice Live's PCM16 OUTPUT rate, which is
    * unaffected by the mic rate above). */
+  /** Create the playback context and start loading the jitter-buffer worklet into it.
+   *
+   * The module load is async and `playAudio` is not, so the promise is kept rather than awaited:
+   * callers get a usable context immediately and audio that arrives early is queued on the main
+   * thread until the node exists. A failed load leaves `playbackNodeRef` null — see `playAudio`. */
   const ensurePlaybackContext = useCallback((): AudioContext => {
     if (!playbackContextRef.current) {
       playbackContextRef.current = new AudioContext({ sampleRate: PLAYBACK_SAMPLE_RATE });
     }
-    return playbackContextRef.current;
+    const ctx = playbackContextRef.current;
+    if (!playbackReadyRef.current) {
+      playbackReadyRef.current = ctx.audioWorklet
+        .addModule("/audio-playback-processor.js")
+        .then(() => {
+          const node = new AudioWorkletNode(ctx, "audio-playback-processor", {
+            numberOfInputs: 0,
+            outputChannelCount: [1],
+          });
+          node.port.onmessage = (e: MessageEvent) => {
+            const msg = e.data as PlaybackStats & { eventType?: string };
+            if (msg.eventType !== "stats") return;
+            // Log each new gap rather than only the total. This is the one symptom a candidate
+            // reports as "the interviewer kept cutting out", and without it the only evidence is
+            // their word — the counter lives in the worklet and nothing else can see it. Also what
+            // the live probe reads to verify the buffer at all (`bufferedMs` says how close the
+            // cushion came to empty, which is what decides whether 150 ms is the right depth).
+            if (msg.state === "playing" && playbackStatsRef.current.state !== "playing") {
+              // Once per session: the moment the candidate first hears the interviewer on this path.
+              console.debug(
+                `[voice-audio] playback started (buffer ${msg.bufferedMs.toFixed(0)}ms)`,
+              );
+            }
+            // Warn when a gap ENDS, not when the counter ticks: the length is only known once the
+            // buffer has refilled, so warning on the increment printed "0ms" (measured — the first
+            // version of this log did exactly that).
+            if (msg.lastGapMs > 0 && msg.lastGapMs !== playbackStatsRef.current.lastGapMs) {
+              console.warn(
+                `[voice-audio] playback underrun #${String(msg.underruns)} — the interviewer's ` +
+                  `voice had a gap of ${msg.lastGapMs.toFixed(0)}ms`,
+              );
+            }
+            playbackStatsRef.current = {
+              underruns: msg.underruns,
+              bufferedMs: msg.bufferedMs,
+              lastGapMs: msg.lastGapMs,
+              state: msg.state,
+            };
+          };
+          node.connect(ctx.destination);
+          playbackNodeRef.current = node;
+          // Hand over whatever arrived while the module was loading, in order.
+          for (const pcm of pendingPlaybackRef.current) node.port.postMessage({ pcm }, [pcm]);
+          pendingPlaybackRef.current = [];
+        })
+        .catch((err: unknown) => {
+          // Audio is the whole product here, so a load failure has to be loud rather than silent.
+          console.error(
+            "[voice-audio] playback worklet failed to load — the interviewer will be inaudible",
+            err,
+          );
+        });
+    }
+    return ctx;
   }, []);
 
-  /** Decode a base64 PCM16 chunk (`response.audio.delta`) and schedule it for gapless playback. */
+  /** Decode a base64 PCM16 chunk (`response.audio.delta`) and hand it to the jitter buffer.
+   *
+   * No scheduling happens here any more: the worklet owns timing, so this is only a decode and a
+   * transfer. See public/audio-playback-processor.js for why the buffer exists. */
   const playAudio = useCallback(
     (base64Audio: string) => {
       const ctx = ensurePlaybackContext();
@@ -171,28 +260,50 @@ export function useVoiceAudio() {
       const binaryStr = atob(base64Audio);
       const bytes = new Uint8Array(binaryStr.length);
       for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-      const int16 = new Int16Array(bytes.buffer);
-      const float32 = new Float32Array(int16.length);
-      for (let i = 0; i < int16.length; i++) float32[i] = (int16[i] ?? 0) / 32768;
-
-      const buffer = ctx.createBuffer(1, float32.length, PLAYBACK_SAMPLE_RATE);
-      buffer.getChannelData(0).set(float32);
-      const src = ctx.createBufferSource();
-      src.buffer = buffer;
-      src.connect(ctx.destination);
-
-      nextPlayTimeRef.current = Math.max(nextPlayTimeRef.current, ctx.currentTime);
-      src.start(nextPlayTimeRef.current);
-      nextPlayTimeRef.current += buffer.duration;
+      // The worklet converts Int16 → float itself, so the bytes go across untouched and the
+      // buffer is TRANSFERRED rather than copied (same reasoning as the capture side).
+      const node = playbackNodeRef.current;
+      if (node) node.port.postMessage({ pcm: bytes.buffer }, [bytes.buffer]);
+      else pendingPlaybackRef.current.push(bytes.buffer);
     },
     [ensurePlaybackContext],
   );
 
-  const stopAudio = useCallback(() => {
-    void playbackContextRef.current?.close().catch(() => undefined);
-    playbackContextRef.current = null;
-    nextPlayTimeRef.current = 0;
+  /** Drop every queued sample immediately, keeping the context and the node alive.
+   *
+   * Deliberately does NOT close the AudioContext, which is what the old `stopAudio` did. Closing it
+   * means the next session constructs a fresh one and has to clear the browser's autoplay gate
+   * again from whatever call stack happens to be running.
+   *
+   * NOT YET WIRED TO BARGE-IN, on purpose. Today nothing drops queued audio when the candidate
+   * starts talking, so the interviewer plays over them for however much Azure had already sent —
+   * and Azure sends in bursts, so that is usually far more than this buffer's 150 ms. Fixing it
+   * needs one thing measured first: whether Azure (which has `interrupt_response: True`) actually
+   * cancels the response on `speech_started`. If it does, flushing here matches its own decision; if
+   * it does not, flushing would cut audio still arriving and the candidate would hear a gap followed
+   * by the rest of the sentence — worse than today. See the perf review's P0-2 follow-up. */
+  const flushPlayback = useCallback(() => {
+    playbackNodeRef.current?.port.postMessage({ command: "flush" });
+    pendingPlaybackRef.current = [];
+    playbackStatsRef.current = { underruns: 0, bufferedMs: 0, lastGapMs: 0, state: "filling" };
   }, []);
+
+  /** Tell the jitter buffer that Azure has finished sending this response's audio.
+   *
+   * Required for the underrun counter to mean anything: the worklet cannot tell a finished sentence
+   * from a stalled network — both just empty the queue — so without this every utterance would log
+   * an underrun. Wired to `response.audio.done`. Harmless if it never arrives: the next chunk clears
+   * the flag, so the only cost of a missed marker is one over-counted gap. */
+  const endPlaybackStream = useCallback(() => {
+    playbackNodeRef.current?.port.postMessage({ command: "end" });
+  }, []);
+
+  const stopAudio = useCallback(() => {
+    flushPlayback();
+  }, [flushPlayback]);
+
+  /** Latest buffer depth + underrun count from the worklet (see PlaybackStats). */
+  const getPlaybackStats = useCallback((): PlaybackStats => playbackStatsRef.current, []);
 
   /** Resume the playback AudioContext inside a user-gesture handler (Chrome autoplay policy) —
    * call this synchronously in the click handler that starts the session, before any async WS
@@ -223,6 +334,9 @@ export function useVoiceAudio() {
     cleanupMic,
     playAudio,
     stopAudio,
+    flushPlayback,
+    endPlaybackStream,
+    getPlaybackStats,
     prepareAudioContext,
   };
 }
