@@ -46,16 +46,29 @@ const PLAYBACK_SAMPLE_RATE = 24_000;
  * contract, which leaves Azure on this default. */
 export const AZURE_DEFAULT_INPUT_SAMPLE_RATE = 24_000;
 
-/** Clip to [-1,1], scale to Int16, and base64-encode — the inverse of playAudio's decode. */
-function encodePcmToBase64(audioData: Float32Array): string {
-  const int16 = new Int16Array(audioData.length);
-  for (let i = 0; i < audioData.length; i++) {
-    const clamped = Math.max(-1, Math.min(1, audioData[i] ?? 0));
-    int16[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
-  }
-  const bytes = new Uint8Array(int16.buffer);
+/** Chunk size for the base64 encode. `String.fromCharCode.apply` is far faster than appending one
+ * character at a time, but it spreads the chunk onto the call stack, so the chunk must stay well
+ * under the engine's argument limit (~65k in V8) — 8 KB is comfortable and still only a handful
+ * of calls for a 40 ms batch. */
+const B64_CHUNK_BYTES = 8192;
+
+/** Base64-encode already-Int16 PCM bytes — the inverse of playAudio's decode.
+ *
+ * The Float32 → Int16 conversion used to happen here, on the main thread, once per 8 ms render
+ * quantum. It now happens in the worklet (see public/audio-processor.js), which both moves the
+ * work off the thread that renders React and decodes the avatar's video, and lets the buffer be
+ * TRANSFERRED here instead of copied. This keeps the one step that genuinely cannot move: `btoa`
+ * does not exist in AudioWorkletGlobalScope.
+ *
+ * Still exported, and still used: the binary uplink is NEGOTIATED, so a page talking to a backend
+ * that predates it falls back to this. See `useInterviewVoice`'s `binaryAudioRef`. */
+export function encodePcmToBase64(pcm: ArrayBuffer): string {
+  const bytes = new Uint8Array(pcm);
   let binary = "";
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  for (let i = 0; i < bytes.length; i += B64_CHUNK_BYTES) {
+    const chunk = bytes.subarray(i, i + B64_CHUNK_BYTES) as unknown as number[];
+    binary += String.fromCharCode.apply(null, chunk);
+  }
   return btoa(binary);
 }
 
@@ -96,8 +109,16 @@ export function useVoiceAudio() {
     workletNodeRef.current = workletNode;
   }, []);
 
-  /** Start streaming mic frames; `onFrame` receives each frame as base64 PCM16. */
-  const startRecording = useCallback((onFrame: (base64Audio: string) => void) => {
+  /** Start streaming mic frames; `onFrame` receives each batch as raw Int16 PCM.
+   *
+   * One call per BATCH, not per render quantum — the worklet aggregates 40 ms before posting, so
+   * this fires ~25 times a second rather than 125 (measured; the worklet's header has the
+   * arithmetic).
+   *
+   * Hands over the RAW buffer rather than base64: whether the wire wants base64 is a protocol
+   * question, answered by the transport (`useInterviewVoice`, from the backend's `binary_audio`
+   * capability) rather than guessed here. `encodePcmToBase64` is exported for that fallback. */
+  const startRecording = useCallback((onFrame: (pcm: ArrayBuffer) => void) => {
     const node = workletNodeRef.current;
     if (!node) {
       console.debug("[voice-audio] startRecording: worklet not initialized");
@@ -105,9 +126,9 @@ export function useVoiceAudio() {
     }
     node.port.postMessage({ command: "START_RECORDING" });
     node.port.onmessage = (e: MessageEvent) => {
-      const msg = e.data as { eventType?: string; audioData?: Float32Array };
-      if (msg.eventType === "audio" && msg.audioData) {
-        onFrame(encodePcmToBase64(msg.audioData));
+      const msg = e.data as { eventType?: string; pcm?: ArrayBuffer };
+      if (msg.eventType === "audio" && msg.pcm) {
+        onFrame(msg.pcm);
       }
     };
   }, []);

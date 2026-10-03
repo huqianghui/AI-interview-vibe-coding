@@ -37,7 +37,12 @@ import { useConnectionPolicy } from "./useConnectionPolicy";
 import { useSpeakQueue } from "./useSpeakQueue";
 import type { RefObject } from "react";
 import { _internal as clientInternal, type VoiceSession } from "../api/client";
-import { AZURE_DEFAULT_INPUT_SAMPLE_RATE, MIC_SAMPLE_RATE, useVoiceAudio } from "./useVoiceAudio";
+import {
+  AZURE_DEFAULT_INPUT_SAMPLE_RATE,
+  MIC_SAMPLE_RATE,
+  encodePcmToBase64,
+  useVoiceAudio,
+} from "./useVoiceAudio";
 import { useAvatarStream } from "./useAvatarStream";
 import type {
   AudioState,
@@ -287,6 +292,8 @@ export function useInterviewVoice(
   const lastLocaleRef = useRef<string | undefined>(undefined);
   const transcriptIdCounter = useRef(0);
   const avatarEnabledRef = useRef(false);
+  /** Whether the connected backend unwraps binary mic frames (from `proxy.connected`). */
+  const binaryAudioRef = useRef(false);
   // Guards the one-shot avatar handshake (Azure sends two session.updated frames; only the second
   // carries ice_servers — fire the handshake once, on whichever frame has them).
   const avatarStartedRef = useRef(false);
@@ -395,6 +402,13 @@ export function useInterviewVoice(
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data));
   }, []);
 
+  /** Send raw mic PCM as a BINARY frame; the backend wraps it into `input_audio_buffer.append`.
+   * Only used when the backend advertised `binary_audio` — see `binaryAudioRef`. */
+  const sendPcm = useCallback((pcm: ArrayBuffer) => {
+    const ws = wsRef.current;
+    if (ws?.readyState === WebSocket.OPEN) ws.send(pcm);
+  }, []);
+
   // Everything a NEW Azure session must start without: the previous session's turn/read
   // bookkeeping, its watchdog timers, and its half-finished transcript state. Shared by `cleanup()`
   // (connect-timeout, mic failure, explicit disconnect) AND the automatic-reconnect branch of
@@ -494,6 +508,10 @@ export function useInterviewVoice(
       switch (msg.type as string | undefined) {
         case "proxy.connected":
           avatarEnabledRef.current = Boolean(msg.avatar_enabled);
+          // Uplink framing (perf review P0-1): with this flag the mic goes up as raw binary PCM
+          // and the backend does the base64. Absent means an older backend whose relay would
+          // reject a binary frame, so the page keeps the base64-JSON path.
+          binaryAudioRef.current = Boolean(msg.binary_audio);
           // Mic-rate drift guard. The backend declares `input_audio_sampling_rate` on the session and
           // Azure decodes our raw PCM16 at exactly that rate, so if the two sides disagree the
           // interviewer hears a pitch- and speed-shifted candidate and every transcript is garbage —
@@ -621,9 +639,14 @@ export function useInterviewVoice(
           // (denied/no hardware), skip recording; the connect()-side await surfaces the error.
           void (micReadyRef.current ?? Promise.resolve())
             .then(() => {
-              audio.startRecording((base64Audio) => {
+              audio.startRecording((pcm) => {
                 if (isMutedRef.current) return;
-                send({ type: "input_audio_buffer.append", audio: base64Audio });
+                // Binary when the backend said it can unwrap it, base64 JSON otherwise. The
+                // fallback is not dead code: frontend and backend are separate container apps
+                // that roll out independently, so a page can genuinely meet a backend that
+                // predates the binary path. Guessing wrong means a silently dead microphone.
+                if (binaryAudioRef.current) sendPcm(pcm);
+                else send({ type: "input_audio_buffer.append", audio: encodePcmToBase64(pcm) });
               });
             })
             .catch(() => undefined);
@@ -862,6 +885,7 @@ export function useInterviewVoice(
       audio,
       avatarStream,
       send,
+      sendPcm,
       setAudio,
       setConn,
       settlePendingCommit,

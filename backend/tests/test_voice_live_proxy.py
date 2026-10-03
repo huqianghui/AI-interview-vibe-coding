@@ -21,6 +21,8 @@ tests lock the shape that makes the digital human WORK end-to-end:
   `azure_semantic_vad`. `create_response`/`interrupt_response` semantics are unchanged either way.
 """
 
+import base64
+import json
 from dataclasses import dataclass
 
 import pytest
@@ -30,7 +32,11 @@ import pytest
 # design — so skip cleanly there rather than error, mirroring test_foundry_client's importorskip.
 pytest.importorskip("azure.ai.voicelive.models")
 
-from app.services.voice_live_proxy import build_avatar_session  # noqa: E402
+from app.services.voice_live_proxy import (  # noqa: E402
+    AUDIO_APPEND_TYPE,
+    build_audio_append,
+    build_avatar_session,
+)
 
 
 @dataclass
@@ -405,3 +411,42 @@ def test_avatar_session_voice_carries_the_knobs_in_playground_mode_too():
         )["voice"]
     )
     assert voice["temperature"] == 0.2 and voice["rate"] == "1.3"
+
+
+# ─── Binary mic uplink (perf review P0-1) ─────────────────────────────────────────────────────────
+# The page used to base64-encode every mic batch and wrap it in JSON before sending. Measured on a
+# live session, that cost 391 kbps of payload for 256 kbps of audio: base64's +1/3 plus a ~47-byte
+# JSON envelope charged per message. The envelope part was fixed by batching 40 ms in the worklet
+# (391 -> 351 kbps); this function removes the base64 from the browser hop. Azure's own protocol has
+# no binary audio frame, so the encode still has to happen — just on this side.
+#
+# The relay that calls it needs a live Azure socket and is coverage-omitted, so these tests are the
+# only guard on the wrapping. A wrong shape here is a silently dead microphone.
+
+
+def test_build_audio_append_wraps_pcm_as_base64_client_event():
+    pcm = bytes([0x00, 0x01, 0xFF, 0x7F, 0x80, 0x00])
+    event = build_audio_append(pcm)
+    assert event == {"type": AUDIO_APPEND_TYPE, "audio": base64.b64encode(pcm).decode("ascii")}
+    # The exact event name Voice Live expects — a typo here is accepted by the socket and then
+    # ignored, so the candidate's audio would vanish with no error anywhere.
+    assert event["type"] == "input_audio_buffer.append"
+
+
+def test_build_audio_append_round_trips_a_full_40ms_batch_byte_for_byte():
+    # 40 ms of 16 kHz mono PCM16 = 640 samples = 1280 bytes: exactly what the worklet transfers.
+    pcm = bytes((i * 37) % 256 for i in range(1280))
+    assert base64.b64decode(build_audio_append(pcm)["audio"]) == pcm
+
+
+def test_build_audio_append_emits_ascii_str_not_bytes():
+    # `json.dumps` of a bytes value raises, and the SDK serialises this dict — the decode matters.
+    audio = build_audio_append(b"\x01\x02")["audio"]
+    assert isinstance(audio, str)
+    json.dumps({"audio": audio})
+
+
+def test_build_audio_append_handles_an_empty_batch_without_raising():
+    # Defensive: a zero-length binary frame should produce a harmless no-op event, never a crash
+    # that takes the whole relay — and with it the session — down.
+    assert build_audio_append(b"") == {"type": AUDIO_APPEND_TYPE, "audio": ""}
