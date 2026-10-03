@@ -275,13 +275,20 @@ export function useVoiceAudio() {
    * means the next session constructs a fresh one and has to clear the browser's autoplay gate
    * again from whatever call stack happens to be running.
    *
-   * NOT YET WIRED TO BARGE-IN, on purpose. Today nothing drops queued audio when the candidate
-   * starts talking, so the interviewer plays over them for however much Azure had already sent —
-   * and Azure sends in bursts, so that is usually far more than this buffer's 150 ms. Fixing it
-   * needs one thing measured first: whether Azure (which has `interrupt_response: True`) actually
-   * cancels the response on `speech_started`. If it does, flushing here matches its own decision; if
-   * it does not, flushing would cut audio still arriving and the candidate would hear a gap followed
-   * by the rest of the sentence — worse than today. See the perf review's P0-2 follow-up. */
+   * DELIBERATELY NOT WIRED TO BARGE-IN — a settled decision (owner, 2026-10-03), not a loose end.
+   * Nothing drops queued audio when the candidate starts talking, so the interviewer plays over them
+   * for whatever Azure had already sent: measured, up to about 4 seconds.
+   *
+   * The measurement that settled it is in the perf review §4.4 ⑤. Azure cannot help — it delivered
+   * 4275 ms of audio in 783 ms and marked the response `completed` 10 ms BEFORE the candidate opened
+   * their mouth, then emitted nothing at all for the 5 s they spoke. "The interviewer is speaking"
+   * exists only in this queue, so `interrupt_response: True` is inert here. Cutting would therefore
+   * be entirely our choice, and the owner chose not to: the candidate hearing two voices for a few
+   * seconds is better than their missing the back half of the question. Transcription is unaffected
+   * either way — the uplink is their own microphone, echo-cancelled at both ends.
+   *
+   * So this is used by teardown only. Do not wire it to `speech_started` without reopening that
+   * decision. */
   const flushPlayback = useCallback(() => {
     playbackNodeRef.current?.port.postMessage({ command: "flush" });
     pendingPlaybackRef.current = [];
