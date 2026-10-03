@@ -35,6 +35,20 @@ const useStyles = makeStyles({
       height: "auto",
       overflow: "visible",
     },
+    // HEIGHT escape hatch. `overflow: hidden` with no scroller means anything that does not fit is
+    // not merely cramped, it is UNREACHABLE. Above the width breakpoint the chrome costs ~270px
+    // (app bar + status strip + top bar + gutters) and the question card's own intrinsic height is
+    // ~200px, so below roughly 500px of viewport height the card — including "I'm done answering"
+    // — gets clipped with no way to scroll to it. That is a candidate stuck mid-interview, and it
+    // happens on ordinary setups: a laptop with devtools open at the bottom, a tiled half-height
+    // window, a 1280x600 projector. The width escape alone does not cover those (they are WIDE and
+    // short). This pre-dates the refresh (the old page had the same overflow:hidden on a
+    // calc(100vh - 56px) box) but the shell owns it now, so it is fixed here: when the viewport is
+    // too short to honour one-viewport, stop pretending and let the page scroll.
+    "@media (max-height: 560px)": {
+      height: "auto",
+      overflow: "visible",
+    },
   },
 
   appbar: {
@@ -127,6 +141,9 @@ const useStyles = makeStyles({
       flexGrow: 0,
       paddingInline: layout.gutterNarrow,
     },
+    // Matches rootFill's height escape: once the page scrolls, main must stop trying to divide a
+    // bounded height it no longer has.
+    "@media (max-height: 560px)": { display: "block", flexGrow: 0 },
   },
   fillInner: {
     flexGrow: 1,
@@ -134,6 +151,7 @@ const useStyles = makeStyles({
     display: "flex",
     flexDirection: "column",
     [`@media (max-width: ${layout.stackBelow})`]: { display: "block" },
+    "@media (max-height: 560px)": { display: "block" },
   },
 
   /** `narrow`: the sign-in form, truly centred in the viewport rather than starting after a dead

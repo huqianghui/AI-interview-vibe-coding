@@ -233,6 +233,10 @@ const useStyles = makeStyles({
       gridTemplateColumns: "1fr",
       gridTemplateRows: "auto",
     },
+    // Matches AppShell's height escape (max-height: 560px): once the page is allowed to scroll,
+    // capping the row would still squeeze the question card against a height the page no longer
+    // has to respect. Let it size from content instead.
+    "@media (max-height: 560px)": { gridTemplateRows: "auto" },
   },
   // Below the breakpoint the two columns stack, and the stage comes first in DOM order — which put the
   // question's TEXT entirely off screen on a phone (measured: 144px off a 390x844 iPhone, 76px off a
