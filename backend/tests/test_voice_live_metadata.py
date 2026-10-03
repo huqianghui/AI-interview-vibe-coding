@@ -9,6 +9,7 @@ import json
 from dataclasses import dataclass
 
 from app.services.agents.voice_live_metadata import (
+    PHOTO_AVATAR_SCENE_POSITION_Y,
     PHOTO_AVATAR_SCENE_ZOOM,
     VOICE_LIVE_CONFIG_KEY,
     VOICE_LIVE_ENABLED_KEY,
@@ -270,7 +271,10 @@ def test_build_avatar_config_photo_has_type_model_and_no_style():
         "model": "vasa-1",
         "character": "adrian",
         "customized": False,
-        "scene": {"zoom": PHOTO_AVATAR_SCENE_ZOOM},
+        "scene": {
+            "zoom": PHOTO_AVATAR_SCENE_ZOOM,
+            "position_y": PHOTO_AVATAR_SCENE_POSITION_Y,
+        },
     }
     # A stale style left over from a video pick must NOT leak onto a photo avatar (Azure rejects
     # "Avatar with character [adrian] and style [casual-sitting] not found").
@@ -309,7 +313,10 @@ def test_build_session_photo_avatar_wire_shape():
         "model": "vasa-1",
         "character": "adrian",
         "customized": False,
-        "scene": {"zoom": PHOTO_AVATAR_SCENE_ZOOM},
+        "scene": {
+            "zoom": PHOTO_AVATAR_SCENE_ZOOM,
+            "position_y": PHOTO_AVATAR_SCENE_POSITION_Y,
+        },
     }
 
 
@@ -364,7 +371,10 @@ def test_build_avatar_config_unknown_character_uses_style_heuristic():
         "model": "vasa-1",
         "character": "newface",
         "customized": False,
-        "scene": {"zoom": PHOTO_AVATAR_SCENE_ZOOM},
+        "scene": {
+            "zoom": PHOTO_AVATAR_SCENE_ZOOM,
+            "position_y": PHOTO_AVATAR_SCENE_POSITION_Y,
+        },
     }
     assert build_avatar_config("newface", "formal") == {
         "character": "newface",
@@ -402,18 +412,28 @@ def test_agent_metadata_photo_avatar_with_long_voice_name_stays_single_key():
 
 
 def test_photo_avatar_is_pulled_back_in_frame_and_video_is_not():
-    """A photo avatar carries `scene.zoom` < 1; a video avatar carries no scene at all.
+    """A photo avatar carries BOTH scene levers; a video avatar carries no scene at all.
 
-    Azure's default framing for a VASA-1 photo avatar is a head-only crop — tighter than the CDN
-    portrait the editor previews, so the two pages showed the same person framed differently and
-    the interview was the tighter one (owner, 2026-10-03: the shoulders and the top are gone).
-    Nothing on our side crops it; `scene` is the only lever that moves it. A video avatar is
-    already a standing figure, so zooming it out would only shrink the person.
+    Azure frames a VASA-1 photo avatar much tighter than the CDN portrait the editor previews, so
+    the two pages showed the same person framed differently and the interview was the tighter one
+    (owner, 2026-10-03: the shoulders and the top are gone). Nothing on our side crops it — measured
+    live, the whole 512x512 frame is on screen with zero gap below the figure.
+
+    `position_y` is asserted alongside `zoom` because the FIRST fix shipped zoom alone and did not
+    work: Azure composes the subject bottom-anchored, so 0.78 and 0.6 both left the shoulders at 98%
+    of the frame height (measured on `layla`). Pulling zoom down shrinks the person without
+    revealing more of them; only the pan moves the framing down the body.
     """
     photo = build_avatar_config("amira", "")
-    assert photo["scene"] == {"zoom": PHOTO_AVATAR_SCENE_ZOOM}
+    assert photo["scene"] == {
+        "zoom": PHOTO_AVATAR_SCENE_ZOOM,
+        "position_y": PHOTO_AVATAR_SCENE_POSITION_Y,
+    }
     # Below 1 zooms OUT; at or above 1 would crop in further.
     assert 0 < PHOTO_AVATAR_SCENE_ZOOM < 1
+    # NEGATIVE moves the subject up, which is what brings the chest into frame. A positive value
+    # would push the head off the top — measured: -0.3 clipped the hair outright.
+    assert -1 < PHOTO_AVATAR_SCENE_POSITION_Y < 0
     assert "scene" not in build_avatar_config("lisa", "casual-sitting")
 
 
@@ -432,5 +452,6 @@ def test_agent_metadata_drops_scene_to_protect_the_single_512_char_key():
     assert "scene" not in avatar
     # ...while the runtime session that Azure actually renders from DOES carry it.
     assert build_session(FakePersona(character="amira", style=""))["avatar"]["scene"] == {
-        "zoom": PHOTO_AVATAR_SCENE_ZOOM
+        "zoom": PHOTO_AVATAR_SCENE_ZOOM,
+        "position_y": PHOTO_AVATAR_SCENE_POSITION_Y,
     }

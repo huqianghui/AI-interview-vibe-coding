@@ -77,25 +77,47 @@ PHOTO_AVATAR_CHARACTERS = frozenset(
 PHOTO_AVATAR_TYPE = "photo-avatar"
 PHOTO_AVATAR_MODEL = "vasa-1"
 
-# How far to pull a PHOTO avatar back in its frame. `AvatarConfig.scene.zoom` is (0, +inf) where
-# values below 1 zoom OUT; Azure's default framing is a head-only crop.
+# How a PHOTO avatar is framed inside its 512x512 render. `AvatarConfig.scene` is the only lever
+# that moves it: `zoom` is (0, +inf) with values below 1 zooming OUT, and `position_y` is [-1, 1]
+# panning the subject by that fraction of the frame height (NEGATIVE moves the subject UP, which is
+# what brings more of the body into view).
 #
-# Why this exists: the editor preview shows the character's CDN portrait — head, shoulders,
-# clothes — while the live stream delivered the head alone, filling the frame to the chin. The two
-# pages showed the same person framed differently, and the interview was the tighter of the two
-# (owner, 2026-10-03: "the shoulders and the top are gone"). Nothing on our side was cropping it:
-# measured live, a 512x512 stream shown `contain` in a 629x629 box, the whole frame on screen. The
-# crop is Azure's own framing, and `scene` is the only lever that moves it.
+# WHY THIS EXISTS. The editor's avatar grid shows each character's CDN portrait — head, shoulders,
+# clothes — while the live stream delivered a much tighter crop. Nothing on our side cuts it:
+# measured live, a 512x512 stream shown `contain` in a 529x529 box, `bottomGapPx: 0` — the whole
+# frame is on screen and the body simply continues past its bottom edge. The crop is Azure's.
 #
-# 0.78 was chosen by measurement, not taste. Frames captured off the live stream: the default is
-# head-to-chin; 0.6 shows shoulders and chest but leaves the figure small in a lot of empty frame;
-# 0.78 is a head-and-shoulders portrait with the lapels and the top visible, which is the
-# composition the thumbnail promises. PHOTO ONLY — a video avatar is already a standing figure and
-# zooming it out just shrinks the person.
+# WHY ZOOM ALONE WAS NOT ENOUGH, which is what the first attempt got wrong. Azure composes the
+# subject BOTTOM-ANCHORED, so zooming out shrinks the person without revealing more of them:
+# measured on `layla`, zoom 0.78 and zoom 0.6 BOTH put the widest point (the shoulders) at 98% of
+# the frame height with zero gap below. The shipped 0.78 therefore still showed hair and a sliver of
+# shoulder, and the owner reported it again (2026-10-03: "the shoulders still are not right, and the
+# admin page shows the buttons on the chest but the interview does not"). `position_y` is the lever
+# that actually moves the framing down the body; `zoom` only buys back the head margin that the pan
+# costs.
 #
-# A per-persona knob would be the next step if a character ever needs its own value; one measured
-# default is the proportionate amount of machinery for "make the two pages agree".
-PHOTO_AVATAR_SCENE_ZOOM = 0.78
+# THE VALUES ARE MEASURED, on three characters whose source portraits are framed differently, with
+# the head-top margin recorded because a VASA-1 head MOVES and a margin that is fine at rest clips
+# the hair on a nod:
+#
+#   zoom 0.62, position_y -0.12   amira  head top 38px, blazer lapels + inner top visible
+#                                 layla  head top 26px, collar + blouse visible
+#                                 imran  head top 38px, shoulders + polo shirt visible
+#
+# Rejected by the same measurements: 0.58/-0.15 reached slightly lower on the chest but left only
+# 16px (3%) above the hair, too little for head motion.
+#
+# WHAT THIS CANNOT DO. The editor grid's portrait is a static CDN marketing photo, not a render of
+# the same framing, so the two will never match pixel for pixel — the goal is the same COMPOSITION
+# (a head-and-shoulders portrait with the garment visible), which these values produce.
+#
+# PHOTO ONLY: a video avatar is already a standing figure and zooming out just shrinks the person.
+#
+# A per-character map is the escape hatch if a fourth character disagrees (the roster already has
+# per-character maps for styles and backdrops). Three independent characters landing on one pair is
+# why there is a single global value instead.
+PHOTO_AVATAR_SCENE_ZOOM = 0.62
+PHOTO_AVATAR_SCENE_POSITION_Y = -0.12
 DEFAULT_VOICE_BY_LOCALE = {"zh-CN": "zh-CN-XiaoxiaoNeural", "en-US": "en-US-AvaNeural"}
 FALLBACK_LOCALE = "en-US"
 
@@ -189,10 +211,14 @@ def build_avatar_config(
             "model": PHOTO_AVATAR_MODEL,
             "character": name,
             "customized": False,
-            # See PHOTO_AVATAR_SCENE_ZOOM: without this Azure frames the head alone, tighter
-            # than the portrait the editor previews. Set here rather than in the proxy so the
-            # split cannot drift between this builder's consumers, which is why it exists.
-            "scene": {"zoom": PHOTO_AVATAR_SCENE_ZOOM},
+            # See PHOTO_AVATAR_SCENE_ZOOM: without this Azure frames much tighter than the
+            # portrait the editor previews, and `zoom` alone cannot fix it because the subject is
+            # bottom-anchored. Set here rather than in the proxy so the split cannot drift between
+            # this builder's consumers, which is why it exists.
+            "scene": {
+                "zoom": PHOTO_AVATAR_SCENE_ZOOM,
+                "position_y": PHOTO_AVATAR_SCENE_POSITION_Y,
+            },
         }
     else:
         avatar = {
