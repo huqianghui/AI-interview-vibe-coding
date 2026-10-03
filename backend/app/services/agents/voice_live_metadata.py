@@ -116,6 +116,32 @@ PHOTO_AVATAR_MODEL = "vasa-1"
 # A per-character map is the escape hatch if a fourth character disagrees (the roster already has
 # per-character maps for styles and backdrops). Three independent characters landing on one pair is
 # why there is a single global value instead.
+#
+# THE COST OF SHOWING MORE BODY, measured after the fact and NOT anticipated when these values
+# were chosen. Framing further down the body also brings the garment into shot, and the live render
+# does not reproduce it: on `layla`, whose source portrait is a fine floral print, the garment
+# arrives as a smeared watercolour with no identifiable pattern, and it shifts frame to frame.
+#
+# Measured over 12 frames 400 ms apart — per-region mean RGB, frame-to-frame standard deviation
+# summed across channels:
+#
+#   layla (fine floral)   face 7.01   garment 19.45    2.8x less stable than the FACE
+#   amira (plain blazer)  face 4.21   garment  8.91    plain cloth smears into plain cloth
+#
+# The garment should be perfectly still — the sitter is not moving — so anything above the face's
+# own number is the render redrawing it. A plain garment costs less than half the instability,
+# which is the practical lever if this ever needs to look better.
+#
+# WHY is MY INFERENCE, not documentation: VASA-1 animates a FACE, so regions away from it are
+# presumably weakly constrained and re-synthesised per frame rather than carried from the source
+# photo. Microsoft documents nothing about this either way, and I have not verified it. The owner
+# is asking the product group whether the behaviour is by design (2026-10-03) — if the answer says
+# otherwise, this paragraph is the thing to correct.
+#
+# OWNER DECISION 2026-10-03: keep this framing FOR NOW. Explicitly PROVISIONAL, unlike the barge-in
+# call in the perf review: a tighter crop hides the artifact but brings back the complaint these
+# values fixed ("the shoulders are gone"), so neither side is free. Revisit after the product
+# group answers, or if the smearing bothers a real viewer.
 PHOTO_AVATAR_SCENE_ZOOM = 0.62
 PHOTO_AVATAR_SCENE_POSITION_Y = -0.12
 DEFAULT_VOICE_BY_LOCALE = {"zh-CN": "zh-CN-XiaoxiaoNeural", "en-US": "en-US-AvaNeural"}

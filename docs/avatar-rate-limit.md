@@ -8,6 +8,26 @@ Voice unavailable: Avatar request was rate-limited. Retry after 7.0s. — you ca
 
 `Voice unavailable: ` 和 `— you can continue by text.` 是我们加的，**中间那句是 Azure 原样返回的**。
 
+## 先立一个框架：avatar 不是一个服务，是 Speech 的附属能力
+
+这句话是 owner 提的（2026-10-03），而它不是用词上的讲究——**本文后面五条分散的实测结论，都是它的必然推论**。
+数字人没有自己的资源类型、没有"部署"这个东西，它是 Azure AI Speech 的 text-to-speech 之下的一个能力。
+于是：
+
+| 实测现象（本文各节） | 由这个框架直接解释 |
+|---|---|
+| Foundry **Quota 页上没有 avatar 这一行**（第 8 节，owner 截图） | 那个页面列的是**模型部署**。avatar 不是可部署的模型，没有可分配的 RPM 池，所以没有行 |
+| **Request quota 按钮用不上**（第 6 节） | 它做的是"把区域配额池分配给某个部署"。没有部署，就没有可分配的对象 |
+| `az cognitiveservices account list-usage` **返回空**（第 5 节） | usage 项跟踪的是已部署 / 已计量的能力 |
+| 拒绝以 **in-band `error` 从 Voice Live 的 WS 回来**，而不是资源上的 HTTP 4xx（第 5 节） | 它是**会话的一个特性**，不是一个有独立请求路径的 API 端点 |
+| 配额**小且固定**（2 次/分钟），与资源规模无关（第 1 节） | 不是按 provision 的容量定的，是服务端对附属能力的固定节流 |
+
+**连第 6 条那个"文档说不可调 vs Q&A 说开票"的矛盾也由此解释**：它不是配额体系里的一等公民，所以既没有
+自助页面，支持票也未必有对应的旋钮可调。**规划容量时不要把它当成"可以申请扩容的配额"，要当成服务的固定
+行为约束**——这会直接改变结论：横向加资源是确定可行的，等配额不是。
+
+---
+
 本文把四个问题逐一落到"文档原文 + 代码位置 + 实测"三者之一，并明确标注哪些是**实测**、哪些是**文档**、
 哪些是**推断**。结论先行：
 
@@ -19,6 +39,10 @@ Voice unavailable: Avatar request was rate-limited. Retry after 7.0s. — you ca
 | 4 | pre-connect 的限流被当成**永久失败**，直接把候选人踢到文字模式 | 代码 |
 | 5 | **Azure 侧看不到这个事件**：usage API 无此项、`ClientErrors` 为 0、`Ratelimit` 是限值量规不是计数器 | 实测 |
 | 6 | **能不能提，证据是矛盾的**：文档说这类限制"除另有说明外不可调整"，而 avatar 表没给调整途径 | 文档 + MS Q&A |
+| 7 | **一次面试只花 1 次**（实测）——爆配额来自测试节奏（Start over / 刷新 / Playground），不是实现 | 实测 |
+| 8 | 生产侧硬上限：**同一资源每分钟最多 2 位候选人能开始面试** | 文档 + 第 7 条 |
+| 9 | **排除项**：Foundry Quota 页上的 `tts` / `tts-hd` 各 3 RPM 与本问题无关（我们走 `azure-standard` Speech 音色，且那个部署 7 天零错误） | owner 截图 + 代码核对 |
+| 10 | **框架**：avatar 不是一个服务、而是 Speech 的附属能力——第 1、5、6、8 条都是它的推论，所以不要把它当成「可申请扩容的配额」 | owner 指出 |
 
 ---
 
@@ -162,6 +186,76 @@ increase this? I am unable to find any ticket-raising system in MS Azure Dashboa
    **未验证**，列为设计选项而非结论。
 
 ---
+
+## 7. 一次面试到底花几次？（实测：1 次）——所以"一个人测试也爆满"不是实现的问题
+
+owner 的疑问是合理的："我就是一个人测试，这个额度都会爆满。" 所以先排除"我们在乱建连接"：
+数一次「开始面试 → 语音作答」里 `session.avatar.connect` 发了几次。
+
+```
+   886ms  WS 打开
+  6031ms  >>> session.avatar.connect     ← 唯一的一次
+  6328ms  收到 session.avatar.connecting
+  7829ms  收到 session.avatar.switch_to_speaking
+ 共花掉 1 次
+```
+
+**happy path 不重复建连。** 各个动作的实际花费：
+
+| 动作 | 花费 | 依据 |
+|---|---|---|
+| 加载 `/admin/agent` 看中间那张图 | **0** | 那是静态 CDN 缩略图；Playground 只在点 **Voice** 时才 `voice.connect()`（`PlaygroundPanel.tsx` 的 `toggleVoice`） |
+| 点 Playground 的 **Voice** | 1 | 同一条 `useAvatarStream` 路径 |
+| 开始面试 + 语音作答 | **1**（实测） | 上面 |
+| **Start over** | 再 1 | 重建会话 |
+| 刷新 / 新标签页 | 再 1 | 且绕过内存账本（第 3 条） |
+| 媒体模式切换（关画面 / 开画面） | 再 1 | Azure 不支持会话中途重协商，切换 = 重建会话 |
+| **关闭会话** | **不退还** | 限的是"每分钟**新建**数" |
+
+**结论：配额是按生产形态定的，不是按开发形态。** 真实候选人开一次、保持最多 30 分钟，2 次/分钟很宽裕；
+而开发时"开面试看一眼 → Start over → 再看 → 同时开 Playground 对比"一分钟内凑三次毫不费力——
+这正是 2026-10-03 那次报错的现场动作（`Retry after 7.0s` ⇒ 最老那次连接在 53 秒前）。
+
+### 但有一条生产侧的硬上限要记住
+
+**同一个资源上每分钟最多只有 2 个候选人能"开始"面试。** 一批人同时开始（例如约在 9:00）会撞墙。
+这不是测试期的噪音，是容量上限，解法只有多资源或服务端排队。
+
+### 测试期的可持续节奏
+
+- 只看画面就**别按 Start over**，复用当前会话。
+- 需要重开时**间隔约 30 秒**（60 秒窗口 2 个名额 ⇒ 约 30 秒/次是可持续速率）。
+- **别在面试开着时点 Playground 的 Voice**。
+- 密集测试：**再开一个 Speech/AI 资源**各有各的 2 次/分钟（配额按资源，文档确认）。
+  "按会话选资源"**未验证**，属设计选项。
+
+## 8. 排除项：Foundry Quota 页上的 TTS 3 RPM 与本问题无关（owner 截图 + 代码核对）
+
+owner 在 Foundry 的 **Manage → Quota** 页按 `tts` 过滤，看到两行（Sweden Central，Standard）：
+
+| 模型 | 共享配额池 | 已分配 | 有部署 | Weekly rate limiting |
+|---|---|---|---|---|
+| `tts-hd` | 3 RPM | 3/3（100%） | 1 个（在 `openAI-hu-SwedenCentral`） | **0%，"No errors in last 7 days"** |
+| `tts` | 3 RPM | **0 of 3（0%）** | 无 | — |
+
+**这两个都不是我们的 TTS。** 四条证据：
+
+1. **它自己的面板说 7 天零错误。** 一场面试要朗读 9 道题；若真走 3 RPM 的部署，早该持续报错。
+2. **代码零引用**：`tts-hd` / `tts-1` / OpenAI TTS / `audio/speech` 在前后端都搜不到。
+3. **会话里音色写死为 Speech 的**：`voice.type = "azure-standard"`，名字 `en-US-AvaNeural` /
+   `zh-CN-XiaoxiaoNeural`。`azure-standard` 是 Voice Live 里"Azure Speech 标准音色"那个枚举值，
+   与 Azure OpenAI 的 TTS 模型是两套东西。
+4. **资源不同**：该部署在 `openAI-hu-SwedenCentral`；应用指向 `ai-foundary-hu-sweden-central2`，而后者
+   的部署清单里**没有任何 TTS 部署**（全是 LLM / embedding / image，已用 `az` 列过）。
+
+**前瞻（这条配额现在无害，但它是"别动 `voice.type`"的具体理由）：** Voice Live 的 `voice.type` 可切成
+`openai`。一旦切过去就会落到这个 3 RPM 上——9 次朗读对 3 RPM，每道题都要排队。
+
+### 同一张截图坐实了第 6 条
+
+该 Quota 页列的是**模型部署**（TPM / RPM），右上角有 **Request quota** 按钮——而**数字人的"2 次新建
+连接/分钟"根本不在这个页面上**。所以第 6 条里那个"文档说不可调 vs Q&A 说开票"的矛盾，现在有了更直接的
+解释：**它不在自助配额页里**，这也正是 Q&A 那位提问者说"在后台找不到开票入口"的原因。
 
 ## 顺带确认的两个硬时限
 
