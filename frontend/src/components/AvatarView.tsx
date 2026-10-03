@@ -27,6 +27,7 @@ import { useTranslation } from "react-i18next";
 import type { MediaMode } from "../hooks/avatarHealth";
 import { AudioOrb } from "./AudioOrb";
 import { fitBox, fitFor, hugRatioFor } from "./avatarFit";
+import { portraitKeyFor, readCachedPortrait } from "./avatarPortraitCache";
 import {
   BLANK_SAMPLE_HEIGHT,
   BLANK_SAMPLE_INTERVAL_MS,
@@ -38,17 +39,6 @@ import {
 } from "./avatarFrameHealth";
 import type { AudioState } from "../types/voice";
 
-/** Single-slot portrait cache. This deployment runs ONE default interviewer persona, so the slot
- * isn't keyed by character; a persona/avatar change self-corrects on the next successful session
- * (the capture below overwrites the slot). Bump the suffix if the stored format ever changes.
- *
- * v1 → v2 (2026-10-02): the MEANING changed, not the format. Portraits captured before the page
- * started sending `avatar_bg` for every avatar type carry whatever studio wall Azure happened to
- * use, so a stale slot shows the figure on a colour that no longer matches the page — and it is
- * shown FIRST on every visit, before the live stream arrives, which is exactly when a mismatched
- * rectangle is most visible. Bumping the key discards those instead of waiting for a successful
- * session to overwrite them. */
-export const AVATAR_PORTRAIT_STORAGE_KEY = "avatar-portrait-v2";
 /** Give the stream a beat after the first frames so the captured pose is settled, not mid-fade. */
 const PORTRAIT_CAPTURE_DELAY_MS = 2000;
 /** Downscale the 1080p frame for storage — a stage-quality still at a fraction of the quota. */
@@ -160,15 +150,6 @@ function useHugBox(el: HTMLElement | null, ratio: number | null) {
   return parent && ratio ? fitBox(parent.w, parent.h, ratio) : null;
 }
 
-function readCachedPortrait(): string | null {
-  try {
-    const v = localStorage.getItem(AVATAR_PORTRAIT_STORAGE_KEY);
-    return v && v.startsWith("data:image/") ? v : null;
-  } catch {
-    return null; // storage unavailable (privacy mode) → orb fallback, as before
-  }
-}
-
 interface AvatarViewProps {
   audioState: AudioState;
   /** True once a real avatar video track is playing → show video, hide the orb. */
@@ -178,16 +159,24 @@ interface AvatarViewProps {
    * identical to "still connecting", so the candidate can't tell a deliberate degrade from a hang.
    * Defaults to `"video"` so callers that don't care (the editor Playground) need no change. */
   mediaMode?: MediaMode;
+  /** Which avatar is configured, so the cached still belongs to the right face. Omit it and the slot
+   * stays un-keyed — the pre-2026-10-03 behaviour, which is correct for a persona with no character. */
+  character?: string | null;
 }
 
 /** Ref is the `<video>` element the voice hook attaches the avatar stream to (via `videoRef`). */
 export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function AvatarView(
-  { audioState, isAvatarConnected, mediaMode = "video" },
+  { audioState, isAvatarConnected, mediaMode = "video", character = null },
   ref,
 ) {
   const styles = useStyles();
   const { t } = useTranslation();
-  const [portrait, setPortrait] = useState<string | null>(readCachedPortrait);
+  const [portrait, setPortrait] = useState<string | null>(() => readCachedPortrait(character));
+  // Follow the character: the configured avatar can change between visits (and, in the editor, within
+  // one). Without this the slot read at mount would outlive the switch and keep showing the old face.
+  useEffect(() => {
+    setPortrait(readCachedPortrait(character));
+  }, [character]);
   const innerRef = useRef<HTMLVideoElement | null>(null);
   // Per-stream fit, read from the element's intrinsic size (the voice hook assigns the element's
   // own on* handlers, so listen with addEventListener to coexist). Contain until metadata arrives.
@@ -317,14 +306,14 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
         if (!ctx) return;
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
-        localStorage.setItem(AVATAR_PORTRAIT_STORAGE_KEY, dataUrl);
+        localStorage.setItem(portraitKeyFor(character), dataUrl);
         setPortrait(dataUrl);
       } catch {
         /* best-effort — keep the previous portrait (or none) */
       }
     }, PORTRAIT_CAPTURE_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [isAvatarConnected, sampleLuma]);
+  }, [isAvatarConnected, sampleLuma, character]);
 
   // Deliberately picture-less: say so, and don't also claim to be "connecting".
   const audioOnly = mediaMode === "audio-only";

@@ -16,7 +16,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import "../i18n";
-import { AVATAR_PORTRAIT_STORAGE_KEY, AvatarView } from "./AvatarView";
+import { AvatarView } from "./AvatarView";
+// These cases render AvatarView with no `character`, so the slot they touch is the one a persona
+// without an avatar uses. Naming it through the helper keeps them honest about which slot that is.
+import { portraitKeyFor } from "./avatarPortraitCache";
 import { BLANK_SAMPLE_INTERVAL_MS, BLANK_STREAK_TO_FAIL } from "./avatarFrameHealth";
 
 /** Stub `getContext("2d")` so the component can "read" frames jsdom cannot produce. `luma` picks what
@@ -94,7 +97,7 @@ describe("AvatarView with an empty picture", () => {
 
   it("prefers the cached still over the orb when one exists", () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    localStorage.setItem(AVATAR_PORTRAIT_STORAGE_KEY, "data:image/jpeg;base64,AAAA");
+    localStorage.setItem(portraitKeyFor(null), "data:image/jpeg;base64,AAAA");
     stubCanvas(0);
     renderConnected();
     advancePastVerdict();
@@ -118,7 +121,7 @@ describe("AvatarView with an empty picture", () => {
     expect(screen.queryByTestId("audio-orb")).toBeNull();
     // A good frame IS worth keeping — so the guard below is specific to blank ones, not a blanket
     // "never cache" that would quietly retire the instant-portrait feature.
-    expect(localStorage.getItem(AVATAR_PORTRAIT_STORAGE_KEY)).toBe("data:image/jpeg;base64,LIT");
+    expect(localStorage.getItem(portraitKeyFor(null))).toBe("data:image/jpeg;base64,LIT");
   });
 
   it("never caches a black frame as the still — that would make one fault permanent", () => {
@@ -129,6 +132,6 @@ describe("AvatarView with an empty picture", () => {
     act(() => {
       vi.advanceTimersByTime(10_000);
     });
-    expect(localStorage.getItem(AVATAR_PORTRAIT_STORAGE_KEY)).toBeNull();
+    expect(localStorage.getItem(portraitKeyFor(null))).toBeNull();
   });
 });
