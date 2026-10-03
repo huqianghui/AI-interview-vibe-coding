@@ -29,9 +29,14 @@ real risk of changing behaviour, and it should be specified before it is attempt
 
 ## Avatar rate limit (docs/avatar-rate-limit.md)
 
-Azure allows **2 new avatar connections per minute** on S0, and Voice Live avatars ride that Speech
-quota rather than Voice Live's own 30/minute. The ledger's window was 20 s (an invalid inference) and
-is now the documented 60 s — fixed in v0.40.11.1. What is left:
+Azure publishes **2 new avatar connections per minute** on S0; **measured, it is 3 per 60 s**, with the
+60 s window confirmed by two independent `Retry after` values converging on the first request's
+timestamp + 60 s. The ledger is now 3 per 60 s (v0.40.11.2); it was 2 per 20 s, both numbers wrong.
+
+**There is no quota object to request** — verified four ways (resource usage API, Monitor metrics,
+`Microsoft.Quota` provider, regional usages API: 287 items, none avatar or speech). Treat it as a fixed
+service-side throttle, not an allocatable quota. **Turning the avatar off avoids it entirely** (measured:
+5 voice-only sessions in 31 s, zero avatar offers, zero refusals). What is left:
 
 - [ ] **A rate-limit refusal should wait, not kick the candidate to text.** `useInterviewVoice`'s
       pre-connect error branch calls `policy.latchFatal()` for every error, with the reasoning that
@@ -52,13 +57,12 @@ is now the documented 60 s — fixed in v0.40.11.1. What is left:
       5 minutes idle or 30 minutes connected. A candidate thinking for over 5 minutes on one question
       would be disconnected, and the reconnect then spends from the 2/minute allowance. Not yet
       measured.
-- [ ] **Raising the quota: the evidence is contradictory, do not promise it.** The docs say these
-      text-to-speech limits "aren't adjustable" unless otherwise specified, and the avatar table
-      specifies no adjustment path; a Microsoft answerer on Q&A says to file a support request, but the
-      asker marked that answer unhelpful and reported finding no ticketing entry. Worth trying, not
-      worth planning around. The quota IS per resource (the table sits under "quotas and limits per
-      resource"), so splitting across resources is the other lever — unverified, and it would mean
-      choosing a resource per session.
+- [x] **~~Raising the quota~~ — settled: there is nothing to request.** The regional usages API tracks
+      287 quota items for this subscription+region and not one is avatar or speech; they are model
+      deployment capacity plus an account count. So a support request can only ask for a service-side
+      limit to be raised, and the docs say these limits "aren't adjustable" unless otherwise specified.
+      Plan around the fixed limit, not around a quota increase. Levers, both measured: turn the avatar
+      off for rapid work (zero spend), and split across resources (3 per 60 s each).
 
 ## Interview (transcript UX)
 

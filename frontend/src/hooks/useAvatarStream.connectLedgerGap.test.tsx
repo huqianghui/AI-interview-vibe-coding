@@ -148,7 +148,14 @@ describe("avatar-request ledger — every offer path, including consumer-driven 
     await pushOfferOut();
     expect(sendOffer).toHaveBeenCalledTimes(2); // request 2 — still inside the allowance either way
 
-    // The THIRD request inside the window is the one Azure refuses. It must be HELD, not sent.
+    // Measured: Azure accepts three inside the window, so the third still goes out…
+    await act(async () => {
+      void result.current.connect(ICE_SERVERS, sendOffer).catch(() => undefined);
+    });
+    await pushOfferOut();
+    expect(sendOffer).toHaveBeenCalledTimes(3);
+
+    // …and the FOURTH is the one it refuses (`rate_limit_exceeded`). It must be HELD, not sent.
     await act(async () => {
       void result.current.connect(ICE_SERVERS, sendOffer).catch(() => undefined);
     });
@@ -156,19 +163,19 @@ describe("avatar-request ledger — every offer path, including consumer-driven 
 
     expect(
       sendOffer,
-      "a third avatar offer inside the rate-limit window would be refused by Azure, and a refused " +
-        "offer still costs the attempt — connect() must hold it like the other two callers do",
-    ).toHaveBeenCalledTimes(2);
+      "a fourth avatar offer inside the rate-limit window is refused by Azure, and a refused offer " +
+        "still costs the attempt — connect() must hold it like the other two callers do",
+    ).toHaveBeenCalledTimes(3);
 
     // …and released once the window has passed, so the hold is a delay and not a silent drop.
     await act(async () => {
-      // One full documented window (2 new connections per minute — docs/avatar-rate-limit.md).
+      // One full window. Measured: 60 s, 3 requests — docs/avatar-rate-limit.md.
       await vi.advanceTimersByTimeAsync(60_000);
     });
     await pushOfferOut();
     expect(
       sendOffer.mock.calls.length,
       "the held offer must eventually go out — a dropped offer would cost the picture just as surely",
-    ).toBeGreaterThanOrEqual(3);
+    ).toBeGreaterThanOrEqual(4);
   });
 });

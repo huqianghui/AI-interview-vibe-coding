@@ -105,10 +105,31 @@ const RECOVERY_BACKOFF_MS = [500, 1500, 3000];
  * was certain to refuse — which is exactly what the owner hit in production on 2026-10-03, closing a
  * session and reconnecting after ~25 s.
  *
- * Both observations fit 2-per-60s once you read `Retry after` as "how long until the oldest connection
- * ages out of the window": 43.0s ⇒ the oldest was 17 s old; 7.0s ⇒ 53 s old. */
+ * THE WINDOW IS NOW MEASURED, NOT JUST DOCUMENTED, and the ALLOWANCE turned out to be 3 rather than
+ * the published 2. Five sessions were opened in separate browser contexts (separate ledgers, so our own
+ * throttle could not interfere) and Azure's raw frames recorded:
+ *
+ *   #1  4681ms  offer -> connecting -> switch_to_speaking   accepted
+ *   #2 11105ms  offer -> connecting -> switch_to_speaking   accepted
+ *   #3 17665ms  offer -> connecting -> switch_to_speaking   accepted   <- the published 2 says no
+ *   #4 24180ms  error  rate_limit_exceeded  "Retry after 40.0s."
+ *   #5 31083ms  error  rate_limit_exceeded  "Retry after 34.0s."
+ *
+ * Both refusals point at the SAME absolute moment — 24180+40000 = 64180, 31083+34000 = 65083 — and #1
+ * was at 4681, so #1 + 60_000 = 64681 sits within half a second of each. That is two independent
+ * confirmations that the window is 60 s AND that `Retry after` means "until the oldest request ages
+ * out". It also means three requests were in flight before one was refused.
+ *
+ * So the allowance here is the MEASURED 3, not the documented 2. Being conservative is not free: with
+ * 2, a third connect is held by our own ledger for up to 60 s — and 60 s of silence is, to a candidate,
+ * indistinguishable from failure — while Azure would have accepted it immediately. The published figure
+ * is kept in `docs/avatar-rate-limit.md` as the conservative number, with this measurement beside it.
+ *
+ * Earlier readings fit too, given an uncounted connection: the 2026-09-30 note said "a third request
+ * inside roughly 20 s was refused", which at an allowance of 3 means a fourth, i.e. the session before
+ * it also counted. */
 const AVATAR_REQUEST_WINDOW_MS = 60_000;
-const AVATAR_REQUESTS_PER_WINDOW = 2;
+const AVATAR_REQUESTS_PER_WINDOW = 3;
 
 export interface AvatarStreamOptions {
   /** Called when the media policy (or the candidate) wants the picture turned on/off. The consumer must
