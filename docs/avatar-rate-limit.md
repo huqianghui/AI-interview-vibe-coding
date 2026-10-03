@@ -21,6 +21,7 @@ Voice unavailable: Avatar request was rate-limited. Retry after 7.0s. — you ca
 | 6 | **能不能提，证据是矛盾的**：文档说这类限制"除另有说明外不可调整"，而 avatar 表没给调整途径 | 文档 + MS Q&A |
 | 7 | **一次面试只花 1 次**（实测）——爆配额来自测试节奏（Start over / 刷新 / Playground），不是实现 | 实测 |
 | 8 | 生产侧硬上限：**同一资源每分钟最多 2 位候选人能开始面试** | 文档 + 第 7 条 |
+| 9 | **排除项**：Foundry Quota 页上的 `tts` / `tts-hd` 各 3 RPM 与本问题无关（我们走 `azure-standard` Speech 音色，且那个部署 7 天零错误） | owner 截图 + 代码核对 |
 
 ---
 
@@ -206,6 +207,34 @@ owner 的疑问是合理的："我就是一个人测试，这个额度都会爆�
 - **别在面试开着时点 Playground 的 Voice**。
 - 密集测试：**再开一个 Speech/AI 资源**各有各的 2 次/分钟（配额按资源，文档确认）。
   "按会话选资源"**未验证**，属设计选项。
+
+## 8. 排除项：Foundry Quota 页上的 TTS 3 RPM 与本问题无关（owner 截图 + 代码核对）
+
+owner 在 Foundry 的 **Manage → Quota** 页按 `tts` 过滤，看到两行（Sweden Central，Standard）：
+
+| 模型 | 共享配额池 | 已分配 | 有部署 | Weekly rate limiting |
+|---|---|---|---|---|
+| `tts-hd` | 3 RPM | 3/3（100%） | 1 个（在 `openAI-hu-SwedenCentral`） | **0%，"No errors in last 7 days"** |
+| `tts` | 3 RPM | **0 of 3（0%）** | 无 | — |
+
+**这两个都不是我们的 TTS。** 四条证据：
+
+1. **它自己的面板说 7 天零错误。** 一场面试要朗读 9 道题；若真走 3 RPM 的部署，早该持续报错。
+2. **代码零引用**：`tts-hd` / `tts-1` / OpenAI TTS / `audio/speech` 在前后端都搜不到。
+3. **会话里音色写死为 Speech 的**：`voice.type = "azure-standard"`，名字 `en-US-AvaNeural` /
+   `zh-CN-XiaoxiaoNeural`。`azure-standard` 是 Voice Live 里"Azure Speech 标准音色"那个枚举值，
+   与 Azure OpenAI 的 TTS 模型是两套东西。
+4. **资源不同**：该部署在 `openAI-hu-SwedenCentral`；应用指向 `ai-foundary-hu-sweden-central2`，而后者
+   的部署清单里**没有任何 TTS 部署**（全是 LLM / embedding / image，已用 `az` 列过）。
+
+**前瞻（这条配额现在无害，但它是"别动 `voice.type`"的具体理由）：** Voice Live 的 `voice.type` 可切成
+`openai`。一旦切过去就会落到这个 3 RPM 上——9 次朗读对 3 RPM，每道题都要排队。
+
+### 同一张截图坐实了第 6 条
+
+该 Quota 页列的是**模型部署**（TPM / RPM），右上角有 **Request quota** 按钮——而**数字人的"2 次新建
+连接/分钟"根本不在这个页面上**。所以第 6 条里那个"文档说不可调 vs Q&A 说开票"的矛盾，现在有了更直接的
+解释：**它不在自助配额页里**，这也正是 Q&A 那位提问者说"在后台找不到开票入口"的原因。
 
 ## 顺带确认的两个硬时限
 
