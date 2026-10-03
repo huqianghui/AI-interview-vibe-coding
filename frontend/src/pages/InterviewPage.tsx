@@ -1405,6 +1405,7 @@ export function InterviewPage() {
                   audioState={badgeState}
                   isAvatarConnected={voice.isAvatarConnected}
                   mediaMode={voice.mediaMode}
+                  character={avatarCharacterRef.current}
                 />
               </div>
             </div>

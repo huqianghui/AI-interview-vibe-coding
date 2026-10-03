@@ -12,7 +12,10 @@ import { describe, expect, it, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import "../i18n";
-import { AVATAR_PORTRAIT_STORAGE_KEY, AvatarView } from "./AvatarView";
+import { AvatarView } from "./AvatarView";
+// These cases render AvatarView with no `character`, so the slot they touch is the one a persona
+// without an avatar uses. Naming it through the helper keeps them honest about which slot that is.
+import { portraitKeyFor } from "./avatarPortraitCache";
 
 function renderView(isAvatarConnected: boolean, mediaMode?: "video" | "audio-only") {
   const ref = createRef<HTMLVideoElement>();
@@ -30,7 +33,7 @@ function renderView(isAvatarConnected: boolean, mediaMode?: "video" | "audio-onl
 }
 
 afterEach(() => {
-  localStorage.removeItem(AVATAR_PORTRAIT_STORAGE_KEY);
+  localStorage.removeItem(portraitKeyFor(null));
 });
 
 describe("AvatarView mediaMode", () => {
@@ -68,7 +71,7 @@ describe("AvatarView mediaMode", () => {
     // Without the audioOnly gate, a cached portrait would otherwise win over the orb (see
     // AvatarView.test.tsx "shows the cached portrait... while connecting"). A deliberate audio-only
     // degrade must say so plainly, not silently show a stale picture of the interviewer.
-    localStorage.setItem(AVATAR_PORTRAIT_STORAGE_KEY, "data:image/jpeg;base64,aGVsbG8=");
+    localStorage.setItem(portraitKeyFor(null), "data:image/jpeg;base64,aGVsbG8=");
     renderView(false, "audio-only");
     expect(screen.queryByTestId("avatar-portrait")).not.toBeInTheDocument();
     expect(screen.queryByTestId("avatar-connecting-hint")).not.toBeInTheDocument();

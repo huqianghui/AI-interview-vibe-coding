@@ -4,7 +4,10 @@ import { describe, expect, it } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import "../i18n";
-import { AVATAR_PORTRAIT_STORAGE_KEY, AvatarView } from "./AvatarView";
+import { AvatarView } from "./AvatarView";
+// These cases render AvatarView with no `character`, so the slot they touch is the one a persona
+// without an avatar uses. Naming it through the helper keeps them honest about which slot that is.
+import { portraitKeyFor } from "./avatarPortraitCache";
 import { fitBox, fitFor } from "./avatarFit";
 
 function renderView(isAvatarConnected: boolean) {
@@ -34,7 +37,7 @@ describe("AvatarView", () => {
     expect(fitFor(1080, 1920)).toBe("contain");
     expect(fitFor(1920, 1080)).toBe("cover");
     expect(fitFor(0, 0)).toBe("contain");
-    localStorage.setItem(AVATAR_PORTRAIT_STORAGE_KEY, "data:image/jpeg;base64,AAAA");
+    localStorage.setItem(portraitKeyFor(null), "data:image/jpeg;base64,AAAA");
     const ref = renderView(false);
     // Before metadata: contain (never crop blind), on both the live video and the cached still.
     expect(getComputedStyle(screen.getByTestId("avatar-video")).objectFit).toBe("contain");
@@ -49,7 +52,7 @@ describe("AvatarView", () => {
     Object.defineProperty(ref.current!, "videoHeight", { value: 512, configurable: true });
     act(() => ref.current!.dispatchEvent(new Event("resize")));
     expect(getComputedStyle(screen.getByTestId("avatar-video")).objectFit).toBe("contain");
-    localStorage.removeItem(AVATAR_PORTRAIT_STORAGE_KEY);
+    localStorage.removeItem(portraitKeyFor(null));
   });
 
   it("keeps the <video> muted so autoplay from ontrack is allowed (avatar audio is separate)", () => {
@@ -76,7 +79,7 @@ describe("AvatarView", () => {
     // Issue 5: the interviewer's FIGURE should appear instantly on every visit after the first —
     // a frame captured from the previous live session stands in while the stream connects.
     localStorage.setItem(
-      AVATAR_PORTRAIT_STORAGE_KEY,
+      portraitKeyFor(null),
       "data:image/jpeg;base64,aGVsbG8=",
     );
     try {
@@ -85,13 +88,13 @@ describe("AvatarView", () => {
       expect(screen.getByTestId("avatar-connecting-hint")).toBeInTheDocument();
       expect(screen.queryByTestId("audio-orb")).not.toBeInTheDocument();
     } finally {
-      localStorage.removeItem(AVATAR_PORTRAIT_STORAGE_KEY);
+      localStorage.removeItem(portraitKeyFor(null));
     }
   });
 
   it("hides the portrait and its connecting hint once the live video is up", () => {
     localStorage.setItem(
-      AVATAR_PORTRAIT_STORAGE_KEY,
+      portraitKeyFor(null),
       "data:image/jpeg;base64,aGVsbG8=",
     );
     try {
@@ -99,18 +102,18 @@ describe("AvatarView", () => {
       expect(screen.queryByTestId("avatar-portrait")).not.toBeInTheDocument();
       expect(screen.queryByTestId("avatar-connecting-hint")).not.toBeInTheDocument();
     } finally {
-      localStorage.removeItem(AVATAR_PORTRAIT_STORAGE_KEY);
+      localStorage.removeItem(portraitKeyFor(null));
     }
   });
 
   it("ignores a non-image value in the portrait slot (falls back to the orb)", () => {
-    localStorage.setItem(AVATAR_PORTRAIT_STORAGE_KEY, "javascript:alert(1)");
+    localStorage.setItem(portraitKeyFor(null), "javascript:alert(1)");
     try {
       renderView(false);
       expect(screen.queryByTestId("avatar-portrait")).not.toBeInTheDocument();
       expect(screen.getByTestId("audio-orb")).toBeInTheDocument();
     } finally {
-      localStorage.removeItem(AVATAR_PORTRAIT_STORAGE_KEY);
+      localStorage.removeItem(portraitKeyFor(null));
     }
   });
 

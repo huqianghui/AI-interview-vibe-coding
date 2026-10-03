@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.40.9.3 (2026-10-03)
+
+### Fixed
+- **The cached portrait now belongs to the avatar you chose.** One slot was shared by every character,
+  on the reasoning that switching persona "self-corrects on the next successful session". It does not
+  correct in the window that matters: the still is what the candidate sees FIRST, while the stream
+  connects, so after switching to a photo avatar every visit opened with the previous character's face.
+  Each character keeps its own slot now, so a switch falls back to the orb until that face has been
+  captured once, and switching back finds the earlier one waiting. Showing the wrong person is worse
+  than showing no person. The pre-change slot is deleted on sight rather than left to surface for a
+  persona that has no avatar at all.
+
 ## 0.40.9.2 (2026-10-02)
 
 ### Fixed
