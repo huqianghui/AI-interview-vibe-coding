@@ -53,6 +53,10 @@ export const AZURE_DEFAULT_INPUT_SAMPLE_RATE = 24_000;
 export interface PlaybackStats {
   underruns: number;
   bufferedMs: number;
+  /** How long the most recent counted gap lasted. Reported separately from `bufferedMs` because the
+   * buffer depth when the warning is POSTED says nothing about the gap — the audio that ended it has
+   * already arrived by then (measured live: "buffer 757ms" about a gap that happened at depth 0). */
+  lastGapMs: number;
   state: "filling" | "playing" | "ramping-out";
 }
 
@@ -99,7 +103,12 @@ export function useVoiceAudio() {
   /** Last stats frame from the worklet: how deep the buffer is and how many gaps it has had. Read
    * by `getPlaybackStats` — the only way the main thread can see inside the worklet's queue, and
    * what makes the jitter buffer measurable rather than merely plausible. */
-  const playbackStatsRef = useRef<PlaybackStats>({ underruns: 0, bufferedMs: 0, state: "filling" });
+  const playbackStatsRef = useRef<PlaybackStats>({
+    underruns: 0,
+    bufferedMs: 0,
+    lastGapMs: 0,
+    state: "filling",
+  });
 
   /** Request mic access and load the recorder worklet. Throws on getUserMedia denial (the caller
    * distinguishes that as MicAccessError) or on worklet-module load failure. */
@@ -194,13 +203,33 @@ export function useVoiceAudio() {
           });
           node.port.onmessage = (e: MessageEvent) => {
             const msg = e.data as PlaybackStats & { eventType?: string };
-            if (msg.eventType === "stats") {
-              playbackStatsRef.current = {
-                underruns: msg.underruns,
-                bufferedMs: msg.bufferedMs,
-                state: msg.state,
-              };
+            if (msg.eventType !== "stats") return;
+            // Log each new gap rather than only the total. This is the one symptom a candidate
+            // reports as "the interviewer kept cutting out", and without it the only evidence is
+            // their word — the counter lives in the worklet and nothing else can see it. Also what
+            // the live probe reads to verify the buffer at all (`bufferedMs` says how close the
+            // cushion came to empty, which is what decides whether 150 ms is the right depth).
+            if (msg.state === "playing" && playbackStatsRef.current.state !== "playing") {
+              // Once per session: the moment the candidate first hears the interviewer on this path.
+              console.debug(
+                `[voice-audio] playback started (buffer ${msg.bufferedMs.toFixed(0)}ms)`,
+              );
             }
+            // Warn when a gap ENDS, not when the counter ticks: the length is only known once the
+            // buffer has refilled, so warning on the increment printed "0ms" (measured — the first
+            // version of this log did exactly that).
+            if (msg.lastGapMs > 0 && msg.lastGapMs !== playbackStatsRef.current.lastGapMs) {
+              console.warn(
+                `[voice-audio] playback underrun #${String(msg.underruns)} — the interviewer's ` +
+                  `voice had a gap of ${msg.lastGapMs.toFixed(0)}ms`,
+              );
+            }
+            playbackStatsRef.current = {
+              underruns: msg.underruns,
+              bufferedMs: msg.bufferedMs,
+              lastGapMs: msg.lastGapMs,
+              state: msg.state,
+            };
           };
           node.connect(ctx.destination);
           playbackNodeRef.current = node;
@@ -256,7 +285,7 @@ export function useVoiceAudio() {
   const flushPlayback = useCallback(() => {
     playbackNodeRef.current?.port.postMessage({ command: "flush" });
     pendingPlaybackRef.current = [];
-    playbackStatsRef.current = { underruns: 0, bufferedMs: 0, state: "filling" };
+    playbackStatsRef.current = { underruns: 0, bufferedMs: 0, lastGapMs: 0, state: "filling" };
   }, []);
 
   /** Tell the jitter buffer that Azure has finished sending this response's audio.

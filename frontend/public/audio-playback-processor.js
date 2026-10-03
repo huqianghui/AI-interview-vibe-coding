@@ -36,14 +36,34 @@
  *
  * This is a conversation, so the buffer is a latency/robustness trade and not a free win: every
  * millisecond here is a millisecond later the candidate hears the question, and a millisecond more
- * of the interviewer's voice that is already committed when the candidate interrupts. 150 ms is the
- * usual conferencing range (telephony runs 20–60 ms on a managed network, conferencing 100–200 ms
- * over the open internet), and it is small against this app's measured ~1 s turn latency.
+ * of the interviewer's voice already committed when the candidate interrupts.
  *
- * Note what it does NOT control: how much audio is pending overall. Azure sends deltas in bursts, so
- * the queue is usually far deeper than this — the target is the floor the buffer refuses to go
- * below, not the amount of audio in flight. */
-const TARGET_LEAD_MS = 150;
+ * 300 ms IS A MEASURED VALUE, AND THE SURPRISE IS WHAT IT IS SIZED AGAINST. It is not network
+ * jitter — it is AZURE'S OWN DELTA PACING. Measured on the live WS PCM path, logging each
+ * `response.audio.delta`'s arrival interval against the audio it carries (one response, ~4.2 s of
+ * speech in 10 deltas):
+ *
+ *   arrival gap   0   249    19   242     7    64   180     1     4     2  (ms)
+ *   audio in it 200   300   500   500   500   500   500   500   500   275  (ms)
+ *
+ * Azure delivers far faster than realtime overall — the cushion grows past 3 s by the end — but the
+ * FIRST delta carries only 200 ms and the second arrives ~250 ms later, and ~250 ms is the modal
+ * interval. So the whole risk is concentrated in the first second, and a 150 ms threshold releases
+ * playback too early to survive it: measured at 150 ms, the first utterance stuttered with a 48 ms
+ * gap, exactly the 251 − 200 the table predicts. At 300 ms the same pacing plays through clean.
+ *
+ * THE COST IS ABOUT 100 ms, not 150: at 150 ms playback began ~150 ms after the first delta; at
+ * 300 ms it waits for the second delta at ~250 ms. Against this app's measured ~1 s turn latency,
+ * that buys a first word without a stutter.
+ *
+ * IT IS A CUSHION, NOT A CURE, and the measurements say so plainly: a third run saw Azure itself go
+ * quiet for 1441 ms mid-response — 5x this buffer — and no threshold anyone would accept in a
+ * conversation can absorb that. What the buffer does there is turn a click into a ramped dip and
+ * count it, so the gap is diagnosable instead of anecdotal.
+ *
+ * Note what it does NOT control: how much audio is pending overall. The target is the floor the
+ * buffer refuses to go below, not the amount of audio in flight. */
+const TARGET_LEAD_MS = 300;
 
 /** Fade length at a discontinuity. Long enough to remove the click (a step is broadband; 3 ms of
  * ramp pushes the energy below ~300 Hz where there is little of it), short enough to be inaudible
@@ -78,6 +98,12 @@ class PlaybackProcessor extends AudioWorkletProcessor {
     this.lastSample = 0;
 
     this.underruns = 0;
+    /** Length of the most recent gap, in samples. The buffer depth at REPORT time is useless for
+     * diagnosis — by then the audio that ended the gap has arrived (measured live: a warning said
+     * "buffer 757ms" about a gap that by definition happened at depth zero). How long the
+     * interviewer was silent is the number that says whether it was a click or a dropout. */
+    this.gapSamples = 0;
+    this.lastGapSamples = 0;
     this.sinceStats = 0;
     /** Set by the main thread when Azure says the response's audio is complete
      * (`response.audio.done`). Cleared by the next chunk that arrives.
@@ -140,7 +166,12 @@ class PlaybackProcessor extends AudioWorkletProcessor {
   /** One output sample, advancing the state machine. */
   _next() {
     if (this.state === "filling") {
-      if (this.queued < this.targetSamples) return 0;
+      if (this.queued < this.targetSamples) {
+        // Silence while refilling after a counted gap is part of that gap, so measure it here.
+        if (this.underruns > 0) this.gapSamples++;
+        return 0;
+      }
+      this.lastGapSamples = this.gapSamples;
       this.state = "playing";
       this.fadeIn = this.rampSamples;
     }
@@ -158,7 +189,10 @@ class PlaybackProcessor extends AudioWorkletProcessor {
       }
       // Ran dry. Count it ONLY if audio was still expected — one per gap, not per silent sample.
       // An expected ending drains the same way and must not be counted (see `endOfStream`).
-      if (!this.endOfStream) this.underruns++;
+      if (!this.endOfStream) {
+        this.underruns++;
+        this.gapSamples = 0;
+      }
       this.state = "ramping-out";
       this.fadeOut = this.rampSamples;
     }
@@ -192,6 +226,7 @@ class PlaybackProcessor extends AudioWorkletProcessor {
         eventType: "stats",
         underruns: this.underruns,
         bufferedMs: (this.queued / sampleRate) * 1000,
+        lastGapMs: (this.lastGapSamples / sampleRate) * 1000,
         state: this.state,
       });
     }

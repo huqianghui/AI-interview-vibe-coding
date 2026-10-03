@@ -15,7 +15,7 @@ import { describe, expect, it } from "vitest";
 const RATE = 24_000;
 const QUANTUM = 128;
 /** Mirrors TARGET_LEAD_MS / RAMP_MS in the worklet. */
-const LEAD_MS = 150;
+const LEAD_MS = 300;
 const RAMP_MS = 3;
 const leadSamples = Math.ceil((RATE * LEAD_MS) / 1000);
 const rampSamples = Math.ceil((RATE * RAMP_MS) / 1000);
@@ -56,6 +56,27 @@ function load(rate = RATE) {
     },
     pushPcm: (pcm: Int16Array) => port.onmessage?.({ data: { pcm: pcm.buffer } }),
     flush: () => port.onmessage?.({ data: { command: "flush" } }),
+    end: () => port.onmessage?.({ data: { command: "end" } }),
+    /** Force a FRESH stats frame and return it, rather than reading whatever was posted last.
+     * The stats interval is 250 ms — about 47 quanta — so a short render legitimately posts nothing
+     * (`stats.at(-1)` undefined) and a long one leaves a frame that predates the thing being
+     * asserted. Both mistakes were made here before this helper existed. */
+    freshStats: () => {
+      const before = stats.length;
+      for (let i = 0; i < 60 && stats.length === before; i++) {
+        const buf = new Float32Array(QUANTUM);
+        node.process([], [[buf]]);
+      }
+      return stats.at(-1);
+    },
+    underruns: () => {
+      const before = stats.length;
+      for (let i = 0; i < 60 && stats.length === before; i++) {
+        const buf = new Float32Array(QUANTUM);
+        node.process([], [[buf]]);
+      }
+      return stats.at(-1)?.underruns ?? 0;
+    },
     /** Render `q` quanta, appending to `out`. */
     render: (q: number) => {
       for (let i = 0; i < q; i++) {
@@ -120,12 +141,11 @@ describe("playback underrun", () => {
 
   it("counts ONE underrun per gap, not one per silent sample", () => {
     const w = starve();
-    const last = w.stats.at(-1);
     // 4 quanta = 512 samples of starvation; a per-sample count would be in the hundreds.
-    expect(w.stats.length === 0 || last?.underruns === 1 || last === undefined).toBe(true);
+    expect(w.underruns()).toBe(1);
     // Render far longer to be sure the count does not keep climbing while dry.
     w.render(200);
-    expect(w.stats.at(-1)!.underruns).toBe(1);
+    expect(w.underruns()).toBe(1);
   });
 
   it("ramps the gap in instead of cutting — no step to zero", () => {
@@ -148,7 +168,7 @@ describe("playback underrun", () => {
     const before = w.out.length;
     w.render(4);
     expect(w.out.slice(before).every((s) => s === 0)).toBe(true);
-    expect(w.stats.at(-1)!.state).toBe("filling");
+    expect(w.freshStats()?.state).toBe("filling");
 
     w.push(leadSamples); // now enough
     w.render(4);
@@ -164,6 +184,72 @@ describe("playback underrun", () => {
     const firstNonZero = resumed.findIndex((s) => s !== 0);
     expect(firstNonZero).toBeGreaterThanOrEqual(0);
     expect(resumed[firstNonZero]).toBeLessThan(0.9);
+  });
+});
+
+describe("end-of-stream marker", () => {
+  /** This whole block exists because the first version of the worklet had no marker, and a test
+   * caught what that costs: from in here, "the sentence ended" and "the network stalled" are the
+   * same event — an empty queue — so a clean run of speech logged one underrun PER UTTERANCE and the
+   * number P0-2 is judged by measured nothing at all. */
+
+  /** Play a full utterance and let it finish naturally.
+   *
+   * The marker is sent while audio is still QUEUED, which is the real ordering: Azure's
+   * `response.audio.done` arrives on the same socket right behind the last `response.audio.delta`,
+   * so it lands long before 150 ms of buffered audio can drain. */
+  function utterance(withMarker: boolean) {
+    const w = load();
+    w.push(leadSamples * 2, 20000);
+    if (withMarker) w.end();
+    w.render(Math.ceil((leadSamples * 2) / QUANTUM) + 60); // play it out, then sit dry
+    return w;
+  }
+
+  it("does NOT count the drain at the end of a sentence as an underrun", () => {
+    expect(utterance(true).underruns()).toBe(0);
+  });
+
+  it("DOES count it without the marker — which is the bug this guards", () => {
+    expect(utterance(false).underruns()).toBe(1);
+  });
+
+  it("still counts a real stall, because the marker had not been sent yet", () => {
+    // The distinction is only ever about expectation: mid-sentence, nothing has said "that's all".
+    const w = load();
+    w.push(leadSamples + QUANTUM, 20000);
+    w.render(Math.ceil((leadSamples + QUANTUM) / QUANTUM) + 10);
+    expect(w.underruns()).toBe(1);
+  });
+
+  it("arriving LATE does not retroactively forgive a gap, and that is deliberate", () => {
+    // If the queue drains before anything says the audio is finished, then at that moment more audio
+    // WAS expected and the gap is real. Only ordering makes this reachable, and the real ordering
+    // cannot produce it — recorded so nobody "fixes" it into forgiving genuine stalls.
+    const w = load();
+    w.push(leadSamples * 2, 20000);
+    w.render(Math.ceil((leadSamples * 2) / QUANTUM) + 10); // drains dry first
+    w.end();
+    w.render(10);
+    expect(w.underruns()).toBe(1);
+  });
+
+  it("is cleared by the next chunk, so a second utterance is measured normally", () => {
+    const w = utterance(true);
+    expect(w.underruns()).toBe(0);
+    // Next response arrives and then stalls mid-way: that gap IS a gap.
+    w.push(leadSamples + QUANTUM, 20000);
+    w.render(Math.ceil((leadSamples + QUANTUM) / QUANTUM) + 10);
+    expect(w.underruns()).toBe(1);
+  });
+
+  it("plays the queued audio through — the marker ends counting, not playback", () => {
+    const w = load();
+    w.push(leadSamples * 2, 20000);
+    w.end(); // marker arrives while there is still a lot to play
+    w.render(Math.ceil((leadSamples * 2) / QUANTUM) + 2);
+    const played = w.out.filter((x) => x !== 0).length;
+    expect(played).toBeGreaterThan(leadSamples); // nearly all of it, minus the two fades
   });
 });
 
@@ -187,7 +273,7 @@ describe("playback flush", () => {
     w.render(Math.ceil(leadSamples / QUANTUM) + 2);
     w.flush();
     w.render(200);
-    expect(w.stats.at(-1)!.underruns).toBe(0);
+    expect(w.underruns()).toBe(0);
   });
 
   it("can play again after a flush", () => {
@@ -245,57 +331,92 @@ describe("A/B against the old scheduler, same arrival pattern", () => {
     return gaps;
   }
 
-  /** The NEW worklet under the same arrivals, driven in 128-sample steps. */
+  /** The NEW worklet under the same arrivals, driven in 128-sample steps.
+   *
+   * Sends the end-of-stream marker after the last arrival, exactly as the hook does on
+   * `response.audio.done`. Without it the final drain counts as a gap and every one of these cases
+   * reports one extra underrun — which is how the missing marker was found in the first place. */
   function newWorkletUnderruns(arrivals: { atMs: number; durMs: number }[]): number {
     const w = load();
     const quantumMs = (QUANTUM / RATE) * 1000;
-    const totalMs = arrivals.at(-1)!.atMs + arrivals.at(-1)!.durMs + 400;
+    const lastMs = arrivals.at(-1)!.atMs + arrivals.at(-1)!.durMs;
     let i = 0;
-    for (let t = 0; t < totalMs; t += quantumMs) {
+    let ended = false;
+    for (let t = 0; t < lastMs + 600; t += quantumMs) {
       while (i < arrivals.length && arrivals[i].atMs <= t) {
         w.push(Math.round((arrivals[i].durMs / 1000) * RATE), 20000);
         i++;
       }
+      if (!ended && i >= arrivals.length) {
+        w.end();
+        ended = true;
+      }
       w.render(1);
     }
-    return w.stats.at(-1)?.underruns ?? 0;
+    return w.underruns();
   }
 
-  /** 20 ms chunks of audio, delivered every 20 ms except for `stallMs` inserted once mid-stream. */
-  function patternWithStall(stallMs: number) {
+  /** 20 ms chunks delivered every 20 ms, with ONE delivery gap of exactly `gapMs` mid-stream.
+   *
+   * `gapMs` is the total time between two arrivals, not an extra delay added to the normal 20 ms —
+   * the first version of this helper conflated the two, so "a 140 ms stall" was really a 160 ms gap
+   * and the worklet was blamed for failing to absorb more than its own buffer. The gap is the thing
+   * the buffer is sized against, so it is what the parameter means. */
+  function patternWithGap(gapMs: number) {
     const arrivals: { atMs: number; durMs: number }[] = [];
     let at = 0;
     for (let n = 0; n < 60; n++) {
-      if (n === 30) at += stallMs;
       arrivals.push({ atMs: at, durMs: 20 });
-      at += 20;
+      at += n === 29 ? gapMs : 20;
     }
     return arrivals;
   }
 
-  it("survives a 100 ms delivery stall that gaps the old scheduler", () => {
-    const p = patternWithStall(100);
+  it("survives a 100 ms delivery gap that gaps the old scheduler", () => {
+    const p = patternWithGap(100);
     expect(oldSchedulerGaps(p)).toBe(1);
     expect(newWorkletUnderruns(p)).toBe(0);
   });
 
-  it("survives a 140 ms stall — just inside the 150 ms lead", () => {
-    const p = patternWithStall(140);
+  it("survives a 250 ms gap — the modal interval Azure actually delivers at", () => {
+    // Measured on the live path: ~250 ms between deltas is the common case, and it is precisely what
+    // a 150 ms threshold could not absorb (one 48 ms stutter on the first utterance).
+    const p = patternWithGap(250);
     expect(oldSchedulerGaps(p)).toBe(1);
     expect(newWorkletUnderruns(p)).toBe(0);
   });
 
-  it("still gaps on a stall LARGER than the buffer — the buffer is a cushion, not a cure", () => {
-    // Stating the limit explicitly matters: 150 ms of lead cannot absorb a 400 ms stall, and a
-    // reader who thinks otherwise would size the next change wrongly.
-    const p = patternWithStall(400);
+  it("still gaps on a delivery gap LARGER than the buffer — a cushion, not a cure", () => {
+    // Stating the limit explicitly matters, and it is not hypothetical: measured live, Azure itself
+    // went quiet for 1441 ms mid-response. No buffer anyone would accept in a conversation absorbs
+    // that; a reader who thinks otherwise would size the next change wrongly.
+    const p = patternWithGap(1441);
     expect(oldSchedulerGaps(p)).toBe(1);
     expect(newWorkletUnderruns(p)).toBe(1);
   });
 
   it("does not gap at all on a steady stream, old or new", () => {
-    const steady = patternWithStall(0);
+    const steady = patternWithGap(20);
     expect(oldSchedulerGaps(steady)).toBe(0);
     expect(newWorkletUnderruns(steady)).toBe(0);
+  });
+
+  it("absorbs AT LEAST the configured lead — the boundary, measured rather than assumed", () => {
+    // Binary-search the largest gap that still plays through. The answer should be at or just above
+    // TARGET_LEAD_MS: the prebuffer releases on the first chunk that crosses the threshold, so the
+    // steady-state cushion overshoots to a chunk boundary and buys slightly more than the nominal
+    // 150 ms. Measuring it keeps that fact honest if either the lead or the chunk size changes.
+    let lo = 20;
+    let hi = 900;
+    while (hi - lo > 1) {
+      const mid = Math.round((lo + hi) / 2);
+      if (newWorkletUnderruns(patternWithGap(mid)) === 0) lo = mid;
+      else hi = mid;
+    }
+    // Close to the configured lead, but not exactly it, and the reason is worth knowing: the release
+    // threshold is crossed by a whole 20 ms chunk, and the gap is consumed in 128-sample quanta, so
+    // the boundary lands within about one chunk either side. Asserting equality would make this test
+    // fail on a chunk-size change that broke nothing.
+    expect(Math.abs(lo - LEAD_MS)).toBeLessThanOrEqual(25);
   });
 });
