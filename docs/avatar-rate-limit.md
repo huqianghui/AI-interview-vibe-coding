@@ -8,6 +8,26 @@ Voice unavailable: Avatar request was rate-limited. Retry after 7.0s. — you ca
 
 `Voice unavailable: ` 和 `— you can continue by text.` 是我们加的，**中间那句是 Azure 原样返回的**。
 
+## 先立一个框架：avatar 不是一个服务，是 Speech 的附属能力
+
+这句话是 owner 提的（2026-10-03），而它不是用词上的讲究——**本文后面五条分散的实测结论，都是它的必然推论**。
+数字人没有自己的资源类型、没有"部署"这个东西，它是 Azure AI Speech 的 text-to-speech 之下的一个能力。
+于是：
+
+| 实测现象（本文各节） | 由这个框架直接解释 |
+|---|---|
+| Foundry **Quota 页上没有 avatar 这一行**（第 8 节，owner 截图） | 那个页面列的是**模型部署**。avatar 不是可部署的模型，没有可分配的 RPM 池，所以没有行 |
+| **Request quota 按钮用不上**（第 6 节） | 它做的是"把区域配额池分配给某个部署"。没有部署，就没有可分配的对象 |
+| `az cognitiveservices account list-usage` **返回空**（第 5 节） | usage 项跟踪的是已部署 / 已计量的能力 |
+| 拒绝以 **in-band `error` 从 Voice Live 的 WS 回来**，而不是资源上的 HTTP 4xx（第 5 节） | 它是**会话的一个特性**，不是一个有独立请求路径的 API 端点 |
+| 配额**小且固定**（2 次/分钟），与资源规模无关（第 1 节） | 不是按 provision 的容量定的，是服务端对附属能力的固定节流 |
+
+**连第 6 条那个"文档说不可调 vs Q&A 说开票"的矛盾也由此解释**：它不是配额体系里的一等公民，所以既没有
+自助页面，支持票也未必有对应的旋钮可调。**规划容量时不要把它当成"可以申请扩容的配额"，要当成服务的固定
+行为约束**——这会直接改变结论：横向加资源是确定可行的，等配额不是。
+
+---
+
 本文把四个问题逐一落到"文档原文 + 代码位置 + 实测"三者之一，并明确标注哪些是**实测**、哪些是**文档**、
 哪些是**推断**。结论先行：
 
@@ -22,6 +42,7 @@ Voice unavailable: Avatar request was rate-limited. Retry after 7.0s. — you ca
 | 7 | **一次面试只花 1 次**（实测）——爆配额来自测试节奏（Start over / 刷新 / Playground），不是实现 | 实测 |
 | 8 | 生产侧硬上限：**同一资源每分钟最多 2 位候选人能开始面试** | 文档 + 第 7 条 |
 | 9 | **排除项**：Foundry Quota 页上的 `tts` / `tts-hd` 各 3 RPM 与本问题无关（我们走 `azure-standard` Speech 音色，且那个部署 7 天零错误） | owner 截图 + 代码核对 |
+| 10 | **框架**：avatar 不是一个服务、而是 Speech 的附属能力——第 1、5、6、8 条都是它的推论，所以不要把它当成「可申请扩容的配额」 | owner 指出 |
 
 ---
 
