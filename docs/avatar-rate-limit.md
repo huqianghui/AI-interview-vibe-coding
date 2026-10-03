@@ -19,6 +19,8 @@ Voice unavailable: Avatar request was rate-limited. Retry after 7.0s. — you ca
 | 4 | pre-connect 的限流被当成**永久失败**，直接把候选人踢到文字模式 | 代码 |
 | 5 | **Azure 侧看不到这个事件**：usage API 无此项、`ClientErrors` 为 0、`Ratelimit` 是限值量规不是计数器 | 实测 |
 | 6 | **能不能提，证据是矛盾的**：文档说这类限制"除另有说明外不可调整"，而 avatar 表没给调整途径 | 文档 + MS Q&A |
+| 7 | **一次面试只花 1 次**（实测）——爆配额来自测试节奏（Start over / 刷新 / Playground），不是实现 | 实测 |
+| 8 | 生产侧硬上限：**同一资源每分钟最多 2 位候选人能开始面试** | 文档 + 第 7 条 |
 
 ---
 
@@ -162,6 +164,48 @@ increase this? I am unable to find any ticket-raising system in MS Azure Dashboa
    **未验证**，列为设计选项而非结论。
 
 ---
+
+## 7. 一次面试到底花几次？（实测：1 次）——所以"一个人测试也爆满"不是实现的问题
+
+owner 的疑问是合理的："我就是一个人测试，这个额度都会爆满。" 所以先排除"我们在乱建连接"：
+数一次「开始面试 → 语音作答」里 `session.avatar.connect` 发了几次。
+
+```
+   886ms  WS 打开
+  6031ms  >>> session.avatar.connect     ← 唯一的一次
+  6328ms  收到 session.avatar.connecting
+  7829ms  收到 session.avatar.switch_to_speaking
+ 共花掉 1 次
+```
+
+**happy path 不重复建连。** 各个动作的实际花费：
+
+| 动作 | 花费 | 依据 |
+|---|---|---|
+| 加载 `/admin/agent` 看中间那张图 | **0** | 那是静态 CDN 缩略图；Playground 只在点 **Voice** 时才 `voice.connect()`（`PlaygroundPanel.tsx` 的 `toggleVoice`） |
+| 点 Playground 的 **Voice** | 1 | 同一条 `useAvatarStream` 路径 |
+| 开始面试 + 语音作答 | **1**（实测） | 上面 |
+| **Start over** | 再 1 | 重建会话 |
+| 刷新 / 新标签页 | 再 1 | 且绕过内存账本（第 3 条） |
+| 媒体模式切换（关画面 / 开画面） | 再 1 | Azure 不支持会话中途重协商，切换 = 重建会话 |
+| **关闭会话** | **不退还** | 限的是"每分钟**新建**数" |
+
+**结论：配额是按生产形态定的，不是按开发形态。** 真实候选人开一次、保持最多 30 分钟，2 次/分钟很宽裕；
+而开发时"开面试看一眼 → Start over → 再看 → 同时开 Playground 对比"一分钟内凑三次毫不费力——
+这正是 2026-10-03 那次报错的现场动作（`Retry after 7.0s` ⇒ 最老那次连接在 53 秒前）。
+
+### 但有一条生产侧的硬上限要记住
+
+**同一个资源上每分钟最多只有 2 个候选人能"开始"面试。** 一批人同时开始（例如约在 9:00）会撞墙。
+这不是测试期的噪音，是容量上限，解法只有多资源或服务端排队。
+
+### 测试期的可持续节奏
+
+- 只看画面就**别按 Start over**，复用当前会话。
+- 需要重开时**间隔约 30 秒**（60 秒窗口 2 个名额 ⇒ 约 30 秒/次是可持续速率）。
+- **别在面试开着时点 Playground 的 Voice**。
+- 密集测试：**再开一个 Speech/AI 资源**各有各的 2 次/分钟（配额按资源，文档确认）。
+  "按会话选资源"**未验证**，属设计选项。
 
 ## 顺带确认的两个硬时限
 
