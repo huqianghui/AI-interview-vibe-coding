@@ -238,10 +238,36 @@ gap 48 ms —— 正好是上表的 251 − 200。取 300 ms 后同样节奏跑�
 
 **⑤ 顺带发现一个本节没提的既有缺陷：打断时播放完全没被冲掉。** `input_audio_buffer.speech_started`
 只改 UI 状态和清定时器，而 Azure 会突发下发音频，所以候选人插话时已排期但未播的音频会继续盖着他说话。
-`flushPlayback()` 已就位但**故意没接到打断上**，因为还缺一个测量：Azure（`interrupt_response: True`）
-在 `speech_started` 时到底有没有真的取消 response。若有，冲队列与它的决定一致；若没有，冲掉会切断仍在
-到达的音频，候选人听到的是"一个缺口 + 后半句"，比现在更糟。**这是 P0-2 的后续项**，需要一个无形象
-persona 的 barge-in 事件序列实测（有形象那条路零个 `response.audio.delta`，测不出来）。
+`flushPlayback()` 已就位但当时没接到打断上，因为缺一个测量。**那个测量现在做完了（2026-10-03，
+无形象 persona，合成 WAV 让候选人的声音精确落在读题中途）：**
+
+```
+6249ms  response.done  status=completed
+6259ms  input_audio_buffer.speech_started     ← 10 毫秒后候选人开口
+6259→11379ms  候选人连续说了 5.1 秒
+         ← 这 5 秒里 Azure 一个事件都没有
+```
+
+而客户端此时还在播那 4275 ms 的音频（约播到 10 秒）。**候选人压着面试官说了约 3.8 秒，Azure 什么也没做：**
+没有 `response.cancel`、没有 `output_audio_buffer.cleared`、没有新 response。
+
+原因在上面那张表里：**Azure 在 783 毫秒内投递了 4275 毫秒的音频，并在候选人开口前 10 毫秒就把 response
+标记为 completed。** 所以"面试官正在说话"这个状态只存在于客户端的播放队列里；从 Azure 的角度早就没有在飞的
+response 可取消。**`interrupt_response: True` 在这条路上是空转的**，这也解释了为什么它配了却从来没见效。
+
+于是原来那个顾虑**部分**消失、但不是全部，而区别来自 Azure 自己的节奏波动（§4.4 ①）：
+
+| Azure 的投递形态 | 候选人插话时 | 单纯冲队列够不够 |
+|---|---|---|
+| **一次性灌完**（本轮：4275 ms / 783 ms） | 音频全到齐了、response 已 completed | **够** —— 冲掉就是干净的停止 |
+| **按约 250 ms 节奏发**（§4.4 ① 那轮） | delta 还在继续到 | **不够** —— 冲完后续 delta 继续播，变成"缺口 + 后半句" |
+
+所以正确的修法不是"冲队列"，而是**冲队列 + 丢弃该 response 余下的 delta**（hook 里已有
+`activeResponseRef` 这套按 response id 跟踪的机制可用）。
+
+**但要不要冲，是产品取舍而不是正确性问题，需要 owner 定：** 今天候选人插话时会听到两个声音最多约 4 秒；
+改成切断则他可能听不到题目的后半句（题面文字一直在屏幕上，可读回）。注意这不影响转写——上行是候选人自己的
+麦克风，且 `echoCancellation` 与服务端回声消除都开着。
 
 ## 5. P1 组
 
