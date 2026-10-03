@@ -238,3 +238,17 @@ and `CHANGELOG.md`.
   `content-encoding`)，根因是 nginx 默认 `gzip_types` 只含 `text/html`；`frontend/nginx.conf` 已加
   `gzip on` + 显式类型 + `gzip_vary`，首屏 975.24 kB → 278.51 kB（Vite 构建输出自带这两个数），而预热是页面加载即开始的，所以这直接缩短
   候选人冷启动。末尾是 7 项待验清单（第 6 项已由实测关闭）。
+
+- [`design-ui-refresh-foundry-purple.md`](design-ui-refresh-foundry-purple.md) — 候选人界面视觉改版的
+  **已批准设计方向**（`/design-shotgun`，2026-10-03，**尚未实现**）。起因是 owner 判断界面"不专业、不
+  fashion"；诊断发现**一半不是审美问题而是布局 bug**：非直播态锁死 760px 而直播态是 1400px（同一路由两
+  套宽度）、`LoginCard` 的 420px 居中容器**嵌在** 760px 页面列里导致标题和卡片左边缘参差、
+  Restart/Sign out 在裸 `div` 里无 gap、orientation 主按钮被 Fluent `Card` 的 `align-items: stretch`
+  **意外拉成通栏**、页头是只装了语言下拉的内联 flex。四个方向（深色影视 / 高级白 / 工程精密 / 人文暖色）
+  出图比对后 owner 否掉两个深色方向，并要求用应用自己的官方数字人照片替换 CSS 剪影。配色单独做了
+  **Azure 蓝 vs Foundry 紫** 的 A/B——前置风险是 Azure Blue `#0078D4` 与现在显廉价的 Fluent 默认蓝
+  `#0F6CBD` 同色相，换色号可能回到原地——最终选定 **Warm Editorial / Foundry Purple**（三个紫值都已在
+  `avatarCharacters.ts:58` 的 Fluent 调色板里，说的是 *Azure AI* 而非泛泛的 Azure）。文档含完整 token
+  集、布局规则（单一内容宽度、64/36 非对称舞台、直播屏严格占满一屏且只有转录内部滚动）、两个实测到的
+  布局陷阱（padded flex item 的 `height:100%` 吃掉 24px 底距；默认 `auto` grid 行按内容撑高导致溢出
+  23px，须用 `minmax(0,1fr)`）、以及 8 步落地计划。
