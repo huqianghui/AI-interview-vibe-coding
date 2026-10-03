@@ -37,9 +37,21 @@ timestamp + 60 s. The ledger is now 3 per 60 s (v0.40.11.2); it was 2 per 20 s, 
 `Microsoft.Quota` provider, regional usages API: 287 items, none avatar or speech). Treat it as a fixed
 service-side throttle, not an allocatable quota.
 
-**Turning the avatar off avoids it entirely, and voice-only has no practical ceiling**: measured 40
-voice-only sessions launched in 20 s (~120 new connections/minute, 4x the documented 30) with zero
-failures, and zero avatar offers. That is the workaround for dense testing. What is left:
+**TWO independent limits**, measured: **5 concurrent** avatar sessions
+(`avatar_service_resource_exhausted`, and closing one frees a slot immediately) and **3 new connections
+per 60 s** (`rate_limit_exceeded`, closing refunds nothing). Near the concurrency ceiling the retries
+burn the rate allowance, so the message the user sees can be the rate one while the cause is capacity —
+that is what sent the 2026-10-03 investigation at the wrong limit first.
+
+A support request now has something concrete to name: raise **concurrent avatar rendering requests**
+(currently 5) on `ai-foundary-hu-sweden-central2` (AIServices / S0 / swedencentral), citing
+`avatar_service_resource_exhausted`. That is what the MS Q&A thread "Increase the limit of concurrent
+users in Speech Services avatar" is about; the quota APIs still expose no row for it.
+
+**Turning the avatar off avoids it entirely, and voice-only has no ceiling at this app's scale**: measured
+**≥120 new connections/minute** (40 launched in 20 s, 4x the documented 30) AND **≥60 concurrent held
+sessions**, both with zero failures and zero avatar offers. Against the avatar's 5 concurrent that is a
+**12x difference** — the avatar is the only genuinely scarce resource here. What is left:
 
 - [ ] **A rate-limit refusal should wait, not kick the candidate to text.** `useInterviewVoice`'s
       pre-connect error branch calls `policy.latchFatal()` for every error, with the reasoning that
@@ -56,6 +68,19 @@ failures, and zero avatar offers. That is the workaround for dense testing. What
       it. `sessionStorage` would cover the first three; two candidates needs a raised quota or
       server-side queueing. Pinned by a test that asserts today's behaviour
       (`useAvatarStream.quota.test.tsx`).
+- [x] **~~Verify the limits' SCOPE~~ — settled: PER RESOURCE, measured.** Exhausted resource A's
+      allowance (3 concurrent), switched the endpoint to a second AIServices/S0/swedencentral resource,
+      and connected successfully **36 s after A's first creation** — inside A's 60 s window, from the same
+      machine, IP, Entra credential and subscription. So per-IP and per-subscription are ruled out and
+      "split across resources" genuinely works: each resource gets its own 5 concurrent + 3 per 60 s.
+- [ ] **Verify the SCOPE of the CONCURRENCY limit (the rate limit's scope is settled, this one is not).**
+      The per-resource test only exercised the rate limit: exhaust A's rate allowance, switch endpoint,
+      B works. That cannot be repeated for concurrency, because switching endpoints restarts the backend
+      and killing A's sessions FREES its concurrency — the experiment destroys itself. It needs two
+      backends running at once (a second backend on :8001 with its own DB copy pointing at resource B,
+      plus a second vite on :5174 via `E2E_API_TARGET`), then fill A to 5 and try B. This decides whether
+      adding resources raises the ceiling on CONCURRENT interviews, which is the binding production
+      constraint — more important than the rate limit.
 - [ ] **Verify the 5-minute idle disconnect.** Documented: the real-time avatar API disconnects after
       5 minutes idle or 30 minutes connected. A candidate thinking for over 5 minutes on one question
       would be disconnected, and the reconnect then spends from the 2/minute allowance. Not yet
