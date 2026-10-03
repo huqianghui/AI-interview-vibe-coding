@@ -37,6 +37,11 @@ timestamp + 60 s. The ledger is now 3 per 60 s (v0.40.11.2); it was 2 per 20 s, 
 `Microsoft.Quota` provider, regional usages API: 287 items, none avatar or speech). Treat it as a fixed
 service-side throttle, not an allocatable quota.
 
+**It is a RATE limit, not a concurrency limit** — measured: three avatar sessions held open, then a
+fourth accepted once the window had room, all four live at once. So releasing is irrelevant, and a
+cohort CAN all be interviewing simultaneously; they just cannot all START inside one minute (3 per
+minute, ~20 s apart).
+
 **Turning the avatar off avoids it entirely, and voice-only has no practical ceiling**: measured 40
 voice-only sessions launched in 20 s (~120 new connections/minute, 4x the documented 30) with zero
 failures, and zero avatar offers. That is the workaround for dense testing. What is left:
