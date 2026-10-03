@@ -31,11 +31,15 @@ import { portraitKeyFor, readCachedPortrait } from "./avatarPortraitCache";
 import {
   BLANK_SAMPLE_HEIGHT,
   BLANK_SAMPLE_INTERVAL_MS,
+  BLANK_STREAK_TO_FAIL,
   BLANK_SAMPLE_WIDTH,
+  initialPictureState,
   isBlankFrame,
-  isPictureDead,
   meanLuma,
-  nextBlankStreak,
+  nextPictureState,
+  pictureIsShowable,
+  type PictureState,
+  type SampleStatus,
 } from "./avatarFrameHealth";
 import type { AudioState } from "../types/voice";
 
@@ -216,27 +220,27 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
   // The picture is arriving but EMPTY. Separate from `isAvatarConnected` on purpose: that flag means
   // frames exist, which a black stream also satisfies. See avatarFrameHealth for why this is a
   // readable/blank streak rather than a brightness judgement.
-  const [pictureDead, setPictureDead] = useState(false);
-  const blankStreakRef = useRef(0);
+  const [picture, setPicture] = useState<PictureState>(initialPictureState);
+  const pictureRef = useRef<PictureState>(initialPictureState);
 
-  /** Draw the current frame small and read its mean luminance. `readable: false` when there was no
-   * frame to read — which is NOT the same as a blank one. */
-  const sampleLuma = useCallback((): { readable: boolean; luma: number } => {
+  /** Draw the current frame small and read its mean luminance, saying WHY when it cannot. */
+  const sampleLuma = useCallback((): { status: SampleStatus; luma: number } => {
     const video = innerRef.current;
-    // HAVE_CURRENT_DATA; below this there is no frame yet and a canvas read returns transparent black.
-    if (!video || video.readyState < 2 || video.videoWidth === 0) return { readable: false, luma: 0 };
+    // HAVE_CURRENT_DATA; below this there is simply no frame yet — not a blank one, and not a browser
+    // that cannot sample. Keep waiting.
+    if (!video || video.readyState < 2 || video.videoWidth === 0) return { status: "not-ready", luma: 0 };
     try {
       const canvas = document.createElement("canvas");
       canvas.width = BLANK_SAMPLE_WIDTH;
       canvas.height = BLANK_SAMPLE_HEIGHT;
       const ctx = canvas.getContext("2d", { willReadFrequently: true });
-      if (!ctx) return { readable: false, luma: 0 };
+      if (!ctx) return { status: "unsupported", luma: 0 };
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      return { readable: true, luma: meanLuma(data) };
+      return { status: "ok", luma: meanLuma(data) };
     } catch {
-      // A tainted or unavailable canvas is a read failure, not a verdict.
-      return { readable: false, luma: 0 };
+      // A tainted or unavailable canvas means this browser will never tell us; it is not a verdict.
+      return { status: "unsupported", luma: 0 };
     }
   }, []);
 
@@ -245,29 +249,33 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
   // either the cached frame, the digital human, or the audio orb; a black screen is not our design").
   useEffect(() => {
     if (!isAvatarConnected || mediaMode === "audio-only") {
-      blankStreakRef.current = 0;
-      setPictureDead(false);
+      pictureRef.current = initialPictureState;
+      setPicture(initialPictureState);
       return;
     }
     const tick = () => {
-      const { readable, luma } = sampleLuma();
-      const streak = nextBlankStreak(blankStreakRef.current, readable, luma);
-      blankStreakRef.current = streak;
-      const dead = isPictureDead(streak);
-      setPictureDead((was) => {
-        if (dead && !was) {
-          // EVIDENCE, not just a symptom. A screenshot of a black box cannot say whether the pixels
-          // came from the media or from our own DOM, nor whether the remote end was still sending.
-          // This records what the element and its track actually were at the moment of the verdict,
-          // so the next occurrence is explainable. getStats-level detail (bytes, framesDecoded) is
-          // sampled by useAvatarStream on the same connection.
+      const { status, luma } = sampleLuma();
+      const prev = pictureRef.current;
+      const next = nextPictureState(prev, status, luma);
+      pictureRef.current = next;
+      if (next.verdict !== prev.verdict) setPicture(next);
+      // Log on the blank RUN, not on the demotion. A picture that is black from the first frame never
+      // reaches `blank` — it stays `waiting` and is simply never shown, which is the fix working — and
+      // that is precisely the case measured on real Azure, so it is the case that most needs evidence.
+      if (next.blankStreak === BLANK_STREAK_TO_FAIL) {
+        {
+          // EVIDENCE, not just a symptom. A screenshot of a black box cannot say whether the pixels came
+          // from the media or from our own DOM, nor whether the remote end was still sending. This
+          // records what the element and its track actually were at the moment of the verdict, so the
+          // next occurrence is explainable. getStats-level detail (bytes, framesDecoded) is sampled by
+          // useAvatarStream on the same connection.
           const video = innerRef.current;
           const track = (video?.srcObject as MediaStream | null)?.getVideoTracks?.()[0];
           console.warn(
             "[avatar] picture is EMPTY while frames are arriving — falling back to the still/orb",
             {
               meanLuma: Number(luma.toFixed(2)),
-              blankSamples: streak,
+              blankSamples: next.blankStreak,
               videoSize: video ? `${video.videoWidth}x${video.videoHeight}` : "none",
               videoReadyState: video?.readyState,
               trackId: track?.id,
@@ -277,8 +285,14 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
             },
           );
         }
-        return dead;
-      });
+      }
+      if (next.verdict === "content" && prev.verdict === "waiting" && status === "unsupported") {
+        // Shown without proof because this browser cannot give us pixels. Worth a line: it means the
+        // blank-frame guard is inert here, so a black stream would go unnoticed.
+        console.debug("[avatar] cannot sample frames — showing the picture unverified", {
+          reason: "canvas cannot read video frames in this browser",
+        });
+      }
     };
     tick();
     const timer = setInterval(tick, BLANK_SAMPLE_INTERVAL_MS);
@@ -297,7 +311,7 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
       // Never cache an empty frame: the still is shown FIRST on the next visit, so storing a black one
       // would turn a transient fault into a permanent black screen for that candidate.
       const probe = sampleLuma();
-      if (!probe.readable || isBlankFrame(probe.luma)) return;
+      if (probe.status !== "ok" || isBlankFrame(probe.luma)) return;
       try {
         const canvas = document.createElement("canvas");
         canvas.width = PORTRAIT_CAPTURE_WIDTH;
@@ -319,7 +333,8 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
   const audioOnly = mediaMode === "audio-only";
   // An empty picture counts as NO picture everywhere below, so the stage can only ever be showing the
   // live figure, the cached still, or the orb.
-  const showVideo = isAvatarConnected && !pictureDead;
+  // PROOF, not mere arrival: frames existing is not evidence that they contain anything.
+  const showVideo = isAvatarConnected && pictureIsShowable(picture);
   const showPortrait = !showVideo && !audioOnly && portrait !== null;
   const mediaRatio = showVideo ? videoRatio : showPortrait ? portraitRatio : null;
   // Which fit the showing media wants. A wide (>=1.4) stream is `cover`: the frame is a centred person
@@ -341,7 +356,7 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
       style={hug ? { width: hug.width, height: hug.height } : undefined}
       data-testid="avatar-view"
       data-avatar-connected={isAvatarConnected}
-      data-picture-dead={pictureDead}
+      data-picture={picture.verdict}
       data-media-mode={mediaMode}
     >
       <video

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.40.9.4 (2026-10-03)
+
+### Fixed
+- **A black picture is never shown at all now, not shown-then-withdrawn.** The previous guard noticed an
+  empty picture after about three seconds and fell back then. Measured against real Azure: the black
+  frame arrives at the START of the session, so those three seconds were exactly the ones the candidate
+  spent looking at it. The stage now withholds the picture until a frame is seen to contain something —
+  withholding costs nothing, because the cached still or the orb is a perfectly good thing to show, while
+  retracting is a visible flip. Giving up a picture that HAD been working still takes a run of blank
+  frames, so a decoder hiccup is not mistaken for a dead avatar; and a browser that cannot be asked for
+  pixels at all shows the picture immediately rather than never, since "cannot check" must not become
+  "cannot watch". A sustained blank run is recorded either way, so a black screen that nobody saw is
+  still explainable afterwards.
+
 ## 0.40.9.3 (2026-10-03)
 
 ### Fixed

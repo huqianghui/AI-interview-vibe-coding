@@ -75,24 +75,49 @@ describe("AvatarView with an empty picture", () => {
     localStorage.clear();
   });
 
-  it("falls back to the orb when the stream is alive but black, instead of showing the black", () => {
+  it("NEVER shows a black stream — not even for the first frame", () => {
+    // The point of the rewrite. The previous policy showed the picture and retracted ~3s later; measured
+    // on real Azure 2026-10-03 the black frame arrives at session START, so those were the three seconds
+    // the candidate spent looking at it.
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     stubCanvas(0);
     renderConnected();
-    advancePastVerdict();
 
     const view = screen.getByTestId("avatar-view");
-    // Still "connected" — frames ARE arriving, and saying otherwise would be a different lie.
-    expect(view).toHaveAttribute("data-avatar-connected", "true");
-    // But the picture is not usable, so the video layer is hidden and a fallback is on screen.
-    expect(view).toHaveAttribute("data-picture-dead", "true");
+    // Unproven from the start: no timer has judged anything yet, so nothing may be shown.
+    expect(view).toHaveAttribute("data-picture", "waiting");
     expect(screen.getByTestId("audio-orb")).toBeInTheDocument();
-    // And the verdict left EVIDENCE: a screenshot of a black box cannot say where the pixels came
-    // from, so the next occurrence has to be explainable from the console alone.
+    // Still "connected": frames ARE arriving, and saying otherwise would be a different lie.
+    expect(view).toHaveAttribute("data-avatar-connected", "true");
+
+    advancePastVerdict();
+    // It stays unproven rather than flipping to a "dead" state — there is nothing to retract.
+    expect(screen.getByTestId("avatar-view")).toHaveAttribute("data-picture", "waiting");
+    // And a sustained blank run leaves EVIDENCE even though nothing was ever shown: a screenshot of a
+    // black box cannot say where the pixels came from, so the console has to.
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining("picture is EMPTY"),
       expect.objectContaining({ meanLuma: 0, videoSize: "1920x1080" }),
     );
+  });
+
+  it("retracts a picture that was proven and then goes black mid-session", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const ctx = stubCanvas(255);
+    vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue("data:image/jpeg;base64,LIT");
+    renderConnected();
+    // `renderConnected` defines videoWidth/readyState AFTER the first render, so the effect's immediate
+    // tick saw a not-ready element. Let one interval pass so a tick actually judges a frame.
+    act(() => {
+      vi.advanceTimersByTime(BLANK_SAMPLE_INTERVAL_MS);
+    });
+    expect(screen.getByTestId("avatar-view")).toHaveAttribute("data-picture", "content");
+    // The stream goes black while it is on screen.
+    ctx.mockRestore();
+    stubCanvas(0);
+    advancePastVerdict();
+    expect(screen.getByTestId("avatar-view")).toHaveAttribute("data-picture", "blank");
+    expect(warn).toHaveBeenCalled();
   });
 
   it("prefers the cached still over the orb when one exists", () => {
@@ -117,7 +142,7 @@ describe("AvatarView with an empty picture", () => {
     });
 
     const view = screen.getByTestId("avatar-view");
-    expect(view).toHaveAttribute("data-picture-dead", "false");
+    expect(view).toHaveAttribute("data-picture", "content");
     expect(screen.queryByTestId("audio-orb")).toBeNull();
     // A good frame IS worth keeping — so the guard below is specific to blank ones, not a blanket
     // "never cache" that would quietly retire the instant-portrait feature.
