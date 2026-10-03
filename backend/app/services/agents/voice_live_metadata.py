@@ -76,6 +76,26 @@ PHOTO_AVATAR_CHARACTERS = frozenset(
 )  # fmt: skip
 PHOTO_AVATAR_TYPE = "photo-avatar"
 PHOTO_AVATAR_MODEL = "vasa-1"
+
+# How far to pull a PHOTO avatar back in its frame. `AvatarConfig.scene.zoom` is (0, +inf) where
+# values below 1 zoom OUT; Azure's default framing is a head-only crop.
+#
+# Why this exists: the editor preview shows the character's CDN portrait — head, shoulders,
+# clothes — while the live stream delivered the head alone, filling the frame to the chin. The two
+# pages showed the same person framed differently, and the interview was the tighter of the two
+# (owner, 2026-10-03: "the shoulders and the top are gone"). Nothing on our side was cropping it:
+# measured live, a 512x512 stream shown `contain` in a 629x629 box, the whole frame on screen. The
+# crop is Azure's own framing, and `scene` is the only lever that moves it.
+#
+# 0.78 was chosen by measurement, not taste. Frames captured off the live stream: the default is
+# head-to-chin; 0.6 shows shoulders and chest but leaves the figure small in a lot of empty frame;
+# 0.78 is a head-and-shoulders portrait with the lapels and the top visible, which is the
+# composition the thumbnail promises. PHOTO ONLY — a video avatar is already a standing figure and
+# zooming it out just shrinks the person.
+#
+# A per-persona knob would be the next step if a character ever needs its own value; one measured
+# default is the proportionate amount of machinery for "make the two pages agree".
+PHOTO_AVATAR_SCENE_ZOOM = 0.78
 DEFAULT_VOICE_BY_LOCALE = {"zh-CN": "zh-CN-XiaoxiaoNeural", "en-US": "en-US-AvaNeural"}
 FALLBACK_LOCALE = "en-US"
 
@@ -169,6 +189,10 @@ def build_avatar_config(
             "model": PHOTO_AVATAR_MODEL,
             "character": name,
             "customized": False,
+            # See PHOTO_AVATAR_SCENE_ZOOM: without this Azure frames the head alone, tighter
+            # than the portrait the editor previews. Set here rather than in the proxy so the
+            # split cannot drift between this builder's consumers, which is why it exists.
+            "scene": {"zoom": PHOTO_AVATAR_SCENE_ZOOM},
         }
     else:
         avatar = {
@@ -252,12 +276,16 @@ def build_agent_metadata_session(persona: Any, *, locale: str | None = None) -> 
             "temperature": persona.voice_temperature,
         },
         "turn_detection": {"type": persona.turn_detection},
-        # Same photo/video split as the runtime session (customized=False is Azure's default and
-        # is dropped here to keep the metadata inside one 512-char value).
+        # Same photo/video split as the runtime session. Two keys are dropped to keep the
+        # metadata inside one 512-char value: `customized` (False is Azure's default anyway) and
+        # `scene` (a photo avatar's framing). `scene` belongs with the verbose runtime knobs named
+        # above — it shapes how a session LOOKS, not whether the agent can do voice, and it reaches
+        # Azure via `session.update` like the rest. Spending this budget on it is what would split
+        # the key, and a split key fails agent initialization outright.
         "avatar": {
             k: v
             for k, v in build_avatar_config(persona.character, persona.style).items()
-            if k != "customized"
+            if k not in ("customized", "scene")
         },
         "proactive_engagement": bool(persona.proactive_engagement),
     }

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.40.9.5 (2026-10-03)
+
+### Fixed
+- **A photo interviewer now shows their shoulders, like the portrait in the editor does.** The live
+  stream framed the head alone, filling the frame to the chin, while the editor previewed the same
+  character head-and-shoulders with their clothes — the two pages showed one person framed two ways, and
+  the interview was the tighter of them. Nothing here was cropping it; that is Azure's own framing, and
+  the only lever that moves it is the avatar's scene setting. The value was chosen by capturing frames
+  off the live stream rather than by eye: the default is head-to-chin, pulling back too far leaves a
+  small figure in a lot of empty frame, and the value shipped is the head-and-shoulders composition the
+  thumbnail promises. Video interviewers are untouched — they already stand in frame, and pulling them
+  back would only shrink them.
+
 ## 0.40.9.4 (2026-10-03)
 
 ### Fixed
