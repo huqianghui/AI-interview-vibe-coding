@@ -33,15 +33,18 @@ Voice unavailable: Avatar request was rate-limited. Retry after 7.0s. — you ca
 
 | # | 结论 | 依据 |
 |---|---|---|
-| 1 | 配额是 **2 次新建连接 / 分钟**（S0），Voice Live 的数字人走 Speech 的 avatar 配额 | 文档 |
+| 1 | 文档写 **2 次新建连接 / 分钟**（S0），**实测是 3 次 / 60 秒**；窗口 60 秒已被两次独立的 `Retry after` 收敛证实 | 文档 + 实测 |
 | 2 | **我们代码里的窗口是 20 秒，宽松了 3 倍** → 会放行 Azure 必然拒绝的请求 | 代码 + 文档对照 |
 | 3 | 限流账本只存在内存里、每次挂载重置 → "Start over"、刷新、新标签页都绕过它 | 代码 |
 | 4 | pre-connect 的限流被当成**永久失败**，直接把候选人踢到文字模式 | 代码 |
 | 5 | **Azure 侧看不到这个事件**：usage API 无此项、`ClientErrors` 为 0、`Ratelimit` 是限值量规不是计数器 | 实测 |
-| 6 | **能不能提，证据是矛盾的**：文档说这类限制"除另有说明外不可调整"，而 avatar 表没给调整途径 | 文档 + MS Q&A |
+| 6 | **没有可申请的 quota 对象**：区域 usages API 的 287 项里没有任何 avatar / speech 条目，只有模型部署容量与账户数 | 实测（4 条途径穷尽） |
 | 7 | **一次面试只花 1 次**（实测）——爆配额来自测试节奏（Start over / 刷新 / Playground），不是实现 | 实测 |
 | 8 | 生产侧硬上限：**同一资源每分钟最多 2 位候选人能开始面试** | 文档 + 第 7 条 |
-| 9 | **排除项**：Foundry Quota 页上的 `tts` / `tts-hd` 各 3 RPM 与本问题无关（我们走 `azure-standard` Speech 音色，且那个部署 7 天零错误） | owner 截图 + 代码核对 |
+| 9 | **排除项**：Foundry Quota 页的 3 RPM 就是 `OpenAI.Standard.tts` / `tts-hd`（API 数字完全对上），与本问题无关 | owner 截图 + usages API + 代码 |
+| 11 | **关掉数字人则完全不碰这个限制**：31 秒内 5 个纯语音会话，avatar offer 0、限流 0 | 实测 |
+| 12 | **纯语音压到约 120 次/分钟仍零失败**（文档称 30），所以密集测试就关数字人 | 实测 |
+| 13 | Foundry 那个 3 RPM 属于 **Azure OpenAI** 的 tts-hd（宿主资源 kind=OpenAI），不是 Speech 的 TTS；两个「3」是巧合 | 实测 |
 | 10 | **框架**：avatar 不是一个服务、而是 Speech 的附属能力——第 1、5、6、8 条都是它的推论，所以不要把它当成「可申请扩容的配额」 | owner 指出 |
 
 ---
@@ -160,32 +163,101 @@ HTTP 4xx**，所以不计入 `ClientErrors`，也不进配额指标。
 
 ---
 
-## 6. 怎么提高：**证据是矛盾的，不要承诺能提**
+## 6. SKU 是什么、该申请什么 quota —— 答案是：**没有可申请的 quota 对象**（已穷尽验证）
 
-先说清配额的作用范围：avatar 这两张表位于文档的 **"Text-to-speech quotas and limits **per resource**"**
-之下，所以 **2 次/分钟是按单个 Speech / AI 资源算的**。
+owner 的要求很明确："一定要搞清楚，对应的 sku 是啥，要去申请什么的 quota。" 下面是钉死的结果。
 
-**能不能提，两个来源互相矛盾：**
+### 资源身份（应用实际连的那个）
 
-| 来源 | 说法 |
+```
+name      ai-foundary-hu-sweden-central2
+type      Microsoft.CognitiveServices/accounts
+kind      AIServices
+sku       S0
+location  swedencentral
+endpoint  https://ai-foundary-hu-sweden-central2.cognitiveservices.azure.com/
+```
+
+### Azure 对这个订阅 + 区域跟踪的全部配额：287 项，没有一项是 avatar
+
+区域级 usages API（`Microsoft.CognitiveServices/locations/swedencentral/usages`）返回 287 项：
+
+| 前缀 | 项数 | 是什么 |
+|---|---:|---|
+| `OpenAI.*` | 179 | Azure OpenAI 模型部署容量 |
+| `AIServices.*` | 107 | 106 项模型部署容量 + `AIServices.S0.AccountCount` |
+| `AccountCount` | 1 | 账户数量 |
+
+按 `avatar` / `conn` / `realtime` / `live` / `session` 穷举筛，命中的**全部是 Azure OpenAI 的模型名**
+（`gpt-realtime`、`gpt-live-1` 等）。**没有任何 avatar 条目，也没有任何 speech 能力的配额项。**
+
+而 owner 在 Foundry Quota 页看到的那个 3，正是这里的两项，数字完全对上：
+
+```
+OpenAI.Standard.tts      current=0  limit=3  unit=Count     ← 截图里的 "0 of 3 RPM"
+OpenAI.Standard.tts-hd   current=3  limit=3  unit=Count     ← 截图里的 "3/3 RPM"
+```
+
+（注意 `current` 是**已分配给部署的份额**，不是请求数——这就是为什么它显示 3/3 而 "Weekly rate
+limiting" 同时是 0%。）
+
+### 结论：没有 quota 名字可以填
+
+"avatar 新建连接数/分钟"**不是一个配额对象**，所以：
+
+| 问题 | 答案 |
 |---|---|
-| 官方文档，同一节开头 | *"Unless otherwise specified, the limits aren't adjustable."* 而 **avatar 表没有标注任何调整途径** |
-| [MS Q&A 上同一个问题](https://learn.microsoft.com/en-us/answers/questions/2258596/increase-the-limit-of-concurrent-users-in-speech-s)，微软方回答 | Portal → 资源 → Support + troubleshooting → New support request，说明当前用量与期望配额 |
+| 对应 SKU | `Microsoft.CognitiveServices/accounts` · kind `AIServices` · **S0** · swedencentral |
+| 该申请哪个 quota | **没有。** Azure 的配额体系里不存在这一项 |
+| 为什么 Request quota 按钮没用 | 它分配的是**模型部署**的容量池；avatar 没有部署、没有池 |
+| 它是什么 | **服务端对一个附属能力的固定行为节流**，不是可分配的配额 |
 
-而且那个帖子里提问者**把这个回答标记为"没有帮助"**，并补充说 *"I am in the S0 plan of PAYG where the
-quota limit for Azure AI Speech Services AI Avatar is 2 connections per minute. Is there a way to
-increase this? I am unable to find any ticket-raising system in MS Azure Dashboard."*（这条也顺带
-**第二次确认了 2 次/分钟这个数字**。）
+这与第 5 节的四条否定结果完全一致，而且现在是**四条独立途径都查过**：资源 usage API、Azure Monitor
+指标、`Microsoft.Quota` 提供程序（对 CognitiveServices 作用域直接 BadRequest）、区域级 usages API。
 
-**所以：开支持票值得一试，但不要把它当成确定可行的方案。** 在确认之前，可靠的杠杆只有两个：
+**所以开支持票只能是"请求提高一个服务端限制"，而不是"申请某个配额"**，而且没有证据表明存在对应的旋钮。
+规划时按**固定约束**对待，不要按"可扩容配额"对待。
 
-1. **少花配额** —— 复用会话别反复重建、把账本改对（第 2 条）、撞上时按 Azure 给的秒数等待重试而不是
-   降级（第 4 条）、避免管理员 Playground 与候选人面试同时开。
-2. **按资源横向拆分** —— 既然配额是按资源的，多个 Speech/AI 资源各有各的 2 次/分钟。对"多候选人并发"
-   这个场景，这比等配额更现实；代价是要按会话选资源，`service_configs` 已经是按行存的，有扩展空间。
-   **未验证**，列为设计选项而非结论。
+### 不要把那个 3 RPM 和 avatar 的 3 混为一谈（本文最容易读错的地方）
 
----
+两个数字都是 3，**但毫无关系**，而且是本文写作过程中真实造成过误解的一处：
+
+| 哪个 3 | 单位 | 是什么 | 在哪看得到 |
+|---|---|---|---|
+| `OpenAI.Standard.tts-hd limit=3` | **Count** | **Azure OpenAI** 的 TTS 模型部署**容量分配**（已分配 3/3） | Foundry Quota 页、usages API |
+| 实测"3 次被接受、第 4 次被拒 / 60 秒" | **连接/60 秒** | **avatar 的新建连接速率** | **哪里都看不到**，只能实测 |
+
+而且那个 `tts-hd` 确实属于 **Azure OpenAI，不是 Speech 的 TTS**，三条独立证据：
+
+1. 配额命名空间是 `OpenAI.*`，和 `OpenAI.GlobalStandard.gpt-4o` 同一族；
+2. 宿主资源 `openAI-hu-SwendenCentral` 的 **kind 是 `OpenAI`**；
+3. 应用实际用的 `ai-foundary-hu-sweden-central2`（kind `AIServices`）上**没有任何 tts 部署**。
+
+**Speech 自己的神经音色（`en-US-AvaNeural` 这类，我们用的就是这个）在那 287 项配额里一条都没有**——
+与"Speech 的能力不是配额对象"完全一致。
+
+### 纯语音的上限：压到 120 次/分钟仍未触及（实测）
+
+既然关掉数字人能绕开 avatar 限制，那纯语音自己的上限在哪？直连后端 WS（不经浏览器，否则建连耗时会把
+速率拖低）压测：
+
+| 轮次 | 发起方式 | 实际速率 | 结果 |
+|---|---|---|---|
+| 串行（等每条建成） | 35 条 / 136 秒 | 约 15 次/分钟 | 35 条全建成，**0 错误** |
+| 并发（不等建成） | 40 条 / 20 秒 | **约 120 次/分钟** | 40 条全建成，**0 错误** |
+
+**120 次/分钟是文档所称 Voice Live「30 新建连接/分钟」的 4 倍，仍然零失败。** 所以在测试强度下纯语音
+不构成约束。（第一轮串行的 15 次/分钟**没有达到上限**，单独列出来是因为只看那一轮会得出"测到 35 条没问题"
+这种偏弱的结论。）
+
+### 可靠的杠杆（都已实测）
+
+1. **密集测试时关掉数字人** —— 实测 31 秒内连开 5 个纯语音会话，**avatar offer 0 次、限流 0 次**，
+   5 个都正常出声。纯语音不走 avatar 配额；它名义上受 Voice Live 自己的「30 新建连接/分钟」管，
+   但**实测压到约 120 次/分钟仍零失败**（见下一节），所以在测试强度下它根本不是约束——
+   不要把那个 30 当成要规避的上限，实测没碰到。
+2. **横向加资源** —— 限制按资源算，每个资源各有自己的额度（实测 3 次 / 60 秒）。
+3. **少建会话** —— 复用，别反复 Start over / 刷新。
 
 ## 7. 一次面试到底花几次？（实测：1 次）——所以"一个人测试也爆满"不是实现的问题
 

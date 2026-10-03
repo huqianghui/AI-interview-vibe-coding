@@ -1,5 +1,5 @@
 /**
- * The avatar quota itself, pinned to the DOCUMENTED number — and the production failure it explains.
+ * The avatar quota itself, pinned to the MEASURED numbers — and the production failure they explain.
  *
  * Azure publishes, for real-time text-to-speech avatar on S0, **2 new connections per minute**, and in
  * the same place says "avatars used in Voice Live follow the quotas and limits described in Real-time
@@ -14,8 +14,22 @@
  *
  *     Voice unavailable: Avatar request was rate-limited. Retry after 7.0s. — you can continue by text.
  *
- * Read `Retry after` as "how long until the oldest connection ages out", and both observations fit a
- * 60 s window exactly: 43.0s ⇒ the oldest was 17 s old, 7.0s ⇒ 53 s old.
+ * THEN THE WHOLE THING WAS MEASURED, which confirmed the window and corrected the allowance. Five
+ * sessions in separate browser contexts (separate ledgers, so our own throttle could not interfere):
+ *
+ *   #1  4681ms  accepted (connecting -> switch_to_speaking)
+ *   #2 11105ms  accepted
+ *   #3 17665ms  accepted          <- the PUBLISHED allowance of 2 says this should have been refused
+ *   #4 24180ms  rate_limit_exceeded  "Retry after 40.0s."
+ *   #5 31083ms  rate_limit_exceeded  "Retry after 34.0s."
+ *
+ * Both refusals name the same absolute moment (24180+40000 = 64180; 31083+34000 = 65083) and #1 was at
+ * 4681, so #1 + 60_000 = 64681 lands within half a second of each: two independent confirmations that
+ * the window is 60 s and that `Retry after` counts down to the OLDEST request ageing out.
+ *
+ * So these tests mirror the measured allowance of THREE. Holding at the published two is not the safe
+ * choice — it stalls a third connect for up to 60 s that Azure would have taken at once, and 60 s of
+ * silence is indistinguishable from failure to the candidate.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
@@ -111,43 +125,43 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("documented avatar quota: 2 new connections per minute", () => {
-  it("lets two offers through and HOLDS the third — the published allowance, not a guess", async () => {
+describe("avatar quota: measured 3 new connections per 60 s", () => {
+  it("lets three offers through and HOLDS the fourth — the measured allowance", async () => {
     const videoRef = makeVideoRef();
     const sendOffer = vi.fn(() => Promise.resolve());
     const { result } = renderHook(() => useAvatarStream(videoRef));
 
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < 3; i++) {
       await act(async () => {
         void result.current.connect(ICE_SERVERS, sendOffer).catch(() => undefined);
       });
       await pushOfferOut();
     }
-    expect(sendOffer).toHaveBeenCalledTimes(2);
+    expect(sendOffer, "three were accepted by the real service").toHaveBeenCalledTimes(3);
 
     await act(async () => {
       void result.current.connect(ICE_SERVERS, sendOffer).catch(() => undefined);
     });
     await pushOfferOut();
-    expect(sendOffer, "the third offer in the window is the one Azure refuses").toHaveBeenCalledTimes(2);
+    expect(sendOffer, "the FOURTH is the one Azure refused, with rate_limit_exceeded").toHaveBeenCalledTimes(3);
   });
 
-  it("reproduces the production failure: 25 s after two offers, a third must still be HELD", async () => {
-    // This is the exact regression. 25 s is past the old 20 s window and well short of the documented
-    // 60 s one, so the old ledger sent this offer and Azure refused it with "Retry after 7.0s"; the new
-    // one has to hold it. Nothing else in this file would have caught the difference, because every
-    // other case puts its requests close together.
+  it("reproduces the production failure: 25 s after three offers, a fourth must still be HELD", async () => {
+    // This is the exact regression. 25 s is past the old 20 s window and well short of the measured
+    // 60 s one, so the old ledger sent this offer and Azure refused it; the new one has to hold it.
+    // Nothing else in this file would have caught the difference, because every other case puts its
+    // requests close together, where both windows behave identically.
     const videoRef = makeVideoRef();
     const sendOffer = vi.fn(() => Promise.resolve());
     const { result } = renderHook(() => useAvatarStream(videoRef));
 
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < 3; i++) {
       await act(async () => {
         void result.current.connect(ICE_SERVERS, sendOffer).catch(() => undefined);
       });
       await pushOfferOut();
     }
-    expect(sendOffer).toHaveBeenCalledTimes(2);
+    expect(sendOffer).toHaveBeenCalledTimes(3);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(25_000);
@@ -159,14 +173,14 @@ describe("documented avatar quota: 2 new connections per minute", () => {
     expect(
       sendOffer,
       "25 s is inside Azure's 60 s window: sending here is what produced the production error",
-    ).toHaveBeenCalledTimes(2);
+    ).toHaveBeenCalledTimes(3);
 
     // Released once the OLDEST request ages out, not a fixed delay after the attempt.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(36_000);
     });
     await pushOfferOut();
-    expect(sendOffer.mock.calls.length).toBeGreaterThanOrEqual(3);
+    expect(sendOffer.mock.calls.length).toBeGreaterThanOrEqual(4);
   });
 
   it("KNOWN LIMITATION: the ledger is per-mount, so two surfaces cannot protect each other", async () => {
@@ -183,13 +197,13 @@ describe("documented avatar quota: 2 new connections per minute", () => {
     const sendOffer = vi.fn(() => Promise.resolve());
 
     const first = renderHook(() => useAvatarStream(videoRef));
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < 3; i++) {
       await act(async () => {
         void first.result.current.connect(ICE_SERVERS, sendOffer).catch(() => undefined);
       });
       await pushOfferOut();
     }
-    expect(sendOffer).toHaveBeenCalledTimes(2); // allowance spent
+    expect(sendOffer).toHaveBeenCalledTimes(3); // allowance spent
 
     // A second surface, mounted fresh — the Playground, another tab, another candidate.
     const second = renderHook(() => useAvatarStream(makeVideoRef()));
@@ -202,6 +216,6 @@ describe("documented avatar quota: 2 new connections per minute", () => {
       "documents TODAY'S behaviour: the fresh ledger sends an offer Azure will refuse. If this ever " +
         "fails because the ledger became shared, that is an improvement — update the test, do not " +
         "widen the window",
-    ).toHaveBeenCalledTimes(3);
+    ).toHaveBeenCalledTimes(4);
   });
 });

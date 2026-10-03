@@ -20,13 +20,22 @@ import { act, renderHook } from "@testing-library/react";
 import { useAvatarStream } from "./useAvatarStream";
 
 const ICE_SERVERS = [{ urls: "stun:stun.example.com" }];
-/** Mirrors the module constant under test. Kept local on purpose: if someone widens the allowance in
- * the hook, these tests should fail and make them re-justify it — which is exactly what happened on
- * 2026-10-03. It was 20_000 here, mirroring an inference from "a third request inside roughly 20 s was
- * refused"; that inference was invalid (requests landing close together says nothing about the
- * window). Azure publishes **2 new connections per minute** for real-time avatar on S0, and Voice Live
- * avatars ride that quota rather than Voice Live's own 30/minute. See `docs/avatar-rate-limit.md`. */
+/** Mirrors the module constants under test. Kept local on purpose: if someone widens the allowance in
+ * the hook, these tests should fail and make them re-justify it — which is exactly what happened twice
+ * on 2026-10-03.
+ *
+ * First the window: it was 20_000 here, mirroring an inference from "a third request inside roughly
+ * 20 s was refused". That inference was invalid — requests landing close together says nothing about
+ * the window's length.
+ *
+ * Then both numbers were MEASURED against the live service, five sessions in separate browser contexts:
+ * three were accepted and the FOURTH refused with `rate_limit_exceeded`, and the two refusals' retry-
+ * after values both counted down to the first request's timestamp + 60 s (within half a second). So the
+ * window is 60 s and the allowance is 3 — one more than Azure publishes for S0.
+ * See `docs/avatar-rate-limit.md`. */
 const WINDOW_MS = 60_000;
+/** Measured allowance inside one window. Used below so the chain's shape is tied to the number. */
+const ALLOWANCE = 3;
 
 class FakePC {
   static instances: FakePC[] = [];
@@ -159,24 +168,33 @@ describe("avatar rate-limit allowance", () => {
     await pushOfferOut();
     expect(sendOffer).toHaveBeenCalledTimes(2);
 
-    // Attempt 2's table backoff is 1500 ms, but the allowance is now spent (2 requests inside the
-    // window), so the attempt MUST wait for the first request to age out instead. Before the fix a
-    // third offer went out here and Azure refused it.
+    // Attempt 2's table backoff is 1500 ms and the allowance still has room (2 requests so far, of a
+    // measured 3), so it goes out and becomes request 3.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2_000);
     });
     await pushOfferOut();
+    expect(sendOffer).toHaveBeenCalledTimes(ALLOWANCE);
+
+    // Attempt 3's table backoff is 3000 ms, but the allowance is now SPENT (3 requests inside the
+    // window — measured: Azure accepted three and refused the fourth with rate_limit_exceeded). So the
+    // attempt must wait for the first request to age out instead of being spent on a refusal. Before
+    // the ledger existed, this offer went out and Azure refused it, costing the attempt for nothing.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4_000);
+    });
+    await pushOfferOut();
     expect(
       sendOffer,
-      "a third avatar offer inside the rate-limit window would be refused, so it must not be sent",
-    ).toHaveBeenCalledTimes(2);
+      "a FOURTH avatar offer inside the window would be refused, so it must not be sent",
+    ).toHaveBeenCalledTimes(ALLOWANCE);
 
-    // Once the window has passed, the attempt proceeds.
+    // Once the window has passed, the attempt proceeds — a delay, not a silent drop.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(WINDOW_MS);
     });
     await pushOfferOut();
-    expect(sendOffer.mock.calls.length).toBeGreaterThanOrEqual(3);
+    expect(sendOffer.mock.calls.length).toBeGreaterThanOrEqual(ALLOWANCE + 1);
   });
 
   it("asks for audio-only when video self-heal is exhausted, rather than stranding the session", async () => {
