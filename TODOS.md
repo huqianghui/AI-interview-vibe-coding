@@ -27,6 +27,39 @@ real risk of changing behaviour, and it should be specified before it is attempt
 **Effort:** — (no action planned)
 **Priority:** P4 — leave unless a case starts owning state.
 
+## Avatar rate limit (docs/avatar-rate-limit.md)
+
+Azure allows **2 new avatar connections per minute** on S0, and Voice Live avatars ride that Speech
+quota rather than Voice Live's own 30/minute. The ledger's window was 20 s (an invalid inference) and
+is now the documented 60 s — fixed in v0.40.11.1. What is left:
+
+- [ ] **A rate-limit refusal should wait, not kick the candidate to text.** `useInterviewVoice`'s
+      pre-connect error branch calls `policy.latchFatal()` for every error, with the reasoning that
+      retrying `invalid_model` / an unsupported region is futile. Rate limiting is the opposite case:
+      Azure states the delay ("Retry after 7.0s."). Today the candidate who could have had the digital
+      human 7 seconds later gets a text interview instead. Needs a UX decision on what they see during
+      the wait — a "queuing" state, not an error.
+- [ ] **A dedicated rate-limit log.** Measured: this event is invisible on the Azure side — the usage
+      API has no avatar entry, `ClientErrors` stays 0, and `Ratelimit` is a gauge of the limit rather
+      than a count of refusals, because the refusal arrives in-band over the Voice Live WS and never
+      becomes an HTTP 4xx on the resource. Our app is the only possible observation point.
+- [ ] **The ledger is per-mount** (`avatarRequestsRef` is a `useRef`), so a reload, a second tab, the
+      editor Playground alongside the interview, or a SECOND CANDIDATE on the same resource all bypass
+      it. `sessionStorage` would cover the first three; two candidates needs a raised quota or
+      server-side queueing. Pinned by a test that asserts today's behaviour
+      (`useAvatarStream.quota.test.tsx`).
+- [ ] **Verify the 5-minute idle disconnect.** Documented: the real-time avatar API disconnects after
+      5 minutes idle or 30 minutes connected. A candidate thinking for over 5 minutes on one question
+      would be disconnected, and the reconnect then spends from the 2/minute allowance. Not yet
+      measured.
+- [ ] **Raising the quota: the evidence is contradictory, do not promise it.** The docs say these
+      text-to-speech limits "aren't adjustable" unless otherwise specified, and the avatar table
+      specifies no adjustment path; a Microsoft answerer on Q&A says to file a support request, but the
+      asker marked that answer unhelpful and reported finding no ticketing entry. Worth trying, not
+      worth planning around. The quota IS per resource (the table sits under "quotas and limits per
+      resource"), so splitting across resources is the other lever — unverified, and it would mean
+      choosing a resource per session.
+
 ## Interview (transcript UX)
 
 ### The candidate's own words do not stream onto the page
