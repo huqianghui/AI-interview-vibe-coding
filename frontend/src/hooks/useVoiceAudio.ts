@@ -259,6 +259,16 @@ export function useVoiceAudio() {
     playbackStatsRef.current = { underruns: 0, bufferedMs: 0, state: "filling" };
   }, []);
 
+  /** Tell the jitter buffer that Azure has finished sending this response's audio.
+   *
+   * Required for the underrun counter to mean anything: the worklet cannot tell a finished sentence
+   * from a stalled network — both just empty the queue — so without this every utterance would log
+   * an underrun. Wired to `response.audio.done`. Harmless if it never arrives: the next chunk clears
+   * the flag, so the only cost of a missed marker is one over-counted gap. */
+  const endPlaybackStream = useCallback(() => {
+    playbackNodeRef.current?.port.postMessage({ command: "end" });
+  }, []);
+
   const stopAudio = useCallback(() => {
     flushPlayback();
   }, [flushPlayback]);
@@ -296,6 +306,7 @@ export function useVoiceAudio() {
     playAudio,
     stopAudio,
     flushPlayback,
+    endPlaybackStream,
     getPlaybackStats,
     prepareAudioContext,
   };

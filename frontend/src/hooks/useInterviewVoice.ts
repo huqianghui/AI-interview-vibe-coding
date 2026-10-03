@@ -753,6 +753,12 @@ export function useInterviewVoice(
         case "response.audio.delta":
           if (msg.delta) audio.playAudio(msg.delta as string);
           break;
+        case "response.audio.done":
+          // The jitter buffer counts a dry queue as an underrun, and a finished sentence empties the
+          // queue exactly like a stalled network does. This is the only signal that tells the two
+          // apart, so without it the metric would fire once per utterance.
+          audio.endPlaybackStream();
+          break;
         case "response.audio_transcript.delta": {
           // Accumulate — consumers replace same-id segments, so a bare fragment would leave only
           // the newest word on screen. Emit the RUNNING text so the bubble grows as the

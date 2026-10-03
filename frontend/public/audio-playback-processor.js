@@ -79,6 +79,15 @@ class PlaybackProcessor extends AudioWorkletProcessor {
 
     this.underruns = 0;
     this.sinceStats = 0;
+    /** Set by the main thread when Azure says the response's audio is complete
+     * (`response.audio.done`). Cleared by the next chunk that arrives.
+     *
+     * Without it the counter is useless, which a test caught before this shipped: from inside the
+     * worklet, "the sentence ended" and "the network stalled" are the same event — the queue goes
+     * empty — so a run of normal speech would have logged one underrun PER UTTERANCE and the metric
+     * P0-2 is judged by would have measured nothing. The main thread is the only side that knows
+     * which it was. */
+    this.endOfStream = false;
 
     this.port.onmessage = (e) => {
       const data = e.data;
@@ -87,7 +96,13 @@ class PlaybackProcessor extends AudioWorkletProcessor {
         if (chunk.length > 0) {
           this.queue.push(chunk);
           this.queued += chunk.length;
+          // More audio is coming after all — whatever drain follows is a stall, not an ending.
+          this.endOfStream = false;
         }
+        return;
+      }
+      if (data.command === "end") {
+        this.endOfStream = true;
         return;
       }
       if (data.command === "flush") {
@@ -98,6 +113,7 @@ class PlaybackProcessor extends AudioWorkletProcessor {
         this.offset = 0;
         this.queued = 0;
         this.underruns = 0;
+        this.endOfStream = true;
         if (this.state === "playing") {
           this.state = "ramping-out";
           this.fadeOut = this.rampSamples;
@@ -140,8 +156,9 @@ class PlaybackProcessor extends AudioWorkletProcessor {
         this.lastSample = s;
         return s;
       }
-      // Ran dry mid-speech. Count it once per gap, not once per silent sample.
-      this.underruns++;
+      // Ran dry. Count it ONLY if audio was still expected — one per gap, not per silent sample.
+      // An expected ending drains the same way and must not be counted (see `endOfStream`).
+      if (!this.endOfStream) this.underruns++;
       this.state = "ramping-out";
       this.fadeOut = this.rampSamples;
     }
