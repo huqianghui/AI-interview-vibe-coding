@@ -84,7 +84,7 @@ Voice unavailable: Avatar request was rate-limited. Retry after 7.0s. — you ca
 | 9 | **排除项**：Foundry Quota 页的 3 RPM 就是 `OpenAI.Standard.tts` / `tts-hd`（API 数字完全对上），与本问题无关 | owner 截图 + usages API + 代码 |
 | 11 | **关掉数字人则完全不碰这个限制**：31 秒内 5 个纯语音会话，avatar offer 0、限流 0 | 实测 |
 | 12 | **纯语音：新建 ≥120 次/分钟、并发 ≥60 条，均零失败未触顶**（文档称 30 次/分钟、无并发行）。关掉数字人并发差 12 倍以上 | 实测 |
-| 13 | Foundry 那个 3 RPM 属于 **Azure OpenAI** 的 tts-hd（宿主资源 kind=OpenAI），不是 Speech 的 TTS；两个「3」是巧合 | 实测 |
+| 13 | Foundry 那个 3 RPM 属于 **Azure OpenAI** 的 tts-hd —— 部署元数据 `format: OpenAI` 直接写明发布方；Speech 的 TTS 是另一个产品、是服务能力、没有配额行。两个「3」是巧合 | 实测（部署元数据） |
 | 10 | **框架**：avatar 不是一个服务、而是 Speech 的附属能力——第 1、5、6、8 条都是它的推论，所以不要把它当成「可申请扩容的配额」 | owner 指出 |
 | 14 | 关闭**不**退还速率额度：三个全关后立刻新建仍被拒，且倒计时锚定第一次**创建**时刻（50+23 = 73 ≈ 12+60 = 72） | 实测 |
 | 16 | Azure 自己的词汇把两者分开：并发 = `avatar_service_resource_exhausted` + "maximum processing capacity"（容量陈述）；速率 = `rate_limit_exceeded` / `invalid_request_error`（纯限流，无容量措辞）。**「为何另设速率限制」我不知道，早先编的理由已撤回** | 实测（词汇）+ 明确未知 |
@@ -293,11 +293,37 @@ limiting" 同时是 0%。）
 | `OpenAI.Standard.tts-hd limit=3` | **Count** | **Azure OpenAI** 的 TTS 模型部署**容量分配**（已分配 3/3） | Foundry Quota 页、usages API |
 | 实测"3 次被接受、第 4 次被拒 / 60 秒" | **连接/60 秒** | **avatar 的新建连接速率** | **哪里都看不到**，只能实测 |
 
-而且那个 `tts-hd` 确实属于 **Azure OpenAI，不是 Speech 的 TTS**，三条独立证据：
+而且那个 `tts-hd` 确实属于 **Azure OpenAI，不是 Speech 的 TTS**。最直接的证据是 Azure 自己的部署元数据
+里的 `format` 字段（**发布方**），不是从名字推断的：
+
+```
+deployment: tts-hd    model: tts-hd    format: OpenAI    version: 001    sku: Standard    capacity: 3
+```
+
+另有三条佐证：
 
 1. 配额命名空间是 `OpenAI.*`，和 `OpenAI.GlobalStandard.gpt-4o` 同一族；
 2. 宿主资源 `openAI-hu-SwendenCentral` 的 **kind 是 `OpenAI`**；
 3. 应用实际用的 `ai-foundary-hu-sweden-central2`（kind `AIServices`）上**没有任何 tts 部署**。
+
+### 为什么同一个"文本转语音"会分成两个产品
+
+owner 问了"为什么 tts 是 OpenAI 的而不是 Azure Speech 的"。因为它们本来就是**两个不同产品**：
+
+| | Azure OpenAI 的 `tts` / `tts-hd` | Azure Speech 的 TTS |
+|---|---|---|
+| 发布方 | **OpenAI**（`format: OpenAI`） | **微软自己** |
+| 本体 | OpenAI 的 TTS 模型（对应其 `tts-1` / `tts-1-hd`） | 神经音色，如 `en-US-AvaNeural` |
+| 怎么用 | **部署成一个模型**，与 `gpt-4o` 同一套机制 | 服务能力，走 Speech SDK / REST |
+| 资源 kind | `OpenAI` | `AIServices` / `SpeechServices` |
+| 有配额行吗 | **有**，按部署计 RPM（所以 Quota 页看得到） | **没有**，因为没有"部署"这回事 |
+
+Azure OpenAI Service 的定位是**托管 OpenAI 的模型**，所以 OpenAI 的 TTS 到了 Azure 上就成了一个可部署的
+模型、带 RPM 配额。Speech 的 TTS 是微软自己的产品线、是**服务能力**——没有东西可部署，配额体系里就没有
+它的行。
+
+**这与"数字人没有配额行"是同一个结构性原因**（见本文开头的框架一节）：Speech 的能力都不是配额对象。
+我们用的恰好是 Speech 这一侧（`voice.type = "azure-standard"`），所以那两个 3 RPM 与本项目无关。
 
 **Speech 自己的神经音色（`en-US-AvaNeural` 这类，我们用的就是这个）在那 287 项配额里一条都没有**——
 与"Speech 的能力不是配额对象"完全一致。
