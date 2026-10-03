@@ -52,7 +52,13 @@ is now the documented 60 s — fixed in v0.40.11.1. What is left:
       5 minutes idle or 30 minutes connected. A candidate thinking for over 5 minutes on one question
       would be disconnected, and the reconnect then spends from the 2/minute allowance. Not yet
       measured.
-- [ ] **Raising the quota** is a support request on the Speech/AI resource (no self-service blade).
+- [ ] **Raising the quota: the evidence is contradictory, do not promise it.** The docs say these
+      text-to-speech limits "aren't adjustable" unless otherwise specified, and the avatar table
+      specifies no adjustment path; a Microsoft answerer on Q&A says to file a support request, but the
+      asker marked that answer unhelpful and reported finding no ticketing entry. Worth trying, not
+      worth planning around. The quota IS per resource (the table sits under "quotas and limits per
+      resource"), so splitting across resources is the other lever — unverified, and it would mean
+      choosing a resource per session.
 
 ## Interview (transcript UX)
 

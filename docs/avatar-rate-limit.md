@@ -18,7 +18,7 @@ Voice unavailable: Avatar request was rate-limited. Retry after 7.0s. — you ca
 | 3 | 限流账本只存在内存里、每次挂载重置 → "Start over"、刷新、新标签页都绕过它 | 代码 |
 | 4 | pre-connect 的限流被当成**永久失败**，直接把候选人踢到文字模式 | 代码 |
 | 5 | **Azure 侧看不到这个事件**：usage API 无此项、`ClientErrors` 为 0、`Ratelimit` 是限值量规不是计数器 | 实测 |
-| 6 | 提配额只能开支持票，没有自助配额页 | 文档 + MS Q&A |
+| 6 | **能不能提，证据是矛盾的**：文档说这类限制"除另有说明外不可调整"，而 avatar 表没给调整途径 | 文档 + MS Q&A |
 
 ---
 
@@ -136,20 +136,30 @@ HTTP 4xx**，所以不计入 `ClientErrors`，也不进配额指标。
 
 ---
 
-## 6. 怎么提高
+## 6. 怎么提高：**证据是矛盾的，不要承诺能提**
 
-没有自助配额页。按文档与
-[MS Q&A 上的同一问题](https://learn.microsoft.com/en-us/answers/questions/2258596/increase-the-limit-of-concurrent-users-in-speech-s)：
+先说清配额的作用范围：avatar 这两张表位于文档的 **"Text-to-speech quotas and limits **per resource**"**
+之下，所以 **2 次/分钟是按单个 Speech / AI 资源算的**。
 
-1. Azure Portal → 该 **Speech / AI Services 资源**
-2. **Support + troubleshooting** → **New support request**
-3. 说明当前用量与期望的并发/新建连接配额
+**能不能提，两个来源互相矛盾：**
 
-Q&A 里另一位用户确认了同一个数字：*"I am in the S0 plan of PAYG where the quota limit for Azure AI
-Speech Services AI Avatar is **2 connections per minute**"*。
+| 来源 | 说法 |
+|---|---|
+| 官方文档，同一节开头 | *"Unless otherwise specified, the limits aren't adjustable."* 而 **avatar 表没有标注任何调整途径** |
+| [MS Q&A 上同一个问题](https://learn.microsoft.com/en-us/answers/questions/2258596/increase-the-limit-of-concurrent-users-in-speech-s)，微软方回答 | Portal → 资源 → Support + troubleshooting → New support request，说明当前用量与期望配额 |
 
-**在配额提上来之前**，产品侧能做的只有少花配额：复用会话（别反复重建）、把账本改对（第 2 条）、
-并在撞上时按 Azure 给的秒数等待重试而不是降级（第 4 条）。
+而且那个帖子里提问者**把这个回答标记为"没有帮助"**，并补充说 *"I am in the S0 plan of PAYG where the
+quota limit for Azure AI Speech Services AI Avatar is 2 connections per minute. Is there a way to
+increase this? I am unable to find any ticket-raising system in MS Azure Dashboard."*（这条也顺带
+**第二次确认了 2 次/分钟这个数字**。）
+
+**所以：开支持票值得一试，但不要把它当成确定可行的方案。** 在确认之前，可靠的杠杆只有两个：
+
+1. **少花配额** —— 复用会话别反复重建、把账本改对（第 2 条）、撞上时按 Azure 给的秒数等待重试而不是
+   降级（第 4 条）、避免管理员 Playground 与候选人面试同时开。
+2. **按资源横向拆分** —— 既然配额是按资源的，多个 Speech/AI 资源各有各的 2 次/分钟。对"多候选人并发"
+   这个场景，这比等配额更现实；代价是要按会话选资源，`service_configs` 已经是按行存的，有扩展空间。
+   **未验证**，列为设计选项而非结论。
 
 ---
 
