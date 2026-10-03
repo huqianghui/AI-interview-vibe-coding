@@ -292,6 +292,16 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalL,
     minWidth: 0,
     minHeight: 0,
+    // SAFETY NET, and it is load-bearing. Capping the grid row at minmax(0, 1fr) stops a long
+    // transcript from pushing the columns past the viewport, but a capped row plus the shell's
+    // `overflow: hidden` means anything that still does not fit is not cramped, it is CLIPPED AND
+    // UNREACHABLE. CI caught exactly that: at Playwright's 1280x720 the resumed interview (whose
+    // transcript already holds the first answer) pushed the answer textarea out of the row, and
+    // `candidate-interview.spec.ts:171` could not see it. The transcript shrinking is the intended
+    // relief valve (see transcriptFill), but it cannot cover the case where the question card and
+    // the answer controls alone exceed the row. Letting this column scroll means the question and
+    // the answer box are always reachable, whatever the viewport.
+    overflowY: "auto",
   },
   questionCard: {
     display: "flex",
@@ -311,7 +321,13 @@ const useStyles = makeStyles({
   // Wrapper that lets the transcript flex-grow and scroll internally (auto-fit, no fixed height).
   transcriptFill: {
     flex: 1,
-    minHeight: "120px",
+    // Was a hard `minHeight: 120px`, which fought the whole point of capping the grid row: the
+    // transcript is the column's relief valve (P11 rule #4 — transcript is SECONDARY to the
+    // question and the controls), and a floor stops it relieving anything. It keeps a comfortable
+    // 120px wherever there is room via flex-basis, but it is now allowed to collapse rather than
+    // squeeze the answer box out of a short viewport.
+    flexBasis: "120px",
+    minHeight: 0,
     display: "flex",
     flexDirection: "column",
   },

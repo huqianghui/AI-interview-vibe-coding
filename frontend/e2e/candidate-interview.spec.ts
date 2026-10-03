@@ -166,8 +166,26 @@ test("candidate resumes an in-progress interview after a page reload (F6 edge b)
 
   await page.reload();
 
-  // Resumes straight into the interview (question + answer box), NOT back to the Start screen.
+  // Resumes straight into the interview, NOT back to the Start screen. THIS is the assertion the
+  // test exists for, and it does not depend on which answer channel the resumed page lands in.
   await expect(page.getByTestId("question-progress")).toBeVisible();
-  await expect(page.getByRole("textbox")).toBeVisible();
   await expect(page.getByRole("button", { name: /开始面试|start interview/i })).toHaveCount(0);
+
+  // Only THEN check the answer box, and put the page in text mode first.
+  //
+  // Why this is needed: when the persona is voice-default the resumed page legitimately opens in
+  // the VOICE channel, and voice mode renders voice controls instead of a textarea — so asserting
+  // a textbox straight after the reload was really asserting "voice failed over to text within
+  // 10s". In CI the Voice Live proxy does fail (`No module named 'azure'`, the azure SDK is not a
+  // CI dependency), but WHETHER `voice.connect()` resolves before that failure arrives is a race:
+  // the WS opens successfully first, and `InterviewPage`'s self-heal effect pulls the channel back
+  // to voice on any connected state. The pre-reload half of this test already guards against the
+  // same thing with `continueByTextIfAsked`; the post-reload half did not.
+  //
+  // So the channel is now chosen explicitly rather than waited on. The segmented control is always
+  // rendered during a live interview and "Answer by text" is never disabled.
+  const useTextTab = page.getByRole("button", { name: /改用文字|answer by text/i });
+  if (await useTextTab.isVisible().catch(() => false)) await useTextTab.click();
+  await continueByTextIfAsked(page);
+  await expect(page.getByRole("textbox")).toBeVisible();
 });
