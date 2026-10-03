@@ -72,6 +72,14 @@ failures, and zero avatar offers. That is the workaround for dense testing. What
       and connected successfully **36 s after A's first creation** — inside A's 60 s window, from the same
       machine, IP, Entra credential and subscription. So per-IP and per-subscription are ruled out and
       "split across resources" genuinely works: each resource gets its own 5 concurrent + 3 per 60 s.
+- [ ] **Verify the SCOPE of the CONCURRENCY limit (the rate limit's scope is settled, this one is not).**
+      The per-resource test only exercised the rate limit: exhaust A's rate allowance, switch endpoint,
+      B works. That cannot be repeated for concurrency, because switching endpoints restarts the backend
+      and killing A's sessions FREES its concurrency — the experiment destroys itself. It needs two
+      backends running at once (a second backend on :8001 with its own DB copy pointing at resource B,
+      plus a second vite on :5174 via `E2E_API_TARGET`), then fill A to 5 and try B. This decides whether
+      adding resources raises the ceiling on CONCURRENT interviews, which is the binding production
+      constraint — more important than the rate limit.
 - [ ] **Verify the 5-minute idle disconnect.** Documented: the real-time avatar API disconnects after
       5 minutes idle or 30 minutes connected. A candidate thinking for over 5 minutes on one question
       would be disconnected, and the reconnect then spends from the 2/minute allowance. Not yet
