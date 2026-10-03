@@ -31,6 +31,17 @@ export const palette = {
   ink: "#4A2680",
   inkStrong: "#3A1D66",
 
+  /**
+   * Action colour: buttons, links, focus rings. This is the SAME value as `foundryPurple[80]`,
+   * and theme.test.ts asserts they stay equal — Fluent derives colorBrandBackground and its
+   * hover/pressed states from the ramp, so if the two drift the page ends up with two slightly
+   * different purples (Fluent controls on one, our own makeStyles rules on the other) and nothing
+   * points at the cause. Named here so a component that needs the colour directly has a token
+   * instead of a literal.
+   */
+  action: "#5C2E91",
+  actionHover: "#4A2375",
+
   /** Accents. `magenta` marks "this is the live/current item"; `cyan` is reserved for LIVE. */
   violet: "#8764B8",
   magenta: "#C239B3",
