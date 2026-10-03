@@ -21,6 +21,7 @@ Two pieces, split the same way as the rest of this codebase's Azure integrations
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 from typing import Any
@@ -39,6 +40,7 @@ from app.services.azure_auth import COGNITIVE_SERVICES_SCOPE, get_azure_credenti
 logger = logging.getLogger(__name__)
 
 PROXY_CONNECTED_TYPE = "proxy.connected"
+AUDIO_APPEND_TYPE = "input_audio_buffer.append"
 ERROR_TYPE = "error"
 
 # Human-readable names for the locales the UI offers (frontend/src/i18n.ts SUPPORTED_LANGUAGES).
@@ -503,6 +505,15 @@ async def run_proxy(
                         # re-derived avatar_enabled) so this can never disagree with what Azure was
                         # actually told. The page compares it with its own mic capture rate.
                         "input_audio_sampling_rate": session["input_audio_sampling_rate"],
+                        # Capability flag, not a preference: a page that sees it sends mic audio as
+                        # BINARY frames and lets this side do the base64 (see build_audio_append).
+                        # It has to be negotiated rather than assumed because the frontend and the
+                        # backend are separate container apps that roll out independently — a new
+                        # page against a backend one revision behind would send binary frames that
+                        # the old relay rejects, and the candidate's microphone would go silently
+                        # dead. Absent ⟹ the page keeps using base64 JSON, which this side still
+                        # accepts, so neither rollout order can break voice.
+                        "binary_audio": True,
                     }
                 )
             )
@@ -531,15 +542,46 @@ async def _relay(
             pass
 
 
+def build_audio_append(pcm: bytes) -> dict[str, str]:
+    """Wrap raw PCM16 mic bytes into the Voice Live ``input_audio_buffer.append`` client event.
+
+    This is the server half of the binary uplink (perf review P0-1). Azure's own protocol has no
+    binary audio frame — ``audio`` is a base64 string — so base64 is unavoidable on the Azure hop.
+    What IS avoidable is paying for it on the BROWSER hop as well: the page used to base64-encode
+    every batch and wrap it in JSON itself, so the candidate's upstream carried base64's +1/3 plus
+    a JSON envelope. Moving both to this side means the browser sends the 1280 raw bytes it already
+    has and this function does the encoding, on a server with bandwidth to spare.
+
+    Kept as a pure function (and unit-tested) because the relay around it cannot be: it needs a live
+    Azure socket.
+    """
+    return {"type": AUDIO_APPEND_TYPE, "audio": base64.b64encode(pcm).decode("ascii")}
+
+
 async def _forward_client_to_azure(
     ws: WebSocket, conn: Any, connection_closed: type
 ) -> None:  # pragma: no cover — live relay
-    """Browser -> Azure: parse each client frame and forward it as a Voice Live client event."""
+    """Browser -> Azure: forward each client frame as a Voice Live client event.
+
+    TEXT frames are Voice Live client events, forwarded verbatim. BINARY frames are raw PCM16 mic
+    audio and are wrapped by :func:`build_audio_append` — see there for why the browser no longer
+    does its own base64.
+
+    Uses the raw ``receive()`` rather than ``receive_text()`` because the latter rejects a binary
+    frame outright; the disconnect message it would have raised on is handled here instead.
+    """
     try:
         while True:
-            message = await ws.receive_text()
-            parsed = json.loads(message)
-            await conn.send(parsed)
+            message = await ws.receive()
+            if message.get("type") == "websocket.disconnect":
+                break
+            text = message.get("text")
+            if text is not None:
+                await conn.send(json.loads(text))
+                continue
+            data = message.get("bytes")
+            if data:
+                await conn.send(build_audio_append(data))
     except (WebSocketDisconnect, connection_closed):
         logger.debug("Voice Live proxy: client->Azure forwarding stopped")
     except Exception as exc:
