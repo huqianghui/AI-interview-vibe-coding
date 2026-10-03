@@ -67,14 +67,11 @@ failures, and zero avatar offers. That is the workaround for dense testing. What
       it. `sessionStorage` would cover the first three; two candidates needs a raised quota or
       server-side queueing. Pinned by a test that asserts today's behaviour
       (`useAvatarStream.quota.test.tsx`).
-- [ ] **HIGH: verify the limits' SCOPE — per resource, per IP, per subscription, or per credential?**
-      Every experiment so far used the same resource, the same credential and the same source IP, so it
-      cannot tell them apart. The docs point at per-resource (the avatar tables sit under "quotas and
-      limits per resource") but that is documentary, not measured. **This matters because the
-      "split across resources" recommendation rests entirely on it** — if the limits are per IP or per
-      subscription, adding resources buys nothing, and note the production app egresses through a single
-      static NAT IP. To test: point the backend at a second Azure resource and use it immediately after
-      exhausting the first.
+- [x] **~~Verify the limits' SCOPE~~ — settled: PER RESOURCE, measured.** Exhausted resource A's
+      allowance (3 concurrent), switched the endpoint to a second AIServices/S0/swedencentral resource,
+      and connected successfully **36 s after A's first creation** — inside A's 60 s window, from the same
+      machine, IP, Entra credential and subscription. So per-IP and per-subscription are ruled out and
+      "split across resources" genuinely works: each resource gets its own 5 concurrent + 3 per 60 s.
 - [ ] **Verify the 5-minute idle disconnect.** Documented: the real-time avatar API disconnects after
       5 minutes idle or 30 minutes connected. A candidate thinking for over 5 minutes on one question
       would be disconnected, and the reconnect then spends from the 2/minute allowance. Not yet
