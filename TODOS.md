@@ -190,6 +190,10 @@ candidates, which is the client's whole user base); 390px has no horizontal page
 only the live voice state; the live screen fits exactly one viewport at 1440x900; and below 560px of
 viewport height it scrolls instead of clipping the controls.
 
+Same backend dependency, same trip: **all 8 README screenshots now predate v0.41.0.0** and show
+the previous appearance (`e2e/readme-screenshots.spec.ts` regenerates them; README carries a note
+saying so in the meantime). One of them was already annotated as stale since v0.39.3.0.
+
 **Effort:** human: ~1 day / CC: ~1h once a seeded candidate account and a running backend are available.
 **Priority:** P1 — the provider-transparency one is a silent regression into a user-visible defect.
 
