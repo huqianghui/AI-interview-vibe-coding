@@ -35,8 +35,11 @@ timestamp + 60 s. The ledger is now 3 per 60 s (v0.40.11.2); it was 2 per 20 s, 
 
 **There is no quota object to request** — verified four ways (resource usage API, Monitor metrics,
 `Microsoft.Quota` provider, regional usages API: 287 items, none avatar or speech). Treat it as a fixed
-service-side throttle, not an allocatable quota. **Turning the avatar off avoids it entirely** (measured:
-5 voice-only sessions in 31 s, zero avatar offers, zero refusals). What is left:
+service-side throttle, not an allocatable quota.
+
+**Turning the avatar off avoids it entirely, and voice-only has no practical ceiling**: measured 40
+voice-only sessions launched in 20 s (~120 new connections/minute, 4x the documented 30) with zero
+failures, and zero avatar offers. That is the workaround for dense testing. What is left:
 
 - [ ] **A rate-limit refusal should wait, not kick the candidate to text.** `useInterviewVoice`'s
       pre-connect error branch calls `policy.latchFatal()` for every error, with the reasoning that
