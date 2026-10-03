@@ -15,6 +15,7 @@ import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import "../i18n";
 import i18n from "../i18n";
 import { InterviewPage } from "./InterviewPage";
+import { palette } from "../theme";
 import * as client from "../api/client";
 
 function renderPage() {
@@ -175,12 +176,22 @@ describe("InterviewPage manual video/audio-only toggle", () => {
   it("asks Azure to paint the stage colour behind EVERY avatar, not just photo ones", async () => {
     // Before this, `avatar_bg` came only from the photo roster's measured thumbnail backdrop, so a
     // VIDEO avatar got nothing and Azure kept its own studio wall — a rectangle in a colour the page
-    // never chose. The value is the theme's surface colour, which is what actually paints behind the
-    // transparent stage (verified against the live deployment: only `.fui-FluentProvider` has a
-    // background, `rgb(255,255,255)`).
+    // never chose.
+    //
+    // The invariant under test is "the wall Azure paints equals the colour actually behind the
+    // transparent stage", NOT any particular hex. It used to be `webLightTheme`'s
+    // colorNeutralBackground1, because the FluentProvider root painted white and nothing else had a
+    // background. With the 2026-10-03 theme refresh the provider root is transparent and the ground
+    // is painted on html/body (styles/global.css), so the colour behind the stage is
+    // `palette.ground` — and colorNeutralBackground1 is now the warm CARD surface, one shade
+    // lighter. Asserting the card token here would let a visible rectangle back around the digital
+    // human, so the assertion follows the ground.
     const { hookSpy } = await startOnVoiceQuestion(baseVoiceMock());
     // `useInterviewVoice(sessionId, options)` — the options are the SECOND argument.
     const options = hookSpy.mock.calls.at(-1)?.[1] as { avatarBackground?: string } | undefined;
-    expect(options?.avatarBackground).toBe(webLightTheme.colorNeutralBackground1);
+    expect(options?.avatarBackground).toBe(palette.ground);
+    // And it must be a full six-digit hex: `buildWsUrl` strips the '#' and validates the digits,
+    // so a token that ever resolved to `rgb()` or a 3-digit shorthand would be dropped silently.
+    expect(options?.avatarBackground).toMatch(/^#[0-9A-Fa-f]{6}$/);
   });
 });

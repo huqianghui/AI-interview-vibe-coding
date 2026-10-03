@@ -1,7 +1,7 @@
 # UI refresh: "Warm Editorial / Foundry Purple" (approved design direction)
 
-**Date:** 2026-10-03 · **Skill:** `/design-shotgun` · **Status:** direction approved, not yet
-implemented · **Artifacts:** `~/.gstack/projects/huqianghui-AI-interview-vibe-coding/designs/ui-refresh-20261003/`
+**Date:** 2026-10-03 · **Skill:** `/design-shotgun` · **Status:** direction approved **and
+implemented** (see §5) · **Artifacts:** `~/.gstack/projects/huqianghui-AI-interview-vibe-coding/designs/ui-refresh-20261003/`
 
 The owner's complaint was that the candidate-facing UI reads neither professional nor fashionable:
 "这些页面都很窄，看着都集中在中间，颜色，色调等等都和不专业和fashion". This document records what was
@@ -20,9 +20,15 @@ Half of it was not taste. It was layout defects.
 | 3 | `Restart` / `Sign out` sit in a bare `<div>` with **no gap and no vertical spacing**, at `size="small"` while everything else is default — reads as debug buttons that leaked out | `InterviewPage.tsx:1443-1448` |
 | 4 | The orientation primary button is stretched **full width by accident** — Fluent `Card` is a flex column with `align-items: stretch` | `InterviewPage.tsx:1466` |
 | 5 | The header is an **inline-styled flex with only a language dropdown**, `justify-content: flex-end` — no bar, no logo, no divider, so the control floats in a ~150px dead band | `frontend/src/App.tsx:12-20` |
-| 6 | `webLightTheme` used bare: Fluent's default blue `#0F6CBD` plus Fluent's light-blue **filled** inputs, one font (Segoe UI), hierarchy from size only, zero depth, no visual anchor | `frontend/src/App.tsx:11` |
+| 6 | `webLightTheme` used bare: Fluent's default blue `#0F6CBD`, one font (Segoe UI), hierarchy from size only, zero depth, no visual anchor | `frontend/src/App.tsx:11` |
+| 7 | **Chrome's autofill** repaints a prefilled field with its own `#E8F0FE` light blue, overriding every Fluent token. Two prefilled fields were enough to make the sign-in screen read like a Windows form | browser behaviour, not app code |
 
-Items 1-5 are bugs. Item 6 is the design-language gap.
+Items 1-5 are bugs. Item 6 is the design-language gap. Item 7 is a correction to this document's
+first draft, which blamed the light-blue input fill on "Fluent's default filled inputs" — that was
+wrong, and it changed the fix. Verified: Fluent `Input`'s default appearance IS `outline` and it
+paints `colorNeutralBackground1`, which in `webLightTheme` is `#ffffff`. The blue was Chrome. So
+the fix is a `:-webkit-autofill` override, not an appearance change; without it the new warm theme
+would still be repainted light blue on exactly the screen the owner complained about.
 
 ## 2. Directions explored and why three were cut
 
@@ -86,7 +92,41 @@ Two layout traps found while building the mockup and worth carrying into the imp
   (651px) pushed the row past the available 628px and both cards overflowed the viewport by 23px.
   The row must be `minmax(0, 1fr)`.
 
-## 5. Implementation plan (not yet done)
+## 5. What shipped
+
+All of the plan below landed in the same change. Gates at the time of writing: `vitest` 50 files /
+569 tests green, `tsc --noEmit` clean, `eslint --max-warnings 0` clean. Verified in the running app
+at 1440×900 and 390px: one `<h1>` on the page (was two), `document.body` background
+`rgb(245,241,234)`, the primary button `rgb(92,46,145)`, both self-hosted faces reporting
+`status: loaded`, and no horizontal overflow at 390px.
+
+New files: `frontend/src/theme.ts` (palette, font stacks, brand ramp, token overrides, layout
+scale), `frontend/src/components/AppShell.tsx` (header band + the four measures),
+`frontend/src/styles/global.css` (self-hosted `@font-face`, page ground, autofill override,
+reduced-motion), `frontend/public/fonts/*.woff2`.
+
+Three things differ from the original plan and are worth recording:
+
+- **Fonts are self-hosted, not a `fonts.googleapis.com` link.** This product is delivered into
+  client tenants whose candidates sit in mainland China, where Google Fonts is unreachable — a CDN
+  link there silently falls back to a system font and collapses the typographic direction exactly
+  where the client is. Three latin-subset variable `woff2` files, 206 KB total, served from our own
+  origin. Neither face carries CJK, so Chinese resolves through the fallback chain by design
+  (Latin → Bricolage/Literata, Chinese → PingFang SC / Microsoft YaHei), made explicit with
+  `unicode-range`.
+- **A fourth measure, `reading` (760px), exists.** 760px was never wrong *as a measure* — ~75
+  characters is right for prose. The defect was that it was one of three widths nested inside each
+  other. It is now a named choice in `layout`, used by orientation / review / scoring / report.
+- **`avatarBackground` now reads `palette.ground`, not `colorNeutralBackground1`.** The mechanism
+  that tells Azure what colour to paint behind the digital human read the Fluent surface token,
+  because the FluentProvider root used to paint the page white. That root is transparent now and
+  the ground is painted on `html`/`body`, so the surface token is one shade lighter than what is
+  actually behind the stage — reading it would have put a visible rectangle back around the
+  interviewer, the exact defect the mechanism exists to prevent. The guarding test
+  (`InterviewPage.videoToggle.test.tsx`) was updated to assert the ground and to additionally
+  require a six-digit hex, since `buildWsUrl` silently drops anything else.
+
+### The plan as executed
 
 1. Replace bare `webLightTheme` with `createLightTheme` + a `BrandVariants` ramp generated from
    `#5C2E91`, plus token overrides for ground/surface/line/text (`frontend/src/App.tsx:11`).
