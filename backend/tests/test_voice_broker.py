@@ -10,7 +10,10 @@ import pytest
 from app.config import get_settings
 from app.services import persona_service as psvc
 from app.services import voice_broker
-from app.services.agents.voice_live_metadata import PHOTO_AVATAR_SCENE_ZOOM
+from app.services.agents.voice_live_metadata import (
+    PHOTO_AVATAR_SCENE_POSITION_Y,
+    PHOTO_AVATAR_SCENE_ZOOM,
+)
 from app.services.voice_broker import VoiceAgentNotSynced, VoiceUnavailable
 from app.services.voice_providers import MockVoiceProvider, get_voice_provider
 from app.utils.azure_endpoints import endpoint_host, to_cognitive_services_endpoint
@@ -228,8 +231,12 @@ async def test_voice_session_photo_avatar_keeps_photo_shape_after_video_injectio
         "model": "vasa-1",
         "character": "adrian",
         "customized": False,
-        # Photo avatars are pulled back in frame so the shoulders and clothing are visible, the
-        # composition the editor's portrait promises — see PHOTO_AVATAR_SCENE_ZOOM.
-        "scene": {"zoom": PHOTO_AVATAR_SCENE_ZOOM},
+        # Photo avatars are pulled back AND panned up so the shoulders and clothing are visible,
+        # the composition the editor's portrait promises. Both levers, because zoom alone does not
+        # work on a bottom-anchored subject — see PHOTO_AVATAR_SCENE_ZOOM.
+        "scene": {
+            "zoom": PHOTO_AVATAR_SCENE_ZOOM,
+            "position_y": PHOTO_AVATAR_SCENE_POSITION_Y,
+        },
         "video": {"codec": "h264"},
     }
