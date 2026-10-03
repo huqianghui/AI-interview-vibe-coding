@@ -48,9 +48,10 @@ A support request now has something concrete to name: raise **concurrent avatar 
 `avatar_service_resource_exhausted`. That is what the MS Q&A thread "Increase the limit of concurrent
 users in Speech Services avatar" is about; the quota APIs still expose no row for it.
 
-**Turning the avatar off avoids it entirely, and voice-only has no practical ceiling**: measured 40
-voice-only sessions launched in 20 s (~120 new connections/minute, 4x the documented 30) with zero
-failures, and zero avatar offers. That is the workaround for dense testing. What is left:
+**Turning the avatar off avoids it entirely, and voice-only has no ceiling at this app's scale**: measured
+**≥120 new connections/minute** (40 launched in 20 s, 4x the documented 30) AND **≥60 concurrent held
+sessions**, both with zero failures and zero avatar offers. Against the avatar's 5 concurrent that is a
+**12x difference** — the avatar is the only genuinely scarce resource here. What is left:
 
 - [ ] **A rate-limit refusal should wait, not kick the candidate to text.** `useInterviewVoice`'s
       pre-connect error branch calls `policy.latchFatal()` for every error, with the reasoning that
