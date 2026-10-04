@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { primeCandidateLogin } from "./helpers/candidateLogin";
+import { continueByTextIfAsked } from "./helpers/micDialog";
 
 /**
  * Admin editor + scored report + voice-fallback E2E (SPEC F2b/F3b/F4/F8/F9).
@@ -65,6 +66,7 @@ test("admin authors a bank + checklist, candidate gets a scored report", async (
   await page.goto("/interview");
   await page.getByRole("button", { name: /开始面试|start interview/i }).click();
   await page.getByRole("button", { name: /我准备好了|i'm ready/i }).click();
+  await continueByTextIfAsked(page);
   await expect(page.getByRole("textbox")).toBeVisible();
 
   for (let i = 0; i < 20; i++) {

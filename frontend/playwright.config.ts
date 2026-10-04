@@ -29,6 +29,17 @@ export default defineConfig({
   use: {
     baseURL: `http://localhost:${FRONTEND_PORT}`,
     trace: "on-first-retry",
+    // Bound every action and API request. The default is 0 — UNLIMITED — so a locator that matches
+    // nothing waits for ever, and wrapping it in `.catch(() => "")`, a common best-effort idiom,
+    // hides the hang completely: the test burns its whole budget on that line and then reports a
+    // failure at some LATER assertion, on a page that renders correctly. That cost PR #154 three
+    // consecutive 180 s timeouts, and the trace's 176-second gap was the only thing that located it
+    // (`e2e/candidate-interview.spec.ts`, the follow-up-citation read).
+    //
+    // 30 s, not lower: this also applies to `apiRequestContext`, and the admin bank-seeding POST on
+    // a cold backend measured over 6 s. The live-Azure specs are unaffected either way — they run on
+    // `e2e/live.config.ts`, which carries its own `use` block.
+    actionTimeout: 30_000,
     // Auto-grant mic permission so the voice path can be exercised without a real device prompt.
     permissions: ["microphone"],
   },

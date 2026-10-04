@@ -1,5 +1,6 @@
 import { test, expect, request as pwRequest } from "@playwright/test";
 import { primeCandidateLogin } from "./helpers/candidateLogin";
+import { continueByTextIfAsked } from "./helpers/micDialog";
 
 /**
  * Candidate interview E2E (SPEC F6/F7/F8/F9) — real browser, real backend (mock providers).
@@ -57,13 +58,6 @@ test.beforeAll(async () => {
  * the headless browser) the "Microphone access needed" dialog appears instead and hides the answer
  * box. These are TEXT-channel tests, so take the dialog's own "Use text instead" exit when offered.
  */
-async function continueByTextIfAsked(page: import("@playwright/test").Page) {
-  const useText = page.getByRole("button", { name: /use text instead|改用文字/i });
-  // The dialog arrives asynchronously (after getUserMedia rejects), so wait for whichever shows
-  // first — the answer box (CI, fake device) or the dialog (no device) — instead of a fixed pause.
-  await expect(page.getByRole("textbox").or(useText).first()).toBeVisible();
-  if (await useText.isVisible().catch(() => false)) await useText.click();
-}
 
 
 test("candidate completes a text interview and reaches a report", async ({ page }) => {
