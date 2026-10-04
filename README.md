@@ -43,10 +43,16 @@ with a rail previewing them:
 ### 3. The interview — digital-human interviewer, voice mode
 
 In voice mode the candidate is interviewed face-to-face: Azure Voice Live streams a live 1080p
-digital-human avatar that **speaks each question aloud** (captured below against real Azure — the
-question is spoken in the persona's language while the pinned question stays authoritative), the
-candidate answers by speaking, and the conversation transcript builds on the right. A status
-legend shows the live voice state (ready / listening / speaking / muted).
+digital-human avatar that **speaks each question aloud**, the candidate answers by speaking, and the
+conversation transcript builds on the right. A status legend shows the live voice state
+(ready / listening / speaking / muted).
+
+The question is read **verbatim** — `response.create` with `pre_generated_assistant_message`, which
+is server-side TTS of the exact pinned text with no model inference in the path (v0.39.2.3). That
+detail is load-bearing rather than incidental: when the read went through the model instead, it
+drifted, and on 2026-09-28 it drifted far enough that the card showed one bank question while the
+avatar asked a different one. What the candidate hears and what they read are now the same string
+by construction.
 
 ![Voice mode — live digital-human avatar speaking the question, transcript streaming](docs/images/09-live-avatar-voice.png)
 
