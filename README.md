@@ -16,14 +16,31 @@ answers comply with the client's *own* SOP, and every judgment points back to it
 
 ## Key scenarios
 
-> **Every screenshot below predates v0.41.0.0.** That release replaced Fluent's factory
-> defaults with the project's own design language ("Warm Editorial / Foundry Purple": a warm sand
-> ground, Bricolage Grotesque + Literata, a purple action colour, and a real header band) and
-> rebuilt the page shell, so the layouts and colours shown here are the previous appearance. The
-> flows, controls and copy are unchanged. Regenerating them needs a live backend plus a seeded
-> candidate account — see `e2e/readme-screenshots.spec.ts` and the TODOS.md entry.
+> Screenshots are current as of **v0.42.2.0**, captured on the zero-Azure mock stack (the one
+> exception is the live digital-human shot below, which needs real Azure). The appearance is the
+> project's own design language, **Warm Editorial / Foundry Purple** — a warm sand ground,
+> Bricolage Grotesque + Literata, a purple action colour, and one shared content width — not
+> Fluent's factory defaults.
 
-### 1. The interview — digital-human interviewer, voice mode
+### 1. Signing in — the interviewer is the screen
+
+The candidate's first screen is the person who will interview them. The interviewer's portrait,
+the one promise that matters before starting (*you can speak or type, and you decide when each
+answer is finished*), and the form — nothing else.
+
+![Candidate sign-in — interviewer portrait beside the form](docs/images/00-signin.png)
+
+### 2. Before the interview — what you are walking into
+
+Signed in, the candidate sees who is interviewing them and the three things people actually worry
+about before starting. The next screen is the only one that says **how many questions there are**,
+with a rail previewing them:
+
+![Signed in — the interviewer, and what to expect](docs/images/01-landing.png)
+
+![Orientation — the question count and how answering works](docs/images/01b-orientation.png)
+
+### 3. The interview — digital-human interviewer, voice mode
 
 In voice mode the candidate is interviewed face-to-face: Azure Voice Live streams a live 1080p
 digital-human avatar that **speaks each question aloud** (captured below against real Azure — the
@@ -33,14 +50,14 @@ legend shows the live voice state (ready / listening / speaking / muted).
 
 ![Voice mode — live digital-human avatar speaking the question, transcript streaming](docs/images/09-live-avatar-voice.png)
 
-### 1b. Text mode — same flow, no Azure needed
+### 3b. Text mode — same flow, no Azure needed
 
 Every question can also be answered by text; on mock providers the avatar stage falls back to the
 audio orb, so the whole flow runs with zero Azure:
 
 ![Interview page in text mode — question, orb fallback, progress rail](docs/images/02-interview-question.png)
 
-### 2. Judged turn mode — a real-time nudge when an answer trails off
+### 4. Judged turn mode — a real-time nudge when an answer trails off
 
 In **Judged** turn mode a backend LLM judge listens during the candidate's pauses and, if the
 answer trails off mid-thought, speaks or shows one short nudge ("please go on" class) — live,
@@ -51,16 +68,20 @@ Also retired, in v0.39.2.0: the linear-mode template follow-up that quoted the c
 submit — a submit now always advances to the next question, in every turn mode; per-question
 **Max follow-ups** is kept for compatibility but is now inert.)
 
-![Judged turn mode nudge (screenshot predates v0.39.3.0; pending regeneration)](docs/images/03-follow-up-memory.png)
+> No screenshot: a nudge needs a real judge verdict, which the mock stack does not produce. The
+> screenshot that used to sit here showed the **linear-mode template follow-up retired in
+> v0.39.2.0** — the capture was gated on the page quoting the candidate back ("You mentioned …"),
+> which can no longer happen, so it silently kept shipping a picture of a feature that no longer
+> exists. The behaviour is covered end to end by `e2e/bank-judged-live.spec.ts` against real Azure.
 
-### 3. Review before scoring — explicit submit
+### 5. Review before scoring — explicit submit
 
 After the last question the candidate reviews every answer in order; scoring starts only on an
 explicit **Submit & evaluate** click (with an optional SOP coverage check):
 
 ![Pre-scoring review screen listing all answers](docs/images/04-review-before-scoring.png)
 
-### 4. The report — SOP-cited compliance scoring
+### 6. The report — SOP-cited compliance scoring
 
 The executive view leads with a classification rating (*Meets Expectations / Needs Improvement /
 Does Not Meet*) on a score gauge, and shows the **SOP source (document + page) beside the
@@ -72,7 +93,7 @@ source document.
 
 ![Report detail — per-question breakdown](docs/images/06-report-detail.png)
 
-### 5. Admin — question banks & AI-drafted scoring rubrics
+### 7. Admin — question banks & AI-drafted scoring rubrics
 
 Admins author question banks and per-question checklists. Checklists are **AI-drafted from the
 SOP** (required / recommended / forbidden items, each with a source quote + page), weights
@@ -80,7 +101,7 @@ normalized to 100, fully editable:
 
 ![Admin workspace — banks, questions, and the scoring rubric editor](docs/images/07-admin-rubric-editor.png)
 
-### 6. Admin — Foundry agent persona editor
+### 8. Admin — Foundry agent persona editor
 
 A portal-faithful editor for the interviewer persona: model deployment, voice, greeting, the full
 Azure avatar roster (video + photo styles), tools, per-persona knowledge, and per-engine voice
@@ -92,7 +113,8 @@ answer-submission timing (auto-submit on/off + silence window) — synced to a r
 ## Architecture
 
 ```
-frontend  React 18 + TypeScript + Vite + Fluent UI v9 · TanStack Query · i18next (zh-CN / en-US)
+frontend  React 18 + TypeScript + Vite + Fluent UI v9 (own design language, not the
+          factory theme) · TanStack Query · i18next (zh-CN / en-US)
 backend   Python 3.11 + FastAPI + SQLAlchemy 2.0 async + Alembic · JWT auth
 azure     AI Foundry agents (Responses API) · Voice Live (avatar, via a backend WS proxy)
           · Foundry IQ / AI Search (RAG with strict citation gating) · Blob Storage
@@ -107,6 +129,12 @@ infra     Azure Container Apps (Sweden Central) · Bicep · GitHub Actions OIDC 
   code default.
 - **Candidate privacy boundary (P3)** — the candidate API never exposes rubric/checklist content;
   enforced by tests.
+- **Scoring is concurrent and survives failure** (v0.42.1.0 / v0.42.2.0) — each question is graded
+  against its own checklist by its own LLM call, three at a time, streamed to the browser as NDJSON
+  with a heartbeat so a long grade never looks like a dead connection. Measured on the live app:
+  **80 s for a nine-question report**, down from 170-190 s sequential. A question that fails is
+  marked *not scored* and excluded from the score rather than given a zero — nobody judged that
+  answer — and the rest of the report still renders.
 
 ## Quickstart (zero Azure, mock providers)
 
@@ -139,8 +167,8 @@ that exists on your resource.
 ## Testing
 
 ```bash
-cd backend && pytest                     # 460+ tests, ~86% coverage
-cd frontend && npm test                  # vitest unit/component tests
+cd backend && pytest                     # 723 tests, 85% coverage gate
+cd frontend && npm test                  # 623 vitest unit/component tests
 cd frontend && npm run e2e               # Playwright E2E — boots both servers, real Chromium, zero Azure
 ```
 
@@ -151,7 +179,11 @@ in CI.
 The README screenshots regenerate with:
 
 ```bash
-# Mock-stack scenarios (zero Azure; boots its own servers)
+# Mock-stack scenarios (zero Azure; boots its own servers).
+# Kill any stale stack FIRST: playwright reuses an already-running server, and that process serves
+# the code it booted with — a four-hour-old backend once produced a screenshot of a bug fixed
+# hours earlier.
+pkill -f "uvicorn app.main:app.*8100"; pkill -f "vite.*5273"
 cd frontend && SCREENSHOTS=1 npx playwright test e2e/readme-screenshots.spec.ts
 
 # Live avatar shot (real dev servers on :5173/:8000 with real Foundry credentials)

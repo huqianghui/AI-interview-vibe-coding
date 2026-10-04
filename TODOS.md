@@ -302,6 +302,35 @@ number.
 
 ## Test infrastructure
 
+### The README screenshot script rots silently, because nothing runs it
+
+`e2e/readme-screenshots.spec.ts` is opt-in (`SCREENSHOTS=1`), so CI never runs it. When the product
+moves, the script breaks and *nobody is told* — it just fails, and the old PNGs keep shipping as if
+they were current. That is exactly how the README carried August screenshots into October: five
+images were five weeks stale while the four candidate screens had been redesigned twice.
+
+Regenerating them on 2026-10-04 surfaced **three independent silent-failure modes in one sitting**:
+
+1. The local mic-permission dialog hid the answer textbox, so the interview-screen capture failed
+   (a recorded learning from 2026-09-24 that the script had never picked up).
+2. The capture loop `break`ed as soon as the review screen was gone, leaving the default 10 s
+   `expect` as the whole scoring budget — a bet on timing, not a wait.
+3. `reuseExistingServer: !CI` reused a **four-hour-old** uvicorn process, which serves the code it
+   booted with. The resulting report screenshot still showed the doubled full stop fixed hours
+   earlier in v0.42.1.1. Caught only by reading the image, not by the run's exit status.
+
+All three are fixed and documented in the spec's header, but the structural problem is untouched:
+there is still no signal when the script stops matching the product.
+
+**Options:** run it in CI with a visual diff (expensive, flaky on font rendering); run it on a
+schedule and fail loudly; or add a cheap CI assertion that each referenced PNG is newer than the
+last change to the component it depicts. The third is the least work for most of the value.
+
+**Effort:** CC: ~40 min for the mtime-vs-component assertion; a real visual-diff pipeline is a day.
+**Priority:** P2 — the README is the first thing a client reads, and it was wrong for five weeks
+without anyone noticing.
+
+
 ### `playwright.config.ts` sets no `actionTimeout`, so a stuck action has no bound
 
 `timeout` (60s, raised per-spec) and `expect.timeout` (10s) are set; `actionTimeout` is not, so it

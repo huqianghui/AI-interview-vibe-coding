@@ -9,6 +9,13 @@ import { primeCandidateLogin } from "./helpers/candidateLogin";
  *
  * Self-skips unless SCREENSHOTS=1 so `npm run e2e` / CI stay unchanged:
  *   cd frontend && SCREENSHOTS=1 npx playwright test e2e/readme-screenshots.spec.ts
+ *
+ * RESTART THE MOCK STACK FIRST. playwright.config sets `reuseExistingServer: !CI`, so a backend
+ * left running from an earlier session is reused — and it serves the code it booted with. That is
+ * how a capture run on 2026-10-04 produced a report screenshot still showing the doubled full stop
+ * fixed hours earlier in v0.42.1.1: the uvicorn process was four hours old. Kill anything on :8100
+ * and :5273 before capturing, or the screenshots document a version that no longer exists:
+ *   pkill -f "uvicorn app.main:app.*8100"; pkill -f "vite.*5273"
  */
 
 const ENABLED = process.env.SCREENSHOTS === "1";
@@ -19,6 +26,21 @@ const ADMIN_PW = "e2e-admin-pw";
 test.skip(!ENABLED, "README screenshot capture is opt-in: set SCREENSHOTS=1");
 
 test.use({ viewport: { width: 1440, height: 900 } });
+
+/**
+ * Clear the mic-permission dialog if it appears (recorded learning, 2026-09-24).
+ *
+ * On a local Mac, headless Chromium has no fake media device, so getUserMedia rejects and the app
+ * raises "Microphone access needed" over the answer box — even with `permissions: ["microphone"]`.
+ * CI (Linux, fake device) never sees it. Without this the capture of the interview screen failed on
+ * a missing textbox and the August screenshots silently stayed in the README.
+ */
+async function continueByTextIfAsked(page: import("@playwright/test").Page) {
+  const useText = page.getByRole("button", { name: /use text instead|改用文字/i });
+  // The dialog arrives asynchronously, so wait for whichever shows first.
+  await expect(page.getByRole("textbox").or(useText).first()).toBeVisible();
+  if (await useText.isVisible().catch(() => false)) await useText.click();
+}
 
 test.beforeAll(async () => {
   if (!ENABLED) return;
@@ -51,7 +73,17 @@ test.beforeAll(async () => {
   await api.dispose();
 });
 
-test("capture candidate flow: interview → follow-up → review → report", async ({ page }) => {
+test("capture the sign-in screen", async ({ page }) => {
+  // Deliberately NOT primed: this is the screen a candidate actually arrives on, and since
+  // v0.41.1.0 it is the strongest one in the product — the interviewer's own portrait beside the
+  // form. The other test primes the login via addInitScript, which has to happen before goto, so
+  // the unauthenticated shot needs its own page.
+  await page.goto("/interview");
+  await expect(page.getByRole("button", { name: /登录|sign in/i })).toBeVisible();
+  await page.screenshot({ path: `${OUT}/00-signin.png` });
+});
+
+test("capture candidate flow: idle → orientation → interview → review → report", async ({ page }) => {
   await primeCandidateLogin(page); // #102: /interview is login-gated
   await page.goto("/interview");
   await expect(page.getByRole("button", { name: /开始面试|start interview/i })).toBeVisible();
@@ -59,14 +91,24 @@ test("capture candidate flow: interview → follow-up → review → report", as
 
   await page.getByRole("button", { name: /开始面试|start interview/i }).click();
   await expect(page.getByText(/开始之前|before we begin/i)).toBeVisible();
+  // The orientation beat is one of the four screens redesigned in v0.42.0.0 and had never been
+  // captured: it is the only screen that tells the candidate how many questions there are.
+  await page.screenshot({ path: `${OUT}/01b-orientation.png` });
   await page.getByRole("button", { name: /我准备好了|i'm ready/i }).click();
 
   await expect(page.getByTestId("question-progress")).toBeVisible();
+  await continueByTextIfAsked(page);
   await expect(page.getByRole("textbox")).toBeVisible();
   await page.screenshot({ path: `${OUT}/02-interview-question.png` });
 
-  // Answer turns until the report; grab the follow-up (memory) and review screens on the way.
-  let shotFollowUp = false;
+  // Answer turns until the report, grabbing the review screen on the way.
+  //
+  // There used to be a `03-follow-up-memory.png` capture here, gated on the body text matching
+  // /You mentioned|你刚才提到/. That was the LINEAR-mode template follow-up, retired in v0.39.2.0
+  // (a submit always advances now, in every turn mode), so the condition can never be true and the
+  // shot can never be taken — it would have silently kept shipping an August screenshot of a
+  // feature that no longer exists. The judged nudge that replaced it needs a real judge verdict,
+  // which the mock stack does not produce; it is covered by `bank-judged-live.spec.ts`.
   for (let i = 0; i < 20; i++) {
     if (await page.getByTestId("report-exec").isVisible().catch(() => false)) break;
 
@@ -83,19 +125,13 @@ test("capture candidate flow: interview → follow-up → review → report", as
     await box.fill("I always double-check the runbook before every deploy.");
     await page.getByRole("button", { name: /提交回答|submit answer/i }).click();
     await page.waitForTimeout(400);
-
-    const bodyText = (await page.locator("body").textContent().catch(() => "")) ?? "";
-    if (
-      !shotFollowUp &&
-      bodyText.includes("double-check the runbook") &&
-      /You mentioned|你刚才提到/.test(bodyText)
-    ) {
-      await page.screenshot({ path: `${OUT}/03-follow-up-memory.png` });
-      shotFollowUp = true;
-    }
   }
 
-  await expect(page.getByTestId("report-exec")).toBeVisible();
+  // The loop above only answers; waiting for the report belongs here. It used to rely on the
+  // loop's own iterations to catch `report-exec`, but once the last answer is submitted the
+  // review screen is gone and no textbox is left, so the loop breaks immediately and the default
+  // 10 s expect became the entire scoring budget — a bet on timing, not a wait.
+  await expect(page.getByTestId("report-exec")).toBeVisible({ timeout: 120_000 });
   await expect(page.getByTestId("score-gauge")).toBeVisible();
   await page.screenshot({ path: `${OUT}/05-report-executive.png`, fullPage: true });
 
