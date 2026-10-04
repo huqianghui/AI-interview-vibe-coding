@@ -63,10 +63,15 @@ async def test_report_stream_emits_ordered_progress_then_report(client):
     progress = [e for e in events if e["type"] == "progress"]
     reports = [e for e in events if e["type"] == "report"]
 
-    # One progress line per graded answer, in order, with a stable denominator...
-    assert [p["done"] for p in progress] == list(range(len(progress)))
-    assert {p["total"] for p in progress} == {len(progress)}
-    assert len(progress) >= total  # follow-ups can add answer groups, never remove
+    # `done` counts questions FINISHED and climbs monotonically from 0 to the total. Scoring runs
+    # the questions concurrently (v0.42.2.0), so there is no "currently analyzing" index to report
+    # and the stream opens with done=0 before any result is in — hence total + 1 progress lines.
+    dones = [p["done"] for p in progress]
+    assert dones == sorted(dones), dones
+    assert dones[0] == 0
+    assert dones[-1] == max(p["total"] for p in progress)
+    assert len({p["total"] for p in progress}) == 1  # one stable denominator
+    assert dones[-1] >= total  # follow-ups can add answer groups, never remove
     # ...then exactly one report, last.
     assert len(reports) == 1
     assert events[-1]["type"] == "report"

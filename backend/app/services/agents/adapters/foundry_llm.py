@@ -29,7 +29,41 @@ logger = logging.getLogger(__name__)
 
 
 class LLMAdapterError(RuntimeError):
-    """Raised when a Foundry LLM completion fails (never silently swallowed)."""
+    """Raised when a Foundry LLM completion fails (never silently swallowed).
+
+    Carries ``status_code`` and ``retryable`` because the message alone is not enough to decide
+    whether trying again is worth anything. This used to flatten every SDK exception into a string,
+    which left callers with no way to tell a 429 (wait and retry — it will probably work) from a 400
+    (a malformed request — it will fail identically forever). Scoring now backs off on the first and
+    gives up immediately on the second.
+    """
+
+    def __init__(
+        self, message: str, *, status_code: int | None = None, retryable: bool = False
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.retryable = retryable
+
+
+def _is_retryable(exc: Exception) -> tuple[int | None, bool]:
+    """Classify an SDK exception into ``(status_code, retryable)``.
+
+    Retryable: 429 (rate limited), 408 (request timeout), 409 (conflict) and any 5xx — transient
+    server-side conditions. Also anything with NO status at all, which is the connection/timeout
+    family (``APIConnectionError``, ``APITimeoutError``): the request may never have been served.
+
+    Not retryable: every other 4xx. A bad model name, an unsupported parameter or a content-filter
+    rejection fails exactly the same way on attempt two, so retrying only spends the candidate's
+    time. The 400-level content filter is the one that matters in practice here — see
+    `ai-interview-judged-turn-mode-spec`'s note on the jailbreak filter 400ing obvious injections.
+    """
+    status = getattr(exc, "status_code", None)
+    if not isinstance(status, int):
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+    if not isinstance(status, int):
+        return None, True  # no HTTP status reached us: connection/timeout class
+    return status, status in (408, 409, 429) or status >= 500
 
 
 # Enough for the judge's JSON: a per-required-item quote check (a few short quotes), the verdict,
@@ -106,8 +140,17 @@ class FoundryLLMAdapter(LLMAdapter):
             openai_client = await self._openai()
             response = await asyncio.to_thread(openai_client.responses.create, **kwargs)
         except Exception as exc:  # noqa: BLE001 — normalize any SDK error, never swallow
-            logger.error("FoundryLLMAdapter.complete failed (model=%s): %s", self._model, exc)
-            raise LLMAdapterError(f"Foundry LLM completion failed: {exc}") from exc
+            status, retryable = _is_retryable(exc)
+            logger.error(
+                "FoundryLLMAdapter.complete failed (model=%s, status=%s, retryable=%s): %s",
+                self._model,
+                status,
+                retryable,
+                exc,
+            )
+            raise LLMAdapterError(
+                f"Foundry LLM completion failed: {exc}", status_code=status, retryable=retryable
+            ) from exc
         return response.output_text or ""
 
     async def stream(  # pragma: no cover — delegates to the live agent stream

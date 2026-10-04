@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.42.2.0 (2026-10-04)
+
+### Changed
+- **Scoring grades the questions at the same time instead of one after another.** Each question's
+  grading is independent — its own rubric, its own answer, no ordering dependency — but they ran
+  strictly in sequence, so a nine-question report took 166 seconds of a candidate watching a
+  progress bar (measured live: 18.4 s median per question). Three now run at once. The cap is
+  deliberate rather than "all of them": Azure enforces a tokens-per-minute limit, and nine
+  simultaneous ~4k-char prompts would throttle, costing more in rate-limit backoff than the
+  concurrency saved.
+
+  SQLAlchemy's `AsyncSession` is not safe for concurrent use, so the per-question work is now split
+  in two: a prepare phase that runs every database read sequentially up front (checklist, items,
+  SOP passages), and a judge phase that makes only the LLM call and therefore parallelises safely.
+  The report is still assembled in bank order, not completion order.
+
+- **The scoring screen says what is actually true.** It read "Analyzing answer 4 of 9", which
+  names a single current question that no longer exists once three are in flight. It now reads
+  "Scored 4 of 9 answers against the SOP" — the count of answers finished. The stream's `progress`
+  event changed meaning to match (`done` counts completions, climbing from 0 to the total), and
+  `ping` no longer carries a `question_id`.
+
+### Fixed
+- **A rate limit no longer costs a question.** There was no transport-level retry anywhere on this
+  path — the OpenAI client is built without `max_retries` — so a single 429 or 502 failed that
+  question outright. Transient failures (429, 408, 409, any 5xx, and the no-status
+  connection/timeout family) now retry three times with jittered exponential backoff. Jitter
+  matters here precisely because the concurrent questions hit the same rate limit at the same
+  moment and would otherwise retry in lockstep and collide again.
+- **A 400 is not retried at all, at either level.** A bad parameter, an unsupported model or a
+  content-filter rejection fails identically every time; retrying only spends the candidate's time.
+  This needed the adapter to stop flattening every SDK exception into a string — `LLMAdapterError`
+  now carries `status_code` and `retryable`, because the message alone gave callers no way to tell
+  a 429 from a 400.
+- **A timeout is not retried at the transport level either.** Retryable transport errors come back
+  in milliseconds, so trying three costs nothing; a timeout has already spent its full 90-second
+  budget, and retrying it twice more would have put the worst case at nine minutes per question —
+  strictly worse than the unbounded stall the timeout exists to prevent. It falls through to the
+  item-level retry, which still gives it one more try.
+
+### Notes
+- The wall-clock win is not yet measured on the live server; the local suites run on mock
+  providers, which say nothing about real latency. 60 s at three-way concurrency is the projection
+  from the sequential measurement, not an observation.
+
 ## 0.42.1.1 (2026-10-04)
 
 ### Fixed

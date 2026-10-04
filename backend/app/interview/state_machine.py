@@ -37,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.interview.questions import Question, question_at, resolve_questions
 from app.interview.scoring import group_answers
 from app.interview.scoring_engine import (
+    QuestionResult,
     build_narrative,
     cap_outcome,
     grade_for_score,
@@ -53,10 +54,18 @@ logger = logging.getLogger(__name__)
 # Sources that can finalize an answer (P9). All route through answer_finalized().
 ANSWER_SOURCES = ("text", "voice", "verbal_cue")
 
-# How often the report stream emits a keepalive while ONE question is being graded. Must stay well
+# How often the report stream emits a keepalive while questions are being graded. Must stay well
 # under Azure Container Apps' ingress "idle request timeout" (default 4 minutes, configurable 4-30);
 # 20 s leaves an order of magnitude of headroom and costs one ~70-byte line per interval.
 SCORING_HEARTBEAT_SECONDS = 20.0
+
+# How many questions are graded at once. Measured sequentially against the live default bank:
+# ~18.4 s median per question, 166 s for nine. Three at a time brings that to roughly 60 s, four to
+# ~45 s. It is bounded rather than unlimited because Azure enforces a tokens-per-minute limit and
+# nine simultaneous ~4k-char prompts would throttle — which would cost more in 429 backoff than
+# the concurrency saved. Three is the conservative starting point; raise it only with a live
+# measurement showing no throttling at the higher number.
+SCORING_CONCURRENCY = 3
 
 
 class InterviewStateError(Exception):
@@ -442,72 +451,126 @@ async def score_and_finalize_events(
 
     unscored: list[str] = []
 
-    for done, (question_id, answer_text) in enumerate(answers):
-        yield {
-            "type": "progress",
-            "done": done,
-            "total": len(answers),
-            "question_id": question_id,
-        }
-        # Grading one question takes tens of seconds (measured 13-25 s against the live bank), and
-        # for that whole time this stream used to send nothing. Azure Container Apps' ingress
-        # disconnects a request that stays idle past its "idle request timeout" (default 4 minutes),
-        # which is exactly how a single stalled call turned into `504 stream timeout` and cost the
-        # candidate the entire report. So heartbeat while waiting: the connection is never idle,
-        # whatever the model does. `ping` carries the same done/total as `progress` so a client that
-        # does not know the type can ignore it safely.
-        result = None
-        failure: Exception | None = None
-        task = asyncio.ensure_future(
-            scoring_service.score_answer_against_checklist(
-                db,
-                question_id=question_id,
-                question_text=prompt_by_id.get(question_id, ""),
-                answer_text=answer_text,
+    # ── Phase 1: every database read, sequentially ────────────────────────────────────────────
+    # SQLAlchemy's AsyncSession is NOT safe for concurrent use — two coroutines awaiting the same
+    # session corrupt it — so all of the per-question queries (checklist, items, SOP passages)
+    # happen before anything is dispatched. They are three cheap local queries per question.
+    prepared: list[tuple[str, str, scoring_service.ScoringTask | None]] = []
+    for question_id, answer_text in answers:
+        prepared.append(
+            (
+                question_id,
+                answer_text,
+                await scoring_service.prepare_scoring(
+                    db,
+                    question_id=question_id,
+                    question_text=prompt_by_id.get(question_id, ""),
+                    answer_text=answer_text,
+                ),
             )
         )
-        while True:
-            done_set, _ = await asyncio.wait({task}, timeout=SCORING_HEARTBEAT_SECONDS)
-            if done_set:
-                break
+
+    # ── Phase 2: the LLM calls, concurrently ──────────────────────────────────────────────────
+    # Grading one question is ~18 s against the live bank, and the questions are independent, so
+    # running them one at a time cost 166 s for a nine-question report — nearly three minutes of a
+    # candidate watching a progress bar. Bounded by a semaphore rather than dispatched all at once:
+    # Azure enforces a tokens-per-minute limit, and nine simultaneous ~4k prompts would throttle.
+    #
+    # `done` now counts questions FINISHED, not the index of the one being started. With concurrency
+    # there is no single "current" question to name, and "4 of 9 done" is both accurate and more
+    # useful than the old "analyzing answer 4 of 9".
+    total = len(answers)
+    completed = 0
+    yield {"type": "progress", "done": 0, "total": total}
+
+    # A question with no authored checklist needs no LLM call at all — it takes the length-based
+    # stub row. Count those as finished immediately, so the numerator and the denominator describe
+    # the same set: an interview whose bank has no checklists at all must still report progress
+    # climbing to its total, not sit at 0 of N forever.
+    for question_id, _answer_text, task in prepared:
+        if task is None:
+            completed += 1
             yield {
-                "type": "ping",
-                "done": done,
-                "total": len(answers),
+                "type": "progress",
+                "done": completed,
+                "total": total,
                 "question_id": question_id,
             }
-        try:
-            result = task.result()
-        except Exception as exc:  # noqa: BLE001 — one question must not cost the whole report
+
+    semaphore = asyncio.Semaphore(SCORING_CONCURRENCY)
+
+    async def _judge(task):
+        async with semaphore:
+            return await scoring_service.judge_prepared(task)
+
+    owner: dict[asyncio.Future, str] = {}
+    for question_id, _answer_text, task in prepared:
+        if task is not None:
+            owner[asyncio.ensure_future(_judge(task))] = question_id
+
+    results: dict[str, QuestionResult] = {}
+    errors: dict[str, Exception] = {}
+    pending: set = set(owner)
+    while pending:
+        # Heartbeat on the timeout branch: the connection must never sit idle past Azure Container
+        # Apps' ingress idle timeout (default 4 minutes), which is what turned one stalled call into
+        # `504 stream timeout` and cost the candidate an entire report.
+        finished, pending = await asyncio.wait(
+            pending, timeout=SCORING_HEARTBEAT_SECONDS, return_when=asyncio.FIRST_COMPLETED
+        )
+        if not finished:
+            yield {"type": "ping", "done": completed, "total": total}
+            continue
+        for future in finished:
+            question_id = owner[future]
+            completed += 1
+            try:
+                results[question_id] = future.result()
+            except Exception as exc:  # noqa: BLE001 — one question must not cost the whole report
+                errors[question_id] = exc
+                logger.warning("Scoring failed for question %s: %s", question_id, exc)
+                yield {
+                    "type": "question_error",
+                    "done": completed,
+                    "total": total,
+                    "question_id": question_id,
+                    "detail": type(exc).__name__,
+                }
+            else:
+                yield {
+                    "type": "progress",
+                    "done": completed,
+                    "total": total,
+                    "question_id": question_id,
+                }
+
+    # ── Phase 3: aggregate in BANK ORDER ──────────────────────────────────────────────────────
+    # Not completion order: the report reads top to bottom as the candidate answered (req. 2),
+    # and concurrency finishes questions in whatever order the model returns them. The opt-in SOP
+    # coverage check lives here too — it is another DB call, so it stays sequential.
+    for question_id, answer_text, task in prepared:
+        if task is None:
+            # No checklist authored for this question — length-based stub row.
+            per_question.append(scoring_service.stub_result_dict(question_id, answer_text))
+            continue
+        failure = errors.get(question_id)
+        if failure is not None:
             # Per-question isolation. The question is recorded as NOT SCORED and excluded from the
             # score the same way a stub question is (out of both numerator and denominator), so the
             # candidate keeps every answer that did grade. Scoring it 0 instead would be the
             # under-count P7 forbids — a question nobody judged is not a question answered badly.
-            failure = exc
-            logger.warning("Scoring failed for question %s: %s", question_id, exc)
             unscored.append(question_id)
             per_question.append(
                 {
                     "question_id": question_id,
                     "is_stub": False,
                     "scoring_failed": True,
-                    "scoring_error": type(exc).__name__,
+                    "scoring_error": type(failure).__name__,
                     "items": [],
                 }
             )
-            yield {
-                "type": "question_error",
-                "done": done,
-                "total": len(answers),
-                "question_id": question_id,
-                "detail": type(exc).__name__,
-            }
-        if failure is not None:
             continue
-        if result is None:
-            # No checklist authored for this question — length-based stub row.
-            per_question.append(scoring_service.stub_result_dict(question_id, answer_text))
-            continue
+        result = results[question_id]
         any_graded = True
         if sop_coverage_check:
             missing = await sop_coverage.check_question_coverage(

@@ -23,6 +23,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
+from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,6 +36,7 @@ from app.interview.scoring_engine import (
     enforce_and_score,
 )
 from app.services import checklist_service, sop_context
+from app.services.agents.adapters.foundry_llm import LLMAdapterError
 from app.services.agents.registry import get_llm_adapter
 
 logger = logging.getLogger(__name__)
@@ -55,6 +58,14 @@ MAX_SCORING_ATTEMPTS = 2
 # tokens, and a 12-item judgment set is then truncated to nothing — 0 of 12 judgments parsed on
 # every one of three answer shapes, versus 12 of 12 without it.
 SCORING_CALL_TIMEOUT_SECONDS = 90.0
+
+# Transport-level retry for ONE completion: transient failures only (429 / 408 / 409 / 5xx, and the
+# no-status connection/timeout family). Three attempts with jittered exponential backoff — 2s, 4s
+# plus up to half of each again. A 400-class error is not retried at all: a bad parameter or a
+# content-filter rejection fails identically every time, and waiting only spends the candidate's
+# time. Jitter matters because a report's concurrent questions hit the same rate limit together.
+TRANSPORT_ATTEMPTS = 3
+TRANSPORT_BACKOFF_BASE_SECONDS = 2.0
 
 # Feature C — SOP source-context injection. Each rubric item can carry, beyond its one-line
 # ``source_quote``, a fuller slice of the original SOP passage it was drawn from so the judge reads
@@ -155,6 +166,47 @@ async def score_answer_against_checklist(
     (:func:`enforce_and_score`) never sees it, so the weighted score for a given set of judgments is
     identical whether or not it is on. Set False to fall back to the historical quote-only prompt.
     """
+    task = await prepare_scoring(
+        db,
+        question_id=question_id,
+        question_text=question_text,
+        answer_text=answer_text,
+        include_source_context=include_source_context,
+    )
+    if task is None:
+        return None
+    return await judge_prepared(task, llm_provider=llm_provider)
+
+
+@dataclass(frozen=True)
+class ScoringTask:
+    """Everything needed to grade one answer, with the database work already done.
+
+    The split exists so questions can be graded CONCURRENTLY. SQLAlchemy's ``AsyncSession`` is not
+    safe for concurrent use — two coroutines awaiting the same session corrupt it — so the DB reads
+    (checklist, items, SOP passages) all happen sequentially up front, and only the LLM call, which
+    touches no session, runs in parallel.
+    """
+
+    question_id: str
+    question_text: str
+    answer_text: str
+    rubric: list[RubricItem]
+    source_context: dict[str, str]
+
+
+async def prepare_scoring(
+    db: AsyncSession,
+    *,
+    question_id: str,
+    question_text: str,
+    answer_text: str,
+    include_source_context: bool = True,
+) -> ScoringTask | None:
+    """Read everything one question's grading needs. Returns None when no checklist is authored.
+
+    All of the DB work, none of the LLM work. Cheap and local: three queries against SQLite.
+    """
     checklist = await checklist_service.get_default_checklist(db, question_id)
     if checklist is None:
         return None
@@ -182,6 +234,68 @@ async def score_answer_against_checklist(
     if include_source_context:
         source_context = await _collect_source_context(db, rubric)
 
+    return ScoringTask(
+        question_id=question_id,
+        question_text=question_text,
+        answer_text=answer_text,
+        rubric=rubric,
+        source_context=source_context,
+    )
+
+
+async def _complete_with_retry(llm, prompt: str) -> str:
+    """One bounded completion, retried with exponential backoff on transient failures only.
+
+    There was no transport retry anywhere on this path: ``get_openai_client()`` is built with no
+    ``max_retries``, so a single 429 or 502 failed the question outright. Backoff is jittered so a
+    report's concurrent questions, which all hit the same rate limit at the same moment, do not
+    retry in lockstep and collide again.
+
+    A non-retryable failure (a 400-class error: bad parameter, content filter) is raised at once —
+    waiting changes nothing about a request that is malformed.
+
+    A TIMEOUT is not retried here either, deliberately. Retryable transport errors come back in
+    milliseconds, so trying three of them costs almost nothing; a timeout has already spent the full
+    90 s budget, and retrying it twice more would put the worst case at 2 x 3 x 90 s = 9 minutes per
+    question — strictly worse than the unbounded stall this timeout exists to prevent. A timeout
+    propagates to the item-level loop, which still gives it one more try.
+    """
+    # Seeded rather than declared, so the final `raise last` is provably bound even if someone sets
+    # TRANSPORT_ATTEMPTS to 0 and the loop body never runs.
+    last: Exception = RuntimeError("no scoring attempt was made")
+    for attempt in range(max(TRANSPORT_ATTEMPTS, 1)):
+        try:
+            return await asyncio.wait_for(
+                llm.complete(prompt, json_mode=True), timeout=SCORING_CALL_TIMEOUT_SECONDS
+            )
+        except TimeoutError:  # asyncio.TimeoutError is this builtin on 3.11+
+            raise  # see the docstring: the 90 s budget is already spent, do not spend it again
+        except Exception as exc:  # noqa: BLE001 — classify, then decide
+            if not getattr(exc, "retryable", False):
+                raise
+            last = exc
+        if attempt < TRANSPORT_ATTEMPTS - 1:
+            delay = TRANSPORT_BACKOFF_BASE_SECONDS * (2**attempt)
+            delay += random.uniform(0, delay / 2)  # noqa: S311 — jitter, not cryptography
+            logger.warning(
+                "Transient LLM failure (%s), retrying in %.1fs (attempt %d/%d)",
+                type(last).__name__,
+                delay,
+                attempt + 1,
+                TRANSPORT_ATTEMPTS,
+            )
+            await asyncio.sleep(delay)
+    raise last
+
+
+async def judge_prepared(task: ScoringTask, *, llm_provider: str | None = None) -> QuestionResult:
+    """Grade one prepared question. Touches no database, so it is safe to run concurrently."""
+    question_id = task.question_id
+    question_text = task.question_text
+    answer_text = task.answer_text
+    rubric = task.rubric
+    source_context = task.source_context
+
     llm = get_llm_adapter(llm_provider)
 
     # Judgments accumulate ACROSS attempts, keyed by item_id. The previous loop rebuilt the full
@@ -201,17 +315,32 @@ async def score_answer_against_checklist(
                 "Judge every one of them."
             )
         try:
-            raw = await asyncio.wait_for(
-                llm.complete(prompt, json_mode=True), timeout=SCORING_CALL_TIMEOUT_SECONDS
-            )
-        except TimeoutError as exc:  # asyncio.TimeoutError is this builtin on 3.11+
-            # A stalled call, cut. Retry once from the top: the pending set is unchanged, and a
-            # fresh call usually returns. The caller isolates the question if this keeps happening.
+            raw = await _complete_with_retry(llm, prompt)
+        except LLMAdapterError as exc:
+            if not exc.retryable:
+                # A 400-class failure: bad parameter, unsupported model, content filter. It will
+                # fail identically on attempt two, so the item-level retry has nothing to add —
+                # going round again just spends the candidate's time. Surface it and let the caller
+                # isolate this one question.
+                raise
             last_error = exc
             logger.warning(
-                "Scoring attempt %d timed out after %.0fs (%d item(s) pending)",
+                "Scoring attempt %d failed (%s, status=%s), %d item(s) pending",
                 attempt + 1,
-                SCORING_CALL_TIMEOUT_SECONDS,
+                type(exc).__name__,
+                exc.status_code,
+                len(pending),
+            )
+            continue
+        except Exception as exc:  # noqa: BLE001 — bounded + already retried inside
+            # A stalled call (the 90 s timeout fired) or a non-adapter failure. The pending set is
+            # unchanged, so the next item-level attempt re-asks the same items; the caller isolates
+            # the question if this keeps happening.
+            last_error = exc
+            logger.warning(
+                "Scoring attempt %d failed (%s), %d item(s) pending",
+                attempt + 1,
+                type(exc).__name__,
                 len(pending),
             )
             continue

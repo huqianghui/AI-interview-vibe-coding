@@ -278,50 +278,27 @@ on the result since it changes the composition they approved.
 
 ## Scoring performance and resilience (PR 2 — follow-up to the stream-resilience fix)
 
-### Score the questions concurrently, with standard retries and a real progress signal
+### Score the questions concurrently, with standard retries and a real progress signal — v0.42.2.0
 
-PR 1 (`fix/scoring-stream-resilience`) made scoring survive failure: a bounded per-call timeout, a
-heartbeat so the stream is never idle, per-question isolation so one bad question no longer discards
-the whole report, a retry that re-asks only the unjudged items, and the in-band error contract. It
-did NOT make scoring faster, add transport-level retries, or improve what the candidate sees.
+Shipped. Three questions grade at once under a semaphore (`SCORING_CONCURRENCY`), the per-question
+work is split into a sequential prepare phase (all the DB reads — `AsyncSession` is not
+concurrency-safe) and a parallel judge phase (the LLM call only), and the report is still assembled
+in bank order. Transient failures (429 / 408 / 409 / 5xx / no-status connection errors) retry three
+times with jittered exponential backoff; a 400-class error is not retried at either level, which
+needed `LLMAdapterError` to start carrying `status_code` and `retryable` instead of flattening every
+SDK exception into a string. The scoring screen now reads "Scored N of M answers" and the stream's
+`progress.done` counts completions.
 
-**Measured, against the live default bank (9 questions × 12 checklist items, ~4.1k-char prompt,
-gpt-5-mini at default reasoning effort, 6 calls):** 13.1 s min, 18.4 s median, 24.8 s max per
-question, 12/12 judgments every time. Sequential total ≈ **166 s**. The candidate stares at a
-progress bar for nearly three minutes.
+Three design errors the tests caught before this shipped, each worth remembering: adding transport
+retries on top of the timeout put the worst case at 2 x 3 x 90 s = 9 minutes per question (fixed by
+not retrying timeouts — they have already spent their budget); the item-level loop retried a 400 a
+second time (fixed by re-raising non-retryable errors); and questions with no authored checklist
+stopped being counted in progress, so a stub-only interview sat at 0 of N forever.
 
-**1. Bounded concurrency.** Each question's grading is independent (its own rubric, its own answer,
-no ordering dependency), so this is embarrassingly parallel: 3-way ≈ 60 s, 4-way ≈ 45 s.
-
-The constraint that shapes the work: one call to `score_answer_against_checklist` does 2-3 DB reads
-(`checklist_service.get_default_checklist`, `list_items`, and `_collect_source_context` →
-`sop_context.get_source_context`), and SQLAlchemy's `AsyncSession` is NOT safe for concurrent use —
-two coroutines awaiting the same session corrupt it. So the refactor is to split the per-question
-work in two: a **prepare** phase (all the DB reads, run sequentially up front — cheap and local) and
-a **judge** phase (the LLM call only, run under a `asyncio.Semaphore(3-4)`). Concurrency must be
-bounded regardless, because Azure enforces a tokens-per-minute limit and 9 simultaneous 4k-char
-prompts would throttle.
-
-**2. Standard transport retries.** `foundry_llm.py` builds its client with `client.get_openai_client()`
-and passes no `max_retries`, and there is no retry layer of our own, so a 429 or a 5xx or a dropped
-connection fails the question outright today. The only retry that exists is the item-level re-ask
-added in PR 1, which is a different thing. Wanted: exponential backoff with jitter on 429 / 5xx /
-timeout only — never on a 4xx parameter error, which will fail identically every time.
-
-**3. Progress the candidate can read.** With concurrency the current "analyzing answer 4 of 9" is no
-longer meaningful; it becomes "4 of 9 done", which is both accurate and more useful. Also surface the
-per-question failure PR 1 introduced (`question_error` events, `unscored_question_ids` in the report)
-so a partially-scored report explains itself instead of quietly averaging fewer questions.
-
-**Do NOT reach for the adapter's `fast=True` to speed this up.** Measured: it caps output tokens, and
-a 12-item judgment set truncates to nothing — 0 of 12 judgments parsed on all three answer shapes
-tested, versus 12/12 without it. It is correct for the judge (one tiny verdict) and wrong here.
-
-**Effort:** CC: ~2-3 h for the prepare/judge split plus the semaphore, the retry decorator, and the
-event-shape change, and it needs a live run against the real bank to confirm the wall-clock win and
-that Azure does not throttle at the chosen concurrency.
-**Priority:** P1 — 166 s of staring is the single worst thing about the candidate's last screen, and
-transport retries are the difference between "one 429 cost me a question" and "it just worked".
+**Still open:** the wall-clock win is unmeasured on the live server. 60 s at three-way is a
+projection from the 166 s sequential measurement, not an observation. Measure it, and only then
+consider raising the cap to four — and only with evidence that Azure does not throttle at that
+number.
 
 ## Test infrastructure
 
