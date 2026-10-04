@@ -4,7 +4,12 @@
  * here (P12: raw SOP citations are not candidate-facing during live Q&A — they surface only in
  * the scoring/report phase), so this component renders text turns only.
  */
-import { makeStyles, tokens, Text } from "@fluentui/react-components";
+import {
+  Text,
+  makeStyles,
+  mergeClasses,
+  tokens,
+} from "@fluentui/react-components";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { TranscriptSegment } from "../types/voice";
@@ -35,6 +40,13 @@ const useStyles = makeStyles({
   turn: { display: "flex", flexDirection: "column", gap: "3px" },
   user: { alignItems: "flex-end" },
   assistant: { alignItems: "flex-start" },
+  // `bubble` sets the borderRadius SHORTHAND while the two role variants below set a single
+  // corner longhand to flatten the bubble's tail. That is a shorthand/longhand conflict, which is
+  // exactly what griffel's mergeClasses exists to resolve — these were joined with a template
+  // string, leaving the winner to CSS source order. Measured in a real browser elsewhere in this
+  // codebase, that form drops the override silently (see griffel-classnames.test.ts). Whether this
+  // particular tail corner was visibly lost in production was NOT verified; the call is switched
+  // because the API is wrong either way, not because the symptom was observed here.
   bubble: {
     maxWidth: "82%",
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
@@ -67,7 +79,7 @@ export function Transcript({ segments }: { segments: TranscriptSegment[] }) {
 
   if (segments.length === 0) {
     return (
-      <div className={`${styles.root} ${styles.empty}`} data-testid="transcript" aria-live="polite">
+      <div className={mergeClasses(styles.root, styles.empty)} data-testid="transcript" aria-live="polite">
         <Text size={200}>{t("voice.transcriptEmpty")}</Text>
       </div>
     );
@@ -78,13 +90,19 @@ export function Transcript({ segments }: { segments: TranscriptSegment[] }) {
       {segments.map((seg) => (
         <div
           key={seg.id}
-          className={`${styles.turn} ${seg.role === "user" ? styles.user : styles.assistant}`}
+          className={mergeClasses(
+            styles.turn,
+            seg.role === "user" ? styles.user : styles.assistant,
+          )}
         >
           <Text size={100} className={styles.role}>
             {seg.role === "user" ? t("voice.roleYou") : t("voice.roleInterviewer")}
           </Text>
           <div
-            className={`${styles.bubble} ${seg.role === "user" ? styles.userBubble : styles.assistantBubble}`}
+            className={mergeClasses(
+              styles.bubble,
+              seg.role === "user" ? styles.userBubble : styles.assistantBubble,
+            )}
           >
             <Text>{seg.content}</Text>
           </div>

@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.42.0.0 (2026-10-04)
+
+### Changed
+- **Every screen a candidate sees now has the interviewer on it, and something to read.** The four
+  screens before and after the interview itself were close to empty: after signing in you got a
+  single full-width button on a blank page, the "before we begin" beat repeated what you had just
+  been told, the review screen gave a question and your answer the same visual weight, and the
+  report crammed its whole argument into one flat card. Each one is now composed: the interviewer's
+  portrait carries through from the sign-in screen, and each screen leads with the one thing it
+  alone can tell you.
+- **Signing in no longer lands you on a void.** The screen you reach is the person who will
+  interview you, beside the three things candidates actually worry about before starting — you can
+  speak or type, you decide when an answer is finished, and there is no timer. It deliberately does
+  not promise a question count, because at that moment the interview has not been created yet and
+  the number does not exist.
+- **"Before we begin" now earns its place.** It exists for the one fact the previous screen could
+  not know — how many questions there are — so the count is the screen, with a rail previewing each
+  one. Two near-identical "are you ready" gates became two screens with different jobs.
+- **The review screen is built for re-reading.** Each question is set large with your own words
+  below it at reading size, and the submit button is separated from the list with its consequence
+  stated beside it: scoring takes about a minute and you cannot change your answers afterwards. It
+  used to sit flush against the last answer, where a scroll could land on it.
+- **The report leads with the verdict and makes the evidence the point.** The overall rating is set
+  as a headline instead of a small chip, with coverage and the question count beside it. The proof
+  that the scoring is traceable — the SOP sentence a judgement was measured against, next to what
+  the candidate actually said — went from a single quoted pair to a question's worth of them, each
+  with its judgement, its weight and a link to the source document. The full per-question breakdown
+  stays one click away.
+
+### Fixed
+- **The interviewer's portrait lines up with the text beside it.** It was sitting 40px to the right
+  of the headline it belongs with, because the browser's own default margin for a figure was only
+  half overridden.
+- **The voice transcript's speech bubbles keep their shape.** The styling that flattens one corner
+  into a tail was being applied in a way that could be silently discarded.
+
+### Added
+- A build-time check that the app can no longer combine two style rules in the way that silently
+  drops one of them. It caught three new instances in this release's own code within minutes of
+  them being written, and two older ones in the voice transcript.
+
 ## 0.41.1.0 (2026-10-04)
 
 ### Fixed

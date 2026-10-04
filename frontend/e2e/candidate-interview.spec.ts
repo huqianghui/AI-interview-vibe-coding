@@ -115,13 +115,21 @@ test("candidate completes a text interview and reaches a report", async ({ page 
     await page.waitForTimeout(250);
 
     // If the current question quotes what we just said, the retired template follow-up fired.
-    const pinned = (await page.locator('[role="heading"], .fui-Card').first().textContent()
-      .catch(() => "")) ?? "";
+    //
+    // This read used to also fetch `[role="heading"], .fui-Card` into a `pinned` variable that was
+    // `void`ed and never asserted on. When the candidate screens stopped using Fluent `<Card>`
+    // (v0.42.0.0) neither half of that selector matched anything: `.fui-Card` was gone, and
+    // `[role="heading"]` needs an EXPLICIT role attribute, which an `<h2>`'s implicit heading role
+    // does not provide. `textContent()` then waited for an element that would never exist — and
+    // because there is no `actionTimeout` in playwright.config.ts, that wait has no bound, while
+    // the `.catch(() => "")` hid it. The test burned its whole 180s budget on a dead diagnostic
+    // line, three retries in a row, and the failure surfaced 12 lines later as "report-exec never
+    // appeared" with the page sitting on a correctly-rendered review screen. Deleting it loses no
+    // coverage: the assertion below reads `bodyText` only.
     const bodyText = (await page.locator("body").textContent().catch(() => "")) ?? "";
     if (bodyText.includes("double-check the runbook") && /You mentioned|你刚才提到/.test(bodyText)) {
       sawFollowUpCitation = true;
     }
-    void pinned;
   }
 
   // Report reveal. Assert on the single, deterministic executive-view container (the same marker the

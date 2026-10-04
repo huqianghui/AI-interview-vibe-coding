@@ -98,6 +98,15 @@ const useStyles = makeStyles({
 
   /** The interviewer's portrait, framed like a photograph on a wall. */
   frame: {
+    // These two zeros are load-bearing: the UA stylesheet gives <figure> `margin: 1em 40px`, and
+    // setting only marginTop/Bottom leaves the 40px SIDES in place. That shipped — the portrait sat
+    // 40px to the right of the headline it is supposed to line up with (measured on the live site:
+    // headline left edge 92px, frame left edge 132px). Nothing errors; the column just quietly
+    // loses its left edge, which is the same class of defect this whole refresh exists to fix.
+    // Longhands rather than `marginInline`, because jsdom does not resolve the logical property
+    // back to left/right — so the guarding test could not see it and passed on the broken code.
+    marginLeft: 0,
+    marginRight: 0,
     marginTop: "auto",
     marginBottom: tokens.spacingVerticalXXL,
     width: "min(54%, 310px)",

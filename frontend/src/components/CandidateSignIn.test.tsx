@@ -79,6 +79,18 @@ describe("CandidateSignIn composition", () => {
     expect(img!.getAttribute("alt")).toBe("");
   });
 
+  it("aligns the portrait frame with the headline, not 40px off it", () => {
+    // The <figure> UA margin is `1em 40px`. Overriding only the block sides left the inline ones in
+    // place, and the portrait shipped 40px to the right of the headline it should line up with
+    // (measured live: headline at 92px, frame at 132px). jsdom applies the UA sheet, so this is a
+    // real guard rather than a restatement of the CSS.
+    renderSignIn();
+    const figure = screen.getByTestId("signin-portrait");
+    const cs = getComputedStyle(figure);
+    expect(cs.marginLeft).toBe("0px");
+    expect(cs.marginRight).toBe("0px");
+  });
+
   it("captions the portrait with the role and the interviewer's name", () => {
     renderSignIn();
     const figure = screen.getByTestId("signin-portrait");
