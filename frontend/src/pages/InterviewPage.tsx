@@ -60,7 +60,7 @@ import { MicAccessError, useInterviewVoice } from "../hooks/useInterviewVoice";
 import type { AudioState, TranscriptSegment } from "../types/voice";
 import { AvatarView } from "../components/AvatarView";
 import { AppShell } from "../components/AppShell";
-import { LoginCard } from "../components/LoginCard";
+import { CandidateSignIn } from "../components/CandidateSignIn";
 import { palette } from "../theme";
 import { QuestionProgress } from "../components/QuestionProgress";
 import { MicPermissionDialog } from "../components/MicPermissionDialog";
@@ -1337,15 +1337,14 @@ export function InterviewPage() {
   // header + login card — nothing else renders (no stale interview state peeking through).
   if (!candidateAuthed) {
     return (
-      <AppShell measure="narrow">
-        <LoginCard
-          title={t("candidate.loginTitle")}
-          body={t("candidate.loginBody")}
+      // `bare` + no band tagline: CandidateSignIn owns the approved asymmetric composition and
+      // sets the tagline as its own display headline. Routing this through `narrow` is what
+      // flattened it into a centred card in v0.41.0.0.
+      <AppShell measure="bare" showTagline={false}>
+        <CandidateSignIn
           error={candidateLoginError}
           busy={candidateLoginBusy}
           onSubmit={onCandidateLogin}
-          testIdPrefix="candidate"
-          titleAs="h2"
         />
       </AppShell>
     );

@@ -92,6 +92,38 @@ Two layout traps found while building the mockup and worth carrying into the imp
   (651px) pushed the row past the available 628px and both cards overflowed the viewport by 23px.
   The row must be `minmax(0, 1fr)`.
 
+## 4b. The implementation got the layout WRONG first — recorded because the reason is reusable
+
+v0.41.0.0 claimed to implement D-purple and shipped **variant B's layout wearing D's palette**: a
+440px form card centred on a plain ground, with no editorial split, no display headline, and no
+interviewer portrait. The owner spotted it in one glance on the live site. Fixed in v0.41.1.0
+(`frontend/src/components/CandidateSignIn.tsx`).
+
+The palette and the typefaces were right, which is exactly why it survived review. The causal chain,
+because "be more careful" is not a fix:
+
+1. **The abstraction was built before the artifact.** `AppShell`'s four "measures"
+   (wide / reading / narrow / fill) were invented during implementation and appear in no approved
+   document. Screens were then mapped onto them, and the sign-in screen got `narrow` because a login
+   form is narrow. At that point the abstraction became the spec.
+2. **The approved artifact was never opened while implementing.** `D-purple-login.html` and
+   `.png` sat in the designs directory the whole time; the work was done from a remembered summary
+   of the direction ("warm sand, Bricolage, purple"). A design IS its composition, and composition
+   is the part that does not survive being remembered as adjectives.
+3. **An approved element was deleted, with a justification committed next to it.** The tagline was
+   the hero headline. In a centred card it had nowhere to go, so it was moved into the header band
+   and described in a code comment as fixing an "orphan". The design was fighting the wrong
+   structure and the friction was read as a defect in the design.
+4. **The verification could not have caught it.** Every live check was a THEME property — body
+   background, button colour, font family, `<h1>` count, fonts loaded, provider transparent — and
+   every one passes identically on the wrong layout. The render was never compared to the approved
+   image.
+
+What is in place now so the same miss is not available: `CandidateSignIn.test.tsx` asserts the
+COMPOSITION (two asymmetric columns, the tagline rendered at display size, the portrait present and
+pointing at the default interviewer), and it is proven to fail when the split is flattened to one
+column. Token tests do not substitute for that.
+
 ## 5. What shipped
 
 All of the plan below landed in the same change. Gates at the time of writing: `vitest` 50 files /

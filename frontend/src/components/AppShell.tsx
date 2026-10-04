@@ -190,13 +190,27 @@ export interface AppShellProps {
   /**
    * `wide` (default, 1320px) — two-column screens: admin, the agent editor.
    * `reading` (760px) — prose-heavy phases: orientation, review, scoring, report.
-   * `narrow` (440px, vertically centred) — the sign-in form.
+   * `narrow` (440px, vertically centred) — a bare form on its own.
    * `fill` — pin the page to exactly one viewport (the live interview screen).
+   * `bare` — no width cap and no padding: the child owns its own composition. For screens whose
+   *   layout IS the design (the candidate sign-in split), where forcing them through one of the
+   *   measures above is how the approved asymmetric composition got flattened into a centred card
+   *   in v0.41.0.0.
    */
-  measure?: "wide" | "reading" | "narrow" | "fill";
+  measure?: "wide" | "reading" | "narrow" | "fill" | "bare";
+  /**
+   * Show the tagline beside the wordmark in the header band. Off for screens that set the tagline
+   * as their own display headline — otherwise the page states its one sentence twice.
+   */
+  showTagline?: boolean;
 }
 
-export function AppShell({ children, actions, measure = "wide" }: AppShellProps) {
+export function AppShell({
+  children,
+  actions,
+  measure = "wide",
+  showTagline = true,
+}: AppShellProps) {
   const styles = useStyles();
   const { t } = useTranslation();
   const fill = measure === "fill";
@@ -207,7 +221,9 @@ export function AppShell({ children, actions, measure = "wide" }: AppShellProps)
         <div className={styles.appbarInner}>
           <div className={styles.identity}>
             <h1 className={styles.wordmark}>{t("appTitle")}</h1>
-            <span className={styles.tagline}>{t("tagline")}</span>
+            {showTagline && (
+              <span className={styles.tagline}>{t("tagline")}</span>
+            )}
           </div>
           <span className={styles.spacer} />
           <div className={styles.actions}>
@@ -221,6 +237,8 @@ export function AppShell({ children, actions, measure = "wide" }: AppShellProps)
         <main className={styles.mainFill}>
           <div className={styles.fillInner}>{children}</div>
         </main>
+      ) : measure === "bare" ? (
+        <main>{children}</main>
       ) : measure === "narrow" ? (
         <main className={styles.mainNarrow}>
           <div className={styles.narrowInner}>{children}</div>
