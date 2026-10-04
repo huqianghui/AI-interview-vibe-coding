@@ -12,6 +12,13 @@ export const resources = {
     translation: {
       appTitle: "AI Interview",
       tagline: "SOP-traceable, digital-human interviewing",
+      // The same sentence as `tagline`, split into three clauses so the sign-in screen can set it
+      // as a display headline with the middle clause in the accent colour (approved direction
+      // D-purple). Split rather than interpolated with markup so each clause stays translatable on
+      // its own — a translator can reorder the clauses without touching the component.
+      taglineLead: "SOP-traceable,",
+      taglineAccent: "digital-human",
+      taglineTail: "interviewing",
       start: "Start interview",
       starting: "Starting…",
       submit: "Submit answer",
@@ -208,6 +215,15 @@ export const resources = {
       candidate: {
         loginTitle: "Candidate sign-in",
         loginBody: "Sign in with the username and password your organizer gave you to start your interview.",
+        // Reassurance under the sign-in headline. The candidate is about to be interviewed and
+        // scored by a machine; saying the two things they actually worry about (no clock, their
+        // choice of channel) before they log in is the point of the editorial column.
+        loginReassurance:
+          "Take your time. You can speak or type, and you decide when each answer is finished.",
+        livePill: "LIVE",
+        // Shown as the portrait's caption on the pre-auth sign-in screen, where no persona is
+        // loaded yet — it names the deployment's DEFAULT interviewer (DEFAULT_AVATAR_CHARACTER).
+        defaultInterviewerName: "Lisa",
         wrongCredentials: "Incorrect username or password.",
         signOut: "Sign out",
         // "Start over" (v0.38.3.0): abandon the live interview and begin a fresh one. Destructive,
@@ -227,6 +243,9 @@ export const resources = {
     translation: {
       appTitle: "AI 面试",
       tagline: "可溯源 SOP、数字人面试",
+      taglineLead: "可溯源 SOP、",
+      taglineAccent: "数字人",
+      taglineTail: "面试",
       start: "开始面试",
       starting: "开始中…",
       submit: "提交回答",
@@ -411,6 +430,9 @@ export const resources = {
       // /auth/login 接口,但持有独立的 token。
       candidate: {
         loginTitle: "候选人登录",
+        loginReassurance: "不用着急。你可以说也可以打字,每一题什么时候算答完由你决定。",
+        livePill: "在线",
+        defaultInterviewerName: "Lisa",
         loginBody: "请使用主办方提供的用户名和密码登录,开始你的面试。",
         wrongCredentials: "用户名或密码错误。",
         signOut: "退出登录",

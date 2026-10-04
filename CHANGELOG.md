@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.41.1.0 (2026-10-04)
+
+### Fixed
+- **The candidate sign-in screen is the design that was actually approved.** v0.41.0.0 shipped a
+  440px form card centred on a plain ground — which is a different variant's layout wearing this
+  one's palette. The approved composition is asymmetric: the tagline set as the page's display
+  headline, the interviewer's own portrait framed beside the form, and the sign-in panel offset to
+  the right. A candidate's first screen now introduces the person who will interview them instead
+  of presenting a bare login box. The colours and the typefaces were right all along, which is why
+  nothing caught it: every check that ran was a colour-and-font check, and those pass just as well
+  on the wrong layout. There are assertions on the composition itself now.
+
 ## 0.41.0.0 (2026-10-03)
 
 ### Changed
