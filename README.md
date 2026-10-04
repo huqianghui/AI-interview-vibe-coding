@@ -146,7 +146,9 @@ infra     Azure Container Apps (Sweden Central) · Bicep · GitHub Actions OIDC 
 - **Scoring is concurrent and survives failure** (v0.42.1.0 / v0.42.2.0) — each question is graded
   against its own checklist by its own LLM call, three at a time, streamed to the browser as NDJSON
   with a heartbeat so a long grade never looks like a dead connection. Measured on the live app:
-  **80 s for a nine-question report**, down from 170-190 s sequential. A question that fails is
+  **35.3 s for a nine-question report**, down from 170-190 s sequential — concurrency equals the
+  question count, so the whole report is one generation and the wall clock is one question long. A
+  question that fails is
   marked *not scored* and excluded from the score rather than given a zero — nobody judged that
   answer — and the rest of the report still renders.
 

@@ -36,6 +36,22 @@
   latency degradation. There was nothing to protect by holding the number down. The comment now
   records both the measurement and the fact that its predecessor was a guess.
 
+### Measured on the live server after deploy
+- **35.3 s** for a nine-question report, against 70 s at concurrency 3 and 170-190 s sequential.
+  The arrival pattern is what confirms the change rather than the total, which moves with whatever
+  Azure is doing at the time:
+
+  ```
+  done=1..9 @ 15.5 / 15.7 / 18.7 / 18.7 / 19.7 / 21.4 / 22.5 / 27.2 / 33.9 s    report @ 35.3 s
+  gaps:       15366 / 242 / 2963 / 53 / 1005 / 1642 / 1140 / 4659 / 6698 ms
+  ```
+
+  One generation: after the first question lands at 15.5 s the rest arrive milliseconds to a few
+  seconds apart, with none of the two 16-second changeover gaps that concurrency 3 showed. A side
+  effect worth noting — the stream emitted **no `ping` frames at all**, because no silent gap now
+  approaches the 20 s heartbeat interval, so the ingress idle timeout that cost a whole report in
+  v0.42.1.0 is no longer within reach on this path.
+
 ### Notes
 - `SCORING_CONCURRENCY_DIVISOR` (default 1) remains as an environment knob: 1 grades every question
   at once, 2 would grade half at a time. It exists so the shape can be changed without a deploy, not
@@ -82,9 +98,11 @@
   item-level retry, which still gives it one more try.
 
 ### Notes
-- The wall-clock win is not yet measured on the live server; the local suites run on mock
-  providers, which say nothing about real latency. 60 s at three-way concurrency is the projection
-  from the sequential measurement, not an observation.
+- The wall-clock win was not measured when this shipped; the local suites run on mock providers,
+  which say nothing about real latency. The 60 s quoted here was a projection from the sequential
+  measurement, and it was wrong — **measured afterwards, three-way concurrency gave 70 s**, because
+  the wall clock is set by `ceil(N / concurrency)` generations rather than by the total work divided
+  by the concurrency. v0.42.3.0 replaced the fixed 3 with the question count and measured **35.3 s**.
 
 ## 0.42.1.1 (2026-10-04)
 
@@ -239,6 +257,83 @@
 - **An autofilled username and password keep the page's own colours.** Chrome repaints autofilled
   fields in its own light blue and overrides every theme value to do it, which was most of what made
   the sign-in screen look like a system dialog in the first place.
+
+## 0.40.11.3 (2026-10-03)
+
+### Fixed
+- **The two real avatar limits, measured end to end.** An investigation that began with one
+  production error ended up correcting four of my own earlier claims, which is why the commit trail
+  for #147 → #149 → #151 reads the way it does. What the probe actually found:
+
+  | limit | documented | measured | error code | does closing a session help? |
+  |---|---|---|---|---|
+  | concurrent avatar sessions | *no row at all* | **5** | `avatar_service_resource_exhausted` | **yes, immediately** |
+  | new connections per 60 s | 2 | **3** | `rate_limit_exceeded` | no — it counts creations, not live sessions |
+  | window length | not stated | **60 s** | — | — |
+
+  The two are independent and need opposite responses: hitting the concurrency ceiling means
+  something is leaking sessions and closing one frees capacity at once, while hitting the creation
+  rate means waiting is the only option. A re-runnable probe ships with it, so the next person does
+  not have to rediscover the numbers.
+
+## 0.40.11.2 (2026-10-03)
+
+### Fixed
+- **The avatar allowance is 3 per 60 s, not the published 2 — and there is no quota object to apply
+  for.** Answering the owner's question ("which SKU, which quota do we request?") took five sessions
+  in separate browser contexts, recording Azure's raw frames: creations #1, #2 and #3 were accepted
+  (at 4.7 s, 11.1 s, 17.7 s) and #4 and #5 came back `rate_limit_exceeded` with Azure's own
+  "Retry after 40.0s" / "34.0s". The published figure of 2 would have refused #3. The answer to the
+  quota question is that there is nothing to request: the limit appears in none of the four Azure
+  quota surfaces, so it cannot be raised through a quota increase.
+
+## 0.40.11.1 (2026-10-03)
+
+### Fixed
+- **The avatar rate-limit window was treated as 20 s; Azure documents a MINUTE.** The production
+  error — `Voice unavailable: Avatar request was rate-limited. Retry after 7.0s. — you can continue
+  by text.` (middle sentence Azure's, verbatim) — was investigated against the Speech service quota
+  docs and the code together. Our own throttle used a 20-second window, so it let through
+  connections Azure then refused. Full write-up in `docs/avatar-rate-limit.md`, with the regression
+  pinned by tests.
+
+## 0.40.11.0 (2026-10-02)
+
+### Fixed
+- **A jitter buffer for the interviewer's voice — and the gaps turned out to be Azure's pacing, not
+  the network.** Playback scheduled each `response.audio.delta` as its own `AudioBufferSourceNode`
+  at `max(nextPlayTime, currentTime)` — **a target lead of zero**. Any delivery gap became silence
+  mid-word, a click at both edges, and a resume with no cushion, so one hiccup made the next more
+  likely. This is the path with **no digital human**, including the fallback for a link where UDP is
+  blocked outright: the path held in reserve for bad networks had no resistance to one.
+
+  It is now an AudioWorklet queue (`public/audio-playback-processor.js`): prebuffer before starting,
+  re-accumulate the lead after a gap instead of realigning to `currentTime`, 3 ms ramps at every
+  discontinuity, and `stopAudio` flushes the queue rather than closing the `AudioContext` (which
+  re-entered the browser's autoplay gate). No `SharedArrayBuffer` — that wants COOP+COEP headers
+  this deployment does not set for one audio path — so chunks transfer by `postMessage` and the
+  queue lives in the worklet.
+
+  **The measurements changed the premise.** The perf review had filed this as weak-network work, so
+  the implied cause was network jitter. On a good local network, one 4.2 s response in 10 deltas
+  arrived with gaps of 0 / 249 / 19 / 242 / 7 / 64 / 180 / 1 / 4 / 2 ms. The quarter-second gaps are
+  Azure's own pacing, not the link — which means every listener has been hearing them, not only
+  those on bad connections.
+
+## 0.40.10.0 (2026-10-02)
+
+### Changed
+- **Mic uplink: 40 ms batches sent as binary — 391 → 256 kbps of payload, 125 → 25 messages/s.** The
+  Web Audio spec calls `process()` every 128 frames whatever the sample rate, which is 8 ms at
+  16 kHz, and the worklet posted on every callback. So one render quantum became one `postMessage`
+  became one base64 encode became one `ws.send` became one Azure event, with nothing aggregating
+  anywhere. Measured on live Azure over a 20 s steady-state window: **125.0 messages/second, 391 B
+  each, 391 kbps of payload — to carry 256 kbps of audio.**
+
+  The extra 135 kbps was not audio. It was base64's +1/3 overhead plus a ~47-byte JSON envelope
+  charged *per message*, so the more messages, the more waste. The perf review's arithmetic for this
+  turned out to be right within 0.5% — but it had been measuring the wrong layer, which changed one
+  of the review's other conclusions.
 
 ## 0.40.9.5 (2026-10-03)
 
