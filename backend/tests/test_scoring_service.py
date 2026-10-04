@@ -365,12 +365,14 @@ async def test_slow_question_emits_heartbeats_so_the_stream_is_never_idle(db_ses
 
 
 @pytest.mark.asyncio
-async def test_questions_are_graded_concurrently_and_bounded(db_session, monkeypatch):
-    """Grading runs in parallel, capped at SCORING_CONCURRENCY.
+async def test_questions_are_graded_concurrently_from_the_question_count(db_session, monkeypatch):
+    """Concurrency is DERIVED from the question count, so every question runs in one generation.
 
-    Sequentially, nine questions at ~18 s each took 166 s live. This asserts the two properties
-    that buy that back without tripping Azure's rate limit: more than one call is in flight at
-    once, and never more than the cap.
+    Sequentially, nine questions at ~18 s each took 166 s live. Pinning concurrency at 3 only got
+    that to 70 s, because what sets the wall clock is ceil(N / concurrency) generations of ~20 s —
+    and 4 would have bought the same three generations as 3 for a nine-question bank. Measured
+    against the live deployment, 12 simultaneous calls finish in 26.3 s with zero failures (one
+    call alone takes 26.7 s), so there is nothing to protect by holding the number down.
     """
     bank = await question_service.create_bank(db_session, name="B", is_default=True)
     qs = []
@@ -381,7 +383,6 @@ async def test_questions_are_graded_concurrently_and_bounded(db_session, monkeyp
         await checklist_service.draft_checklist(db_session, q.id)
         qs.append(q)
 
-    monkeypatch.setattr(state_machine, "SCORING_CONCURRENCY", 3)
     in_flight = 0
     peak = 0
     real_judge = scoring_service.judge_prepared
@@ -408,8 +409,8 @@ async def test_questions_are_graded_concurrently_and_bounded(db_session, monkeyp
     events = [e async for e in state_machine.score_and_finalize_events(db_session, session)]
     report = next(e["report"] for e in events if e["type"] == "report")
 
-    assert peak > 1, "grading is still sequential — the whole point of the change"
-    assert peak <= 3, f"exceeded the concurrency cap: {peak}"
+    # All six at once: one generation, which is what makes the wall clock one question long.
+    assert peak == len(qs), f"expected all {len(qs)} in flight at once, peak was {peak}"
     # Every question still scored, and the report rows stay in BANK order, not completion order.
     assert [r["question_id"] for r in report["per_question"]] == [q.id for q in qs]
 
@@ -501,3 +502,15 @@ async def test_a_rate_limit_is_retried_but_a_bad_request_is_not(db_session, monk
             db_session, question_id=q.id, question_text=q.text, answer_text="a long enough answer"
         )
     assert bad_request.calls == 1, f"a 400 was retried {bad_request.calls} times"
+
+
+@pytest.mark.asyncio
+async def test_concurrency_divisor_splits_the_questions_into_generations(monkeypatch):
+    """The owner can trade one generation for two without a code change (N vs N/2)."""
+    monkeypatch.setattr(state_machine, "SCORING_CONCURRENCY_DIVISOR", 1)
+    assert state_machine.scoring_concurrency(9) == 9  # one generation
+    monkeypatch.setattr(state_machine, "SCORING_CONCURRENCY_DIVISOR", 2)
+    assert state_machine.scoring_concurrency(9) == 5  # two generations: ceil(9/2)
+    assert state_machine.scoring_concurrency(1) == 1  # never zero
+    monkeypatch.setattr(state_machine, "SCORING_CONCURRENCY_DIVISOR", 3)
+    assert state_machine.scoring_concurrency(9) == 3

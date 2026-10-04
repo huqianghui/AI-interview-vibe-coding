@@ -28,6 +28,8 @@ became stale between load and write — the exact TOCTOU the TODO names.
 
 import asyncio
 import logging
+import math
+import os
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
@@ -59,13 +61,34 @@ ANSWER_SOURCES = ("text", "voice", "verbal_cue")
 # 20 s leaves an order of magnitude of headroom and costs one ~70-byte line per interval.
 SCORING_HEARTBEAT_SECONDS = 20.0
 
-# How many questions are graded at once. Measured sequentially against the live default bank:
-# ~18.4 s median per question, 166 s for nine. Three at a time brings that to roughly 60 s, four to
-# ~45 s. It is bounded rather than unlimited because Azure enforces a tokens-per-minute limit and
-# nine simultaneous ~4k-char prompts would throttle — which would cost more in 429 backoff than
-# the concurrency saved. Three is the conservative starting point; raise it only with a live
-# measurement showing no throttling at the higher number.
-SCORING_CONCURRENCY = 3
+# How many questions are graded at once — DERIVED from the question count, not a fixed number
+# (owner decision, 2026-10-04).
+#
+# What sets the wall clock is the number of sequential GENERATIONS, ceil(N / concurrency), because
+# the questions are discrete ~20 s units rather than divisible work. Measured on the live server
+# with concurrency pinned at 3 and N=9, the nine completions arrive in three clear generations:
+#
+#   done=1..3 @ 17.6 / 19.6 / 22.1 s     done=4..6 @ 38.2 / 43.6 / 46.9 s
+#   done=7..9 @ 60.0 / 61.1 / 68.9 s     report @ 70 s
+#
+# So 3 bought 3 generations, and — the part that makes a fixed number the wrong shape — 4 would have
+# bought exactly the same 3 for a nine-question bank, saving nothing. Only 5 (two generations) and 9
+# (one) are real steps, and where those land depends entirely on N.
+#
+# A previous version of this comment claimed the cap had to be low because "nine simultaneous
+# ~4k-char prompts would throttle" Azure's tokens-per-minute limit. That was asserted, not measured,
+# and it is wrong by two orders of magnitude: the gpt-5-mini deployment is provisioned at capacity
+# 3512 (~3.5M TPM), while a FORTY-question report fired all at once is ~60k tokens — about 1.7% of
+# it. TPM is not the constraint here.
+#
+# ``SCORING_CONCURRENCY_DIVISOR``: 1 → every question at once (one generation, fastest); 2 → half at
+# a time (two generations). Environment-overridable so this can be tuned without a deploy.
+SCORING_CONCURRENCY_DIVISOR = max(1, int(os.getenv("SCORING_CONCURRENCY_DIVISOR", "1")))
+
+
+def scoring_concurrency(question_count: int) -> int:
+    """How many of ``question_count`` questions to grade simultaneously. At least 1."""
+    return max(1, math.ceil(question_count / SCORING_CONCURRENCY_DIVISOR))
 
 
 class InterviewStateError(Exception):
@@ -497,7 +520,7 @@ async def score_and_finalize_events(
                 "question_id": question_id,
             }
 
-    semaphore = asyncio.Semaphore(SCORING_CONCURRENCY)
+    semaphore = asyncio.Semaphore(scoring_concurrency(total))
 
     async def _judge(task):
         async with semaphore:
