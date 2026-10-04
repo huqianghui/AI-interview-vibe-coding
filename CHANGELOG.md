@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.42.3.0 (2026-10-04)
+
+### Changed
+- **Scoring concurrency is the question count, not a fixed 3.** v0.42.2.0 pinned it at three, which
+  took a nine-question report from 170-190 s down to 70 s — but no further, and the reason is that
+  what sets the wall clock is the number of sequential GENERATIONS, `ceil(N / concurrency)`, not the
+  total work divided by the concurrency. The questions are discrete ~20 s units. Measured on the
+  live server at concurrency 3, the nine completions arrive in three clear generations:
+
+  ```
+  done=1..3 @ 17.6 / 19.6 / 22.1 s    done=4..6 @ 38.2 / 43.6 / 46.9 s
+  done=7..9 @ 60.0 / 61.1 / 68.9 s    report @ 70 s
+  ```
+
+  Three bought three generations. Four would have bought the same three for a nine-question bank —
+  saving nothing. Concurrency now equals the number of answers, so every question is graded in one
+  generation and the wall clock is one question long plus report assembly.
+
+### Fixed
+- **A claim in the code that was asserted rather than measured, and wrong.** The previous comment
+  justified holding concurrency down because "nine simultaneous ~4k-char prompts would throttle"
+  Azure's tokens-per-minute limit. The owner questioned the arithmetic. Checked: the `gpt-5-mini`
+  deployment is provisioned at capacity **3512 (~3.5M TPM)**, and a forty-question report fired all
+  at once is roughly **60k tokens — about 1.7% of it**. A probe then measured the deployment
+  directly, firing the production-shaped prompt at increasing concurrency:
+
+  | concurrency | 1 | 3 | 5 | 9 | 12 |
+  |---|---:|---:|---:|---:|---:|
+  | wall clock | 26.7 s | 20.3 s | 21.1 s | 23.2 s | 26.3 s |
+  | failures | 0 | 0 | 0 | 0 | 0 |
+  | per-call median | 26.7 s | 19.4 s | 20.2 s | 22.2 s | 18.7 s |
+
+  Twelve at once costs the same wall clock as one, with no 429 at any level and no meaningful
+  latency degradation. There was nothing to protect by holding the number down. The comment now
+  records both the measurement and the fact that its predecessor was a guess.
+
+### Notes
+- `SCORING_CONCURRENCY_DIVISOR` (default 1) remains as an environment knob: 1 grades every question
+  at once, 2 would grade half at a time. It exists so the shape can be changed without a deploy, not
+  because a lower value is currently known to be better.
+
 ## 0.42.2.0 (2026-10-04)
 
 ### Changed
