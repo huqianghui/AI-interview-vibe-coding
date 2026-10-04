@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.42.1.1 (2026-10-04)
+
+### Fixed
+- **The report's headline sentence was broken, visibly, on the screen a client reads first.** It
+  rendered as `Demonstrated 19 of the expected points, including The answer describes … are
+  asserted..` — a capital letter mid-sentence and a doubled full stop. The narrative splices a judge
+  rationale into its own sentence, and a rationale is the model's own prose: it starts with a capital
+  and brings its own full stop, which the f-string then added again. The rationale is now quoted, so
+  the capital sits inside quotes where it belongs and only one full stop remains. Curly quotes read
+  correctly in English and Chinese alike, and the Chinese full stop is stripped like the ASCII one.
+  Found while verifying the report screen on the live server; the code dates from v0.31.1.0, so this
+  has been on every scored report since.
+
 ## 0.42.1.0 (2026-10-04)
 
 ### Fixed

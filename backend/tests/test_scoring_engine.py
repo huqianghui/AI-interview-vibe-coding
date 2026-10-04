@@ -238,3 +238,70 @@ def test_low_score_without_critical_is_does_not_meet():
     assert result.score == 0.0
     assert result.outcome == DOES_NOT_MEET
     assert result.capped is False  # low score is natural, not a cap
+
+
+def test_build_narrative_does_not_splice_a_rationale_mid_sentence():
+    """The live report's headline read "…, including The answer describes … are asserted..".
+
+    A rationale is the model's own prose — capitalised, already punctuated, often several
+    sentences. Interpolating it raw put a capital letter mid-sentence and doubled the full stop.
+    """
+    rubric = _rubric()
+    judgments = [
+        {
+            "item_id": "i1",
+            "judgment": "met",
+            # Exactly the shape that broke it: capitalised, multi-sentence, trailing period.
+            "rationale": (
+                "The answer describes monitoring-related activities. "
+                "No invented steps are asserted."
+            ),
+        },
+        {"item_id": "i2", "judgment": "not_met"},
+        {"item_id": "i3", "judgment": "not_met"},
+    ]
+    result = enforce_and_score("q1", _LONG, rubric, judgments)
+    text = build_narrative([result])
+
+    assert ".." not in text, text
+    # The rationale is quoted rather than spliced, so the capital is inside quotes where it belongs.
+    assert "including “The answer describes" in text, text
+    assert text.rstrip().endswith(".")
+    # Still carries the judge's words, which is the whole point of the sentence.
+    assert "No invented steps are asserted" in text
+
+
+def test_build_narrative_quotes_the_gap_and_violation_clauses_too():
+    rubric = _rubric()
+    result = enforce_and_score(
+        "q1",
+        _LONG,
+        rubric,
+        [
+            {"item_id": "i1", "judgment": "met"},
+            {"item_id": "i2", "judgment": "met"},
+            {"item_id": "i3", "judgment": "met", "rationale": "Bypassed a safety step."},
+        ],
+    )
+    text = build_narrative([result])
+    assert ".." not in text, text
+    assert "“Bypassed a safety step”" in text, text
+
+
+def test_build_narrative_handles_a_chinese_rationale():
+    """F4 AC #4: the rationale can be Chinese. Curly quotes are correct in both languages, and the
+    Chinese full stop must be stripped like the ASCII one so the clause does not end in "。."."""
+    rubric = _rubric()
+    result = enforce_and_score(
+        "q1",
+        _LONG,
+        rubric,
+        [
+            {"item_id": "i1", "judgment": "met", "rationale": "回答描述了书面的监查计划。"},
+            {"item_id": "i2", "judgment": "not_met"},
+            {"item_id": "i3", "judgment": "not_met"},
+        ],
+    )
+    text = build_narrative([result])
+    assert "。”" not in text, text  # no stray Chinese stop left inside the quote
+    assert "“回答描述了书面的监查计划”" in text, text
