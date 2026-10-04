@@ -109,7 +109,7 @@ export const resources = {
         useTextInstead: "Use text instead",
       },
       transition: {
-        scoring: "Analyzing answer {{n}} of {{total}} against the SOP…",
+        scoring: "Scored {{n}} of {{total}} answers against the SOP…",
         reportReady: "Your report is ready.",
       },
       report: {
@@ -366,7 +366,7 @@ export const resources = {
         useTextInstead: "改用文字",
       },
       transition: {
-        scoring: "正在按 SOP 分析第 {{n}} / {{total}} 个回答…",
+        scoring: "已按 SOP 评完 {{n}} / {{total}} 个回答…",
         reportReady: "你的报告已就绪。",
       },
       report: {

@@ -1079,10 +1079,12 @@ export function InterviewPage() {
   });
 
   const q = interview?.current_question ?? null;
-  // REAL streamed progress when /report/stream delivered any (done = answers already graded, so
-  // the on-screen ordinal is done+1). Fallback (stream unavailable): the report's per-question
-  // count once it's back, else the total latched during the interview (current_question is null
-  // in the scoring phase, so q.total is gone) — with the old static numerator.
+  // REAL streamed progress when /report/stream delivered any. `done` is the number of answers
+  // FINISHED (v0.42.2.0: the backend grades them concurrently, so there is no single "currently
+  // analyzing" question to name — it is shown as-is, not done+1, which would claim one more answer
+  // is finished than actually is). Fallback (stream unavailable): the report's per-question count
+  // once it's back, else the total latched during the interview (current_question is null in the
+  // scoring phase, so q.total is gone).
   const scoringTotal =
     scoringProgress?.total ||
     report?.per_question.length ||
@@ -1090,8 +1092,8 @@ export function InterviewPage() {
     1;
   const scoringNarr = t("transition.scoring", {
     n: scoringProgress
-      ? Math.min(scoringProgress.done + 1, scoringTotal)
-      : Math.min((q?.index ?? 0) + 1, scoringTotal),
+      ? Math.min(scoringProgress.done, scoringTotal)
+      : Math.min(q?.index ?? 0, scoringTotal),
     total: scoringTotal,
   });
 

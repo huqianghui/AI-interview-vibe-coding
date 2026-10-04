@@ -8,6 +8,7 @@ import pytest
 
 from app.interview import scoring_engine, state_machine
 from app.services import checklist_service, question_service, scoring_service
+from app.services.agents.adapters.foundry_llm import LLMAdapterError
 from app.services.anonymous_session_service import create_anonymous_session
 
 
@@ -295,22 +296,16 @@ async def test_one_failing_question_does_not_discard_the_rest_of_the_report(
         await checklist_service.draft_checklist(db_session, q.id)
         qs.append(q)
 
-    real = scoring_service.score_answer_against_checklist
+    # Patch the concurrent seam: since v0.42.2.0 the generator prepares every question's DB work
+    # sequentially and then runs judge_prepared() for each under a semaphore.
+    real_judge = scoring_service.judge_prepared
 
-    async def _fail_on_second(db, *, question_id, question_text, answer_text, **kw):
-        if question_id == qs[1].id:
+    async def _fail_on_second(task, **kw):
+        if task.question_id == qs[1].id:
             raise scoring_engine.ScoringIncomplete("LLM did not judge checklist item 'x'")
-        return await real(
-            db,
-            question_id=question_id,
-            question_text=question_text,
-            answer_text=answer_text,
-            **kw,
-        )
+        return await real_judge(task, **kw)
 
-    monkeypatch.setattr(
-        state_machine.scoring_service, "score_answer_against_checklist", _fail_on_second
-    )
+    monkeypatch.setattr(state_machine.scoring_service, "judge_prepared", _fail_on_second)
 
     cand, _ = await create_anonymous_session(db_session, ip_address="1.2.3.4")
     session = await state_machine.start_interview(db_session, cand.id)
@@ -347,17 +342,162 @@ async def test_slow_question_emits_heartbeats_so_the_stream_is_never_idle(db_ses
         db_session, session, "a long enough answer to score", source="text"
     )
 
-    real = scoring_service.score_answer_against_checklist
+    real_judge = scoring_service.judge_prepared
 
-    async def _slow(db, **kw):
+    async def _slow(task, **kw):
         await asyncio.sleep(0.25)  # longer than the heartbeat interval below
-        return await real(db, **kw)
+        return await real_judge(task, **kw)
 
-    monkeypatch.setattr(state_machine.scoring_service, "score_answer_against_checklist", _slow)
+    monkeypatch.setattr(state_machine.scoring_service, "judge_prepared", _slow)
     monkeypatch.setattr(state_machine, "SCORING_HEARTBEAT_SECONDS", 0.05)
 
     events = [e async for e in state_machine.score_and_finalize_events(db_session, session)]
     pings = [e for e in events if e["type"] == "ping"]
-    assert pings, "a question slower than the heartbeat interval must emit keepalives"
-    assert all(p["question_id"] == q.id and p["total"] == 1 for p in pings)
+    assert pings, "grading slower than the heartbeat interval must emit keepalives"
+    # Since v0.42.2.0 questions are graded concurrently, so a ping names no single "current"
+    # question — it carries the finished count against a stable total.
+    assert all(p["total"] == 1 and p["done"] <= 1 for p in pings), pings
     assert any(e["type"] == "report" for e in events)
+    assert q.id
+
+
+# --- concurrency + transport retries (v0.42.2.0) ---------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_questions_are_graded_concurrently_and_bounded(db_session, monkeypatch):
+    """Grading runs in parallel, capped at SCORING_CONCURRENCY.
+
+    Sequentially, nine questions at ~18 s each took 166 s live. This asserts the two properties
+    that buy that back without tripping Azure's rate limit: more than one call is in flight at
+    once, and never more than the cap.
+    """
+    bank = await question_service.create_bank(db_session, name="B", is_default=True)
+    qs = []
+    for i in range(6):
+        q = await question_service.add_question(
+            db_session, bank_id=bank.id, text=f"Q{i + 1}?", order_index=i
+        )
+        await checklist_service.draft_checklist(db_session, q.id)
+        qs.append(q)
+
+    monkeypatch.setattr(state_machine, "SCORING_CONCURRENCY", 3)
+    in_flight = 0
+    peak = 0
+    real_judge = scoring_service.judge_prepared
+
+    async def _tracked(task, **kw):
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        try:
+            await asyncio.sleep(0.05)  # hold the slot so overlap is observable
+            return await real_judge(task, **kw)
+        finally:
+            in_flight -= 1
+
+    monkeypatch.setattr(state_machine.scoring_service, "judge_prepared", _tracked)
+
+    cand, _ = await create_anonymous_session(db_session, ip_address="1.2.3.4")
+    session = await state_machine.start_interview(db_session, cand.id)
+    for _ in qs:
+        session = await state_machine.answer_finalized(
+            db_session, session, "a long enough answer to score", source="text"
+        )
+
+    events = [e async for e in state_machine.score_and_finalize_events(db_session, session)]
+    report = next(e["report"] for e in events if e["type"] == "report")
+
+    assert peak > 1, "grading is still sequential — the whole point of the change"
+    assert peak <= 3, f"exceeded the concurrency cap: {peak}"
+    # Every question still scored, and the report rows stay in BANK order, not completion order.
+    assert [r["question_id"] for r in report["per_question"]] == [q.id for q in qs]
+
+
+@pytest.mark.asyncio
+async def test_progress_counts_finished_questions_and_reaches_the_total(db_session):
+    """`done` climbs monotonically from 0 to the total, whatever order the model finishes in."""
+    bank = await question_service.create_bank(db_session, name="B", is_default=True)
+    qs = []
+    for i in range(3):
+        q = await question_service.add_question(
+            db_session, bank_id=bank.id, text=f"Q{i + 1}?", order_index=i
+        )
+        await checklist_service.draft_checklist(db_session, q.id)
+        qs.append(q)
+
+    cand, _ = await create_anonymous_session(db_session, ip_address="1.2.3.4")
+    session = await state_machine.start_interview(db_session, cand.id)
+    for _ in qs:
+        session = await state_machine.answer_finalized(
+            db_session, session, "a long enough answer to score", source="text"
+        )
+
+    events = [e async for e in state_machine.score_and_finalize_events(db_session, session)]
+    dones = [e["done"] for e in events if e["type"] == "progress"]
+    assert dones == sorted(dones), dones
+    assert dones[0] == 0
+    assert dones[-1] == len(qs)
+    assert {e["total"] for e in events if e["type"] == "progress"} == {len(qs)}
+
+
+@pytest.mark.asyncio
+async def test_a_rate_limit_is_retried_but_a_bad_request_is_not(db_session, monkeypatch):
+    """Backoff is for transient failures only.
+
+    A 429 arrives in milliseconds and usually succeeds on the next try, so it is worth retrying.
+    A 400 (bad parameter, content filter) fails identically every time — retrying it only spends
+    the candidate's time, and there was no retry at all on this path before.
+    """
+    q = await _question_with_checklist(db_session)
+
+    class _Flaky:
+        name = "flaky"
+
+        def __init__(self, *, status, retryable, fail_times):
+            self.calls = 0
+            self.status = status
+            self.retryable = retryable
+            self.fail_times = fail_times
+
+        async def complete(self, prompt, *, json_mode=False, fast=False):
+            self.calls += 1
+            if self.calls <= self.fail_times:
+                exc = LLMAdapterError(
+                    f"boom {self.status}", status_code=self.status, retryable=self.retryable
+                )
+                raise exc
+            items = await checklist_service.list_items(
+                db_session, (await checklist_service.get_default_checklist(db_session, q.id)).id
+            )
+            return json.dumps(
+                {
+                    "judgments": [
+                        {"item_id": it.id, "judgment": "met", "rationale": "r", "answer_quote": "a"}
+                        for it in items
+                    ]
+                }
+            )
+
+        async def stream(self, prompt):
+            yield ""
+
+    monkeypatch.setattr(scoring_service, "TRANSPORT_BACKOFF_BASE_SECONDS", 0.01)
+
+    # 429 twice, then success — retried, and the question scores.
+    rate_limited = _Flaky(status=429, retryable=True, fail_times=2)
+    monkeypatch.setattr(scoring_service, "get_llm_adapter", lambda name=None: rate_limited)
+    result = await scoring_service.score_answer_against_checklist(
+        db_session, question_id=q.id, question_text=q.text, answer_text="a long enough answer"
+    )
+    assert result is not None
+    assert rate_limited.calls == 3  # two failures + the success
+
+    # 400 — raised on the first attempt, never retried.
+    bad_request = _Flaky(status=400, retryable=False, fail_times=99)
+    monkeypatch.setattr(scoring_service, "get_llm_adapter", lambda name=None: bad_request)
+    with pytest.raises(LLMAdapterError):
+        await scoring_service.score_answer_against_checklist(
+            db_session, question_id=q.id, question_text=q.text, answer_text="a long enough answer"
+        )
+    assert bad_request.calls == 1, f"a 400 was retried {bad_request.calls} times"
