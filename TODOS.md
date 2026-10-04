@@ -168,34 +168,29 @@ on EVERY machine instead of only on machines that happen to lack a mic by accide
 
 ## Design system (frontend/src/theme.ts, AppShell.tsx)
 
-### The 8 appearance invariants that only a real browser can hold
+### The 8 appearance invariants that only a real browser can hold — DONE v0.42.4.0
 
-Shipped v0.41.0.0. Unit tests cover the theme contracts and AppShell's structure, but eight things
-are E2E-shaped by nature — jsdom has no autofill, no real font loading and no viewport — so they are
-currently held by nothing but a manual check done once at ship time.
+Pinned in `frontend/e2e/appearance-invariants.spec.ts`, on the standard zero-Azure mock stack, so
+they run in `npm run e2e` and gate every commit.
 
-**Highest value first, because this one has bug history:** the FluentProvider root must stay
-transparent. The page ground is painted on `html`/`body` in `styles/global.css`, and `avatar_bg`
-tells Azure to paint the digital human's wall the same colour. If the `provider` class in
-`App.tsx` is ever dropped, the provider repaints the page in the warm CARD surface, the two stop
-matching, and a visible rectangle reappears around the interviewer — which is exactly the defect
-the `avatar_bg` mechanism was built to prevent, and CI would be entirely green. Assert
-`getComputedStyle(document.querySelector('.fui-FluentProvider')).backgroundColor` is transparent
-and `document.body`'s is `rgb(245, 241, 234)`.
+Four were verified to go RED when deliberately broken, which is the only thing that makes a guard
+real:
 
-The other seven: an autofilled field keeps the warm surface (this was most of the original
-complaint); both faces report `status: "loaded"` and nothing requests fonts.googleapis.com; zh-CN
-renders Chinese in PingFang SC / Microsoft YaHei rather than SimSun (only ever visible to Chinese
-candidates, which is the client's whole user base); 390px has no horizontal page scroll and shows
-only the live voice state; the live screen fits exactly one viewport at 1440x900; and below 560px of
-viewport height it scrolls instead of clipping the controls.
+| broken | what the test reported |
+|---|---|
+| `provider: { backgroundColor: "transparent" }` removed | expected `rgba(0, 0, 0, 0)`, got `rgb(255, 253, 249)` — the card surface repainting the page, which is exactly the regression that brings the rectangle back around the interviewer |
+| the `:-webkit-autofill` block deleted | failed |
+| `"PingFang SC"` dropped from the body stack | failed |
+| a `@import` to fonts.googleapis.com added | failed, naming the URL |
 
-Same backend dependency, same trip: **all 8 README screenshots now predate v0.41.0.0** and show
-the previous appearance (`e2e/readme-screenshots.spec.ts` regenerates them; README carries a note
-saying so in the meantime). One of them was already annotated as stale since v0.39.3.0.
+One honest limitation, documented in the spec: Playwright cannot trigger a real Chrome autofill, so
+test 2 asserts the RULE is live in the stylesheet (inset shadow in `rgb(255, 253, 249)` plus
+`-webkit-text-fill-color`) rather than the post-autofill state. Weaker than the real thing, stronger
+than nothing.
 
-**Effort:** human: ~1 day / CC: ~1h once a seeded candidate account and a running backend are available.
-**Priority:** P1 — the provider-transparency one is a silent regression into a user-visible defect.
+Also: asserting the colour as the hex `fffdf9` failed, because the engine normalises `cssText` to
+`rgb(255, 253, 249)` — the same mistake this repo already made once in jsdom. The assertion uses the
+rgb form.
 
 ### Fluent's type SIZES were never overridden, only the family
 

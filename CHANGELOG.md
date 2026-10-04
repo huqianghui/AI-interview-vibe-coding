@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.42.4.0 (2026-10-04)
+
+### Added
+- **The eight appearance invariants are pinned by tests instead of by one manual check.** The theme
+  contracts and the page shell had unit coverage, but eight properties of the v0.41.0.0 design are
+  E2E-shaped by nature — jsdom has no autofill, no real font loading and no viewport — so since that
+  release they had been held by nothing but a check done once at ship time. They now run on the
+  zero-Azure mock stack as part of `npm run e2e`.
+
+  The one with bug history is first: the FluentProvider root must stay **transparent**. The page
+  ground is painted on `html`/`body`, and `avatar_bg` tells Azure to paint the digital human's wall
+  the same colour; if the `provider` class is ever dropped the provider repaints the page in the
+  warm CARD surface, the two stop matching, and a visible rectangle reappears around the interviewer
+  — with CI entirely green. Deliberately removing it now reports `expected rgba(0, 0, 0, 0), got
+  rgb(255, 253, 249)`.
+
+  The other seven: an autofilled field keeps the warm surface rather than Chrome's `#E8F0FE`; both
+  faces reach `status: "loaded"` and **nothing requests fonts.googleapis.com** (they are self-hosted
+  because the client's network cannot reach Google, so a regression to the CDN would look fine here
+  and render Songti there); zh-CN lands in PingFang SC / Microsoft YaHei with PingFang ahead of any
+  serif; 390px has no horizontal page scroll; the page ground is the ground colour and not the card
+  surface; sign-in fits one viewport at 1440x900; and a 520px-tall viewport scrolls instead of
+  clipping the answer controls — a bug that shipped once and could not be clicked out of.
+
+  Four of the eight were verified to fail when the thing they guard is deliberately broken
+  (transparency, the autofill rule, the CJK font stack, and a `@import` to Google Fonts). A guard
+  that has never been seen to fail is decoration.
+
+### Notes
+- Test 2 asserts the autofill RULE is live in the stylesheet rather than the post-autofill state:
+  Playwright cannot trigger a real Chrome autofill. The limitation is written into the spec.
+
 ## 0.42.3.0 (2026-10-04)
 
 ### Changed
