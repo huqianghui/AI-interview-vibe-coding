@@ -367,11 +367,16 @@ async def judge_prepared(task: ScoringTask, *, llm_provider: str | None = None) 
     raise last_error  # type: ignore[misc]
 
 
-def stub_result_dict(question_id: str, answer_text: str) -> dict:
-    """The F4-stub per-question row, used for questions that have no checklist authored yet."""
+def stub_result_dict(question_id: str, answer_text: str, prompt: str = "") -> dict:
+    """The F4-stub per-question row, used for questions that have no checklist authored yet.
+
+    ``prompt`` is the question's own text, so a stub row labels itself the same way a graded one
+    does — the report should not be able to name some of its questions and not others.
+    """
     stub = score_answer(question_id, answer_text)
     return {
         "question_id": question_id,
+        "prompt": prompt,
         "judgment": stub.judgment,
         "rationale": stub.rationale,
         "is_stub": True,

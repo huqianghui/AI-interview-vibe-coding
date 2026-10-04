@@ -574,7 +574,11 @@ async def score_and_finalize_events(
     for question_id, answer_text, task in prepared:
         if task is None:
             # No checklist authored for this question — length-based stub row.
-            per_question.append(scoring_service.stub_result_dict(question_id, answer_text))
+            per_question.append(
+                scoring_service.stub_result_dict(
+                    question_id, answer_text, prompt_by_id.get(question_id, "")
+                )
+            )
             continue
         failure = errors.get(question_id)
         if failure is not None:
@@ -586,6 +590,7 @@ async def score_and_finalize_events(
             per_question.append(
                 {
                     "question_id": question_id,
+                    "prompt": prompt_by_id.get(question_id, ""),
                     "is_stub": False,
                     "scoring_failed": True,
                     "scoring_error": type(failure).__name__,
@@ -618,6 +623,11 @@ async def score_and_finalize_events(
         per_question.append(
             {
                 "question_id": result.question_id,
+                # The question's own text. The report is the one screen whose entire claim is
+                # traceability, and until v0.42.6.0 it could only label a judgement "Question 3" —
+                # so a reader had to hold the question in their head from the interview to make
+                # sense of the finding beside it.
+                "prompt": prompt_by_id.get(result.question_id, ""),
                 "score": result.score,
                 "coverage_pct": result.coverage_pct,
                 "grade": grade_for_score(result.score),

@@ -64,14 +64,31 @@ const useStyles = makeStyles({
   },
   facts: { display: "flex", gap: tokens.spacingHorizontalS, flexWrap: "wrap", marginBottom: tokens.spacingVerticalM },
   /** The evidence block, given the weight the credibility claim deserves. */
+  /** The ordinal eyebrow owns the gap that separates the block from the exec card above it. The
+   *  heading used to carry it, but putting the eyebrow in front left that XXL space BETWEEN the two
+   *  — eyebrow jammed against the card, loose from its own heading, the hierarchy inverted. */
+  evidenceOrdinal: {
+    display: "block",
+    fontFamily: fonts.display,
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: 700,
+    color: palette.magenta,
+    letterSpacing: "0.02em",
+    marginTop: tokens.spacingVerticalXXL,
+    marginBottom: tokens.spacingVerticalXS,
+  },
   evidenceHead: {
     fontFamily: fonts.display,
     fontWeight: 700,
     fontSize: tokens.fontSizeBase500,
     letterSpacing: "-0.02em",
     color: palette.ink,
-    margin: `${tokens.spacingVerticalXXL} 0 ${tokens.spacingVerticalM}`,
+    // No top margin: the eyebrow above supplies the separation when it is rendered, and when it is
+    // not (an older report with no prompt) this heading needs it instead — hence the sibling rule.
+    margin: `0 0 ${tokens.spacingVerticalM}`,
   },
+  /** Fallback for a report with no question text: the heading stands alone, so it takes the gap. */
+  evidenceHeadAlone: { marginTop: tokens.spacingVerticalXXL },
   evidenceList: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalL },
   itemCard: {
     backgroundColor: tokens.colorNeutralBackground1,
@@ -414,8 +431,25 @@ export function ReportView({ report }: { report: Report }) {
           TODOS.md rather than invented here. */}
       {evidence && (
         <>
-          <h3 className={styles.evidenceHead}>
-            {t("report.questionN", { n: evidence.index + 1 })}
+          {/* The report's whole claim is traceability, so the evidence block leads with the
+              question itself and keeps the ordinal as a small label above it. Older reports have no
+              `prompt`, so the ordinal is still the fallback rather than an empty heading. */}
+          {/* The ordinal is an eyebrow ONLY when the heading carries the question text. Without a
+              prompt (an older report) the heading IS the ordinal, and rendering both would print
+              "Question 1" twice. */}
+          {evidence.question.prompt && (
+            <span className={styles.evidenceOrdinal}>
+              {t("report.questionN", { n: evidence.index + 1 })}
+            </span>
+          )}
+          <h3
+            className={
+              evidence.question.prompt
+                ? styles.evidenceHead
+                : mergeClasses(styles.evidenceHead, styles.evidenceHeadAlone)
+            }
+          >
+            {evidence.question.prompt || t("report.questionN", { n: evidence.index + 1 })}
           </h3>
           <div className={styles.evidenceList} data-testid="report-evidence">
             {evidence.items.map((it, ii) => (
@@ -484,7 +518,8 @@ export function ReportView({ report }: { report: Report }) {
           {report.per_question.map((q: QuestionScore, qi) => (
             <AccordionItem value={q.question_id} key={q.question_id}>
               <AccordionHeader>
-                {t("report.questionN", { n: qi + 1 })} —{" "}
+                {t("report.questionN", { n: qi + 1 })}
+                {q.prompt ? `: ${q.prompt}` : ""} —{" "}
                 {q.outcome ? t(`report.outcome.${q.outcome}`) : (q.grade ?? "")} (
                 {Math.round(q.score ?? 0)}
                 /100){q.capped ? " ⚑" : ""}

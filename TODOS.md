@@ -204,18 +204,20 @@ background-image and the blur to a solid tint with no visible loss.
 **Effort:** human: ~2h / CC: ~30 min with the existing avatar-weaknet probe.
 **Priority:** P2 — cheap to measure, and the one path in this app where paint cost has bitten before.
 
-### The report cannot name its own questions
+### The report cannot name its own questions — DONE v0.42.6.0
 
-`QuestionScore` (the report payload) carries `question_id` and no question TEXT, so the report's
-evidence block and its detail accordion can only label a question "Question 3". On the one screen
-whose entire claim is traceability, that is the weakest possible label — a reader has to hold the
-question in their head from the interview to make sense of the judgement beside it.
+`prompt` now rides on every per-question row — graded, stub and scoring-failed alike, since a report
+that can name some of its questions and not others is worse than one that names none. The evidence
+block leads with the question text and keeps the ordinal as an eyebrow; the detail accordion carries
+it too. Older reports have no field, so the ordinal stays as the fallback.
 
-v0.42.0.0 deliberately did not fake it. The fix is a backend field (`prompt` on the per-question
-score, mirroring `AnsweredQuestionOut`), then one line in `ReportView`.
+Two defects this introduced, both found by **opening the screenshot** rather than by a test:
 
-**Effort:** human: ~2h / CC: ~20 min across backend schema + frontend.
-**Priority:** P2 — the report reads as less traceable than it actually is, which is backwards.
+1. Without a prompt the eyebrow and the heading both printed "Question 1". The component was fixed
+   (no eyebrow when the heading is the ordinal), not the test that caught it.
+2. `evidenceHead` carried the XXL top margin, so inserting an eyebrow above it left that gap
+   *between* the two — eyebrow jammed against the exec card, loose from its own heading, hierarchy
+   inverted. The gap moved to the eyebrow, with a sibling rule for the no-prompt case.
 
 ### Two griffel class joins left in the agent editor
 
