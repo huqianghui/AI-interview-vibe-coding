@@ -54,6 +54,14 @@ drifted, and on 2026-09-28 it drifted far enough that the card showed one bank q
 avatar asked a different one. What the candidate hears and what they read are now the same string
 by construction.
 
+Two avatar families are supported, and they are not interchangeable. **Video** avatars (shown here —
+Lisa, `casual-sitting`) stream 1080p 16:9. **Photo** avatars (`type: photo-avatar` + `model: vasa-1`,
+e.g. Amira, Adrian) are photoreal head-and-shoulders and stream **512×512 square**, which is why the
+avatar stage hugs the stream instead of imposing a frame (v0.39.2.2 — any `object-fit: cover` on a
+non-square stage cropped the person's chin and shoulders). Video style slugs are per character, so a
+style valid for one is not valid for another. The persona editor picks both from the live Azure
+roster.
+
 ![Voice mode — live digital-human avatar speaking the question, transcript streaming](docs/images/09-live-avatar-voice.png)
 
 ### 3b. Text mode — same flow, no Azure needed
