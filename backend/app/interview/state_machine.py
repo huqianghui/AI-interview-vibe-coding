@@ -26,6 +26,8 @@ and the caller re-checked ``session.current_question_index``/``status`` against 
 became stale between load and write — the exact TOCTOU the TODO names.
 """
 
+import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
@@ -46,8 +48,15 @@ from app.models.interview import InterviewSession, InterviewTurn
 from app.models.sop import SopDocument
 from app.services import scoring_service, sop_coverage
 
+logger = logging.getLogger(__name__)
+
 # Sources that can finalize an answer (P9). All route through answer_finalized().
 ANSWER_SOURCES = ("text", "voice", "verbal_cue")
+
+# How often the report stream emits a keepalive while ONE question is being graded. Must stay well
+# under Azure Container Apps' ingress "idle request timeout" (default 4 minutes, configurable 4-30);
+# 20 s leaves an order of magnitude of headroom and costs one ~70-byte line per interval.
+SCORING_HEARTBEAT_SECONDS = 20.0
 
 
 class InterviewStateError(Exception):
@@ -431,6 +440,8 @@ async def score_and_finalize_events(
     # the opt-in flag is on. Never touches any score below.
     coverage_findings: list[dict] = []
 
+    unscored: list[str] = []
+
     for done, (question_id, answer_text) in enumerate(answers):
         yield {
             "type": "progress",
@@ -438,12 +449,61 @@ async def score_and_finalize_events(
             "total": len(answers),
             "question_id": question_id,
         }
-        result = await scoring_service.score_answer_against_checklist(
-            db,
-            question_id=question_id,
-            question_text=prompt_by_id.get(question_id, ""),
-            answer_text=answer_text,
+        # Grading one question takes tens of seconds (measured 13-25 s against the live bank), and
+        # for that whole time this stream used to send nothing. Azure Container Apps' ingress
+        # disconnects a request that stays idle past its "idle request timeout" (default 4 minutes),
+        # which is exactly how a single stalled call turned into `504 stream timeout` and cost the
+        # candidate the entire report. So heartbeat while waiting: the connection is never idle,
+        # whatever the model does. `ping` carries the same done/total as `progress` so a client that
+        # does not know the type can ignore it safely.
+        result = None
+        failure: Exception | None = None
+        task = asyncio.ensure_future(
+            scoring_service.score_answer_against_checklist(
+                db,
+                question_id=question_id,
+                question_text=prompt_by_id.get(question_id, ""),
+                answer_text=answer_text,
+            )
         )
+        while True:
+            done_set, _ = await asyncio.wait({task}, timeout=SCORING_HEARTBEAT_SECONDS)
+            if done_set:
+                break
+            yield {
+                "type": "ping",
+                "done": done,
+                "total": len(answers),
+                "question_id": question_id,
+            }
+        try:
+            result = task.result()
+        except Exception as exc:  # noqa: BLE001 — one question must not cost the whole report
+            # Per-question isolation. The question is recorded as NOT SCORED and excluded from the
+            # score the same way a stub question is (out of both numerator and denominator), so the
+            # candidate keeps every answer that did grade. Scoring it 0 instead would be the
+            # under-count P7 forbids — a question nobody judged is not a question answered badly.
+            failure = exc
+            logger.warning("Scoring failed for question %s: %s", question_id, exc)
+            unscored.append(question_id)
+            per_question.append(
+                {
+                    "question_id": question_id,
+                    "is_stub": False,
+                    "scoring_failed": True,
+                    "scoring_error": type(exc).__name__,
+                    "items": [],
+                }
+            )
+            yield {
+                "type": "question_error",
+                "done": done,
+                "total": len(answers),
+                "question_id": question_id,
+                "detail": type(exc).__name__,
+            }
+        if failure is not None:
+            continue
         if result is None:
             # No checklist authored for this question — length-based stub row.
             per_question.append(scoring_service.stub_result_dict(question_id, answer_text))
@@ -533,6 +593,11 @@ async def score_and_finalize_events(
             "per_question": per_question,
             "warnings": all_warnings,
             "is_stub": not any_graded,
+            # Questions whose grading failed outright. Present only when there are any, so the
+            # report can say "N questions could not be scored" instead of quietly averaging fewer
+            # questions than the candidate answered. They are excluded from the score above, NOT
+            # scored zero: an unjudged question is not a badly answered one (P7).
+            "unscored_question_ids": unscored or None,
             # Feature D: present only when the opt-in check ran and found something; None otherwise
             # so the report renders the panel only when there are findings. Never affects scores.
             "sop_coverage": coverage_findings

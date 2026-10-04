@@ -830,17 +830,28 @@ export function InterviewPage() {
       setScoringProgress(null);
       let r: Report;
       try {
-        // Streaming first: one progress event per question as the backend grades it.
-        r = await getReportStream(
-          iv.interview_session_id,
-          sopCoverageCheck,
-          (p) => setScoringProgress({ done: p.done, total: p.total }),
-        );
-      } catch {
-        // Stream unavailable (older backend, proxy hiccup) — the batch endpoint returns the same
-        // report; a scored interview re-scores idempotently so retrying after a mid-stream failure
-        // is safe. The screen shows the latched fallback numerator meanwhile.
-        r = await getReport(iv.interview_session_id, sopCoverageCheck);
+        try {
+          // Streaming first: one progress event per question as the backend grades it.
+          r = await getReportStream(
+            iv.interview_session_id,
+            sopCoverageCheck,
+            (p) => setScoringProgress({ done: p.done, total: p.total }),
+          );
+        } catch {
+          // Stream unavailable (older backend, proxy hiccup) — the batch endpoint returns the same
+          // report; a scored interview re-scores idempotently so retrying after a mid-stream failure
+          // is safe. The screen shows the latched fallback numerator meanwhile.
+          r = await getReport(iv.interview_session_id, sopCoverageCheck);
+        }
+      } catch (e) {
+        // Both paths failed. Go BACK to review instead of leaving the candidate on the scoring
+        // screen: `guard` only sets the error banner, so the phase stayed "scoring" forever and the
+        // screen had no retry and no way back — a dead end with a spinner on it. Review still has
+        // their answers and the submit button, and re-scoring is idempotent, so the natural next
+        // action is to press it again. Rethrow so `guard` still surfaces what went wrong.
+        setPhase("review");
+        setScoringProgress(null);
+        throw e;
       }
       setReport(r);
       setPhase("scored");

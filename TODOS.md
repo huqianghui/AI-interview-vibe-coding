@@ -260,6 +260,69 @@ not attempt it: inventing changelog prose for work you did not do is how a chang
 **Effort:** human: ~1h / CC: ~15 min reading the five PR bodies.
 **Priority:** P1 — a changelog with holes in it is the one artifact a client reads to understand what changed.
 
+### Sign-in overflows a 720px-tall viewport by 3px
+
+Measured on the live server at 1280 wide (v0.42.0.0): the sign-in portrait card's bottom edge lands
+at y=723 in a 720px-tall viewport — 3px below the fold, with 51px of page scroll. At 800 and 900 tall
+it fits with 47px to spare. The screen is built to `minHeight: calc(100vh - 64px)`, so at 720 the
+64px header band plus the card's own height is just over budget.
+
+Cosmetic, and 720 is shorter than the 900 the design was measured at, but it means the sign-in screen
+is not quite one-viewport on a 720-tall window — which is the one thing that screen was composed to
+be. Note the 51px of scroll is larger than the 3px the card overflows, so something else contributes
+~48px as well; find that before changing a height.
+
+**Effort:** CC: ~20 min, including a re-measure at 720/800/900 and 390px.
+**Priority:** P3 — visible only as a small scrollbar on short windows, and it needs the owner's eye
+on the result since it changes the composition they approved.
+
+## Scoring performance and resilience (PR 2 — follow-up to the stream-resilience fix)
+
+### Score the questions concurrently, with standard retries and a real progress signal
+
+PR 1 (`fix/scoring-stream-resilience`) made scoring survive failure: a bounded per-call timeout, a
+heartbeat so the stream is never idle, per-question isolation so one bad question no longer discards
+the whole report, a retry that re-asks only the unjudged items, and the in-band error contract. It
+did NOT make scoring faster, add transport-level retries, or improve what the candidate sees.
+
+**Measured, against the live default bank (9 questions × 12 checklist items, ~4.1k-char prompt,
+gpt-5-mini at default reasoning effort, 6 calls):** 13.1 s min, 18.4 s median, 24.8 s max per
+question, 12/12 judgments every time. Sequential total ≈ **166 s**. The candidate stares at a
+progress bar for nearly three minutes.
+
+**1. Bounded concurrency.** Each question's grading is independent (its own rubric, its own answer,
+no ordering dependency), so this is embarrassingly parallel: 3-way ≈ 60 s, 4-way ≈ 45 s.
+
+The constraint that shapes the work: one call to `score_answer_against_checklist` does 2-3 DB reads
+(`checklist_service.get_default_checklist`, `list_items`, and `_collect_source_context` →
+`sop_context.get_source_context`), and SQLAlchemy's `AsyncSession` is NOT safe for concurrent use —
+two coroutines awaiting the same session corrupt it. So the refactor is to split the per-question
+work in two: a **prepare** phase (all the DB reads, run sequentially up front — cheap and local) and
+a **judge** phase (the LLM call only, run under a `asyncio.Semaphore(3-4)`). Concurrency must be
+bounded regardless, because Azure enforces a tokens-per-minute limit and 9 simultaneous 4k-char
+prompts would throttle.
+
+**2. Standard transport retries.** `foundry_llm.py` builds its client with `client.get_openai_client()`
+and passes no `max_retries`, and there is no retry layer of our own, so a 429 or a 5xx or a dropped
+connection fails the question outright today. The only retry that exists is the item-level re-ask
+added in PR 1, which is a different thing. Wanted: exponential backoff with jitter on 429 / 5xx /
+timeout only — never on a 4xx parameter error, which will fail identically every time.
+
+**3. Progress the candidate can read.** With concurrency the current "analyzing answer 4 of 9" is no
+longer meaningful; it becomes "4 of 9 done", which is both accurate and more useful. Also surface the
+per-question failure PR 1 introduced (`question_error` events, `unscored_question_ids` in the report)
+so a partially-scored report explains itself instead of quietly averaging fewer questions.
+
+**Do NOT reach for the adapter's `fast=True` to speed this up.** Measured: it caps output tokens, and
+a 12-item judgment set truncates to nothing — 0 of 12 judgments parsed on all three answer shapes
+tested, versus 12/12 without it. It is correct for the judge (one tiny verdict) and wrong here.
+
+**Effort:** CC: ~2-3 h for the prepare/judge split plus the semaphore, the retry decorator, and the
+event-shape change, and it needs a live run against the real bank to confirm the wall-clock win and
+that Azure does not throttle at the chosen concurrency.
+**Priority:** P1 — 166 s of staring is the single worst thing about the candidate's last screen, and
+transport retries are the difference between "one 429 cost me a question" and "it just worked".
+
 ## Test infrastructure
 
 ### `playwright.config.ts` sets no `actionTimeout`, so a stuck action has no bound

@@ -2,9 +2,13 @@
 
 ``score_answer_against_checklist`` grades one answer against its question's default checklist:
 build a cross-language judging prompt, ask the LLM for a per-item judgment (JSON), parse it, and
-run it through :mod:`app.interview.scoring_engine` (the rails + weighting). On a
-:class:`ScoringIncomplete` (the LLM skipped an item) it retries once with a stricter reminder
-before giving up — never silently under-counts (SPEC P7).
+run it through :mod:`app.interview.scoring_engine` (the rails + weighting).
+
+Each call is bounded by ``SCORING_CALL_TIMEOUT_SECONDS``, and judgments accumulate across attempts:
+a retry re-asks ONLY the items still unjudged rather than the whole checklist. If items are still
+missing when the attempts run out it raises rather than inventing a judgment or under-counting
+coverage (SPEC P7) — the caller then marks that one question unscored and keeps the rest of the
+report, so a single bad question no longer costs the candidate every other answer.
 
 Cross-language (SPEC F4 AC #4): the prompt states that the SOP, the answer, and the report may be
 in different languages and instructs the model to compare across them. The mock LLM returns a
@@ -16,6 +20,7 @@ un-authored question still produces a report row instead of erroring.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -34,6 +39,22 @@ from app.services.agents.registry import get_llm_adapter
 logger = logging.getLogger(__name__)
 
 MAX_SCORING_ATTEMPTS = 2
+
+# Wall-clock ceiling for ONE scoring call. Measured against the live default bank (9 questions ×
+# 12 checklist items, a ~4.1k-char prompt, gpt-5-mini at default reasoning effort): 13.1 s min,
+# 18.4 s median, 24.8 s max over six calls. 90 s is ~3.6× the slowest observed, so a healthy call
+# never trips it, while a stalled one is cut instead of hanging forever.
+#
+# Why this has to exist at all: without it one stalled Azure call made the report stream go silent
+# for 270 s, and Azure Container Apps' ingress disconnects a request that stays idle past its
+# "idle request timeout" (default 4 minutes) — the candidate got `504 stream timeout` and lost the
+# whole report, including the questions that had already been graded. The judge has had this bound
+# since #114 (`app/interview/judge.py`, `asyncio.wait_for`); scoring never got it.
+#
+# NOTE: do NOT reach for the adapter's `fast=True` to speed this up. Measured: `fast` caps output
+# tokens, and a 12-item judgment set is then truncated to nothing — 0 of 12 judgments parsed on
+# every one of three answer shapes, versus 12 of 12 without it.
+SCORING_CALL_TIMEOUT_SECONDS = 90.0
 
 # Feature C — SOP source-context injection. Each rubric item can carry, beyond its one-line
 # ``source_quote``, a fuller slice of the original SOP passage it was drawn from so the judge reads
@@ -162,17 +183,58 @@ async def score_answer_against_checklist(
         source_context = await _collect_source_context(db, rubric)
 
     llm = get_llm_adapter(llm_provider)
-    prompt = _build_scoring_prompt(question_text, answer_text, rubric, source_context)
-    last_error: ScoringIncomplete | None = None
+
+    # Judgments accumulate ACROSS attempts, keyed by item_id. The previous loop rebuilt the full
+    # prompt with a "you omitted items, judge ALL of them" suffix and threw the partial answer away,
+    # so a first attempt that judged 11 of 12 items was worth nothing and the retry had the same
+    # 12-item job to get right. Now each retry re-asks ONLY the items still missing: a smaller
+    # prompt, and the model cannot omit an item that is not in front of it.
+    merged: dict[str, dict] = {}
+    pending = list(rubric)
+    last_error: Exception | None = None
+
     for attempt in range(MAX_SCORING_ATTEMPTS):
-        raw = await llm.complete(prompt, json_mode=True)
+        prompt = _build_scoring_prompt(question_text, answer_text, pending, source_context)
+        if attempt:
+            prompt += (
+                f"\n\nIMPORTANT: a previous response omitted these {len(pending)} item(s). "
+                "Judge every one of them."
+            )
         try:
-            return enforce_and_score(question_id, answer_text, rubric, _parse_judgments(raw))
-        except ScoringIncomplete as exc:
+            raw = await asyncio.wait_for(
+                llm.complete(prompt, json_mode=True), timeout=SCORING_CALL_TIMEOUT_SECONDS
+            )
+        except TimeoutError as exc:  # asyncio.TimeoutError is this builtin on 3.11+
+            # A stalled call, cut. Retry once from the top: the pending set is unchanged, and a
+            # fresh call usually returns. The caller isolates the question if this keeps happening.
             last_error = exc
-            logger.warning("Scoring attempt %d incomplete: %s", attempt + 1, exc)
-            prompt = prompt + "\n\nIMPORTANT: your last response omitted items. Judge ALL of them."
-    # Exhausted retries — surface it rather than under-counting coverage (P7).
+            logger.warning(
+                "Scoring attempt %d timed out after %.0fs (%d item(s) pending)",
+                attempt + 1,
+                SCORING_CALL_TIMEOUT_SECONDS,
+                len(pending),
+            )
+            continue
+
+        for j in _parse_judgments(raw):
+            if isinstance(j, dict) and j.get("item_id") not in merged:
+                merged[j["item_id"]] = j
+
+        pending = [it for it in rubric if it.item_id not in merged]
+        if not pending:
+            # Rail #3 still applies inside enforce_and_score: judgments for items that are not in
+            # the checklist are dropped there, so a mis-echoed id cannot sneak in as a real one.
+            return enforce_and_score(question_id, answer_text, rubric, list(merged.values()))
+
+        last_error = ScoringIncomplete(
+            f"LLM did not judge {len(pending)} checklist item(s) after {attempt + 1} attempt(s)"
+        )
+        logger.warning(
+            "Scoring attempt %d incomplete: %d item(s) still unjudged", attempt + 1, len(pending)
+        )
+
+    # Exhausted retries. Surface it rather than inventing a judgment or under-counting coverage
+    # (P7) — the caller marks THIS question unscored and keeps the rest of the report.
     raise last_error  # type: ignore[misc]
 
 

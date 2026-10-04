@@ -9,6 +9,7 @@ Voice sources (voice / verbal_cue) share the same answer_finalized event and are
 """
 
 import json
+import logging
 from dataclasses import asdict
 from urllib.parse import quote
 
@@ -32,6 +33,8 @@ from app.services import checklist_service, persona_service, question_service, v
 from app.services.agents.voice_live_metadata import has_configured_voice
 from app.services.storage import get_storage
 from app.services.voice_broker import DEFAULT_LOCALE, VoiceAgentNotSynced, VoiceUnavailable
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/candidate/interview", tags=["interview"])
 
@@ -181,6 +184,13 @@ class ReportOut(BaseModel):
     # Feature D (opt-in): reference-only "SOP points the rubric may not cover", per question. None
     # when the check wasn't requested or found nothing. Advisory — never affects any score above.
     sop_coverage: list[dict] | None = None
+    # Questions whose grading failed outright, so a partially-scored report can say so instead of
+    # quietly averaging fewer questions than the candidate answered. They are excluded from
+    # ``total_score`` rather than scored zero: nobody judged those answers, so there is no basis for
+    # calling them bad (P7). None when everything graded. Declared here as well as in the streamed
+    # dict because test_report_stream asserts the two report shapes stay identical — the batch
+    # endpoint filters through this model, so a field missing here silently disappears from it.
+    unscored_question_ids: list[str] | None = None
 
 
 class ReportOptionsIn(BaseModel):
@@ -822,6 +832,17 @@ async def report_stream(
                     yield json.dumps(event, ensure_ascii=False) + "\n"
         except InterviewStateError as exc:
             yield json.dumps({"type": "error", "detail": str(exc)}) + "\n"
+        except Exception as exc:  # noqa: BLE001
+            # The 200 is already on the wire, so an exception escaping here does not become a 5xx:
+            # it tears the connection down and the browser reports a bare network failure ("Failed
+            # to fetch") with nothing to show the candidate. Only InterviewStateError was caught
+            # before, so a scoring failure bypassed this endpoint's own documented in-band error
+            # contract. Everything terminal now leaves as `{"type":"error"}`.
+            logger.exception("Report stream failed for interview %s", interview_id)
+            yield (
+                json.dumps({"type": "error", "detail": f"Scoring failed: {type(exc).__name__}"})
+                + "\n"
+            )
 
     return StreamingResponse(
         event_lines(),

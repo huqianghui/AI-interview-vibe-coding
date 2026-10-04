@@ -1,6 +1,7 @@
 """LLM-backed scoring (SPEC F4): scoring against a real checklist via the mock LLM, the
 cross-language path, retry-on-incomplete, and end-to-end scoring through the state machine."""
 
+import asyncio
 import json
 
 import pytest
@@ -184,3 +185,179 @@ async def test_interview_without_checklist_falls_back_to_stub(db_session):
     report = await state_machine.score_and_finalize(db_session, interview)
     assert report["is_stub"] is True
     assert report["per_question"][0]["is_stub"] is True
+
+
+# --- resilience: bounded calls, merge-across-attempts, per-question isolation ----------------
+#
+# These four cover the 2026-10-04 live failure: one stalled scoring call went silent for 270 s,
+# Azure Container Apps' ingress disconnected the idle request with `504 stream timeout`, and the
+# candidate lost the whole report including the three questions that had already graded.
+
+
+@pytest.mark.asyncio
+async def test_stalled_call_is_cut_not_hung(db_session, monkeypatch):
+    """A call that never returns must raise, not hang. Without the timeout this test never ends."""
+    q = await _question_with_checklist(db_session)
+
+    class _HangingLLM:
+        name = "hanging"
+        calls = 0
+
+        async def complete(self, prompt, *, json_mode=False):
+            type(self).calls += 1
+            await asyncio.sleep(3600)  # the stall that killed the live report
+
+        async def stream(self, prompt):
+            yield ""
+
+    llm = _HangingLLM()
+    monkeypatch.setattr(scoring_service, "get_llm_adapter", lambda name=None: llm)
+    monkeypatch.setattr(scoring_service, "SCORING_CALL_TIMEOUT_SECONDS", 0.05)
+
+    with pytest.raises(TimeoutError):
+        await scoring_service.score_answer_against_checklist(
+            db_session, question_id=q.id, question_text=q.text, answer_text="a long enough answer"
+        )
+    # Cut on every attempt rather than on the first one only.
+    assert llm.calls == scoring_service.MAX_SCORING_ATTEMPTS
+
+
+@pytest.mark.asyncio
+async def test_retry_re_asks_only_the_missing_items_and_keeps_the_partial_answer(
+    db_session, monkeypatch
+):
+    """A first attempt that judges all-but-one item must not be thrown away.
+
+    The old loop re-sent the whole checklist with a "judge ALL of them" suffix and discarded the
+    partial result, so the retry had the same full-size job to get right. Now the retry is handed
+    ONLY the unjudged item, and the judgments merge.
+    """
+    q = await _question_with_checklist(db_session)
+    checklist = await checklist_service.get_default_checklist(db_session, q.id)
+    items = await checklist_service.list_items(db_session, checklist.id)
+    assert len(items) >= 2, "fixture needs a multi-item checklist to drop one"
+    dropped = items[-1].id
+
+    class _DropsOneLLM:
+        name = "drops-one"
+
+        def __init__(self):
+            self.prompts: list[str] = []
+
+        async def complete(self, prompt, *, json_mode=False):
+            self.prompts.append(prompt)
+            if len(self.prompts) == 1:
+                judged = [it for it in items if it.id != dropped]  # omit exactly one
+            else:
+                judged = [it for it in items if it.id == dropped]  # the re-ask
+            return json.dumps(
+                {
+                    "judgments": [
+                        {"item_id": it.id, "judgment": "met", "rationale": "r", "answer_quote": "q"}
+                        for it in judged
+                    ]
+                }
+            )
+
+        async def stream(self, prompt):
+            yield ""
+
+    llm = _DropsOneLLM()
+    monkeypatch.setattr(scoring_service, "get_llm_adapter", lambda name=None: llm)
+
+    result = await scoring_service.score_answer_against_checklist(
+        db_session, question_id=q.id, question_text=q.text, answer_text="a long enough answer"
+    )
+    # Every item judged, from the two attempts merged — not from one attempt getting it all right.
+    assert len(result.items) == len(items)
+    assert len(llm.prompts) == 2
+    # The retry prompt carries ONLY the missing item, so the model cannot omit what it never saw.
+    retry = llm.prompts[1]
+    assert dropped in retry
+    assert sum(1 for it in items if it.id in retry) == 1
+
+
+@pytest.mark.asyncio
+async def test_one_failing_question_does_not_discard_the_rest_of_the_report(
+    db_session, monkeypatch
+):
+    """Per-question isolation: Q2 failing must not cost the candidate Q1 and Q3.
+
+    This is the behaviour the live failure violated — the stream died on question 4 and the three
+    already-graded questions went with it.
+    """
+    bank = await question_service.create_bank(db_session, name="B", is_default=True)
+    qs = []
+    for i in range(3):
+        q = await question_service.add_question(
+            db_session, bank_id=bank.id, text=f"Q{i + 1}?", order_index=i
+        )
+        await checklist_service.draft_checklist(db_session, q.id)
+        qs.append(q)
+
+    real = scoring_service.score_answer_against_checklist
+
+    async def _fail_on_second(db, *, question_id, question_text, answer_text, **kw):
+        if question_id == qs[1].id:
+            raise scoring_engine.ScoringIncomplete("LLM did not judge checklist item 'x'")
+        return await real(
+            db,
+            question_id=question_id,
+            question_text=question_text,
+            answer_text=answer_text,
+            **kw,
+        )
+
+    monkeypatch.setattr(
+        state_machine.scoring_service, "score_answer_against_checklist", _fail_on_second
+    )
+
+    cand, _ = await create_anonymous_session(db_session, ip_address="1.2.3.4")
+    session = await state_machine.start_interview(db_session, cand.id)
+    for _ in qs:
+        session = await state_machine.answer_finalized(
+            db_session, session, "a long enough answer to score", source="text"
+        )
+
+    events = [e async for e in state_machine.score_and_finalize_events(db_session, session)]
+    report = next(e["report"] for e in events if e["type"] == "report")
+
+    # The report exists at all — that is the fix.
+    assert report["per_question"] and len(report["per_question"]) == 3
+    failed = [r for r in report["per_question"] if r.get("scoring_failed")]
+    assert [r["question_id"] for r in failed] == [qs[1].id]
+    assert report["unscored_question_ids"] == [qs[1].id]
+    # The other two really did grade.
+    graded = [r for r in report["per_question"] if not r.get("scoring_failed")]
+    assert len(graded) == 2 and all(r["items"] for r in graded)
+    # P7: the failed question is EXCLUDED from the score, not scored zero. A zero would be an
+    # under-count — nobody judged that answer, so there is no basis for calling it bad.
+    assert report["total_score"] > 0
+    # And the stream told the client which question broke, in band.
+    assert [e["question_id"] for e in events if e["type"] == "question_error"] == [qs[1].id]
+
+
+@pytest.mark.asyncio
+async def test_slow_question_emits_heartbeats_so_the_stream_is_never_idle(db_session, monkeypatch):
+    """The ingress disconnects an idle request; a slow question must keep the connection alive."""
+    q = await _question_with_checklist(db_session)
+    cand, _ = await create_anonymous_session(db_session, ip_address="1.2.3.4")
+    session = await state_machine.start_interview(db_session, cand.id)
+    session = await state_machine.answer_finalized(
+        db_session, session, "a long enough answer to score", source="text"
+    )
+
+    real = scoring_service.score_answer_against_checklist
+
+    async def _slow(db, **kw):
+        await asyncio.sleep(0.25)  # longer than the heartbeat interval below
+        return await real(db, **kw)
+
+    monkeypatch.setattr(state_machine.scoring_service, "score_answer_against_checklist", _slow)
+    monkeypatch.setattr(state_machine, "SCORING_HEARTBEAT_SECONDS", 0.05)
+
+    events = [e async for e in state_machine.score_and_finalize_events(db_session, session)]
+    pings = [e for e in events if e["type"] == "ping"]
+    assert pings, "a question slower than the heartbeat interval must emit keepalives"
+    assert all(p["question_id"] == q.id and p["total"] == 1 for p in pings)
+    assert any(e["type"] == "report" for e in events)
