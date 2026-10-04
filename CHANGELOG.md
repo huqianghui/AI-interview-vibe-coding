@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.42.1.0 (2026-10-04)
+
+### Fixed
+- **A report no longer vanishes because one question went wrong.** Scoring grades nine questions
+  inside a single long-lived request, and nothing on that path was bounded: one stalled Azure call
+  went silent for 270 seconds, Azure Container Apps' ingress disconnected the idle request with
+  `504 stream timeout`, and the candidate lost the whole report — including the three questions that
+  had already been graded — landing on a scoring screen with an error banner, no retry, and no way
+  back. Four things changed. Each scoring call is now bounded (90 s, about 3.6x the slowest healthy
+  call measured against the live bank). The stream heartbeats every 20 s while a question is being
+  graded, so the connection is never idle whatever the model does. A question that fails is recorded
+  as *not scored* and the rest of the report still renders — excluded from the score rather than
+  given a zero, because nobody judged that answer and a zero would be the under-count P7 forbids.
+  And a scoring failure now returns the candidate to the review screen, with their answers and the
+  submit button intact, instead of stranding them.
+- **A retry now asks only for what was missing.** When the model omitted a judgment the old retry
+  re-sent the entire checklist with a "judge ALL of them" reminder and threw the partial answer
+  away, so an attempt that judged 11 of 12 items was worth nothing. Judgments now accumulate across
+  attempts and the retry is handed only the items still unjudged — a smaller prompt, and the model
+  cannot omit an item it was never shown.
+- **The report stream's own error contract is honoured.** The endpoint documents a terminal
+  `{"type":"error"}` line, but only `InterviewStateError` was caught, so a scoring failure escaped
+  the generator and tore the connection down — the browser reported a bare "Failed to fetch" with
+  nothing to show. Everything terminal now leaves in band.
+
+### Notes
+- Measured while diagnosing this, against the live default bank (9 questions x 12 checklist items,
+  gpt-5-mini): 13.1 s min / 18.4 s median / 24.8 s max per question, 166 s for a full report, and
+  12 of 12 judgments returned on every probe call regardless of whether the answer was on-topic,
+  off-topic, or content-free. Making it *faster* (bounded concurrency), adding transport-level
+  retries for 429/5xx, and reworking the progress the candidate sees are filed as the next piece of
+  work in TODOS.md — this release is about surviving failure, not about speed.
+- Do not reach for the LLM adapter's `fast=True` to speed scoring up: it caps output tokens, and a
+  12-item judgment set truncates to nothing (0 of 12 parsed, measured). It is correct for the
+  per-turn judge, which returns one tiny verdict, and wrong here.
+
 ## 0.42.0.0 (2026-10-04)
 
 ### Changed

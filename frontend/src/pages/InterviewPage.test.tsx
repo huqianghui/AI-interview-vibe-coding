@@ -142,6 +142,58 @@ describe("InterviewPage", () => {
     expect(screen.getByText(/met/)).toBeInTheDocument();
   });
 
+  it("returns to review when scoring fails, instead of stranding on the scoring screen", async () => {
+    // The 2026-10-04 live failure: scoring died mid-stream (a stalled call tripped the ingress idle
+    // timeout, `504 stream timeout`) and the candidate was left on the scoring screen with an error
+    // banner, no retry and no way back — `guard` only sets the banner, so the phase stayed
+    // "scoring" forever. Review still holds their answers and the submit button, and re-scoring is
+    // idempotent, so that is where a failure has to land.
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "in_progress",
+      current_question: { question_id: "q1", prompt: "Question one?", index: 0, total: 1 },
+    });
+    vi.spyOn(client, "submitAnswer").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "completed",
+      current_question: null,
+    });
+    vi.spyOn(client, "getReview").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "completed",
+      answers: [
+        { question_id: "q1", prompt: "Question one?", index: 0, answer_text: "a sufficiently long answer" },
+      ],
+    });
+    // Both scoring paths fail: the stream, then the batch fallback it retries through.
+    const streamSpy = vi
+      .spyOn(client, "getReportStream")
+      .mockRejectedValue(new Error("Scoring failed: ScoringIncomplete"));
+    const batchSpy = vi
+      .spyOn(client, "getReport")
+      .mockRejectedValue(new Error("Scoring failed: ScoringIncomplete"));
+
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+    await user.type(await screen.findByRole("textbox"), "a sufficiently long answer");
+    await user.click(screen.getByRole("button", { name: /submit answer/i }));
+    await screen.findByTestId("review");
+
+    await user.click(screen.getByTestId("submit-and-evaluate"));
+
+    // Both paths were tried, and we are back on review with the answers and the button intact.
+    await waitFor(() => expect(screen.getByTestId("review")).toBeInTheDocument());
+    expect(streamSpy).toHaveBeenCalledTimes(1);
+    expect(batchSpy).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("submit-and-evaluate")).toBeInTheDocument();
+    expect(screen.getByTestId("review-answer")).toHaveTextContent("a sufficiently long answer");
+    // And the candidate is told what happened rather than watching a spinner forever.
+    expect(screen.getByText(/ScoringIncomplete/)).toBeInTheDocument();
+  });
+
   it("opts into the SOP coverage check when ticked, and renders the advisory panel (feature D)", async () => {
     await i18n.changeLanguage("en-US");
     const user = userEvent.setup();
