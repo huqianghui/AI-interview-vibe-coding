@@ -246,6 +246,22 @@ def cap_outcome(natural: str, *, critical_fired: bool) -> tuple[str, bool]:
     return NEEDS_IMPROVEMENT, True
 
 
+def _as_quote(rationale: str) -> str:
+    """One judge rationale, ready to splice into a sentence.
+
+    A rationale is the model's own prose: it starts with a capital and ends with its own full stop,
+    sometimes several sentences long. Interpolating it raw produced a visibly broken headline on the
+    live report — ``"Demonstrated 19 of the expected points, including The answer describes ... are
+    asserted.."`` — a capital letter mid-sentence and a doubled period, because the f-string added a
+    full stop the rationale already had.
+
+    Quoting fixes both at once: a quoted sentence may legitimately start with a capital, and the
+    trailing stop comes off so only one remains. Curly quotes read correctly in English and Chinese
+    alike (the rationale can be either — F4 AC #4 judges across languages).
+    """
+    return "“" + rationale.strip().rstrip(".。 ") + "”"
+
+
 def build_narrative(results: list[QuestionResult]) -> str:
     """A 1-2 sentence strength/gap summary for the report's executive headline (F8 / P14).
 
@@ -271,11 +287,13 @@ def build_narrative(results: list[QuestionResult]) -> str:
 
     parts: list[str] = []
     if met:
-        parts.append(f"Demonstrated {len(met)} of the expected points, including {met[0]}.")
+        parts.append(
+            f"Demonstrated {len(met)} of the expected points, including {_as_quote(met[0])}."
+        )
     else:
         parts.append("Did not clearly demonstrate the expected points.")
     if violations:
-        parts.append(f"Triggered a forbidden item: {violations[0]}.")
+        parts.append(f"Triggered a forbidden item: {_as_quote(violations[0])}.")
     elif gaps:
-        parts.append(f"Main gap: {gaps[0]}.")
+        parts.append(f"Main gap: {_as_quote(gaps[0])}.")
     return " ".join(parts)
