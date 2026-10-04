@@ -41,6 +41,9 @@ export const palette = {
    */
   action: "#5C2E91",
   actionHover: "#4A2375",
+  /** The action colour at panel strength — for a surface that must read as "this is the
+   *  authoritative side" without competing with the text on it (the report's SOP quote panels). */
+  actionTint: "#F2ECFA",
 
   /** Accents. `magenta` marks "this is the live/current item"; `cyan` is reserved for LIVE. */
   violet: "#8764B8",

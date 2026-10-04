@@ -124,6 +124,8 @@ export const resources = {
         showDetail: "Show detailed breakdown",
         hideDetail: "Hide detailed breakdown",
         questionN: "Question {{n}}",
+        questionsScored: "{{count}} questions scored",
+        moreQuestions: "{{count}} more questions",
         weight: "weight",
         judgment: {
           met: "Met",
@@ -378,6 +380,8 @@ export const resources = {
         showDetail: "展开详细拆解",
         hideDetail: "收起详细拆解",
         questionN: "第 {{n}} 题",
+        questionsScored: "已评测 {{count}} 道题",
+        moreQuestions: "还有 {{count}} 道题",
         weight: "权重",
         judgment: {
           met: "达标",

@@ -26,15 +26,117 @@ import {
   Text,
   Title3,
   makeStyles,
+  mergeClasses,
   tokens,
 } from "@fluentui/react-components";
-import type { Report, QuestionScore, ScoredItem, Outcome } from "../api/client";
+import type { Report, QuestionScore, ScoredItem } from "../api/client";
 import { fetchSopDocument } from "../api/client";
 import { ScoreGauge } from "./ScoreGauge";
+import { fonts, palette } from "../theme";
 
 const useStyles = makeStyles({
-  execRow: { display: "flex", gap: "24px", alignItems: "center", flexWrap: "wrap" },
-  narrative: { flex: "1 1 260px" },
+  root: { display: "flex", flexDirection: "column" },
+  kicker: {
+    fontFamily: fonts.display,
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: 600,
+    color: palette.action,
+    margin: `0 0 ${tokens.spacingVerticalM}`,
+  },
+  /** Executive band: its own raised surface, so the one-glance verdict is not one paragraph in a
+   *  wall of card. */
+  execCard: {
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderRadius: tokens.borderRadiusXLarge,
+    boxShadow: tokens.shadow4,
+    padding: tokens.spacingVerticalXXL,
+  },
+  execRow: { display: "flex", gap: tokens.spacingHorizontalXXXL, alignItems: "center", flexWrap: "wrap" },
+  narrative: { flex: "1 1 260px", minWidth: 0 },
+  outcomeDisplay: {
+    fontFamily: fonts.display,
+    fontWeight: 800,
+    fontSize: "clamp(26px, 2.8vw, 38px)",
+    lineHeight: 1.08,
+    letterSpacing: "-0.028em",
+    color: palette.ink,
+    margin: `${tokens.spacingVerticalXS} 0 ${tokens.spacingVerticalM}`,
+  },
+  facts: { display: "flex", gap: tokens.spacingHorizontalS, flexWrap: "wrap", marginBottom: tokens.spacingVerticalM },
+  /** The evidence block, given the weight the credibility claim deserves. */
+  evidenceHead: {
+    fontFamily: fonts.display,
+    fontWeight: 700,
+    fontSize: tokens.fontSizeBase500,
+    letterSpacing: "-0.02em",
+    color: palette.ink,
+    margin: `${tokens.spacingVerticalXXL} 0 ${tokens.spacingVerticalM}`,
+  },
+  evidenceList: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalL },
+  itemCard: {
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderRadius: tokens.borderRadiusXLarge,
+    boxShadow: tokens.shadow4,
+    padding: tokens.spacingVerticalXL,
+  },
+  itemTop: {
+    display: "flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalM,
+    flexWrap: "wrap",
+    marginBottom: tokens.spacingVerticalM,
+  },
+  itemSpacer: { flexGrow: 1 },
+  itemRationale: {
+    fontFamily: fonts.display,
+    fontWeight: 700,
+    fontSize: tokens.fontSizeBase400,
+    lineHeight: tokens.lineHeightBase500,
+    color: palette.ink,
+    margin: `0 0 ${tokens.spacingVerticalL}`,
+  },
+  pair: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: tokens.spacingHorizontalL,
+    "@media (max-width: 900px)": { gridTemplateColumns: "1fr" },
+  },
+  sopPanel: {
+    padding: tokens.spacingVerticalL,
+    borderRadius: tokens.borderRadiusLarge,
+    backgroundColor: palette.actionTint,
+    borderLeft: `3px solid ${palette.action}`,
+  },
+  answerPanel: {
+    padding: tokens.spacingVerticalL,
+    borderRadius: tokens.borderRadiusLarge,
+    backgroundColor: tokens.colorNeutralBackground3,
+    borderLeft: `3px solid ${tokens.colorNeutralStroke1}`,
+  },
+  panelLabel: {
+    display: "block",
+    fontFamily: fonts.display,
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: 600,
+    marginBottom: tokens.spacingVerticalXS,
+  },
+  sopLabel: { color: palette.action },
+  answerLabel: { color: tokens.colorNeutralForeground3 },
+  panelQuote: {
+    display: "block",
+    fontSize: tokens.fontSizeBase300,
+    lineHeight: tokens.lineHeightBase500,
+    color: tokens.colorNeutralForeground1,
+  },
+  sopQuote: { fontStyle: "italic" },
+  detailRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalL,
+    flexWrap: "wrap",
+    marginTop: tokens.spacingVerticalXL,
+  },
+  detailNote: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 },
   outcomeHead: { display: "flex", alignItems: "baseline", gap: "8px", marginBottom: "4px" },
   outcomeLabel: { color: tokens.colorNeutralForeground3 },
   warning: {
@@ -113,21 +215,32 @@ const JUDGMENT_COLOR: Record<string, "success" | "warning" | "danger" | "subtle"
   violated: "danger",
 };
 
-const OUTCOME_COLOR: Record<Outcome, "success" | "warning" | "danger"> = {
-  "Meets Expectations": "success",
-  "Needs Improvement": "warning",
-  "Does Not Meet": "danger",
-};
-
 /** The backend tags an advisory (CONFLICT-001) disclosure with this stable English prefix so it can
  * be told apart from a hard critical-error warning regardless of the display locale. */
 const ADVISORY_PREFIX = "Advisory item disclosed";
 
-/** First scored item with both a SOP quote and an answer quote — the side-by-side proof (P14). */
-function firstEvidence(report: Report): ScoredItem | null {
-  for (const q of report.per_question) {
-    for (const it of q.items ?? []) {
-      if (it.source_quote && it.answer_quote) return it;
+/**
+ * The side-by-side proof that the RAG is real (P14), now a question's worth of it rather than one
+ * pair. Returns the first question that has any item carrying BOTH quotes, with those items.
+ *
+ * Capped at three items: this block is the executive view's evidence, and a rubric with eight
+ * items would turn the headline screen into the detail screen. The rest stays behind the existing
+ * "show detailed breakdown" toggle, which is unchanged.
+ *
+ * NOTE: `QuestionScore` carries no question TEXT — the report payload has `question_id` only — so
+ * this block can label itself "Question N" and nothing more. Showing the prompt here needs a
+ * backend field; filed in TODOS.md rather than faked.
+ */
+const EVIDENCE_ITEM_CAP = 3;
+
+function firstEvidenceGroup(
+  report: Report,
+): { index: number; question: QuestionScore; items: ScoredItem[] } | null {
+  for (let i = 0; i < report.per_question.length; i++) {
+    const q = report.per_question[i];
+    const items = (q.items ?? []).filter((it) => it.source_quote && it.answer_quote);
+    if (items.length > 0) {
+      return { index: i, question: q, items: items.slice(0, EVIDENCE_ITEM_CAP) };
     }
   }
   return null;
@@ -227,7 +340,7 @@ export function ReportView({ report }: { report: Report }) {
     );
   }
 
-  const evidence = firstEvidence(report);
+  const evidence = firstEvidenceGroup(report);
   const grade = report.grade ?? "F";
   const score = report.total_score ?? 0;
   const outcome = report.outcome ?? null;
@@ -239,30 +352,36 @@ export function ReportView({ report }: { report: Report }) {
   const criticalWarnings = warnings.filter((w) => !w.startsWith(ADVISORY_PREFIX));
 
   return (
-    <Card>
-      <CardHeader
-        header={
-          <Text weight="semibold" style={{ color: tokens.colorPaletteGreenForeground1 }}>
-            {t("transition.reportReady")}
-          </Text>
-        }
-      />
+    <div className={styles.root}>
+      <p className={styles.kicker}>{t("report.title")}</p>
 
-      {/* Executive view */}
-      <div className={styles.execRow} data-testid="report-exec">
-        <ScoreGauge score={score} grade={grade} outcome={outcome} />
-        <div className={styles.narrative}>
-          <Title3 as="h2">{t("report.title")}</Title3>
-          {outcome && (
-            <div className={styles.outcomeHead} data-testid="report-outcome">
-              <Text size={200} className={styles.outcomeLabel}>
-                {t("report.outcomeLabel")}:
-              </Text>
-              <Badge color={OUTCOME_COLOR[outcome]} appearance="filled" size="large">
-                {t(`report.outcome.${outcome}`)}
+      {/* Executive band: the one-glance verdict on its own raised surface. */}
+      <section className={styles.execCard}>
+        <div className={styles.execRow} data-testid="report-exec">
+          <ScoreGauge score={score} grade={grade} outcome={outcome} />
+          <div className={styles.narrative}>
+            {outcome ? (
+              <div data-testid="report-outcome">
+                <Text size={200} className={styles.outcomeLabel}>
+                  {t("report.outcomeLabel")}
+                </Text>
+                {/* The rating as display type rather than a chip: it is the single thing a reader
+                    takes away, and a 12px badge was not carrying that. */}
+                <h2 className={styles.outcomeDisplay}>
+                  {t(`report.outcome.${outcome}`)}
+                </h2>
+              </div>
+            ) : (
+              <h2 className={styles.outcomeDisplay}>{t("report.title")}</h2>
+            )}
+            <div className={styles.facts}>
+              <Badge color="informative" appearance="tint">
+                {t("coverage")} {report.coverage_pct}%
+              </Badge>
+              <Badge color="brand" appearance="tint">
+                {t("report.questionsScored", { count: report.per_question.length })}
               </Badge>
             </div>
-          )}
           {report.narrative && (
             <Body1 style={{ display: "block", marginTop: 8 }}>{report.narrative}</Body1>
           )}
@@ -282,36 +401,82 @@ export function ReportView({ report }: { report: Report }) {
               {t("report.disclosureNote")}
             </div>
           ))}
+          </div>
         </div>
-      </div>
+      </section>
 
-      {/* SOP-vs-answer side-by-side — the proof RAG is real (P14). */}
+      {/* The credibility claim, given room: every judgement beside the SOP sentence it was measured
+          against AND the candidate's own words (P14). This used to be a single quote pair; it is
+          now the first question's worth of them, capped at three.
+
+          The heading can only say "Question N" — `QuestionScore` carries no question text, the
+          report payload has `question_id` alone. Adding the prompt needs a backend field; it is in
+          TODOS.md rather than invented here. */}
       {evidence && (
-        <div className={styles.sideBySide} data-testid="report-evidence">
-          <div className={styles.quoteCard}>
-            <Text size={200} weight="semibold" className={styles.quoteLabel}>
-              <SopSourceLink interviewId={report.interview_session_id} item={evidence} />
-            </Text>
-            <Text className={styles.quote}>"{evidence.source_quote}"</Text>
+        <>
+          <h3 className={styles.evidenceHead}>
+            {t("report.questionN", { n: evidence.index + 1 })}
+          </h3>
+          <div className={styles.evidenceList} data-testid="report-evidence">
+            {evidence.items.map((it, ii) => (
+              <article key={ii} className={styles.itemCard}>
+                <div className={styles.itemTop}>
+                  <Badge
+                    color={JUDGMENT_COLOR[it.judgment] ?? "subtle"}
+                    appearance="tint"
+                  >
+                    {t(`report.judgment.${it.judgment}`)}
+                  </Badge>
+                  <Text size={200} className={styles.answerLabel}>
+                    {t("report.weight")} {it.weight}
+                  </Text>
+                  <span className={styles.itemSpacer} />
+                  <Text size={200}>
+                    <SopSourceLink
+                      interviewId={report.interview_session_id}
+                      item={it}
+                    />
+                  </Text>
+                </div>
+                {it.rationale && <p className={styles.itemRationale}>{it.rationale}</p>}
+                <div className={styles.pair}>
+                  <div className={styles.sopPanel}>
+                    <span className={mergeClasses(styles.panelLabel, styles.sopLabel)}>
+                      {t("report.sopSource")}
+                    </span>
+                    <Text className={mergeClasses(styles.panelQuote, styles.sopQuote)}>
+                      &ldquo;{it.source_quote}&rdquo;
+                    </Text>
+                  </div>
+                  <div className={styles.answerPanel}>
+                    <span className={mergeClasses(styles.panelLabel, styles.answerLabel)}>
+                      {t("report.candidateAnswer")}
+                    </span>
+                    <Text className={styles.panelQuote}>
+                      &ldquo;{it.answer_quote}&rdquo;
+                    </Text>
+                  </div>
+                </div>
+              </article>
+            ))}
           </div>
-          <div className={styles.quoteCard}>
-            <Text size={200} weight="semibold" className={styles.quoteLabel}>
-              {t("report.candidateAnswer")}
-            </Text>
-            <Text className={styles.quote}>"{evidence.answer_quote}"</Text>
-          </div>
-        </div>
+        </>
       )}
 
-      {/* Detail view — progressively disclosed */}
-      <div style={{ marginTop: 16 }}>
+      {/* Detail view — progressively disclosed, behaviour unchanged. */}
+      <div className={styles.detailRow}>
         <Button
-          appearance="subtle"
+          appearance="secondary"
           onClick={() => setShowDetail((v) => !v)}
           data-testid="toggle-detail"
         >
           {showDetail ? t("report.hideDetail") : t("report.showDetail")}
         </Button>
+        {!showDetail && report.per_question.length > 1 && (
+          <span className={styles.detailNote}>
+            {t("report.moreQuestions", { count: report.per_question.length - 1 })}
+          </span>
+        )}
       </div>
 
       {showDetail && (
@@ -391,6 +556,6 @@ export function ReportView({ report }: { report: Report }) {
           ))}
         </div>
       )}
-    </Card>
+    </div>
   );
 }

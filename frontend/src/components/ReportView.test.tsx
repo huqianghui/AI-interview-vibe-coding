@@ -173,3 +173,58 @@ describe("ReportView", () => {
     expect(screen.queryByTestId("score-gauge")).not.toBeInTheDocument();
   });
 });
+
+/**
+ * COMPOSITION additions (2026-10-04). The report carries the product's whole credibility claim —
+ * every judgement beside the SOP sentence it was measured against and the candidate's own words —
+ * so these assert that claim is on screen with real weight, not that the colours are right.
+ */
+describe("ReportView composition", () => {
+  it("sets the overall rating as display type, not a 12px chip", () => {
+    // The base fixture carries no classification outcome, so this one supplies it: the rating is
+    // the single thing a reader takes away from the report, and a tint badge was not carrying it.
+    renderReport({ ...SCORED, outcome: "Meets Expectations" });
+    const outcome = screen.getByTestId("report-outcome");
+    const heading = outcome.querySelector("h2")!;
+    expect(heading).toHaveTextContent(/meets expectations/i);
+    expect(getComputedStyle(heading).fontSize).toContain("clamp(26px");
+  });
+
+  it("states coverage and the question count as facts beside the rating", () => {
+    renderReport(SCORED);
+    const exec = screen.getByTestId("report-exec");
+    expect(exec.textContent).toMatch(/\d+%/);
+    expect(exec.textContent).toMatch(/questions scored/i);
+  });
+
+  it("shows a question's worth of SOP-vs-answer evidence, not a single pair", () => {
+    // This was one quote pair. The evidence block is the credibility claim, so it now carries the
+    // first question's items that have both quotes — capped at three so the executive view does
+    // not become the detail view.
+    renderReport(SCORED);
+    const ev = screen.getByTestId("report-evidence");
+    const cards = ev.children;
+    expect(cards.length).toBeGreaterThanOrEqual(1);
+    expect(cards.length).toBeLessThanOrEqual(3);
+    // Each card pairs the two panels side by side.
+    const first = cards[0] as HTMLElement;
+    expect(first.textContent).toMatch(/sop source/i);
+    expect(first.textContent).toMatch(/candidate answer/i);
+  });
+
+  it("puts the SOP panel and the answer panel in two columns", () => {
+    // The side-by-side IS the claim. One column would make it a list of quotes, which is what the
+    // detail accordion already is.
+    renderReport(SCORED);
+    const grids = Array.from(
+      screen.getByTestId("report-evidence").querySelectorAll("div"),
+    ).filter((d) => getComputedStyle(d).gridTemplateColumns === "1fr 1fr");
+    expect(grids.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("keeps the detail breakdown progressively disclosed", () => {
+    renderReport(SCORED);
+    expect(screen.queryByTestId("report-detail")).toBeNull();
+    expect(screen.getByTestId("toggle-detail")).toBeInTheDocument();
+  });
+});
