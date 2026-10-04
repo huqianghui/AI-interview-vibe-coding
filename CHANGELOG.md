@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.42.5.0 (2026-10-04)
+
+### Added
+- **A stale README screenshot can no longer be merged silently.** Each image is now asserted to be
+  no older than the components it depicts, plus the shared `theme.ts` / `global.css` /
+  `AppShell.tsx` — a change to any of those restyles every screen at once, which is exactly how five
+  images sat five weeks stale through two redesigns. Verified by touching `ReportView.tsx` without
+  recapturing: both report screenshots go red, and the message carries the recapture command
+  *including* the kill-the-stale-stack step. A companion test refuses any README image that is in
+  neither the map nor a named exemption list, which immediately caught one I had missed.
+
+  This is deliberately not "run the capture script in CI". That would have caught **one** of the
+  three capture failures found the same day: the mic-dialog one does not happen on CI (Linux has a
+  fake media device) and the stale-server one *cannot* (`reuseExistingServer: !process.env.CI` means
+  CI always boots fresh). What detects a stale image is comparing it against what it shows.
+
+### Changed
+- **Every Playwright action and API request is now bounded** (`actionTimeout: 30_000`). The default
+  is `0` — unlimited — so a locator that matches nothing waits for ever, and the common
+  `.catch(() => "")` idiom hides the hang entirely: the test spends its whole budget there and then
+  reports a failure at some later assertion, on a page that renders correctly. That cost PR #154
+  three consecutive 180 s timeouts, and only the trace's 176-second gap located it. 30 s is 5x the
+  slowest legitimate single action measured — the bound also covers `apiRequestContext`, and an
+  admin bank-seeding POST on a cold backend took over 6 s.
+
+### Fixed
+- **`admin-and-report.spec.ts` passes on a machine with no audio capture.** Headless Chromium on a
+  local Mac has no fake media device, so `getUserMedia` rejects and the app raises "Microphone access
+  needed" over the answer controls; CI never sees it. The handler is now
+  `e2e/helpers/micDialog.ts`, shared with `candidate-interview.spec.ts`, which had a private copy.
+  Beyond the one spec: a test that is red on every developer machine for a reason unrelated to the
+  code trains people to ignore a red suite, which does more damage than the missing coverage.
+
+### Notes
+- The freshness guard cannot tell whether an image is CORRECT, only whether it is older than what it
+  shows — stated in the test itself. Both bad captures on 2026-10-04 (a four-hour-old backend, and a
+  photo avatar where every other image is the video one) were caught by a human opening the file.
+
 ## 0.42.4.0 (2026-10-04)
 
 ### Added

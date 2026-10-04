@@ -145,28 +145,15 @@ words appear is a large part of that.
 
 ## E2E harness
 
-### `admin-and-report.spec.ts` fails on any machine whose Chromium cannot capture audio
+### `admin-and-report.spec.ts` fails without audio capture — DONE v0.42.5.0
 
-Measured 2026-10-02 on macOS: Playwright's bundled Chromium returns `NotSupportedError` from
-`getUserMedia({audio:true})` — with `permissions: ["microphone"]` granted AND with
-`--use-fake-device-for-media-stream`. So `initMic()` rejects, the page shows `MicPermissionDialog`,
-and line 68's `expect(getByRole("textbox")).toBeVisible()` fails with "element(s) not found".
+The mic-dialog handler is now `e2e/helpers/micDialog.ts`, shared by `admin-and-report.spec.ts` and
+`candidate-interview.spec.ts` (which had a private copy). Both pass locally — the first time
+`admin-and-report` has been green on this machine.
 
-**The failure names the wrong thing.** The real cause is "this browser has no audio capture"; the
-message a developer sees is "no textbox", which sends them into the layout code. CI is green
-(Linux Chromium does support it), so this only ever bites locally — which is exactly when a
-developer is trying to decide whether their own change broke something. It cost a bisect run and a
-standalone `getUserMedia` probe to clear this branch.
-
-**Fix:** before the textbox assertion, dismiss the dialog when it is present — the page already
-offers the affordance (`Use text instead`), so the test should take the same path a candidate
-without a mic takes. One conditional, and the spec then exercises the documented F9 AC #4 fallback
-on EVERY machine instead of only on machines that happen to lack a mic by accident.
-
-**Effort:** CC ~10 min.
-**Priority:** P3 — local-only, but it mislabels its own cause, which is the expensive part.
-
-## Design system (frontend/src/theme.ts, AppShell.tsx)
+Worth naming why this mattered beyond the one spec: a test that is red on every developer machine
+for a reason unrelated to the code **trains people to ignore a red suite**, which is more damaging
+than the missing coverage.
 
 ### The 8 appearance invariants that only a real browser can hold — DONE v0.42.4.0
 
@@ -300,68 +287,36 @@ level** (wall 26.7/20.3/21.1/23.2/26.3 s). See `verify-dont-assert-limits` in me
 
 ## Test infrastructure
 
-### The README screenshot script rots silently, because nothing runs it
+### The README screenshot script rots silently — DETECTION ADDED v0.42.5.0
 
-`e2e/readme-screenshots.spec.ts` is opt-in (`SCREENSHOTS=1`), so CI never runs it. When the product
-moves, the script breaks and *nobody is told* — it just fails, and the old PNGs keep shipping as if
-they were current. That is exactly how the README carried August screenshots into October: five
-images were five weeks stale while the four candidate screens had been redesigned twice.
+`frontend/src/readme-screenshots-freshness.test.ts` asserts, per screenshot, that its last commit is
+not older than the last commit to the components it depicts (plus the shared `theme.ts`,
+`global.css` and `AppShell.tsx`, a change to any of which restyles every screen at once — which is
+exactly what went unnoticed for five weeks). Verified: touching `ReportView.tsx` without recapturing
+turns both report screenshots red, and the failure message carries the recapture command including
+the kill-the-stale-stack step. A second test refuses a README image that is in neither the map nor a
+named exemption list — it immediately caught `02-interview-question.png`, which I had missed.
 
-Regenerating them on 2026-10-04 surfaced **three independent silent-failure modes in one sitting**:
+This is the option the corrected analysis pointed at. Running the capture script in CI would have
+caught **one** of the three failures found on 2026-10-04: the mic-dialog one does not happen there
+(Linux fake device) and the stale-server one cannot (`reuseExistingServer: !process.env.CI`).
 
-1. The local mic-permission dialog hid the answer textbox, so the interview-screen capture failed
-   (a recorded learning from 2026-09-24 that the script had never picked up).
-2. The capture loop `break`ed as soon as the review screen was gone, leaving the default 10 s
-   `expect` as the whole scoring budget — a bet on timing, not a wait.
-3. `reuseExistingServer: !CI` reused a **four-hour-old** uvicorn process, which serves the code it
-   booted with. The resulting report screenshot still showed the doubled full stop fixed hours
-   earlier in v0.42.1.1. Caught only by reading the image, not by the run's exit status.
+**Still not covered, and stated in the test:** this cannot tell whether an image is CORRECT, only
+whether it is older than what it shows. Both of the bad captures on 2026-10-04 — the four-hour-old
+backend and the photo avatar — were caught by a human opening the file. Reading the image stays part
+of the job.
 
-All three are fixed and documented in the spec's header, but the structural problem is untouched:
-there is still no signal when the script stops matching the product.
+### `playwright.config.ts` sets no `actionTimeout` — DONE v0.42.5.0
 
-**Correction to an earlier version of this entry**, which called "the script is opt-in so CI never
-runs it" the ROOT CAUSE. That was wrong twice over. It is not the cause of any of the three defects
-— they have three unrelated causes (no fake media device locally; a wait written in the wrong place;
-`reuseExistingServer`) — it is only the reason they went unnoticed. And on the facts, putting the
-script in CI would have caught **one of the three**: mode 1 does not happen on CI (Linux has a fake
-device, per the 2026-09-24 learning), and mode 3 **cannot** happen there (`reuseExistingServer:
-!process.env.CI` means CI always boots fresh). Only mode 2 would have gone red.
+`actionTimeout: 30_000`. The bound is 5x the slowest legitimate single action measured (an admin
+bank-seeding POST on a cold backend, over 6 s) — it also applies to `apiRequestContext`, which is
+why it is not lower.
 
-So "run it in CI" is not the fix for staleness. What actually detects a stale image is checking the
-image against what it depicts, whatever broke the script.
+The risk this entry worried about was overstated: it said the value "has to be validated against the
+live-Azure specs". Those run on `e2e/live.config.ts`, which carries its own `use` block, so the main
+config does not reach them at all. Full local e2e: 17 passed, and the one failure was the known
+mic-dialog issue below, not this change.
 
-**Options:** a CI assertion that each referenced PNG's last commit is newer than the last commit to
-the component it depicts (catches staleness regardless of why the script broke — the real answer,
-and the cheapest); a scheduled run that fails loudly (catches a broken script, not a stale image);
-a visual diff (expensive, flaky on font rendering).
-
-**Effort:** CC: ~40 min for the mtime-vs-component assertion; a real visual-diff pipeline is a day.
-**Priority:** P2 — the README is the first thing a client reads, and it was wrong for five weeks
-without anyone noticing.
-
-
-### `playwright.config.ts` sets no `actionTimeout`, so a stuck action has no bound
-
-`timeout` (60s, raised per-spec) and `expect.timeout` (10s) are set; `actionTimeout` is not, so it
-defaults to `0` — unlimited. An action or query on a locator that matches nothing therefore waits
-forever rather than failing, and the common `.catch(() => "")` idiom hides it completely: the test
-spends its whole budget on that line and then reports a failure at a *later* assertion, on a page
-that renders correctly. That is exactly what cost PR #154 three consecutive 180s timeouts — see the
-root-cause comment in `e2e/candidate-interview.spec.ts` around the follow-up-citation read.
-
-Not fixed in #154 on purpose: `actionTimeout` also applies to `apiRequestContext` requests, and this
-repo's admin bank-seeding POSTs measured over 6s locally, so the bound has to be chosen against the
-slowest legitimate request (≥20s, probably 30s) and then validated against the live-Azure specs,
-which this PR does not touch and cannot exercise in CI. Doing it blind risks turning one red spec
-into several.
-
-**Effort:** CC: ~20 min to set `actionTimeout: 30_000` and read through every spec's longest single
-action; the real cost is one full CI run to confirm nothing live-Azure regressed.
-**Priority:** P2 — it does not break anything today, but it converts the next "selector no longer
-matches" mistake from a silent 3×180s burn into an error that names the line.
-
-## Completed
 ### Narrow viewports: question readable without scrolling — v0.40.9.0
 
 Two changes, both measured before and after. The voice-status strip explained all four states at once
