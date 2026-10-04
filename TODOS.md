@@ -222,6 +222,31 @@ background-image and the blur to a solid tint with no visible loss.
 **Effort:** human: ~2h / CC: ~30 min with the existing avatar-weaknet probe.
 **Priority:** P2 — cheap to measure, and the one path in this app where paint cost has bitten before.
 
+### The report cannot name its own questions
+
+`QuestionScore` (the report payload) carries `question_id` and no question TEXT, so the report's
+evidence block and its detail accordion can only label a question "Question 3". On the one screen
+whose entire claim is traceability, that is the weakest possible label — a reader has to hold the
+question in their head from the interview to make sense of the judgement beside it.
+
+v0.42.0.0 deliberately did not fake it. The fix is a backend field (`prompt` on the per-question
+score, mirroring `AnsweredQuestionOut`), then one line in `ReportView`.
+
+**Effort:** human: ~2h / CC: ~20 min across backend schema + frontend.
+**Priority:** P2 — the report reads as less traceable than it actually is, which is backwards.
+
+### Two griffel class joins left in the agent editor
+
+`griffel-classnames.test.ts` exempts `AvatarGrid.tsx:190` and `PlaygroundPanel.tsx:258` by name.
+Both join two `makeStyles` classes with a template string, which leaves the winner to CSS source
+order — measured in a real browser elsewhere in this codebase, that form silently drops the
+override. They are operator-facing, and admin/agent is out of scope by owner instruction
+(2026-10-04), so they ride along with that screen's own pass. The exemption list has a test of its
+own asserting every entry still points at real code, so a stale entry cannot shelter a new offender.
+
+**Effort:** CC: ~5 min, once admin/agent is in scope.
+**Priority:** P3 — operator-facing, and the guard stops the list growing.
+
 ## Release hygiene
 
 ### CHANGELOG is missing five shipped versions
