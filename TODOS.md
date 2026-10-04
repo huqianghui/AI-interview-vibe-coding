@@ -260,6 +260,28 @@ not attempt it: inventing changelog prose for work you did not do is how a chang
 **Effort:** human: ~1h / CC: ~15 min reading the five PR bodies.
 **Priority:** P1 — a changelog with holes in it is the one artifact a client reads to understand what changed.
 
+## Test infrastructure
+
+### `playwright.config.ts` sets no `actionTimeout`, so a stuck action has no bound
+
+`timeout` (60s, raised per-spec) and `expect.timeout` (10s) are set; `actionTimeout` is not, so it
+defaults to `0` — unlimited. An action or query on a locator that matches nothing therefore waits
+forever rather than failing, and the common `.catch(() => "")` idiom hides it completely: the test
+spends its whole budget on that line and then reports a failure at a *later* assertion, on a page
+that renders correctly. That is exactly what cost PR #154 three consecutive 180s timeouts — see the
+root-cause comment in `e2e/candidate-interview.spec.ts` around the follow-up-citation read.
+
+Not fixed in #154 on purpose: `actionTimeout` also applies to `apiRequestContext` requests, and this
+repo's admin bank-seeding POSTs measured over 6s locally, so the bound has to be chosen against the
+slowest legitimate request (≥20s, probably 30s) and then validated against the live-Azure specs,
+which this PR does not touch and cannot exercise in CI. Doing it blind risks turning one red spec
+into several.
+
+**Effort:** CC: ~20 min to set `actionTimeout: 30_000` and read through every spec's longest single
+action; the real cost is one full CI run to confirm nothing live-Azure regressed.
+**Priority:** P2 — it does not break anything today, but it converts the next "selector no longer
+matches" mistake from a silent 3×180s burn into an error that names the line.
+
 ## Completed
 ### Narrow viewports: question readable without scrolling — v0.40.9.0
 
