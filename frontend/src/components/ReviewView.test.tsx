@@ -62,3 +62,47 @@ describe("ReviewView", () => {
     expect(screen.getByTestId("submit-and-evaluate")).toBeDisabled();
   });
 });
+
+/**
+ * COMPOSITION additions (2026-10-04) — the class of test that was missing when the sign-in screen
+ * shipped the wrong layout. Token checks pass on any composition; these assert the things that make
+ * this the approved design.
+ */
+describe("ReviewView composition", () => {
+  it("states the answered count as a display headline", async () => {
+    await i18n.changeLanguage("en-US");
+    renderReview();
+    const h = screen.getByTestId("review-headline");
+    expect(h).toHaveTextContent(/you've answered\s+all 3 questions/i);
+    expect(getComputedStyle(h).fontSize).toContain("clamp(26px");
+  });
+
+  it("separates the irreversible action from the list, and states the consequence beside it", async () => {
+    await i18n.changeLanguage("en-US");
+    // Previously the submit button sat flush against the last answer card, where a scroll could
+    // land on it. It is the only one-way door in the candidate's flow.
+    renderReview();
+    const btn = screen.getByTestId("submit-and-evaluate");
+    expect(btn).toBeInTheDocument();
+    expect(
+      screen.getByText(/can't change your answers afterwards/i),
+    ).toBeInTheDocument();
+    // A divider element sits between the list and the action row.
+    const list = screen.getByTestId("review-list");
+    expect(list.nextElementSibling).not.toBeNull();
+  });
+
+  it("keeps the candidate's own line breaks rather than collapsing them", () => {
+    // Showing a reformatted answer on the screen whose whole job is "this is what we recorded"
+    // would be showing them something else.
+    renderReview();
+    expect(getComputedStyle(screen.getAllByTestId("review-answer")[0]).whiteSpace).toBe(
+      "pre-wrap",
+    );
+  });
+
+  it("still exposes the opt-in coverage switch, default off", () => {
+    renderReview();
+    expect(screen.getByTestId("sop-coverage-check")).not.toBeChecked();
+  });
+});

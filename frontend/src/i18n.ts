@@ -151,7 +151,14 @@ export const resources = {
       },
       review: {
         title: "Review your answers",
-        body: "You've answered every question. Read them over — when you're ready, submit to start SOP-based scoring.",
+        kicker: "Review",
+        // Split so the count can carry the accent colour as a display headline.
+        headlineLead: "You've answered",
+        headlineAccent: "all {{count}} questions",
+        yourAnswer: "Your answer",
+        body: "Read them over. Nothing is scored until you submit, and your answers are shown exactly as they were recorded.",
+        // The one irreversible action in the candidate's flow, so the consequence sits beside it.
+        consequence: "Scoring takes about a minute. You can't change your answers afterwards.",
         action: "Submit & evaluate",
         // Feature D opt-in: default off. Ticking it runs an advisory SOP-coverage audit.
         sopCoverageCheck: {
@@ -396,7 +403,12 @@ export const resources = {
       },
       review: {
         title: "回顾你的回答",
-        body: "你已回答完所有问题。请整体回顾一遍 —— 准备好后,点击提交即可开始按 SOP 评测。",
+        kicker: "复核",
+        headlineLead: "你已回答",
+        headlineAccent: "全部 {{count}} 道题",
+        yourAnswer: "你的回答",
+        body: "请逐条读一遍。提交之前不会进行任何评测,你看到的就是系统记录下来的原文。",
+        consequence: "评测大约需要一分钟。提交之后无法再修改答案。",
         action: "提交并评测",
         // 功能 D 可选项:默认关闭。勾选后额外做一次 SOP 原文覆盖度体检(仅作提示)。
         sopCoverageCheck: {
