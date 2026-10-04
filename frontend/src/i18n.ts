@@ -38,6 +38,16 @@ export const resources = {
         bodyExternal:
           "The interviewer will guide you through the conversation. Take your time — you can speak or type, and you decide when each answer is finished.",
         begin: "I'm ready",
+        // The one thing this screen knows that the idle screen could not: the question count.
+        headlineLead: "{{total}} questions,",
+        headlineAccent: "at your pace",
+        lede: "Lisa will ask each one out loud. The question stays on screen the whole time, so you can re-read it while you think.",
+        railLabel: "The interview at a glance",
+        fact1Title: "Answer however suits you",
+        fact1Body: "Speak or type, and switch between them whenever you like.",
+        fact2Title: "Say when you're done",
+        fact2Body: "Each answer is submitted only when you say it's finished.",
+        beginNote: "Question 1 starts as soon as you press this.",
       },
       noQuestions: {
         title: "No questions available",
@@ -221,6 +231,24 @@ export const resources = {
         loginReassurance:
           "Take your time. You can speak or type, and you decide when each answer is finished.",
         livePill: "LIVE",
+        readyPill: "READY",
+        yourInterviewer: "Your interviewer",
+        // idle: the candidate is signed in and nothing has started. This screen CANNOT know the
+        // question count — the interview does not exist until startInterview() — so it says what it
+        // can honestly say and points forward for the count.
+        idle: {
+          kicker: "You're signed in",
+          headlineLead: "Lisa is ready",
+          headlineAccent: "when you are",
+          lede: "She'll ask the questions out loud and listen to your answers. Nothing starts until you press the button.",
+          fact1Title: "Speak or type",
+          fact1Body: "Answer out loud, or switch to typing at any point in the interview. Both work the whole way through.",
+          fact2Title: "You decide when an answer is finished",
+          fact2Body: "Nothing is submitted until you say so, so a pause to think costs you nothing.",
+          fact3Title: "No timer",
+          fact3Body: "Take the time you need on every question. You can also start over from the beginning if you need to.",
+          startNote: "You'll see how many questions there are on the next screen.",
+        },
         // Shown as the portrait's caption on the pre-auth sign-in screen, where no persona is
         // loaded yet — it names the deployment's DEFAULT interviewer (DEFAULT_AVATAR_CHARACTER).
         defaultInterviewerName: "Lisa",
@@ -263,6 +291,15 @@ export const resources = {
         // 外部模式没有固定题数(面试官逐题引导),沿用上面的题数文案会显示“0 道题”,故用此变体。
         bodyExternal: "面试官会逐题引导你完成对话。不用着急 —— 可以语音或打字作答，每题何时答完由你决定。",
         begin: "我准备好了",
+        headlineLead: "{{total}} 道题,",
+        headlineAccent: "按你的节奏",
+        lede: "Lisa 会把每道题念出来。题目会一直留在屏幕上,方便你边想边重读。",
+        railLabel: "面试概览",
+        fact1Title: "怎么答都行",
+        fact1Body: "说或打字,随时互相切换。",
+        fact2Title: "答完了你说一声",
+        fact2Body: "每个答案只在你说「答完了」之后才提交。",
+        beginNote: "按下之后第 1 题立刻开始。",
       },
       noQuestions: {
         title: "暂无可用题目",
@@ -432,6 +469,21 @@ export const resources = {
         loginTitle: "候选人登录",
         loginReassurance: "不用着急。你可以说也可以打字,每一题什么时候算答完由你决定。",
         livePill: "在线",
+        readyPill: "就绪",
+        yourInterviewer: "你的面试官",
+        idle: {
+          kicker: "已登录",
+          headlineLead: "Lisa 已就位,",
+          headlineAccent: "等你开始",
+          lede: "她会把问题念出来并听你回答。不按按钮就不会开始。",
+          fact1Title: "说或打字都行",
+          fact1Body: "你可以开口回答,也可以随时切换成打字。整场面试两种方式都一直可用。",
+          fact2Title: "什么时候算答完由你决定",
+          fact2Body: "你不说答完就不会提交,所以停下来想一想不会有任何代价。",
+          fact3Title: "没有计时",
+          fact3Body: "每道题你想花多久都可以。需要的话也可以从头重新开始。",
+          startNote: "下一屏会告诉你一共有几道题。",
+        },
         defaultInterviewerName: "Lisa",
         loginBody: "请使用主办方提供的用户名和密码登录,开始你的面试。",
         wrongCredentials: "用户名或密码错误。",

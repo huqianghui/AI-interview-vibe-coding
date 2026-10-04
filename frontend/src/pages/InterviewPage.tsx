@@ -61,6 +61,8 @@ import type { AudioState, TranscriptSegment } from "../types/voice";
 import { AvatarView } from "../components/AvatarView";
 import { AppShell } from "../components/AppShell";
 import { CandidateSignIn } from "../components/CandidateSignIn";
+import { CandidateIdle } from "../components/CandidateIdle";
+import { CandidateOrientation } from "../components/CandidateOrientation";
 import { palette } from "../theme";
 import { QuestionProgress } from "../components/QuestionProgress";
 import { MicPermissionDialog } from "../components/MicPermissionDialog";
@@ -1350,6 +1352,39 @@ export function InterviewPage() {
     );
   }
 
+  // Idle: signed in, nothing started. Its own full-bleed screen rather than a lone button inside
+  // the reading column — the interviewer is the hero here (see CandidateIdle).
+  if (phase === "idle") {
+    return (
+      <>
+        <AppShell measure="bare" showTagline={false} actions={candidateActions}>
+          <CandidateIdle busy={busy} onStart={onStart} />
+        </AppShell>
+        {errorBanner}
+        {micDialog}
+        {restartDialog}
+      </>
+    );
+  }
+
+  // Orientation: the one screen that knows the question count, so the count is the screen.
+  if (phase === "orientation" && q) {
+    return (
+      <>
+        <AppShell measure="bare" showTagline={false} actions={candidateActions}>
+          <CandidateOrientation
+            total={q.total}
+            isExternal={isExternal}
+            onBegin={() => setPhase("interviewing")}
+          />
+        </AppShell>
+        {errorBanner}
+        {micDialog}
+        {restartDialog}
+      </>
+    );
+  }
+
   // Live Q&A: a global top bar over a full-width two-column stage (avatar left, controls right).
   if (phase === "interviewing" && q) {
     const voiceActive = channel === "voice";
@@ -1477,37 +1512,7 @@ export function InterviewPage() {
       <AppShell measure="reading" actions={candidateActions}>
         <div className={styles.page}>
 
-        {phase === "idle" && (
-          <Button appearance="primary" disabled={busy} onClick={onStart}>
-            {busy ? t("starting") : t("start")}
-          </Button>
-        )}
 
-        {/* Orientation beat (P13): set expectations before Q1. */}
-        {phase === "orientation" && q && (
-          <Card>
-            <CardHeader
-              header={<Text weight="semibold">{t("orientation.title")}</Text>}
-            />
-            <Body1 style={{ display: "block", marginBottom: 16 }}>
-              {isExternal
-                ? t("orientation.bodyExternal")
-                : t("orientation.body", { total: q.total })}
-            </Body1>
-            {/* Fluent's Card is a flex COLUMN with `align-items: stretch`, so a bare button here
-                was silently stretched to the card's full width — a giant banner-sized primary
-                action that matched nothing else on the page. The row wrapper gives it its natural
-                width back, and any sibling action added later lands beside it with a real gap. */}
-            <div className={styles.cardActions}>
-              <Button
-                appearance="primary"
-                onClick={() => setPhase("interviewing")}
-              >
-                {t("orientation.begin")}
-              </Button>
-            </div>
-          </Card>
-        )}
 
         {/* Phase 2: an external turn that stalled before any question is on screen (e.g. a `start`
             that never posed one) — offer 恢复 rather than the dead-end "no questions" card. */}
