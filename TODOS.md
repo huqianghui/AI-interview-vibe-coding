@@ -295,10 +295,13 @@ not retrying timeouts — they have already spent their budget); the item-level 
 second time (fixed by re-raising non-retryable errors); and questions with no authored checklist
 stopped being counted in progress, so a stub-only interview sat at 0 of N forever.
 
-**Still open:** the wall-clock win is unmeasured on the live server. 60 s at three-way is a
-projection from the 166 s sequential measurement, not an observation. Measure it, and only then
-consider raising the cap to four — and only with evidence that Azure does not throttle at that
-number.
+**Measured and closed (v0.42.3.0).** Concurrency 3 gave **70 s**; concurrency = N (the question
+count) gives **35.3 s**, against 170-190 s sequential. The advice in this entry to "consider raising
+the cap to four" was wrong: for a nine-question bank 4 buys the same `ceil(9/4) = 3` generations as
+3 does, saving nothing. And the reason given for capping at all — Azure TPM — was never measured and
+is wrong by two orders of magnitude: the deployment is provisioned at ~3.5M TPM and a forty-question
+report is ~60k tokens. A probe measured 1/3/5/9/12 concurrent calls with **zero failures at every
+level** (wall 26.7/20.3/21.1/23.2/26.3 s). See `verify-dont-assert-limits` in memory.
 
 ## Test infrastructure
 
@@ -322,9 +325,21 @@ Regenerating them on 2026-10-04 surfaced **three independent silent-failure mode
 All three are fixed and documented in the spec's header, but the structural problem is untouched:
 there is still no signal when the script stops matching the product.
 
-**Options:** run it in CI with a visual diff (expensive, flaky on font rendering); run it on a
-schedule and fail loudly; or add a cheap CI assertion that each referenced PNG is newer than the
-last change to the component it depicts. The third is the least work for most of the value.
+**Correction to an earlier version of this entry**, which called "the script is opt-in so CI never
+runs it" the ROOT CAUSE. That was wrong twice over. It is not the cause of any of the three defects
+— they have three unrelated causes (no fake media device locally; a wait written in the wrong place;
+`reuseExistingServer`) — it is only the reason they went unnoticed. And on the facts, putting the
+script in CI would have caught **one of the three**: mode 1 does not happen on CI (Linux has a fake
+device, per the 2026-09-24 learning), and mode 3 **cannot** happen there (`reuseExistingServer:
+!process.env.CI` means CI always boots fresh). Only mode 2 would have gone red.
+
+So "run it in CI" is not the fix for staleness. What actually detects a stale image is checking the
+image against what it depicts, whatever broke the script.
+
+**Options:** a CI assertion that each referenced PNG's last commit is newer than the last commit to
+the component it depicts (catches staleness regardless of why the script broke — the real answer,
+and the cheapest); a scheduled run that fails loudly (catches a broken script, not a stale image);
+a visual diff (expensive, flaky on font rendering).
 
 **Effort:** CC: ~40 min for the mtime-vs-component assertion; a real visual-diff pipeline is a day.
 **Priority:** P2 — the README is the first thing a client reads, and it was wrong for five weeks
