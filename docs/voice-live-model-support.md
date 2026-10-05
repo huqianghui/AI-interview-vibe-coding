@@ -912,7 +912,7 @@ TTS"，理由换了一个。**
 | avatar（数字人）| ✅ `ice=1` | ✅ **`ice=1`** | 实测 §4.7 |
 | 不设 `voice` 时的默认声音 | Azure 自动填 `azure-standard/en-US-AvaNeural` | **`openai/marin`（模型自带）** | 实测 §4.7 |
 | 配 Azure TTS 音色输出 | ✅ | ✅ **（这就是"混合式"）** | 实测 §4.7 |
-| **逐字念题**（`pre_generated_assistant_message`）| ✅ 188000 字节、逐字一致、1.8s | ✅ **188000 字节、逐字一致、1.4s（更快）** | **实测，本节** |
+| **逐字念题**（`pre_generated_assistant_message`）| ✅ 188000 字节、逐字一致、1.8s | ⚠️ **纯语音会话下** 188000 字节、逐字一致、1.4s；**挂上数字人则 9/10 静音**（§4.12）| **实测，本节 + §4.12** |
 | 输入转写 `azure-speech` | ✅ | ✅（配音频型 EoU 时）| 实测 §4.7 |
 | BYOM profile | `byom-azure-openai-chat-completion` | `byom-azure-openai-realtime` | 实测 §4.4 / §4.5 |
 | 部署的 `capabilities` | `chat_completion: "true"` | `chat_completion: "false"`（**无正向 realtime 标记**）| 实测 §4.5 |
@@ -923,12 +923,20 @@ TTS"，理由换了一个。**
 | 打断（barge-in）行为差异 | — | — | **未测** |
 | 成本 | — | — | **未测** |
 
-**逐字念题在 realtime 会话上正常（实测）** —— 这是混合式对本产品可用的最后一块拼图：
+**逐字念题在 realtime 会话上正常（实测）**，但**这次测量没有挂数字人** —— 这一点当时没写明，后来
+就是它让我把结论说过了头（owner 2026-10-05 当场质疑）：
 
 ```
 CASCADED gpt-5-mini      : response.done=True  audio=188000B  verbatim=True  1.8s
 HYBRID   gpt-realtime-2.1: response.done=True  audio=188000B  verbatim=True  1.4s
 ```
+
+> **怎么看出它没挂数字人**：`audio=188000B` 是从 WS 上的 `response.audio.delta` 数出来的，而挂上数字人
+> 之后那条路的 WS 音频帧数实测是 **0**（音频改走 WebRTC 音频轨，§4.12）。所以这两行都是**纯语音会话**。
+>
+> **挂上数字人之后的真实结果在 §4.12**：浏览器里 10 次尝试只有 1 次出声，失败时 Azure 用
+> `response.text.delta` 回答，静默无报错。所以本行只能证明"realtime 能逐字念"，**不能**证明
+> "realtime + 数字人能逐字念"。
 
 **评估该用哪个模型 —— 这一格我先下过一个太宽的结论，owner 当场质疑，更正如下。**
 
