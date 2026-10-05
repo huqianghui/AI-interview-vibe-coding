@@ -487,3 +487,95 @@ def test_build_audio_append_handles_an_empty_batch_without_raising():
     # Defensive: a zero-length binary frame should produce a harmless no-op event, never a crash
     # that takes the whole relay — and with it the session — down.
     assert build_audio_append(b"") == {"type": AUDIO_APPEND_TYPE, "audio": ""}
+
+
+# The session a CASCADED (chat-model) interview sends, field for field. Captured from the code that
+# shipped before any of the voice-model / end-of-utterance work and verified byte-identical across
+# v0.42.6.0, v0.43.1.0 and today — five persona shapes and both locales. Its job is to fail loudly
+# if the path that every live interview actually runs on is changed by accident while someone is
+# editing the realtime branch beside it.
+SHIPPED_CASCADED_SESSION = {
+    "input_audio_echo_cancellation": {"type": "server_echo_cancellation"},
+    "input_audio_noise_reduction": {"type": "azure_deep_noise_suppression"},
+    "input_audio_sampling_rate": 16000,
+    "input_audio_transcription": {"language": "en-US", "model": "azure-speech"},
+    "modalities": ["text", "audio", "avatar"],
+    "turn_detection": {
+        "create_response": False,
+        "end_of_utterance_detection": {
+            "model": "semantic_detection_v1_multilingual",
+            "threshold_level": "medium",
+            "timeout_ms": 1500,
+        },
+        "interrupt_response": True,
+        "remove_filler_words": True,
+        "silence_duration_ms": 800,
+        "type": "azure_semantic_vad_multilingual",
+    },
+    "voice": {
+        "name": "en-US-AvaNeural",
+        "rate": "1.0",
+        "temperature": 0.8,
+        "type": "azure-standard",
+    },
+}
+
+
+def _plain(obj):
+    """SDK models are MutableMappings holding enums; flatten to plain JSON-ish values."""
+    if hasattr(obj, "as_dict"):
+        obj = obj.as_dict()
+    if hasattr(obj, "keys"):
+        return {str(k): _plain(v) for k, v in dict(obj).items()}
+    if isinstance(obj, (list, tuple)):
+        return [_plain(v) for v in obj]
+    return getattr(obj, "value", obj)
+
+
+def test_the_cascaded_session_still_matches_what_shipped_field_for_field():
+    """The chat-model path must not move while the realtime branch next to it does.
+
+    This is the guard for "are you sure nothing else changed?" — a question no amount of reading the
+    diff answers as well as rebuilding the session and comparing it. The avatar block is excluded on
+    purpose: it is roster data (character, framing, bitrate), not session behaviour.
+    """
+    built = _plain(
+        build_avatar_session(
+            FakePersona(voice_map='{"en-US": "en-US-AvaNeural"}'),
+            locale="en-US",
+            playground=False,
+            background=None,
+        )
+    )
+    built.pop("avatar", None)
+    assert built == SHIPPED_CASCADED_SESSION
+
+
+def test_the_realtime_session_differs_from_the_shipped_one_in_exactly_one_field():
+    """And the realtime branch may only move the detector — nothing else about the session.
+
+    Written as a diff rather than a second golden copy: the point being locked is that choosing a
+    realtime voice model changes the end-of-utterance detector and NOTHING else (same voice, same
+    transcription, same modalities, same VAD envelope).
+    """
+    realtime = _plain(
+        build_avatar_session(
+            FakePersona(voice_map='{"en-US": "en-US-AvaNeural"}'),
+            locale="en-US",
+            playground=False,
+            background=None,
+            realtime_pipeline=True,
+        )
+    )
+    realtime.pop("avatar", None)
+    differing = {
+        k
+        for k in set(realtime) | set(SHIPPED_CASCADED_SESSION)
+        if realtime.get(k) != SHIPPED_CASCADED_SESSION.get(k)
+    }
+    assert differing == {"turn_detection"}
+    cascaded_td = dict(SHIPPED_CASCADED_SESSION["turn_detection"])
+    realtime_td = dict(realtime["turn_detection"])
+    assert {
+        k for k in set(realtime_td) | set(cascaded_td) if realtime_td.get(k) != cascaded_td.get(k)
+    } == {"end_of_utterance_detection"}
