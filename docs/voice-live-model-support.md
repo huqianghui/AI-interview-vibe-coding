@@ -1223,9 +1223,35 @@ owner：「之前是测试过 gpt-realtime 是可以驱动数字人的」—— 
 | `pc_connected` → `read_sent` | **865 ms** | **312 ms** |
 
 两次的 `proxy_connected`/`session_updated`/`avatar_connect_sent`/`avatar_answer`/`pc_track_video`/
-`pc_track_audio`/`pc_ice_connected`/`pc_connected`/`read_sent`/`read_created` 顺序**一模一样**。于是下一个
-待验证的假设是**竞态**：数字人媒体刚连上就马上发朗读请求时，realtime 会用文本回答；等一会儿再发则正常。
-这条正在用 `avatar-speak-start-live` 重复测（它本来就记录这两个标记），**在拿到相关性之前不写成结论**。
+`pc_track_audio`/`pc_ice_connected`/`pc_connected`/`read_sent`/`read_created` 顺序**一模一样**。
+
+于是测了**竞态**假设：数字人媒体刚连上就马上发朗读请求时 realtime 用文本回答，等一会儿再发则正常。
+重复 4 次 realtime 后相关性看起来很诱人 —— 唯一出声的那次 gap 是 **865 ms**，三次静音是
+**312 / 322 / 376 / 379 ms**，而级联在 381 ms 就能出声（所以阈值若存在，是 realtime 自己的）。
+
+**但直接实验把它否掉了。** 在页面里把第一帧朗读请求**硬压 2500 ms**（`LIPSYNC_DELAY_READ_MS=2500`，
+patch `WebSocket.prototype.send`，不动产品代码）：realtime 仍然回 `response.text.delta`，仍然静音。
+所以**不是时序**。
+
+| # | 假设 | 实测 | 结论 |
+| --- | --- | --- | --- |
+| 8 | 朗读请求发得太早（竞态） | 人为延迟 2500 ms 后仍是文本、仍静音（`read_delayed_ms=2500` 写在产物里） | ❌ 排除 |
+
+#### 代码侧已排除：会话字节与「那次出声」的版本完全相同
+
+把三个历史版本的 `voice_live_proxy.py` 取出来，在同一个进程里为同一组人物形态生成 `session.update` 并
+逐字节比较（5 种形态 × 2 种语言）：
+
+| 比较 | 结果 |
+| --- | --- |
+| **级联会话** vs `v0.42.6.0`（语音模型拆分之前） | **IDENTICAL** |
+| **级联会话** vs `v0.43.1.0`（拆分后、EoU 工作之前） | **IDENTICAL** |
+| **realtime 会话** vs `e617e44` —— 07:21 那次**听得见**的版本 | **IDENTICAL** |
+
+两条结论：**(a) 线上跑的那条路（chat/级联）与本次全部改动之前逐字节相同**；**(b) realtime 会话形状自
+「那次出声」以来没有变过**，所以本次改动无法解释「先出声后静音」。守卫已进单测
+（`test_the_cascaded_session_still_matches_what_shipped_field_for_field` 锁死级联整份会话，
+`test_the_realtime_session_differs_from_the_shipped_one_in_exactly_one_field` 锁死 realtime 只许改检测器）。
 
 #### 对结论的修正
 
@@ -1233,14 +1259,15 @@ PR #168 写的「realtime 语音模型可用」**说得太满**。准确的说�
 
 - ✅ 会话能建立、数字人能协商出流、音频型 EoU 工作正常 —— 这些都实测过；
 - ✅ **纯语音**（不挂数字人）的 realtime 朗读正常出声；
-- ⚠️ **挂上数字人之后，realtime 的念题不稳定**：5 次里 1 次出声（本节），失败时静默无报错。所以
+- ⚠️ **挂上数字人之后，realtime 的念题基本不出声**：浏览器里共 **10 次尝试，只有 1 次出声**（07:21 那
+  次，至今无法解释），失败时静默无报错。而**不挂数字人**时同一个模型、同一个请求 **7/7 出声**。所以
   **现在不要把带数字人的面试切到 realtime** —— 不是"不能"，是"不可靠"，而面试场景下静音一次就等于废掉
   一场面试。
 - 代码对级联零影响（chat 那条路一个字节没动），所以线上没有风险：默认仍是 `gpt-5-mini`。
 
 #### 还不知道的
 
-为什么「握手完成」会把模态从音频切成文本 —— 这需要 Azure 侧的解释，或者一个能在脚本里完成 avatar WebRTC
+为什么「挂上数字人」会把模态从音频切成文本 —— 这需要 Azure 侧的解释，或者一个能在脚本里完成 avatar WebRTC
 握手的装置（aiortc 那次装置本身跑不通，见 §4.10 的诚实缺口）。在此之前**不要**把第 7 条写成机制，它只是
 与数据一致的唯一剩余解释。
 
