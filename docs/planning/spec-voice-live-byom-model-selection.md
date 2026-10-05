@@ -332,7 +332,14 @@ else:
    但"客户到底想要哪一层"取决于其意图(只想消错 / 要治理计费归自己 / 要模型真的主导面试),实现方无从代答。
 2. **作用域 A vs B(§9)**:全局单档(推荐)还是逐层 per-persona?客户是否需要混用原生/BYOM?
    注:§4.1 的"一个模型值四处统一"**没有**关掉这一项——它统一的是消费端,不是取消 per-persona 覆盖。
-3. **客户实际用哪种 deployment**:是 chat-completion(默认)、realtime,还是 Foundry 上的 Claude?直接决定默认 profile 是否要改。
+3. ~~**客户实际用哪种 deployment**:是 chat-completion(默认)、realtime,还是 Foundry 上的 Claude?~~
+   **已关闭(2026-10-05,v0.43.0.0 实现后)。** 这条是实现前的开放项,当时的疑问是"要不要只硬编码一种
+   profile"。实现里**三个 profile 全部进了下拉**、默认 `byom-azure-openai-chat-completion`,客户自己选
+   即可,实现方没有要问的。而且"选错 profile"也不靠问:保存时的实测复校会拦住——实测报文
+   `invalid_profile`(profile 名不存在)与 `byom_realtime_connection_error`(chat 部署配 realtime 协议),
+   见 model-support §4.4 的 E / F 两条。
+   **剩下的不是待确认项,而是一条维护提示**:Azure 若将来新增第四种 profile,
+   `voice_live_probe.BYOM_PROFILES` 与前端 `admin.BYOM_PROFILES` 要同步加。
 4. **checkbox 落点**:只在全局卡片(方案 A),还是也进 per-persona 编辑器(方案 B)?
 5. **是否暴露 `foundry_resource_override`**:v1 是否支持跨资源 BYOM,还是先只支持同资源、把跨资源留到后续。
 
