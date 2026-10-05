@@ -24,6 +24,7 @@ import asyncio
 import json
 import logging
 import random
+import re
 from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -81,17 +82,29 @@ def _build_scoring_prompt(
     rubric: list[RubricItem],
     source_context: dict[str, str] | None = None,
 ) -> str:
-    """Cross-language per-item judging prompt; JSON-only output keyed by item_id.
+    """Cross-language per-item judging prompt; JSON-only output keyed by the item's ORDINAL.
 
-    ``source_context`` (feature C) maps ``item_id`` → a fuller SOP passage for that item. When
-    present it is appended after the item's short quote as supporting reference text. It is
+    Items are numbered ``1..N`` in the order given, and the model answers with those numbers;
+    :func:`_resolve_item_id` maps them back. They used to be printed as the item's database id — a
+    36-character UUID — which made every call ask the model to transcribe up to 17 distinct UUIDs
+    exactly (measured on the default bank: 17, 14, 14, 14, 13 items in the five largest checklists).
+    One wrong character meant that item counted as UNJUDGED while the mistyped id counted as an
+    invented one, and with only two attempts available the question could end up `scoring_failed` —
+    reported to the candidate as a question nobody could score. The id is an internal key the model
+    never needed to see. Observed signature of the old failure, in pairs:
+
+        Scoring attempt 1 incomplete: 1 item(s) still unjudged
+        Dropping 1 invented scoring item(s) not in the checklist
+
+    ``source_context`` (feature C) maps the real ``item_id`` → a fuller SOP passage for that item.
+    When present it is appended after the item's short quote as supporting reference text. It is
     reference-only — the judge still decides per item against the checklist ``text``; the rubric,
     weighting, and rails are unchanged.
     """
     source_context = source_context or {}
     lines = []
-    for it in rubric:
-        line = f"[{it.item_id}] ({it.kind}) {it.text}"
+    for ordinal, it in enumerate(rubric, start=1):
+        line = f"[{ordinal}] ({it.kind}) {it.text}"
         if it.source_quote:
             line += f'  — SOP: "{it.source_quote}"'
         passage = source_context.get(it.item_id)
@@ -106,6 +119,8 @@ def _build_scoring_prompt(
         "For EVERY checklist item return a judgment: met | partially_met | not_met | violated "
         "(violated only for a forbidden item the answer actually triggers).\n"
         'Return ONLY JSON: {"judgments": [{"item_id", "judgment", "rationale", "answer_quote"}]}. '
+        "item_id is the NUMBER in square brackets for that checklist item (1, 2, 3, ...) — return "
+        "it exactly, and do not invent numbers that are not listed.\n"
         "answer_quote is a short verbatim span from the candidate's answer for the judgment.\n"
         "Judge every item — do not omit any.\n\n"
         f"QUESTION:\n{question_text}\n\nCHECKLIST:\n{rubric_block}\n\nANSWER:\n{answer_text}\n"
@@ -134,6 +149,49 @@ async def _collect_source_context(db: AsyncSession, rubric: list[RubricItem]) ->
             out[it.item_id] = passage
             budget -= len(passage)
     return out
+
+
+# What a model actually returns for the item printed as "[3]". MEASURED, not guessed, and the reason
+# this is deliberately permissive rather than one canonical spelling: against the SAME gpt-5-mini
+# deployment with the SAME prompt, two live calls answered differently —
+#
+#   call 1:  "item_id": "[1]"     (the token copied verbatim from the prompt, brackets included)
+#   call 2:  "item_id": 1         (a bare JSON number)
+#
+# A bare-digits pattern therefore matched NOTHING on the first shape and every judgment was dropped.
+# The live run that caught it failed 3 of 3 items on both attempts:
+#
+#   Dropping 3 scoring judgment(s) whose item_id matched no listed item
+#   ScoringIncomplete: LLM did not judge 3 checklist item(s) after 2 attempt(s)
+#
+# The unit tests could not catch it: the mock adapter's own regex (`^\[([^\]]+)\]`) captures the
+# bracket CONTENTS, so the mock always answers with bare digits — the one form the real model does
+# not use. Hence this accepts any plausible wrapping rather than one canonical spelling.
+_ORDINAL_RE = re.compile(r"^[\[\(#\s]*(\d+)[\]\)\.\s]*$")
+
+
+def _resolve_item_id(raw_id: object, asked: list[RubricItem]) -> str | None:
+    """Map what the model returned for ``item_id`` back to a real checklist item id, or None.
+
+    ``asked`` must be the SAME list, in the same order, that built the prompt — a retry re-asks only
+    the still-pending items, so it renumbers from 1 and the mapping differs per attempt.
+
+    Returns None for anything unresolvable (a number out of range, an id that is not in this
+    checklist), which the caller drops and counts. Dropping is the same outcome as the old
+    "invented item" rail; what changed is how rarely it should now happen.
+
+    An ordinal wins over an id match, which is unambiguous in practice because real ids are UUIDs
+    and can never be a bare integer. The id branch exists only so that a model which echoes the real
+    id anyway — it is still in ``source_context`` keys, never in the prompt text — is not discarded.
+    """
+    key = str(raw_id).strip()
+    if not key:
+        return None
+    ordinal = _ORDINAL_RE.match(key)
+    if ordinal:
+        n = int(ordinal.group(1))
+        return asked[n - 1].item_id if 1 <= n <= len(asked) else None
+    return key if any(it.item_id == key for it in asked) else None
 
 
 def _parse_judgments(raw_output: str) -> list[dict]:
@@ -243,8 +301,13 @@ async def prepare_scoring(
     )
 
 
-async def _complete_with_retry(llm, prompt: str) -> str:
+async def complete_with_retry(llm, prompt: str) -> str:
     """One bounded completion, retried with exponential backoff on transient failures only.
+
+    Public because the opt-in SOP coverage audit (``app.services.sop_coverage``) needs the exact
+    same guarantee and used to have none: it called ``complete()`` raw, so its only bound was the
+    OpenAI SDK default (measured: read=600 s, max_retries=2) — long past the ingress idle timeout
+    that turns a slow report into a dead stream.
 
     There was no transport retry anywhere on this path: ``get_openai_client()`` is built with no
     ``max_retries``, so a single 429 or 502 failed the question outright. Backoff is jittered so a
@@ -308,14 +371,23 @@ async def judge_prepared(task: ScoringTask, *, llm_provider: str | None = None) 
     last_error: Exception | None = None
 
     for attempt in range(MAX_SCORING_ATTEMPTS):
-        prompt = _build_scoring_prompt(question_text, answer_text, pending, source_context)
+        # Bound to its own name: `pending` is reassigned below, and the ordinals in the prompt only
+        # mean anything against the exact list that produced them.
+        asked = pending
+        prompt = _build_scoring_prompt(question_text, answer_text, asked, source_context)
         if attempt:
+            # Say the numbers RESTART. The ordinal scheme introduced a failure mode the UUID scheme
+            # could not have: this retry lists only the still-pending items, so they are numbered
+            # from 1 again, and a model that answered with the ORIGINAL numbering would resolve to
+            # nothing (out of range) and leave the item unjudged a second time. The ids are the ones
+            # in front of it, not the ones from the earlier call.
             prompt += (
                 f"\n\nIMPORTANT: a previous response omitted these {len(pending)} item(s). "
-                "Judge every one of them."
+                "Judge every one of them. They are RENUMBERED from [1] in the list above — use "
+                "those numbers, not any numbering from an earlier response."
             )
         try:
-            raw = await _complete_with_retry(llm, prompt)
+            raw = await complete_with_retry(llm, prompt)
         except LLMAdapterError as exc:
             if not exc.retryable:
                 # A 400-class failure: bad parameter, unsupported model, content filter. It will
@@ -345,9 +417,24 @@ async def judge_prepared(task: ScoringTask, *, llm_provider: str | None = None) 
             )
             continue
 
+        unresolved = 0
         for j in _parse_judgments(raw):
-            if isinstance(j, dict) and j.get("item_id") not in merged:
-                merged[j["item_id"]] = j
+            if not isinstance(j, dict):
+                continue
+            real_id = _resolve_item_id(j.get("item_id"), asked)
+            if real_id is None:
+                unresolved += 1
+                continue
+            if real_id not in merged:
+                # Store the REAL id: the pure engine matches judgments to the rubric by item_id, and
+                # knows nothing about the ordinals that exist only inside the prompt.
+                merged[real_id] = {**j, "item_id": real_id}
+        if unresolved:
+            # The diagnostic that replaces "Dropping N invented scoring item(s)": the model answered
+            # with something that is not one of the numbers it was given.
+            logger.warning(
+                "Dropping %d scoring judgment(s) whose item_id matched no listed item", unresolved
+            )
 
         pending = [it for it in rubric if it.item_id not in merged]
         if not pending:
