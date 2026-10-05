@@ -1317,9 +1317,27 @@ owner：「在 agent 里面能否配置 gpt-realtime 模型，那个时候的声
 | --- | --- |
 | agent 定义里配 `model=gpt-realtime-2.1` | ✅ **接受** —— `agents.create_version` 返回 `version=1` |
 | 这个 agent 能运行吗 | ❌ **不能** —— `400 This model is not supported by Responses API.`（agent 执行在 Responses API 上，而它拒 realtime 部署，§4.9） |
-| agent 模式下声音能是模型自带的吗 | ❌ **不能** —— 即使**完全不发** `session.voice`，Azure 也补成 `azure-standard/en-US-AvaNeural`，不是 `openai/marin` |
+| agent 模式下声音能是模型自带的吗 | ⚠️ **取决于我们发不发 `session.voice`** —— 见下面的修正 |
 
-**所以 agent 模式下 Voice Live 永远由 Azure TTS 发声，与 agent 底层是什么模型无关。** 这也解释了为什么
+**修正（后续实测，原先这里写错了）**：我最初写"agent 模式下 Azure 永远补 Azure 音色、拿不到模型自带音色"，
+依据是"不发 `session.voice` 时回显 `azure-standard/en-US-AvaNeural`" —— 但那次**我们发的音色和 agent 配的
+恰好相同**，分不出谁生效。改发一个不同的音色就清楚了：
+
+| 场景 | 生效音色 |
+| --- | --- |
+| agent 模式 + 我们发 `en-US-AndrewNeural`（agent 自己配的是 Ava） | **`azure-standard/en-US-AndrewNeural`** —— **我们赢** |
+| model 模式 + 我们发 `en-US-AndrewNeural`（对照） | `azure-standard/en-US-AndrewNeural`（一致） |
+| agent 模式 + 我们**不发** `session.voice` | 回落到 agent / Portal 侧配的那个（本次是 Ava） |
+
+**两个推论**：
+
+1. **Portal 的 agent Voice 设置，对我们的会话等于失效** —— 我们每次都发 `session.voice`，而我们的值赢。
+2. **要用模型原生音色，缺的不是 Azure 的能力，而是我们这边一个"用模型自带音色"的开关**（不发
+   `session.voice`），再由 Portal 把 agent 的 Voice 设成 "real-time model native voices" 那一类。
+
+补充一条 SDK 层的事实：`PromptAgentDefinition` 只有 `instructions` / `model` / `tools` / `temperature` /
+`top_p` / `reasoning` / `text` / `rai_config` / `structured_inputs` / `tool_choice`，**没有 voice / avatar
+字段** —— Portal 的 Voice 与 Avatar 存在别处（agent 的语音通道配置），这个 SDK 既读不到也写不了。 这也解释了为什么
 **推理模型下拉不列 realtime 部署**是对的（过滤条件：声明 `chat_completion == "true"`，realtime 部署声明
 `"false"`，§4.5）：那种配置**存得下、运行时才 400**，属于最坏的一类配置错误。
 
