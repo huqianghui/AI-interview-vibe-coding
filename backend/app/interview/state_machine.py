@@ -432,8 +432,16 @@ async def score_and_finalize_events(
     call takes seconds; a 10-question interview used to sit behind one long batch request while
     the UI faked its numerator). Yields, in order:
 
-    - ``{"type": "progress", "done": i, "total": n, "question_id": ...}`` — BEFORE grading each
-      answer (``done`` = answers already graded), so the UI can say "analyzing answer i+1 of n";
+    - ``{"type": "progress", "done": i, "total": n, "question_id": ...}`` — one per answer as its
+      grading finishes (``done`` = answers graded so far);
+    - ``{"type": "question_error", "done": i, "total": n, "question_id": ..., "detail": ...}`` — a
+      question whose grading failed; it is reported unscored, never scored zero (P7);
+    - ``{"type": "coverage", "done": i, "total": m, "question_id": ...}`` — only when
+      ``sop_coverage_check`` is on, one per audited question. ``m`` is the number of questions that
+      actually need a model round-trip, which is usually FEWER than ``n``: a question with no
+      checklist or no linked SOP passage has nothing to audit and costs no call.
+    - ``{"type": "ping", "done": i, "total": n}`` — a heartbeat while waiting, so the connection
+      never sits idle past the ingress timeout. Carries no new information.
     - ``{"type": "report", "report": <the full report dict>}`` — exactly once, last.
 
     ``sop_coverage_check`` (feature D, default off) is a reference-only audit: when on, each
@@ -567,10 +575,75 @@ async def score_and_finalize_events(
                     "question_id": question_id,
                 }
 
-    # ── Phase 3: aggregate in BANK ORDER ──────────────────────────────────────────────────────
+    # ── Phase 3: the opt-in SOP coverage audit, concurrently ──────────────────────────────────
+    # This used to live inside the aggregation loop below, one question at a time, justified by a
+    # comment calling it "another DB call". It is not: it ends in an LLM round-trip
+    # (``sop_coverage.audit_prepared``). So a nine-question audit was nine serial model calls with
+    # NO event on the wire — the candidate watched "9 of 9 scored" with a frozen spinner, and if the
+    # silence outlasted the ingress idle timeout the stream died and the frontend silently re-scored
+    # the whole interview from scratch. Same shape as Phase 2 now: prepare sequentially, dispatch
+    # concurrently, heartbeat while waiting, and report progress.
+    coverage_by_question: dict[str, list[dict]] = {}
+    if sop_coverage_check:
+        # Graded questions only: a stub question has no authored rubric to audit, and a question
+        # whose grading failed has no judgement the audit would be commenting on.
+        auditable = [qid for qid, _a, task in prepared if task is not None and qid not in errors]
+
+        # Phase 3a — every database read, sequentially (the AsyncSession constraint from Phase 1).
+        # A question with nothing to audit yields no task at all, so the count below is EXACTLY how
+        # many model round-trips the audit costs: the progress line never promises more than it
+        # actually does.
+        coverage_tasks = []
+        for question_id in auditable:
+            coverage_task = await sop_coverage.prepare_coverage(
+                db, question_id=question_id, question_text=prompt_by_id.get(question_id, "")
+            )
+            if coverage_task is not None:
+                coverage_tasks.append(coverage_task)
+
+        coverage_total = len(coverage_tasks)
+        if coverage_total:
+            yield {"type": "coverage", "done": 0, "total": coverage_total}
+            coverage_semaphore = asyncio.Semaphore(scoring_concurrency(coverage_total))
+
+            async def _audit(coverage_task):
+                async with coverage_semaphore:
+                    return await sop_coverage.audit_prepared(coverage_task)
+
+            coverage_owner: dict[asyncio.Future, str] = {
+                asyncio.ensure_future(_audit(ct)): ct.question_id for ct in coverage_tasks
+            }
+            coverage_done = 0
+            coverage_pending: set = set(coverage_owner)
+            while coverage_pending:
+                finished, coverage_pending = await asyncio.wait(
+                    coverage_pending,
+                    timeout=SCORING_HEARTBEAT_SECONDS,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if not finished:
+                    yield {"type": "ping", "done": coverage_done, "total": coverage_total}
+                    continue
+                for future in finished:
+                    audited_id = coverage_owner[future]
+                    coverage_done += 1
+                    try:
+                        coverage_by_question[audited_id] = future.result()
+                    except Exception as exc:  # noqa: BLE001 — advisory audit, never fails a report
+                        # audit_prepared already degrades on its own; this catches a bug in it
+                        # rather than letting one cost the candidate a report they have earned.
+                        logger.warning("SOP coverage audit errored for %s: %s", audited_id, exc)
+                        coverage_by_question[audited_id] = []
+                    yield {
+                        "type": "coverage",
+                        "done": coverage_done,
+                        "total": coverage_total,
+                        "question_id": audited_id,
+                    }
+
+    # ── Phase 4: aggregate in BANK ORDER ──────────────────────────────────────────────────────
     # Not completion order: the report reads top to bottom as the candidate answered (req. 2),
-    # and concurrency finishes questions in whatever order the model returns them. The opt-in SOP
-    # coverage check lives here too — it is another DB call, so it stays sequential.
+    # and concurrency finishes questions in whatever order the model returns them.
     for question_id, answer_text, task in prepared:
         if task is None:
             # No checklist authored for this question — length-based stub row.
@@ -601,11 +674,7 @@ async def score_and_finalize_events(
         result = results[question_id]
         any_graded = True
         if sop_coverage_check:
-            missing = await sop_coverage.check_question_coverage(
-                db,
-                question_id=question_id,
-                question_text=prompt_by_id.get(question_id, ""),
-            )
+            missing = coverage_by_question.get(question_id)
             if missing:
                 coverage_findings.append(
                     {
