@@ -56,6 +56,7 @@ import type {
   ExternalConfig,
 } from "../api/admin";
 import * as auth from "../api/auth";
+import { listPersonas } from "../api/personas";
 import { AppShell } from "../components/AppShell";
 import { LoginCard } from "../components/LoginCard";
 
@@ -214,6 +215,10 @@ export function AdminPage() {
   const [cfgVoiceModel, setCfgVoiceModel] = useState("");
   const [cfgVoiceByom, setCfgVoiceByom] = useState(false);
   const [cfgVoiceProfile, setCfgVoiceProfile] = useState<string>(admin.DEFAULT_BYOM_PROFILE);
+  // Personas that carry their OWN model and therefore ignore the inference model below. Read-only:
+  // this page deliberately does not push the global value down onto them (that would erase a
+  // deliberate per-persona choice), so the honest thing is to show the operator who overrides it.
+  const [modelOverrides, setModelOverrides] = useState<{ name: string; model: string }[]>([]);
   // Options pulled from the real Foundry resource; empty until "Load options" fetches them.
   const [modelOptions, setModelOptions] = useState<ConfigOption[]>([]);
   const [voiceModelOptions, setVoiceModelOptions] = useState<ConfigOption[]>([]);
@@ -266,6 +271,18 @@ export function AdminPage() {
         setCfgKb(c.knowledge_base);
         setCfgKs(c.knowledge_source);
         setCfgKey(""); // never prefill the (masked) key; empty = keep existing
+        // Best-effort: the notice is informational, so a failure here must not break the config
+        // panel (and a fresh install has no personas yet).
+        try {
+          const personas = await listPersonas();
+          setModelOverrides(
+            personas
+              .filter((pp) => (pp.model ?? "").trim())
+              .map((pp) => ({ name: pp.name, model: (pp.model ?? "").trim() })),
+          );
+        } catch {
+          setModelOverrides([]);
+        }
       }),
     [guard],
   );
@@ -877,10 +894,16 @@ export function AdminPage() {
               {probing && <Spinner size="tiny" label="Probing the region…" />}
             </div>
 
-            <Text weight="semibold">Inference model — judge, scoring, digital-human agent</Text>
+            <Text weight="semibold">
+              Inference model — judge and scoring always; the agent only as a fallback
+            </Text>
             <Body1>
-              A <strong>deployment</strong> in this resource: judge, scoring and the Foundry agent
-              all address models by deployment name. Your own deployments are exactly right here.
+              A <strong>deployment</strong> in this resource — judge, scoring and the Foundry agent
+              all address models by deployment name, so your own deployments are exactly right here.
+              Judge and scoring always use this value. The digital-human agent uses it only when its
+              persona has no model of its own: a model picked in the agent editor overrides it, and a
+              synced persona usually has one, because reconcile pulls the live agent's model onto the
+              persona. Changing this does not rewrite those — that would erase a deliberate choice.
             </Body1>
 
             {/* Model: dropdown once options are loaded, else a text input fallback. */}
@@ -905,6 +928,19 @@ export function AdminPage() {
                 onChange={(_, d) => setCfgModel(d.value)}
                 data-testid="cfg-model"
               />
+            )}
+
+            {modelOverrides.length > 0 ? (
+              <Caption1 data-testid="cfg-model-overrides">
+                {modelOverrides.length} persona(s) carry their own model and are NOT affected by this
+                setting:{" "}
+                {modelOverrides.map((o) => `${o.name} (${o.model})`).join(", ")}. Change those in the
+                agent editor.
+              </Caption1>
+            ) : (
+              <Caption1 data-testid="cfg-model-overrides-none">
+                No persona overrides this — every persona's agent follows the model above.
+              </Caption1>
             )}
 
             {/* The Voice Live SESSION model — a separate setting, because its legal values are a
