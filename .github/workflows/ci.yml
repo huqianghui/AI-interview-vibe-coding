@@ -21,7 +21,14 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install
-        run: pip install -e ".[dev]"
+        # The azure extra too, even though CI never talks to Azure: 31 tests in
+        # test_voice_live_proxy.py guard themselves with importorskip("azure") because
+        # build_avatar_session / build_turn_detection construct SDK MODEL CLASSES (no network, no
+        # credential). Without the extra CI silently skipped them, leaving the voice-session assembly
+        # — the shape of every Voice Live session — unverified on the runner and voice_live_proxy.py
+        # at 69%. With it: 766 passed / 0 skipped and that file at 100%, total coverage 84.95% ->
+        # 85.57% (measured 2026-10-05, SDK present with every Azure endpoint env var blanked).
+        run: pip install -e ".[dev,azure]"
       - name: Lint
         run: ruff check app tests
       - name: Format check
