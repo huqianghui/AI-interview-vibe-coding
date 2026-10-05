@@ -354,6 +354,9 @@ describe("AdminPage", () => {
     const listKbs = vi
       .spyOn(admin, "listKnowledgeBases")
       .mockResolvedValue([{ value: "sop-kb", label: "SOP KB" }]);
+    const listVoice = vi
+      .spyOn(admin, "listVoiceLiveModels")
+      .mockResolvedValue([{ value: "gpt-5-mini", label: "gpt-5-mini" }]);
 
     renderPage();
     await signIn(user);
@@ -370,9 +373,147 @@ describe("AdminPage", () => {
     expect(screen.getByTestId("cfg-kb-dropdown")).toBeInTheDocument();
     expect(listModels).toHaveBeenCalled();
     expect(listKbs).toHaveBeenCalled();
+    // The native voice list is a THIRD source: the deployments API cannot answer "what does Voice
+    // Live accept in this region", so both are fetched and they feed different dropdowns.
+    expect(listVoice).toHaveBeenCalled();
     await waitFor(() =>
-      expect(screen.getByTestId("cfg-status")).toHaveTextContent(/1 model.*1 knowledge base/i),
+      expect(screen.getByTestId("cfg-status")).toHaveTextContent(
+        /1 deployment.*1 native voice model.*1 knowledge base/i,
+      ),
     );
+  });
+
+  // --- The voice session model is a SEPARATE setting from the inference model -------------------
+  // One field used to feed both and their legal values differ: judge / scoring / the Foundry agent
+  // address models by DEPLOYMENT NAME, while Voice Live MODEL mode accepts only models it hosts
+  // natively in the region. Saving an own deployment broke every voice session with
+  // "Model X is not supported in this region".
+
+  /** Sign in, open the connection tab, and load all three option sources. */
+  async function openConnectionWithOptions(
+    user: ReturnType<typeof userEvent.setup>,
+    cfg: Partial<admin.AiFoundryConfig> = {},
+  ) {
+    mockAdminLogin();
+    vi.spyOn(admin, "listBanks").mockResolvedValue([]);
+    vi.spyOn(admin, "getAiFoundryConfig").mockResolvedValue({
+      ...EMPTY_CFG,
+      endpoint: "https://demo.services.ai.azure.com",
+      model_or_deployment: "my-own-deployment",
+      is_active: true,
+      ...cfg,
+    } as admin.AiFoundryConfig);
+    vi.spyOn(admin, "listModelDeployments").mockResolvedValue([
+      { value: "my-own-deployment", label: "my-own-deployment (gpt-5.4-mini)" },
+    ]);
+    vi.spyOn(admin, "listKnowledgeBases").mockResolvedValue([]);
+    vi.spyOn(admin, "listVoiceLiveModels").mockResolvedValue([
+      { value: "gpt-5-mini", label: "gpt-5-mini" },
+    ]);
+    renderPage();
+    await signIn(user);
+    await user.click(await screen.findByTestId("admin-tab-connection"));
+    await waitFor(() => expect(screen.getByTestId("cfg-load-options")).toBeInTheDocument());
+    await user.click(screen.getByTestId("cfg-load-options"));
+    await waitFor(() => expect(screen.getByTestId("cfg-model-dropdown")).toBeInTheDocument());
+  }
+
+  it("offers the region's probed native models for the voice session, not the deployments", async () => {
+    const user = userEvent.setup();
+    await openConnectionWithOptions(user);
+
+    // Native mode (default): the voice dropdown lists what a real connection ACCEPTED here, which
+    // is a different set from the resource's deployments.
+    expect(screen.getByTestId("cfg-voice-native-hint")).toHaveTextContent(
+      /two separate settings and both need a value/i,
+    );
+    await user.click(screen.getByTestId("cfg-voice-model-dropdown"));
+    expect(await screen.findByRole("option", { name: "gpt-5-mini" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /my-own-deployment/ })).not.toBeInTheDocument();
+  });
+
+  it("switches the voice dropdown to your deployments and defaults it to the inference model on BYOM", async () => {
+    const user = userEvent.setup();
+    await openConnectionWithOptions(user);
+
+    // No profile picker while the platform hosts the session — a profile there is a different
+    // connection path entirely.
+    expect(screen.queryByTestId("cfg-byom-profile")).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId("cfg-voice-byom"));
+
+    // BYOM needs the protocol stated: it is not inferable from the deployment name.
+    expect(await screen.findByTestId("cfg-byom-profile")).toBeInTheDocument();
+    // And the voice model defaults to the inference model, because BYOM takes the same kind of name.
+    expect(screen.getByTestId("cfg-voice-model-dropdown")).toHaveValue("my-own-deployment");
+    await user.click(screen.getByTestId("cfg-voice-model-dropdown"));
+    expect(await screen.findByRole("option", { name: /my-own-deployment/ })).toBeInTheDocument();
+  });
+
+  it("sends the voice settings on BOTH save paths, including clear-key", async () => {
+    const user = userEvent.setup();
+    await openConnectionWithOptions(user, { masked_key: "****1234", voice_model: "gpt-5-mini" });
+    const update = vi
+      .spyOn(admin, "updateAiFoundryConfig")
+      .mockResolvedValue({ ...EMPTY_CFG, voice_model_check: "verified" } as admin.AiFoundryConfig);
+
+    await user.click(screen.getByTestId("cfg-save"));
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model_or_deployment: "my-own-deployment",
+        voice_model: "gpt-5-mini",
+        voice_model_mode: "native",
+        voice_byom_profile: "",
+      }),
+    );
+
+    // Clearing the key is a full save too. It spelled the payload out separately before, which is
+    // exactly how a newly added field gets silently reset by the path that forgot it.
+    update.mockClear();
+    await user.click(screen.getByTestId("cfg-clear-key"));
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clear_api_key: true,
+        voice_model: "gpt-5-mini",
+        voice_model_mode: "native",
+      }),
+    );
+  });
+
+  it("surfaces the live check result after saving, and flags a stored value the region rejects", async () => {
+    const user = userEvent.setup();
+    // A migrated install can carry a voice model that is not in this region's accepted list; it
+    // stays visible (not silently swapped) but must be called out.
+    await openConnectionWithOptions(user, { voice_model: "gpt-5.4-mini" });
+    expect(screen.getByTestId("cfg-voice-model-illegal")).toHaveTextContent(
+      /not supported in this region/i,
+    );
+
+    vi.spyOn(admin, "updateAiFoundryConfig").mockResolvedValue({
+      ...EMPTY_CFG,
+      voice_model_check: "Voice model gpt-5-mini verified against the live service.",
+    } as admin.AiFoundryConfig);
+    await user.click(screen.getByTestId("cfg-save"));
+    await waitFor(() =>
+      expect(screen.getByTestId("cfg-status")).toHaveTextContent(
+        /verified against the live service/i,
+      ),
+    );
+  });
+
+  it("re-probes the region on demand", async () => {
+    const user = userEvent.setup();
+    await openConnectionWithOptions(user);
+    const reprobe = vi
+      .spyOn(admin, "listVoiceLiveModels")
+      .mockResolvedValue([{ value: "gpt-5-mini", label: "gpt-5-mini" }]);
+
+    await user.click(screen.getByTestId("cfg-voice-reprobe"));
+    // refresh=true: the cached answer can be up to 6h old, so a just-rolled-out model needs a sweep.
+    await waitFor(() => expect(reprobe).toHaveBeenCalledWith(true));
+    await waitFor(() => expect(screen.getByTestId("cfg-status")).toHaveTextContent(/re-probed/i));
   });
 
   it("links from the top bar to the digital-human agent editor", async () => {

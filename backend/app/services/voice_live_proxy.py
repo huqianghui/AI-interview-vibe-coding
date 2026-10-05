@@ -389,6 +389,51 @@ async def _resolve_voice_live_credential(api_key: str) -> tuple[Any, bool]:  # p
     )
 
 
+def build_connect_kwargs(
+    *,
+    endpoint: str,
+    credential: Any,
+    api_version: str,
+    ssl_ctx: Any,
+    is_agent: bool,
+    agent_name: str | None,
+    agent_version: str,
+    project: str,
+    default_model: str,
+    byom_profile: str = "",
+) -> dict[str, Any]:
+    """The exact ``connect()`` kwargs for one session (pure, so the three paths are unit-testable).
+
+    Three mutually exclusive ways to attach a brain, and mixing them is what produces the errors
+    this function exists to keep apart:
+
+    * **agent (path ③)** — ``agent_name`` / ``agent_version`` / ``project_name``, no ``model``.
+      Never carries a BYOM profile: the agent's own model lives on the Foundry side.
+    * **native model (path ①)** — ``model=<a name Voice Live hosts natively in the region>``.
+    * **BYOM (path ②)** — the same ``model=`` slot holds YOUR deployment name and
+      ``query={"profile": ...}`` tells Voice Live which upstream protocol to drive it with. The SDK
+      maps ``query`` straight onto the WebSocket URL.
+
+    A non-empty ``byom_profile`` is only honoured on the model path; see
+    ``voice_live_ws.resolve_byom_profile`` for where the empty-vs-set decision is made.
+    """
+    kwargs: dict[str, Any] = {
+        "endpoint": endpoint,
+        "credential": credential,
+        "api_version": api_version,
+        "connection_options": {"vendor_options": {"ssl": ssl_ctx}},
+    }
+    if is_agent:
+        kwargs["agent_name"] = agent_name
+        kwargs["agent_version"] = agent_version
+        kwargs["project_name"] = project
+        return kwargs
+    kwargs["model"] = default_model
+    if byom_profile:
+        kwargs["query"] = {"profile": byom_profile}
+    return kwargs
+
+
 async def run_proxy(
     ws: WebSocket,
     *,
@@ -399,6 +444,7 @@ async def run_proxy(
     api_key: str,
     api_version: str,
     default_model: str,
+    byom_profile: str = "",
     playground: bool = False,
     avatar_background: str | None = None,
 ) -> None:  # pragma: no cover — live Azure connect + relay, no Azure in CI
@@ -408,7 +454,9 @@ async def run_proxy(
     ``project_name`` so the hosted Foundry agent drives the session; ``agent_id`` is stored as
     ``"name:version"`` (see :mod:`app.services.voice_broker`) so any ``:version`` suffix is
     stripped for ``agent_name`` and passed separately as ``agent_version``. Model mode (no
-    ``agent_id``) connects with ``model=default_model``.
+    ``agent_id``) connects with ``model=default_model``, plus ``query={"profile": byom_profile}``
+    when the operator pointed the voice session at their own deployment (BYOM, path ②) — see
+    :func:`build_connect_kwargs`.
 
     Sends ``{"type": "proxy.connected", ...}`` once Azure has acknowledged the initial
     ``session.update``, then runs two race-cancelled relay loops until either side closes.
@@ -432,18 +480,18 @@ async def run_proxy(
     # escape hatch, which maps straight to aiohttp ws_connect's ssl= kwarg. Built once, reused here.
     ssl_ctx = _certifi_ssl_context()
 
-    connect_kwargs: dict[str, Any] = {
-        "endpoint": endpoint,
-        "credential": credential,
-        "api_version": api_version,
-        "connection_options": {"vendor_options": {"ssl": ssl_ctx}},
-    }
-    if is_agent:
-        connect_kwargs["agent_name"] = agent_name
-        connect_kwargs["agent_version"] = persona.agent_version or ""
-        connect_kwargs["project_name"] = project
-    else:
-        connect_kwargs["model"] = default_model
+    connect_kwargs = build_connect_kwargs(
+        endpoint=endpoint,
+        credential=credential,
+        api_version=api_version,
+        ssl_ctx=ssl_ctx,
+        is_agent=is_agent,
+        agent_name=agent_name,
+        agent_version=persona.agent_version or "",
+        project=project,
+        default_model=default_model,
+        byom_profile=byom_profile,
+    )
 
     try:
         async with connect(**connect_kwargs) as conn:
@@ -486,6 +534,9 @@ async def run_proxy(
                         "mode": "agent" if is_agent else "model",
                         "agent_name": agent_name or "",
                         "model": "" if is_agent else default_model,
+                        # Which brain-attach path this session really used — path ② is invisible
+                        # otherwise, since BYOM reuses the same ``model=`` slot as native.
+                        "byom_profile": "" if is_agent else byom_profile,
                         "avatar_enabled": bool((persona.character or "").strip()),
                         "persona_id": persona.id,
                         "read_directive": read_directive,

@@ -21,11 +21,14 @@ import {
   Badge,
   Body1,
   Button,
+  Caption1,
   Card,
   CardHeader,
   Dropdown,
   Input,
   Option,
+  Spinner,
+  Switch,
   Tab,
   TabList,
   Table,
@@ -204,8 +207,17 @@ export function AdminPage() {
   const [cfgKs, setCfgKs] = useState("");
   const [cfgKey, setCfgKey] = useState("");
   const [cfgStatus, setCfgStatus] = useState<string | null>(null);
+  // The Voice Live SESSION model — a separate setting from the inference model above, because the
+  // legal values differ: Voice Live MODEL mode accepts only models it hosts natively in the region,
+  // while judge/scoring/the agent address models by deployment name. `cfgVoiceByom` off = platform
+  // native (path ①); on = your own deployment via a profile (path ②).
+  const [cfgVoiceModel, setCfgVoiceModel] = useState("");
+  const [cfgVoiceByom, setCfgVoiceByom] = useState(false);
+  const [cfgVoiceProfile, setCfgVoiceProfile] = useState<string>(admin.DEFAULT_BYOM_PROFILE);
   // Options pulled from the real Foundry resource; empty until "Load options" fetches them.
   const [modelOptions, setModelOptions] = useState<ConfigOption[]>([]);
+  const [voiceModelOptions, setVoiceModelOptions] = useState<ConfigOption[]>([]);
+  const [probing, setProbing] = useState(false);
   const [kbOptions, setKbOptions] = useState<ConfigOption[]>([]);
 
   // External interview API/server config (Phase 2, vendor-neutral). Resolved live from the DB on
@@ -248,6 +260,9 @@ export function AdminPage() {
         setCfgEndpoint(c.endpoint);
         setCfgProject(c.default_project);
         setCfgModel(c.model_or_deployment);
+        setCfgVoiceModel(c.voice_model ?? "");
+        setCfgVoiceByom((c.voice_model_mode ?? "native") === "byom");
+        setCfgVoiceProfile(c.voice_byom_profile || admin.DEFAULT_BYOM_PROFILE);
         setCfgKb(c.knowledge_base);
         setCfgKs(c.knowledge_source);
         setCfgKey(""); // never prefill the (masked) key; empty = keep existing
@@ -268,18 +283,60 @@ export function AdminPage() {
     [guard],
   );
 
-  // Pull the real model deployments + knowledge bases from the saved Foundry resource.
+  // Pull the real model deployments + knowledge bases from the saved Foundry resource, plus the
+  // native Voice Live models this REGION actually accepts (measured by real connections — no API
+  // lists them and the docs table runs ahead of rollout, so this is the only trustworthy source).
   const loadOptions = () =>
     guard(async () => {
       setCfgStatus(null);
-      const [models, kbs] = await Promise.all([
-        admin.listModelDeployments(),
-        admin.listKnowledgeBases(),
-      ]);
-      setModelOptions(models);
-      setKbOptions(kbs);
-      setCfgStatus(`Loaded ${models.length} model(s), ${kbs.length} knowledge base(s).`);
+      setProbing(true);
+      try {
+        const [models, kbs, voiceModels] = await Promise.all([
+          admin.listModelDeployments(),
+          admin.listKnowledgeBases(),
+          admin.listVoiceLiveModels(),
+        ]);
+        setModelOptions(models);
+        setKbOptions(kbs);
+        setVoiceModelOptions(voiceModels);
+        setCfgStatus(
+          `Loaded ${models.length} deployment(s), ${voiceModels.length} native voice model(s), ` +
+            `${kbs.length} knowledge base(s).`,
+        );
+      } finally {
+        setProbing(false);
+      }
     });
+
+  // Re-measure the region's native list. The cached answer is ~6h old at worst; this forces a fresh
+  // sweep (measured ~10s for 23 candidates) for when a model has just rolled out to the region.
+  const reprobeVoiceModels = () =>
+    guard(async () => {
+      setCfgStatus(null);
+      setProbing(true);
+      try {
+        const voiceModels = await admin.listVoiceLiveModels(true);
+        setVoiceModelOptions(voiceModels);
+        setCfgStatus(`Re-probed: ${voiceModels.length} native voice model(s) accepted here.`);
+      } finally {
+        setProbing(false);
+      }
+    });
+
+  // ONE payload builder for both save buttons (Save and Clear key). They used to spell the body out
+  // twice, which is how a newly added field gets silently reset by the path that forgot it.
+  const foundryPayload = (extra: Partial<admin.AiFoundryConfigInput> = {}) => ({
+    endpoint: cfgEndpoint.trim(),
+    api_key: cfgKey,
+    default_project: cfgProject.trim(),
+    model_or_deployment: cfgModel.trim(),
+    voice_model: cfgVoiceModel.trim(),
+    voice_model_mode: cfgVoiceByom ? "byom" : "native",
+    voice_byom_profile: cfgVoiceByom ? cfgVoiceProfile : "",
+    knowledge_base: cfgKb.trim(),
+    knowledge_source: cfgKs.trim(),
+    ...extra,
+  });
 
   // On mount, validate any residual token before trusting it. me() clears the token on a 401, so a
   // failed check drops us to the login form instead of hammering the admin API with a dead bearer.
@@ -795,15 +852,9 @@ export function AdminPage() {
                     onClick={() =>
                       guard(async () => {
                         setCfgStatus(null);
-                        await admin.updateAiFoundryConfig({
-                          endpoint: cfgEndpoint.trim(),
-                          api_key: "",
-                          clear_api_key: true,
-                          default_project: cfgProject.trim(),
-                          model_or_deployment: cfgModel.trim(),
-                          knowledge_base: cfgKb.trim(),
-                          knowledge_source: cfgKs.trim(),
-                        });
+                        await admin.updateAiFoundryConfig(
+                          foundryPayload({ api_key: "", clear_api_key: true }),
+                        );
                         setCfgKey("");
                         setCfgStatus("API key cleared — using Entra ID / Managed Identity.");
                         await refreshConfig();
@@ -819,9 +870,18 @@ export function AdminPage() {
                 </Text>
               )}
             </div>
-            <Button data-testid="cfg-load-options" onClick={loadOptions}>
-              Load models & knowledge bases
-            </Button>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <Button data-testid="cfg-load-options" onClick={loadOptions} disabled={probing}>
+                Load models & knowledge bases
+              </Button>
+              {probing && <Spinner size="tiny" label="Probing the region…" />}
+            </div>
+
+            <Text weight="semibold">Inference model — judge, scoring, digital-human agent</Text>
+            <Body1>
+              A <strong>deployment</strong> in this resource: judge, scoring and the Foundry agent
+              all address models by deployment name. Your own deployments are exactly right here.
+            </Body1>
 
             {/* Model: dropdown once options are loaded, else a text input fallback. */}
             {modelOptions.length > 0 ? (
@@ -845,6 +905,100 @@ export function AdminPage() {
                 onChange={(_, d) => setCfgModel(d.value)}
                 data-testid="cfg-model"
               />
+            )}
+
+            {/* The Voice Live SESSION model — a separate setting, because its legal values are a
+                different set. Keeping it in one field with the inference model is what produced
+                "Model X is not supported in this region" on every voice session. */}
+            <Text weight="semibold">Voice session model — Voice Live</Text>
+            <Switch
+              label="Use my own model (bring your own model)"
+              checked={cfgVoiceByom}
+              data-testid="cfg-voice-byom"
+              onChange={(_, d) => {
+                const byom = !!d.checked;
+                setCfgVoiceByom(byom);
+                // Switching to BYOM, the voice session runs on a deployment — the same kind of name
+                // the inference model uses — so default to it rather than leaving a native model
+                // name behind that this path would reject.
+                const stale =
+                  !cfgVoiceModel || voiceModelOptions.some((o) => o.value === cfgVoiceModel);
+                if (byom && stale) setCfgVoiceModel(cfgModel.trim());
+              }}
+            />
+            {cfgVoiceByom ? (
+              <>
+                <Body1>
+                  The voice session connects to <strong>your deployment</strong>. Note the voice leg
+                  never asks a model to think (it reads prepared text), so this changes the session
+                  host and billing path, not interview behaviour.
+                </Body1>
+                <Dropdown
+                  aria-label="BYOM profile"
+                  data-testid="cfg-byom-profile"
+                  selectedOptions={[cfgVoiceProfile]}
+                  value={
+                    admin.BYOM_PROFILES.find((pr) => pr.value === cfgVoiceProfile)?.label ??
+                    cfgVoiceProfile
+                  }
+                  onOptionSelect={(_, d) =>
+                    setCfgVoiceProfile(d.optionValue ?? admin.DEFAULT_BYOM_PROFILE)
+                  }
+                >
+                  {admin.BYOM_PROFILES.map((pr) => (
+                    <Option key={pr.value} value={pr.value} text={pr.label}>
+                      {pr.label}
+                    </Option>
+                  ))}
+                </Dropdown>
+              </>
+            ) : (
+              <Body1 data-testid="cfg-voice-native-hint">
+                The voice session runs on a model <strong>Azure hosts for Voice Live</strong> in this
+                region. Those are not deployments in your resource, so judge / scoring / the agent
+                cannot use them — <strong>these are two separate settings and both need a value</strong>.
+              </Body1>
+            )}
+            {/* Native mode lists only models a real connection ACCEPTED here; BYOM mode lists your
+                deployments. Either way the options are legal for the leg that uses them — and there
+                is deliberately NO free-text box, since that is how an unsupported model got saved. */}
+            {(cfgVoiceByom ? modelOptions : voiceModelOptions).length > 0 ? (
+              <Dropdown
+                aria-label="Voice session model"
+                data-testid="cfg-voice-model-dropdown"
+                selectedOptions={cfgVoiceModel ? [cfgVoiceModel] : []}
+                value={cfgVoiceModel}
+                onOptionSelect={(_, d) => setCfgVoiceModel(d.optionValue ?? "")}
+              >
+                {(cfgVoiceByom ? modelOptions : voiceModelOptions).map((o) => (
+                  <Option key={o.value} value={o.value}>
+                    {o.label}
+                  </Option>
+                ))}
+              </Dropdown>
+            ) : (
+              <Caption1 data-testid="cfg-voice-model-empty">
+                No options yet — use “Load models &amp; knowledge bases” above.
+              </Caption1>
+            )}
+            {cfgVoiceModel &&
+              !cfgVoiceByom &&
+              voiceModelOptions.length > 0 &&
+              !voiceModelOptions.some((o) => o.value === cfgVoiceModel) && (
+                <Caption1 data-testid="cfg-voice-model-illegal">
+                  “{cfgVoiceModel}” is not in this region’s accepted list — voice sessions will fail
+                  with “not supported in this region”. Pick one above.
+                </Caption1>
+              )}
+            {!cfgVoiceByom && (
+              <Button
+                size="small"
+                onClick={reprobeVoiceModels}
+                disabled={probing}
+                data-testid="cfg-voice-reprobe"
+              >
+                Re-probe the region
+              </Button>
             )}
 
             {/* Knowledge base: dropdown once loaded, else text input. */}
@@ -884,15 +1038,10 @@ export function AdminPage() {
                 onClick={() =>
                   guard(async () => {
                     setCfgStatus(null);
-                    await admin.updateAiFoundryConfig({
-                      endpoint: cfgEndpoint.trim(),
-                      api_key: cfgKey,
-                      default_project: cfgProject.trim(),
-                      model_or_deployment: cfgModel.trim(),
-                      knowledge_base: cfgKb.trim(),
-                      knowledge_source: cfgKs.trim(),
-                    });
-                    setCfgStatus("Saved.");
+                    const saved = await admin.updateAiFoundryConfig(foundryPayload());
+                    // The backend live-checks a changed voice model before committing, so a
+                    // region-rejected choice never gets here (it is a 422 surfaced by guard).
+                    setCfgStatus(saved.voice_model_check || "Saved.");
                     await refreshConfig();
                   })
                 }

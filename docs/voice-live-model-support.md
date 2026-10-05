@@ -399,8 +399,17 @@ chat-completion 调用（`POST /{id}/judge` → `app.interview.judge.run_judge`�
 
 所以毛病不在"自有 deployment 不该用"，而在 **admin 只有一个 `model_or_deployment` 字段，却同时承载了
 两种互不兼容的语义**：填上你的 deployment，前三处全对、第四处立刻报 "not supported in this region"。
-要让第四处也吃自有 deployment，**只有 BYOM 一条路**（`profile=byom-...` + 你的 deployment，§3.2）——
-这就是把这一个字段拆成"原生 model"和"BYOM deployment + profile"两种语义的理由。
+要让第四处也吃自有 deployment，**只有 BYOM 一条路**（`profile=byom-...` + 你的 deployment，§3.2）。
+
+> **已在 v0.43.0.0 拆开（2026-10-05）。** admin 现在是两个设置：
+> **推理模型**（`model_or_deployment` → judge / 打分 / agent，仍列你的 deployment，行为不变）与
+> **语音会话模型**（`voice_model` + `voice_model_mode` native|byom + `voice_byom_profile`）。
+> `model_or_deployment` **不再喂 Voice Live**，`persona.model` 也不再进语音链（那是第二个漏非法值的
+> 口子）——根因就此切断。原生模式的下拉只列**对本资源实测 ACCEPTED** 的模型（§4.4 的探测，缓存 6h），
+> 保存前还会对改动过的语音模型做一次实测复校，被明确拒绝就是 422、不落库。
+> 为什么拆而不是"统一成一个值"：语音腿是**嘴、不推理**（§3.3 / §3.5），为了口径一致把它也拖进 BYOM
+> 要付出 Foundry 资源 + MI 权限 + 级联延迟的真实代价，却换不到任何功能收益——§4.4 的 D 条实测
+> （不存在的部署名也能建连）正说明那条腿根本不会去调你的模型。
 
 > 旁注：`config_overlay.py` **故意不**覆盖 `settings.voice_live_default_model`（注释里写明覆盖它会让
 > 每个语音会话在 admin 保存的瞬间就挂掉）；但 `voice_live_ws.py` 在**每次连接时直接读 master row**，

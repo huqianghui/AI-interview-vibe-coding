@@ -137,14 +137,24 @@ export const editChecklistItems = (
 // The saved master config is what the backend reads at runtime (DB > .env > code default). The
 // API key is write-only: responses only carry a masked form, never the stored secret.
 
+// Two models, not one. `model_or_deployment` is the INFERENCE model (judge, scoring, and the
+// Foundry agent) and must be a deployment in the resource. `voice_model` is the Voice Live SESSION
+// model and must be a name Voice Live hosts natively in the region — unless `voice_model_mode` is
+// "byom", which points the voice session at your own deployment via `voice_byom_profile`. They were
+// one field, and that is exactly what produced "Model X is not supported in this region" whenever
+// an operator saved their own deployment (docs/voice-live-model-support.md §3.6).
 export interface AiFoundryConfig {
   endpoint: string;
   masked_key: string;
   default_project: string;
   model_or_deployment: string;
+  voice_model?: string;
+  voice_model_mode?: string; // "native" | "byom"
+  voice_byom_profile?: string;
   knowledge_base: string;
   knowledge_source: string;
   is_active: boolean;
+  voice_model_check?: string; // what the save-time live check concluded
 }
 
 export interface AiFoundryConfigInput {
@@ -153,9 +163,21 @@ export interface AiFoundryConfigInput {
   clear_api_key?: boolean; // true deletes the stored key (Entra ID / Managed Identity auth only)
   default_project: string;
   model_or_deployment: string;
+  voice_model?: string;
+  voice_model_mode?: string;
+  voice_byom_profile?: string;
   knowledge_base: string;
   knowledge_source: string;
 }
+
+// The three BYOM integration modes — the upstream protocol Voice Live drives your deployment with.
+// Not inferable from the deployment name, which is why the operator picks one.
+export const BYOM_PROFILES = [
+  { value: "byom-azure-openai-chat-completion", label: "Chat completion (cascaded) — most models" },
+  { value: "byom-azure-openai-realtime", label: "Realtime (speech-native passthrough)" },
+  { value: "byom-foundry-anthropic-messages", label: "Anthropic Messages (Claude, preview)" },
+] as const;
+export const DEFAULT_BYOM_PROFILE = "byom-azure-openai-chat-completion";
 
 export interface ConnectionTestResult {
   success: boolean;
@@ -185,6 +207,14 @@ export const listModelDeployments = () =>
 
 export const listKnowledgeBases = () =>
   adminRequest<ConfigOption[]>("/admin/config/ai-foundry/knowledge-bases");
+
+// The NATIVE Voice Live models this resource's REGION actually accepts, measured by real
+// connections (no API lists them, and the docs table runs ahead of rollout). Cached server-side;
+// `refresh` re-probes.
+export const listVoiceLiveModels = (refresh = false) =>
+  adminRequest<ConfigOption[]>(
+    `/admin/config/ai-foundry/voice-live-models${refresh ? "?refresh=true" : ""}`,
+  );
 
 // ── External interview API/server config (Phase 2, vendor-neutral) ─────
 // Connection to the client's external interview brain. Resolved live from the DB on every turn

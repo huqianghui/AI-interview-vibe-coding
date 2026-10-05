@@ -1,5 +1,58 @@
 # Changelog
 
+## 0.43.0.0 (2026-10-05)
+
+### Changed
+- **The voice session model is now its own setting, separate from the inference model.** One
+  `model_or_deployment` field fed four consumers, and they do not accept the same kind of name:
+  judge, scoring and the Foundry agent address models by **deployment name** in your resource, while
+  Voice Live's MODEL mode accepts only models **Voice Live itself hosts natively in the region** —
+  which create no deployment you can call. So the moment an operator saved their own deployment
+  (exactly right for the other three), every voice session died with "Model X is not supported in
+  this region". The admin page now configures an **inference model** and a **voice session model**
+  independently, the latter with a native / bring-your-own-model switch and, for BYOM, the profile
+  that says which upstream protocol Voice Live should drive your deployment with. The migration
+  backfills `voice_model` from `model_or_deployment`, so an upgraded install behaves exactly as it
+  did and the page flags the value instead of silently swapping models underneath a running install.
+- **Whatever the dropdown offers is connectable.** There is no API that lists the native models live
+  in a region and the published table runs ahead of rollout (`gpt-5.6-luna` was rejected on
+  2026-09-23 and accepted on 2026-10-05 on the same resource), so the native list is **measured**:
+  `voice_live_probe` opens a real session per candidate — 23 of them in ~10s at concurrency 6,
+  cached ~6h, re-probed on demand. A changed voice model is live-checked before the row is
+  committed, so a region-rejected choice is a 422 and never reaches an interview. Inconclusive
+  checks (no credential, offline) still save, with a note: blocking a save because Azure was
+  unreachable would make the admin page unusable, and every other discovery path here fails soft.
+  The free-text model box is gone from the voice setting — a free-text box is how an unsupported
+  model got saved in the first place.
+- `persona.model` no longer feeds the voice session. It was a second place an illegal value could
+  enter (pick a deployment in the agent editor and the voice leg breaks even when the global voice
+  model is valid); it now drives the agent / inference side only. What #99 established is kept
+  intact: the voice model still comes from user config, is still read from the DB per connection, and
+  is still never frozen by the env cache.
+
+### Added
+- `GET /admin/config/ai-foundry/voice-live-models` — the region's accepted native models, measured
+  and cached; `?refresh=true` re-probes.
+- `app/services/voice_live_probe.py` — the probe, its verdict taxonomy, and the result cache, shared
+  by the admin route and `scripts/voice_live_model_probe.py` (previously untracked, now a thin CLI
+  over the same code, so what you measure on the command line is what the product offers).
+- BYOM connection support on the voice leg: `query={"profile": ...}` alongside your deployment name.
+  `build_connect_kwargs` is now a pure function, so the three brain-attach paths are unit-tested —
+  including that the agent path never carries a profile.
+
+### Notes
+- Measured on the live swedencentral resource (api-version `2026-01-01-preview`, Entra) and written
+  up in [`docs/voice-live-model-support.md`](docs/voice-live-model-support.md) §4.4: `gpt-5.4-mini`
+  is a real deployment that native Voice Live REJECTS and BYOM ACCEPTS; a bad profile and a protocol
+  mismatch are both rejected at connect; **a nonexistent deployment name is accepted**, so a BYOM
+  probe can never prove the deployment exists — that guarantee comes from the deployment list. Two
+  earlier open questions are closed: BYOM needs no newer api-version, and the Foundry managed
+  identity already has deployment access.
+- A consequence worth stating: candidate interviews run Voice Live as a mouth
+  (`create_response=False`) and never ask it to think, so BYOM on the voice leg changes the session
+  host and billing path, not interview behaviour. That is why these are two settings rather than one
+  value forced through both.
+
 ## 0.42.6.0 (2026-10-04)
 
 ### Changed
