@@ -219,6 +219,10 @@ export function AdminPage() {
   // this page deliberately does not push the global value down onto them (that would erase a
   // deliberate per-persona choice), so the honest thing is to show the operator who overrides it.
   const [modelOverrides, setModelOverrides] = useState<{ name: string; model: string }[]>([]);
+  // Deployments legal for the CHOSEN BYOM profile. Separate from `modelOptions` (chat-only, for the
+  // inference model) because a realtime deployment is not chat-capable: reusing the chat list left
+  // byom-azure-openai-realtime with nothing selectable even though that path is live-verified.
+  const [byomDeployments, setByomDeployments] = useState<ConfigOption[]>([]);
   // Options pulled from the real Foundry resource; empty until "Load options" fetches them.
   const [modelOptions, setModelOptions] = useState<ConfigOption[]>([]);
   const [voiceModelOptions, setVoiceModelOptions] = useState<ConfigOption[]>([]);
@@ -324,6 +328,20 @@ export function AdminPage() {
         setProbing(false);
       }
     });
+
+  // The BYOM deployment list follows the chosen profile (chat / realtime / all). Runs only in BYOM
+  // mode, so the native path costs nothing.
+  useEffect(() => {
+    if (!cfgVoiceByom) return;
+    let active = true;
+    void admin
+      .listModelDeployments(admin.deploymentKindForProfile(cfgVoiceProfile))
+      .then((opts) => active && setByomDeployments(opts))
+      .catch(() => active && setByomDeployments([]));
+    return () => {
+      active = false;
+    };
+  }, [cfgVoiceByom, cfgVoiceProfile]);
 
   // Re-measure the region's native list. The cached answer is ~6h old at worst; this forces a fresh
   // sweep (measured ~10s for 23 candidates) for when a model has just rolled out to the region.
@@ -969,6 +987,15 @@ export function AdminPage() {
                   never asks a model to think (it reads prepared text), so this changes the session
                   host and billing path, not interview behaviour.
                 </Body1>
+                <Caption1 data-testid="cfg-byom-kind">
+                  Listing{" "}
+                  {admin.deploymentKindForProfile(cfgVoiceProfile) === "realtime"
+                    ? "realtime deployments (not chat-capable, so they are absent from the inference list above)"
+                    : admin.deploymentKindForProfile(cfgVoiceProfile) === "chat"
+                      ? "chat-capable deployments"
+                      : "every deployment — no filter can be verified for this profile"}
+                  .
+                </Caption1>
                 <Dropdown
                   aria-label="BYOM profile"
                   data-testid="cfg-byom-profile"
@@ -998,7 +1025,7 @@ export function AdminPage() {
             {/* Native mode lists only models a real connection ACCEPTED here; BYOM mode lists your
                 deployments. Either way the options are legal for the leg that uses them — and there
                 is deliberately NO free-text box, since that is how an unsupported model got saved. */}
-            {(cfgVoiceByom ? modelOptions : voiceModelOptions).length > 0 ? (
+            {(cfgVoiceByom ? byomDeployments : voiceModelOptions).length > 0 ? (
               <Dropdown
                 aria-label="Voice session model"
                 data-testid="cfg-voice-model-dropdown"
@@ -1006,7 +1033,7 @@ export function AdminPage() {
                 value={cfgVoiceModel}
                 onOptionSelect={(_, d) => setCfgVoiceModel(d.optionValue ?? "")}
               >
-                {(cfgVoiceByom ? modelOptions : voiceModelOptions).map((o) => (
+                {(cfgVoiceByom ? byomDeployments : voiceModelOptions).map((o) => (
                   <Option key={o.value} value={o.value}>
                     {o.label}
                   </Option>

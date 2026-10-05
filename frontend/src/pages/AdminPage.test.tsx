@@ -605,6 +605,78 @@ describe("AdminPage", () => {
     expect(screen.getByTestId("cfg-model-overrides-none")).toBeInTheDocument();
   });
 
+  // --- The BYOM deployment list must follow the chosen profile -----------------------------------
+  // The bug this guards: the BYOM voice dropdown reused the chat-only deployment list, and a
+  // realtime deployment is NOT chat-capable (measured: capabilities {chat_completion:"false",
+  // completion:"false"}), so byom-azure-openai-realtime had nothing selectable — unreachable from the
+  // UI even though both gpt-realtime-1.5 and gpt-realtime-2.1 are live-verified under that profile.
+
+  it("asks for realtime deployments when the realtime profile is chosen", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    vi.spyOn(admin, "listBanks").mockResolvedValue([]);
+    vi.spyOn(admin, "getAiFoundryConfig").mockResolvedValue({
+      ...EMPTY_CFG,
+      endpoint: "https://demo.services.ai.azure.com",
+      model_or_deployment: "gpt-5-mini",
+      is_active: true,
+    });
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([]);
+    vi.spyOn(admin, "listKnowledgeBases").mockResolvedValue([]);
+    vi.spyOn(admin, "listVoiceLiveModels").mockResolvedValue([]);
+    const listDeployments = vi
+      .spyOn(admin, "listModelDeployments")
+      .mockImplementation(async (kind = "chat") =>
+        kind === "realtime"
+          ? [{ value: "gpt-realtime-2.1", label: "gpt-realtime-2.1 (gpt-realtime-2.1)" }]
+          : [{ value: "gpt-5-mini", label: "gpt-5-mini (gpt-5-mini)" }],
+      );
+
+    renderPage();
+    await signIn(user);
+    await user.click(await screen.findByTestId("admin-tab-connection"));
+    await user.click(await screen.findByTestId("cfg-voice-byom"));
+
+    // Default profile is chat-completion -> the chat list.
+    await waitFor(() => expect(listDeployments).toHaveBeenCalledWith("chat"));
+    await user.click(screen.getByTestId("cfg-voice-model-dropdown"));
+    expect(await screen.findByRole("option", { name: /gpt-5-mini/ })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+
+    // Switch to the realtime profile -> the realtime list, which the chat-only list could not show.
+    await user.click(screen.getByTestId("cfg-byom-profile"));
+    await user.click(await screen.findByRole("option", { name: /Realtime/i }));
+    await waitFor(() => expect(listDeployments).toHaveBeenCalledWith("realtime"));
+    await user.click(screen.getByTestId("cfg-voice-model-dropdown"));
+    expect(await screen.findByRole("option", { name: /gpt-realtime-2\.1/ })).toBeInTheDocument();
+    expect(screen.getByTestId("cfg-byom-kind")).toHaveTextContent(/realtime deployments/i);
+  });
+
+  it("lists every deployment for the Anthropic profile, since no filter can be verified", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    vi.spyOn(admin, "listBanks").mockResolvedValue([]);
+    vi.spyOn(admin, "getAiFoundryConfig").mockResolvedValue({
+      ...EMPTY_CFG,
+      endpoint: "https://demo.services.ai.azure.com",
+      is_active: true,
+    });
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([]);
+    vi.spyOn(admin, "listKnowledgeBases").mockResolvedValue([]);
+    vi.spyOn(admin, "listVoiceLiveModels").mockResolvedValue([]);
+    const listDeployments = vi.spyOn(admin, "listModelDeployments").mockResolvedValue([]);
+
+    renderPage();
+    await signIn(user);
+    await user.click(await screen.findByTestId("admin-tab-connection"));
+    await user.click(await screen.findByTestId("cfg-voice-byom"));
+    await user.click(await screen.findByTestId("cfg-byom-profile"));
+    await user.click(await screen.findByRole("option", { name: /Anthropic/i }));
+
+    await waitFor(() => expect(listDeployments).toHaveBeenCalledWith("all"));
+    expect(screen.getByTestId("cfg-byom-kind")).toHaveTextContent(/no filter can be verified/i);
+  });
+
   it("links from the top bar to the digital-human agent editor", async () => {
     const user = userEvent.setup();
     mockAdminLogin();

@@ -544,6 +544,54 @@ E / F 的服务器原始报文（逐字）：
 
 ---
 
+### 4.5 三个 profile 的真实验证状态 + 一个"清单被过滤过"的坑
+
+> 2026-10-05 续测。§4.4 只验了 chat-completion 一个 profile。这里补上 realtime，并记下一个让
+> realtime 这条路**在界面上走不通**的坑。
+
+**先说那个坑，因为它比结论更容易再犯一次。** 判断"资源里有没有 realtime 部署"时，用的是
+`/admin/config/ai-foundry/model-deployments` 的返回——但那个接口里的过滤器**只保留
+`capabilities.chat_completion == "true"` 的部署**（它的注释原文就写着 *"not embeddings, image, or
+realtime deployments"*）。于是：
+
+- 真实 API 返回 **18** 个部署，过滤后只剩 **14** 个；
+- `gpt-realtime-1.5` / `gpt-realtime-2.1` **确实存在**，但永远不出现在那个清单里；
+- 而 BYOM 的语音模型下拉当初复用了这个 chat-only 清单 → **`byom-azure-openai-realtime` 在 UI 上没有
+  任何可选值，这条已验证可用的路径从界面走不通。**
+
+**能力标记的实测普查**（全资源 18 个部署，`capabilities` 里只出现过三个 key）：
+
+| 部署类型 | `capabilities` 实际内容 |
+| --- | --- |
+| chat（14 个）| `{"chat_completion": "true", "completion": "false"}` |
+| realtime（2 个）| `{"chat_completion": "false", "completion": "false"}` |
+| embedding | `{"embeddings": "true"}` |
+| image（`gpt-image-2-1`）| **`{}`（空对象）** |
+
+**没有任何"realtime"正向标记**，所以只能反向识别。而且"不是 chat"还不够——按"不是 chat 且不是
+embedding"筛，`gpt-image-2-1` 也会被捞进来（**这是跑真实接口才发现的，单元测试没抓到**）。真正可用的
+区分是：**声明了 `chat_completion` 且其值为 `"false"`** —— realtime 有这个 key，image 的
+`capabilities` 是空的。
+
+**三个 profile 的验证状态（全部真实建连）：**
+
+| profile | 用的部署 | 结果 |
+| --- | --- | --- |
+| `byom-azure-openai-chat-completion` | `gpt-5.4-mini`、`gpt-6-luna` | ✅ ACCEPTED（§4.4） |
+| `byom-azure-openai-realtime` | **`gpt-realtime-1.5`**、**`gpt-realtime-2.1`** | ✅ **ACCEPTED** |
+| `byom-azure-openai-realtime`（错配）| `gpt-5-mini`（chat 部署） | ❌ `byom_realtime_connection_error` |
+| `byom-foundry-anthropic-messages` | — | ⚠️ **无法验证**：本租户不能部署 Claude |
+
+**对 anthropic 那一格刻意不发明过滤条件。** 既然无法测量 Claude 部署长什么样，猜一个过滤条件若猜错，
+下拉就会是空的——正是上面 realtime 那个 bug 的翻版。所以该 profile 列**全部部署**（`kind=all`）：清单
+过宽是可恢复的（Azure 在建连时会拒掉错配，§4.4 的 E/F 两条已实测），**过窄则让功能彻底不可达**。
+
+**接口形态**：`GET /admin/config/ai-foundry/model-deployments?kind=chat|realtime|all`，默认 `chat`
+（推理模型下拉与人物编辑器保持原行为）；未知值回退到 `chat`，不 422——一个会报错的下拉比一个显示安全
+默认值的下拉更糟。
+
+---
+
 ## 5. 一句话决策树
 
 ```

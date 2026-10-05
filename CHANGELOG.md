@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.43.1.0 (2026-10-05)
+
+### Fixed
+- **The inference model is the agent's fallback, and the page now says so.** Configuring it on
+  `/admin` did not move "Model deployment" in `/admin/agent`, and the label claimed it would. The
+  real chain: judge and scoring read the admin value and never look at `persona.model`, while the
+  Foundry agent reads `persona.model or <admin value>` — the persona wins, and reconcile backfills the
+  live agent's model onto the persona, so a synced persona almost always has one. The coupling is
+  one-way (the default persona's model is pushed UP into the master row; nothing is pushed down).
+  Rather than propagate downward — that would erase a choice an operator made in the editor — the
+  page now NAMES the personas that override it, read from the existing `GET /admin/personas`. The
+  agent editor says the persona model overrides the admin value, which is the half that explains the
+  missing link.
+- **`byom-azure-openai-realtime` was unreachable from the UI.** The BYOM voice-model dropdown reused
+  the chat-only deployment list, and a realtime deployment is not chat-capable — so a profile whose
+  path is live-verified had nothing selectable. `GET …/model-deployments` now takes
+  `kind=chat|realtime|all` (default `chat`, so the inference dropdown and the per-persona editor are
+  unchanged) and the BYOM dropdown asks for the kind its chosen profile needs.
+
+### Notes
+- Measured on the real resource while fixing the above, and written up in
+  [`docs/voice-live-model-support.md`](docs/voice-live-model-support.md) §4.5:
+  `byom-azure-openai-realtime` **works** — `gpt-realtime-1.5` and `gpt-realtime-2.1` both ACCEPTED;
+  a chat deployment under that profile is rejected at connect (`byom_realtime_connection_error`).
+  `byom-foundry-anthropic-messages` **cannot be verified here** (this tenant cannot deploy Claude).
+- The deployments API exposes **no positive "realtime" capability**: across 18 deployments the only
+  capability keys are `chat_completion`, `completion` and `embeddings`. Realtime carries
+  `{"chat_completion": "false", "completion": "false"}` while the image deployment carries an **empty**
+  `capabilities: {}` — so realtime is identified by *declaring* `chat_completion` as `"false"`.
+  Filtering on "not chat" alone also offered `gpt-image-2-1`, which only running the real endpoint
+  caught; the unit test did not.
+- No filter is invented for the Anthropic profile: with no way to measure how a Claude deployment is
+  labelled, a wrong guess would empty that dropdown — the same bug being fixed. It lists every
+  deployment instead. Too wide is recoverable (Azure rejects a bad pairing at connect); too narrow
+  makes the profile unreachable.
+
 ## 0.43.0.0 (2026-10-05)
 
 ### Changed

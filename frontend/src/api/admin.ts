@@ -202,8 +202,23 @@ export const testAiFoundryConfig = () =>
   adminRequest<ConnectionTestResult>("/admin/config/ai-foundry/test", { method: "POST" });
 
 // Dropdown options pulled from the real Foundry resource (see backend #20 endpoints).
-export const listModelDeployments = () =>
-  adminRequest<ConfigOption[]>("/admin/config/ai-foundry/model-deployments");
+// `kind` says which deployments are legal for the consumer asking. Default "chat" (judge, scoring,
+// the Foundry agent, and the chat-completion BYOM profile). "realtime" is required for
+// `byom-azure-openai-realtime`: realtime deployments are NOT chat-capable, so the default list
+// excludes them and that profile would have no selectable value at all. "all" is used for the
+// Anthropic profile, where no filter can be verified on a tenant that cannot deploy Claude.
+export const listModelDeployments = (kind: "chat" | "realtime" | "all" = "chat") =>
+  adminRequest<ConfigOption[]>(
+    `/admin/config/ai-foundry/model-deployments?kind=${encodeURIComponent(kind)}`,
+  );
+
+/** Which deployments a BYOM profile can legally point at. */
+export const deploymentKindForProfile = (profile: string): "chat" | "realtime" | "all" =>
+  profile === "byom-azure-openai-realtime"
+    ? "realtime"
+    : profile === "byom-azure-openai-chat-completion"
+      ? "chat"
+      : "all";
 
 export const listKnowledgeBases = () =>
   adminRequest<ConfigOption[]>("/admin/config/ai-foundry/knowledge-bases");
