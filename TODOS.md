@@ -241,6 +241,13 @@ CHANGELOG entry — the file was last touched in `c8bd980`, which is before the 
 backfill should be written from those rather than from commit subjects, which is why v0.41.0.0 did
 not attempt it: inventing changelog prose for work you did not do is how a changelog starts lying.
 
+**Guarded against recurrence since v0.45.0.0,** but NOT backfilled: CI now fails when `VERSION` does
+not equal the newest `## x.y.z.w` heading in CHANGELOG.md. The check is bidirectional, so it catches
+both shapes of this drift — a version bump with no CHANGELOG entry (what happened to these five) and a
+CHANGELOG entry with no bump (what happened to 0.43.0.0 through 0.44.0.0, which left VERSION stranded
+at 0.42.7.0 for four releases). The five missing entries above still have to be written from their PR
+bodies; the guard only stops a sixth from joining them.
+
 **Effort:** human: ~1h / CC: ~15 min reading the five PR bodies.
 **Priority:** P1 — a changelog with holes in it is the one artifact a client reads to understand what changed.
 
