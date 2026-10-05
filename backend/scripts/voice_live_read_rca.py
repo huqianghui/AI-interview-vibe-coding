@@ -54,6 +54,7 @@ import argparse
 import asyncio
 import json
 import sys
+import time
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -128,6 +129,8 @@ async def one_read(
     read_mode: str,
     drop_voice: bool,
     agent: tuple[str, str] | None,
+    voice_override: str,
+    auto_response: bool,
     locale: str,
     timeout_s: float,
 ) -> dict[str, Any]:
@@ -154,6 +157,22 @@ async def one_read(
         background=background or None,
         realtime_pipeline=realtime_pipeline,
     )
+    if auto_response:
+        # A REAL speech-in -> speech-out turn: let server VAD open the model's turn when the
+        # candidate stops talking, instead of the product's linear contract (create_response=False).
+        # Without this the session never answers the audio on its own and the input side cannot be
+        # timed at all.
+        session = dict(session)
+        td = dict(session["turn_detection"])
+        td["create_response"] = True
+        session["turn_detection"] = td
+    if voice_override:
+        # Send a voice DIFFERENT from the one configured on the agent, so the echo says whose
+        # setting wins in agent mode — "both were en-US-AvaNeural" cannot answer that.
+        from azure.ai.voicelive.models import AzureStandardVoice
+
+        session = dict(session)
+        session["voice"] = AzureStandardVoice(name=voice_override, type="azure-standard")
     if drop_voice:
         # Ask "can the MODEL's own voice drive this session?" — with no session.voice a realtime
         # model answers in its own voice (measured: openai/marin) instead of Azure TTS. The product
@@ -210,6 +229,16 @@ async def one_read(
 
     applied_session: dict[str, Any] = {}
     applied_session: dict[str, Any] = {}
+    # Time from asking for speech to the FIRST audio byte: the number that says whether routing the
+    # output through Azure TTS costs anything against the model speaking in its own voice. Only
+    # meaningful WITHOUT --auto-response: there the clock starts at session.updated while the mic
+    # WAV may still be in its leading silence, so read `stop_to_audio_ms` instead.
+    asked_at = 0.0
+    first_audio_ms = -1
+    # The input side: from "the candidate stopped talking" to "the interviewer is heard" — the hop a
+    # speech-to-speech model is supposed to shorten, since no STT runs before the brain.
+    stopped_at = 0.0
+    stop_to_audio_ms = -1
     types: Counter[str] = Counter()
     audio_bytes = 0
     transcript = ""
@@ -232,7 +261,13 @@ async def one_read(
                         types[etype] += 1
                         if etype.endswith("error"):
                             errors.append(json.dumps(raw.get("error", raw))[:300])
+                        if etype.endswith("input_audio_buffer.speech_stopped"):
+                            stopped_at = time.monotonic()
                         if etype.endswith("response.audio.delta"):
+                            if stop_to_audio_ms < 0 and stopped_at:
+                                stop_to_audio_ms = int((time.monotonic() - stopped_at) * 1000)
+                            if first_audio_ms < 0 and asked_at:
+                                first_audio_ms = int((time.monotonic() - asked_at) * 1000)
                             audio_bytes += len(str(raw.get("delta", "")))
                         if etype.endswith("response.audio_transcript.delta"):
                             transcript += str(raw.get("delta", ""))
@@ -273,7 +308,11 @@ async def one_read(
                                     await conn.send(build_audio_append(frame))
                                 feeder = asyncio.create_task(feed())
                                 feeders.append(feeder)
-                            if read_mode == "model_turn":
+                            if auto_response:
+                                # Nothing to send: the mic audio drives it. Just start the clock.
+                                read_sent = True
+                                asked_at = time.monotonic()
+                            elif read_mode == "model_turn":
                                 # The OTHER way to make it talk: give the model something to answer
                                 # and let it generate the turn itself (no pre-generated text, so no
                                 # server-side TTS shortcut). Answers "does a realtime model's OWN
@@ -299,6 +338,7 @@ async def one_read(
                                 # Session is live: ask for the read exactly as the product does.
                                 await conn.send(build_read_frame(READ_TEXT))
                             read_sent = True
+                            asked_at = time.monotonic()
                         if etype.endswith("response.done") and read_sent:
                             break
             except TimeoutError:
@@ -326,6 +366,8 @@ async def one_read(
         "read_sent": read_sent,
         "audio_bytes": audio_bytes,
         "audio_deltas": types.get("response.audio.delta", 0),
+        "first_audio_ms": first_audio_ms,
+        "stop_to_audio_ms": stop_to_audio_ms,
         "spoke": types.get("session.avatar.switch_to_speaking", 0),
         "response_done": types.get("response.done", 0),
         "transcript_chars": len(transcript),
@@ -392,6 +434,16 @@ async def main() -> None:
         "--agent",
         default="",
         help='AGENT mode: "name:version" — drive that Foundry agent; no model= is sent',
+    )
+    ap.add_argument(
+        "--voice",
+        default="",
+        help="send this Azure voice name instead of the persona's (agent-mode precedence test)",
+    )
+    ap.add_argument(
+        "--auto-response",
+        action="store_true",
+        help="let server VAD open the model's turn (real speech-in -> speech-out timing)",
     )
     ap.add_argument("--locale", default="en-US")
     ap.add_argument("--timeout", type=float, default=25.0)
@@ -473,13 +525,17 @@ async def main() -> None:
                     if args.agent
                     else None
                 ),
+                voice_override=args.voice,
+                auto_response=args.auto_response,
                 project=s.azure_foundry_default_project or "",
                 locale=args.locale,
                 timeout_s=args.timeout,
             )
             rows.append(row)
             print(
-                f"  rep {i}: audio_deltas={row['audio_deltas']:4d} "
+                f"  rep {i}: stop→audio={row['stop_to_audio_ms']:5d}ms "
+                f"first_audio={row['first_audio_ms']:5d}ms "
+                f"audio_deltas={row['audio_deltas']:4d} "
                 f"audio_bytes={row['audio_bytes']:7d} spoke={row['spoke']} "
                 f"response.done={row['response_done']} text_deltas={row['text_deltas']} "
                 f"voice={(row['applied_session'].get('voice') or {}).get('type', '?')}/"
