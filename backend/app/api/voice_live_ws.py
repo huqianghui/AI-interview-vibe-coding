@@ -31,6 +31,7 @@ from app.models.user import User
 from app.services import config_service, persona_service
 from app.services.anonymous_session_service import AnonymousSessionError, verify_anonymous_token
 from app.services.voice_broker import DEFAULT_LOCALE
+from app.services.voice_live_probe import uses_realtime_pipeline
 from app.services.voice_live_proxy import is_mouth_persona, run_proxy
 
 logger = logging.getLogger(__name__)
@@ -192,12 +193,22 @@ async def voice_live_websocket(ws: WebSocket) -> None:
     settings = get_settings()
     resolved_model = resolve_voice_model(_master_voice_model, settings.voice_live_default_model)
     resolved_profile = resolve_byom_profile(_voice_mode, _voice_profile)
+    # Cascaded (a chat model) keeps the detector it always had; speech-to-speech MUST switch,
+    # because the text-based one is refused there. Membership is measured, not guessed — see
+    # voice_live_probe.uses_realtime_pipeline (phi4-mm-realtime is cascaded despite its name).
+    realtime_pipeline = uses_realtime_pipeline(resolved_model, resolved_profile)
     logger.info(
         "Voice Live model resolved to %r (master.voice_model=%r → env=%r); mode=%r profile=%r",
         resolved_model,
         _master_voice_model or None,
         settings.voice_live_default_model,
         _voice_mode or "native",
+        resolved_profile or None,
+    )
+    logger.info(
+        "Voice Live pipeline: realtime=%s (model=%r profile=%r)",
+        realtime_pipeline,
+        resolved_model,
         resolved_profile or None,
     )
     try:
@@ -211,6 +222,7 @@ async def voice_live_websocket(ws: WebSocket) -> None:
             api_version=settings.voice_live_api_version,
             default_model=resolved_model,
             byom_profile=resolved_profile,
+            realtime_pipeline=realtime_pipeline,
             # Editor Playground (pinned persona_id) is a free conversation with the agent, so a
             # linear-turn BANK persona keeps its model turn THERE only (see
             # linear_turns_for_persona).

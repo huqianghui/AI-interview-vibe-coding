@@ -541,3 +541,43 @@ def test_probe_model_sends_the_session_it_is_given(stub_voicelive_sdk):
 
     conn = sys.modules["azure.ai.voicelive.aio"].connect
     assert conn.captured, "connect was never called"
+
+
+def test_the_realtime_model_set_was_measured_not_pattern_matched():
+    """``phi4-mm-realtime`` is the reason this is a list and not a substring check.
+
+    Every native candidate was probed with the TEXT end-of-utterance detector; the six that refused
+    the session are the speech-to-speech ones. ``phi4-mm-realtime`` ACCEPTED it, so by Azure's own
+    answer it runs a cascaded pipeline — a ``"realtime" in name`` test would have put it on the
+    audio detector and changed its turn-taking for no reason.
+    """
+    from app.services.voice_live_probe import REALTIME_NATIVE_MODELS, uses_realtime_pipeline
+
+    assert "phi4-mm-realtime" not in REALTIME_NATIVE_MODELS
+    assert uses_realtime_pipeline("phi4-mm-realtime") is False
+    for name in ("gpt-realtime", "gpt-realtime-mini", "gpt-realtime-2.1", "azure-realtime"):
+        assert name in REALTIME_NATIVE_MODELS
+        assert uses_realtime_pipeline(name) is True
+
+
+def test_a_chat_model_keeps_the_cascaded_pipeline():
+    from app.services.voice_live_probe import uses_realtime_pipeline
+
+    for name in ("gpt-5-mini", "gpt-4o", "phi4-mm-realtime", "", None):
+        assert uses_realtime_pipeline(name) is False
+
+
+def test_the_byom_realtime_profile_is_realtime_whatever_the_deployment_is_called():
+    """BYOM points at YOUR deployment, so the name carries no signal — the profile does.
+
+    ``byom-azure-openai-realtime`` speaks the realtime protocol by definition (a deployment that
+    does not gets ``byom_realtime_connection_error``), so the profile alone decides.
+    """
+    from app.services.voice_live_probe import uses_realtime_pipeline
+
+    assert uses_realtime_pipeline("my-own-name", "byom-azure-openai-realtime") is True
+    assert uses_realtime_pipeline("my-own-name", " BYOM-Azure-OpenAI-Realtime ") is True
+    assert uses_realtime_pipeline("my-own-name", "byom-azure-openai-chat-completion") is False
+    # A realtime deployment under the CHAT profile is still answered by the profile: the chat
+    # profile is a cascaded pipeline regardless of what model sits behind it.
+    assert uses_realtime_pipeline("gpt-realtime", "byom-azure-openai-chat-completion") is False

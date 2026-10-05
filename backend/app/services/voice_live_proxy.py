@@ -173,10 +173,21 @@ MOUTH_VAD_TYPE = "azure_semantic_vad_multilingual"
 MOUTH_VAD_SILENCE_MS = 800
 MOUTH_VAD_REMOVE_FILLER_WORDS = True
 MOUTH_EOU_THRESHOLD_LEVEL = "medium"
+# CASCADED sessions keep the value they have always shipped with. Nothing about the chat-model path
+# changes: same detector, same timeout, same segmentation.
 MOUTH_EOU_TIMEOUT_MS = 1500
+# REALTIME (speech-to-speech) sessions use the audio-based detector, and 1000 ms is the measured
+# value, not a round number (model-support §4.8, spec-voice-live-eou-unification.md §4). The audio
+# detector at 1500 ms ends a turn ~0.45-0.6 s later than the text one; at 1000 ms it is level
+# (English last-stop 7.68 s vs 7.57 s, Chinese 8.96 s vs 8.98 s). At 700 ms the behaviour CHANGES
+# rather than speeds up — it stopped splitting at a 1.2 s pause and merged the answer into one
+# segment ending at 9.08 s, unexplained. Re-run scripts/voice_live_eou_ab.py before touching it.
+MOUTH_EOU_AUDIO_TIMEOUT_MS = 1000
 
 
-def build_turn_detection(*, linear_turns: bool, mouth: bool, eou_detection: bool) -> Any:
+def build_turn_detection(
+    *, linear_turns: bool, mouth: bool, eou_detection: bool, realtime_pipeline: bool = False
+) -> Any:
     """The ``turn_detection`` block of the Voice Live session.
 
     Two shapes, decided by WHO owns the turn:
@@ -184,10 +195,32 @@ def build_turn_detection(*, linear_turns: bool, mouth: bool, eou_detection: bool
     * Agent sessions (bank model-turn, editor Playground) keep the plain ``azure_semantic_vad`` they
       always had — the Foundry agent's own turn contract is tuned around it.
     * MOUTH sessions (external, linear/judged bank) get ``azure_semantic_vad_multilingual`` with
-      end-of-utterance detection (``semantic_detection_v1_multilingual``, medium threshold, 1.5 s
-      timeout), an 800 ms silence window and filler-word removal — cleaner, less fragmented segments
-      for the transcript buffer and for the judge's silence trigger — unless the persona turned
+      end-of-utterance detection (``smart_end_of_turn_detection``, medium threshold, 1 s timeout),
+      an 800 ms silence window and filler-word removal — unless the persona turned
       ``eou_detection`` off, in which case they keep the plain VAD.
+
+    ``realtime_pipeline`` picks WHICH end-of-utterance detector, and it is not a preference — it
+    decides whether the session can exist at all. Voice Live ships two:
+    ``semantic_detection_v1_multilingual`` reads the recognised TEXT, and
+    ``smart_end_of_turn_detection`` works on the input AUDIO.
+
+    * ``False`` (cascaded — a chat model) keeps the **text** detector at 1500 ms: exactly what this
+      product has always shipped, so the chat path is untouched by realtime support.
+    * ``True`` (speech-to-speech) must use the **audio** detector, because passthrough has no Voice
+      Live speech recognizer and the text one is refused outright: *"Text-based end-of-utterance
+      detection requires a local speech recognizer and is only supported on cascaded pipelines"*
+      (``param: session.turn_detection.end_of_utterance_detection``). That single line was the only
+      thing keeping realtime voice models out.
+
+    The audio detector is accepted on every pipeline measured, and an A/B on real audio found the
+    segmentation identical to the text one (same segment count, same split point, byte-identical
+    transcript) in English and Chinese alike — so switching a realtime session to it costs nothing
+    behaviourally. It is NOT applied to cascaded sessions anyway: keeping the shipped path
+    unchanged bit-for-bit is worth more than one fewer branch. Evidence:
+    ``docs/voice-live-model-support.md`` §4.7-§4.8, reproducible via
+    ``scripts/voice_live_eou_ab.py``. Who counts as realtime is measured too, not pattern-matched —
+    see ``voice_live_probe.uses_realtime_pipeline`` (``phi4-mm-realtime`` is cascaded despite its
+    name).
 
     ``create_response`` is always ``not linear_turns`` (the linear-turns contract; mouth ⇒ False)
     and barge-in is always on. Pure shaping (SDK import inside so the module stays importable
@@ -197,15 +230,23 @@ def build_turn_detection(*, linear_turns: bool, mouth: bool, eou_detection: bool
         AzureSemanticDetectionMultilingual,
         AzureSemanticVad,
         AzureSemanticVadMultilingual,
+        SmartEndOfTurnDetection,
     )
 
     if mouth and eou_detection:
         return AzureSemanticVadMultilingual(
             silence_duration_ms=MOUTH_VAD_SILENCE_MS,
             remove_filler_words=MOUTH_VAD_REMOVE_FILLER_WORDS,
-            end_of_utterance_detection=AzureSemanticDetectionMultilingual(
-                threshold_level=MOUTH_EOU_THRESHOLD_LEVEL,
-                timeout_ms=MOUTH_EOU_TIMEOUT_MS,
+            end_of_utterance_detection=(
+                SmartEndOfTurnDetection(
+                    threshold_level=MOUTH_EOU_THRESHOLD_LEVEL,
+                    timeout_ms=MOUTH_EOU_AUDIO_TIMEOUT_MS,
+                )
+                if realtime_pipeline
+                else AzureSemanticDetectionMultilingual(
+                    threshold_level=MOUTH_EOU_THRESHOLD_LEVEL,
+                    timeout_ms=MOUTH_EOU_TIMEOUT_MS,
+                )
             ),
             create_response=not linear_turns,
             interrupt_response=True,
@@ -223,6 +264,7 @@ def build_avatar_session(
     locale: str | None,
     playground: bool = False,
     background: str | None = None,
+    realtime_pipeline: bool = False,
 ) -> Any:
     """Build the Azure SDK ``RequestSession`` for a persona's avatar/voice Voice Live session.
 
@@ -314,6 +356,8 @@ def build_avatar_session(
             linear_turns=linear_turns,
             mouth=is_mouth_persona(persona, playground=playground),
             eou_detection=bool(getattr(persona, "eou_detection", True)),
+            # Speech-to-speech models cannot run the text detector; see build_turn_detection.
+            realtime_pipeline=realtime_pipeline,
         ),
         "input_audio_transcription": AudioInputTranscriptionOptions(
             model="azure-speech", language=resolved_locale
@@ -445,6 +489,7 @@ async def run_proxy(
     api_version: str,
     default_model: str,
     byom_profile: str = "",
+    realtime_pipeline: bool = False,
     playground: bool = False,
     avatar_background: str | None = None,
 ) -> None:  # pragma: no cover — live Azure connect + relay, no Azure in CI
@@ -496,7 +541,11 @@ async def run_proxy(
     try:
         async with connect(**connect_kwargs) as conn:
             session = build_avatar_session(
-                persona, locale=locale, playground=playground, background=avatar_background
+                persona,
+                locale=locale,
+                playground=playground,
+                background=avatar_background,
+                realtime_pipeline=realtime_pipeline,
             )
             await conn.session.update(session=session)
 
@@ -537,6 +586,9 @@ async def run_proxy(
                         # Which brain-attach path this session really used — path ② is invisible
                         # otherwise, since BYOM reuses the same ``model=`` slot as native.
                         "byom_profile": "" if is_agent else byom_profile,
+                        # Which pipeline the session was built for — the thing that decides which
+                        # end-of-utterance detector went on the wire.
+                        "realtime_pipeline": realtime_pipeline,
                         "avatar_enabled": bool((persona.character or "").strip()),
                         "persona_id": persona.id,
                         "read_directive": read_directive,

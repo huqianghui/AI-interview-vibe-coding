@@ -21,7 +21,9 @@
  *   BYOM_CHAT_MODEL      (default gpt-5-mini)      — a chat-capable deployment
  *   BYOM_REALTIME_MODEL  (default gpt-realtime-2.1) — a realtime deployment
  * `byom-foundry-anthropic-messages` is deliberately absent: it needs a Claude deployment, which the
- * reference tenant cannot create, so there is nothing to verify (docs/voice-live-model-support.md §4.5).
+ * reference tenant cannot create, so there is nothing to verify (docs/voice-live-model-support.md
+ * §4.5). The realtime profile IS covered — it became usable once the end-of-utterance detector moved
+ * from the text-based variant to the audio-based one (§4.7-§4.8).
  */
 import { test, expect } from "@playwright/test";
 import {
@@ -224,34 +226,49 @@ test.describe("BYOM voice sessions (real Azure)", () => {
     }
   });
 
-  test("BYOM realtime (passthrough) is refused at SAVE, so no interview ever sees it", async () => {
-    // This case documents a measured incompatibility rather than a working path.
+  test("BYOM realtime (passthrough): the profile reaches the wire and the session runs", async ({
+    page,
+  }) => {
+    // This case used to assert the opposite — that saving a realtime profile was REFUSED — and that
+    // was correct at the time: the session asked for the TEXT end-of-utterance detector
+    // (semantic_detection_v1_multilingual), which only exists on a cascaded pipeline, so Azure
+    // rejected the whole session with "Text-based end-of-utterance detection requires a local speech
+    // recognizer and is only supported on cascaded pipelines".
     //
-    // A realtime deployment DOES connect under this profile — the probe's minimal session is
-    // ACCEPTED. The production session is not: speech-native passthrough has no Voice Live speech
-    // recognizer, and this product's session asks for text end-of-utterance detection plus
-    // azure-speech input transcription, which only exist on a cascaded pipeline. Azure says so and
-    // names the field.
-    //
-    // That is why the save-time check sends the PRODUCTION session shape. Checking a minimal session
-    // was a false green that would have let an operator save a config under which every voice
-    // session fails. The first browser run of this spec is what caught it.
+    // The detector is now the AUDIO-based smart_end_of_turn_detection, which every pipeline accepts,
+    // so realtime works. An A/B on real audio showed the segmentation is unchanged in English and
+    // Chinese (docs/voice-live-model-support.md §4.8), which is why there is one detector rather than
+    // a switch. If this test ever goes back to expecting a 422, something put the text detector back.
     const before = await readVoiceCfg();
-    const { status, body } = await putVoiceCfg(before, {
-      voice_model: REALTIME_MODEL,
-      voice_model_mode: "byom",
-      voice_byom_profile: "byom-azure-openai-realtime",
-    });
+    const o = watchVoiceWs(page);
+    try {
+      const saved = await writeVoiceCfg(before, {
+        voice_model: REALTIME_MODEL,
+        voice_model_mode: "byom",
+        voice_byom_profile: "byom-azure-openai-realtime",
+      });
+      expect(saved.voice_model).toBe(REALTIME_MODEL);
+      expect(saved.voice_byom_profile).toBe("byom-azure-openai-realtime");
+      // The backend live-probes the PRODUCTION session shape before committing, so a 200 here means
+      // Azure accepted the real thing, not a minimal probe session.
+      expect(String(saved.voice_model_check)).toMatch(/verified/i);
 
-    expect(status, `expected the save to be refused, got ${status}: ${body}`).toBe(422);
-    expect(body).toMatch(/end-of-utterance detection requires a local speech recognizer/i);
-    expect(body).toMatch(/cascaded pipelines/i);
+      await runVoiceSession(page, o);
 
-    // And the stored config is untouched — a refused save must not half-apply.
-    const after = await readVoiceCfg();
-    expect(after.voice_model).toBe(before.voice_model);
-    expect(after.voice_model_mode).toBe(before.voice_model_mode);
-    expect(after.voice_byom_profile).toBe(before.voice_byom_profile);
+      expect(o.connected?.byom_profile, `proxy.connected: ${JSON.stringify(o.connected)}`).toBe(
+        "byom-azure-openai-realtime",
+      );
+      expect(o.connected?.model).toBe(REALTIME_MODEL);
+      expect(o.connected?.mode).toBe("model");
+      expect(o.errorFrame, `Azure rejected the session: ${o.errorFrame}`).toBeNull();
+      await expect(page.getByText(/语音不可用|voice unavailable/i)).toHaveCount(0);
+    } finally {
+      await writeVoiceCfg(before, {
+        voice_model: String(before.voice_model ?? ""),
+        voice_model_mode: String(before.voice_model_mode ?? "native"),
+        voice_byom_profile: String(before.voice_byom_profile ?? ""),
+      });
+    }
   });
 
   test("native control: no profile reaches the wire", async ({ page }) => {

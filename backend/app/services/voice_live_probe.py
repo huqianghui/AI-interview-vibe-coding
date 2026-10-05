@@ -97,6 +97,57 @@ BYOM_PROFILES: tuple[str, ...] = (
 )
 DEFAULT_BYOM_PROFILE = "byom-azure-openai-chat-completion"
 
+# Which NATIVE models run Voice Live's speech-to-speech pipeline rather than the cascaded one.
+# It decides which end-of-utterance detector a session may ask for, so a wrong answer breaks
+# sessions.
+#
+# MEASURED, not pattern-matched: a text-based EoU session is ACCEPTED by a cascaded model and
+# REFUSED by a realtime one ("Text-based end-of-utterance detection requires a local speech
+# recognizer and is only supported on cascaded pipelines"), so that refusal IS the classifier. Swept
+# over NATIVE_MODEL_CANDIDATES on swedencentral 2026-10-05 with
+# ``scripts/voice_live_session_probe.py``: 6 refused, 14 accepted.
+#
+# Why a name pattern would be WRONG: ``phi4-mm-realtime`` has "realtime" in its name and ACCEPTED
+# the text detector — it is cascaded. Any `*realtime*` heuristic misclassifies it.
+#
+# A realtime model missing from this set gets the text detector and its save is refused with Azure's
+# own message (the save-time check sends the production session shape), so the failure is visible at
+# configuration time rather than silent in an interview. A cascaded model wrongly listed here just
+# gets the audio detector, which is measured equivalent. Both failure directions are benign.
+# Re-measure with: python scripts/voice_live_session_probe.py --matrix
+REALTIME_NATIVE_MODELS = frozenset(
+    {
+        "gpt-realtime",
+        "gpt-realtime-mini",
+        "gpt-realtime-1.5",
+        "gpt-realtime-2.1",
+        "gpt-realtime-2.1-mini",
+        "azure-realtime",
+    }
+)
+
+# The BYOM profile that drives YOUR deployment over the realtime (speech-native) protocol. Unlike
+# the native case this needs no list: the operator states it.
+REALTIME_BYOM_PROFILE = "byom-azure-openai-realtime"
+
+
+def uses_realtime_pipeline(model: str | None, byom_profile: str | None = "") -> bool:
+    """Does this (model, profile) pair run the speech-to-speech pipeline?
+
+    True ⇒ the session must use the AUDIO-based end-of-utterance detector; the text-based one is
+    refused outright there. False ⇒ cascaded, which keeps the detector it has always used.
+
+    In BYOM mode the PROFILE is the whole answer and the deployment name carries no signal —
+    measured: our own ``gpt-realtime-2.1`` deployment under ``byom-azure-openai-chat-completion``
+    ACCEPTS the text detector, i.e. that profile is cascaded no matter what sits behind it. Only in
+    native mode does the name decide, against the measured set above.
+    """
+    profile = (byom_profile or "").strip().lower()
+    if profile:
+        return profile == REALTIME_BYOM_PROFILE
+    return (model or "").strip().lower() in REALTIME_NATIVE_MODELS
+
+
 DEFAULT_TIMEOUT_SECONDS = 8.0
 # A voice-only session (no avatar) measured ~120 connections/min, so a handful at a time is well
 # inside the limit; the 3-per-60s ceiling is an AVATAR-creation limit and does not apply here

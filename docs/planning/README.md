@@ -255,3 +255,6 @@ and `CHANGELOG.md`.
   集、布局规则（单一内容宽度、64/36 非对称舞台、直播屏严格占满一屏且只有转录内部滚动）、两个实测到的
   布局陷阱（padded flex item 的 `height:100%` 吃掉 24px 底距；默认 `auto` grid 行按内容撑高导致溢出
   23px，须用 `minmax(0,1fr)`）、以及 8 步落地计划。
+- **[spec-voice-live-eou-unification.md](spec-voice-live-eou-unification.md)** — 统一 Voice Live 的
+  end-of-utterance 检测（文本型 → 音频型）以打开 realtime 管线：需求、设计、实测依据、测试计划，以及
+  一条尚未解决的阻塞项（中文 A/B 不可结论）。实现前文档，不是完成报告。
