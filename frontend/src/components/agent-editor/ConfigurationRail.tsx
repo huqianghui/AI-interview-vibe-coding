@@ -166,11 +166,12 @@ export function ConfigurationRail({
         onChange={onChange}
       />
 
-      {/* Turn control — BANK engine only. Does the model get a generative turn of its own between
-          questions? "linear" (default): no — the digital human only reads each question and is
-          silent in between (the "Thank you. Thank you." fix: server-VAD used to open a model turn on
-          EVERY pause). "model": the pre-v0.38.2.0 hands-free turn, governed by the instructions.
-          External sessions are linear by construction (no brain of their own), so nothing to show. */}
+      {/* Turn control — BANK engine only. "linear" (default): the digital human only reads each
+          question and stays silent in between (the "Thank you. Thank you." fix: server-VAD used to
+          open a model turn on EVERY pause). "judged": a backend judge may nudge during the
+          candidate's pauses (never a follow-up or redirect since 2026-09-28). The pre-v0.39 "model"
+          hands-free turn is retired. External sessions are linear by construction (no brain of their
+          own), so nothing to show. */}
       {form.interviewBrain !== "external" && (
         <TurnModeControls form={form} onChange={onChange} />
       )}

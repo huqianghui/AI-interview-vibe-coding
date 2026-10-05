@@ -133,24 +133,17 @@ def _certifi_ssl_context() -> Any:  # pragma: no cover — trivial cache around 
 def linear_turns_for_persona(persona: InterviewerPersona, *, playground: bool = False) -> bool:
     """Whether this persona's voice session runs LINEAR TURNS (no model turn of its own).
 
-    External personas: always linear (they supply no brain; see ``build_avatar_session``). Bank
-    personas: the admin's ``bank_turn_mode`` (``"linear"`` default / ``"model"``), via
-    :meth:`InterviewerPersona.linear_turns_for`. Duck-typed on purpose (the pure builder is
-    unit-tested with a dataclass stand-in): a persona object without the field is treated as the
-    default, linear. ``playground=True`` (editor Playground, pinned ``persona_id``) keeps the model
-    turn for a BANK persona — that surface is a free conversation with the agent to test its
-    instructions, not the candidate interview flow, so the linear contract would just mute it;
-    external stays linear there too (it has no agent to converse with).
+    Every candidate-facing session is linear since v0.39.0.0: external personas supply no brain,
+    and both bank modes (``linear`` and ``judged``) read the backend's text verbatim — the judge
+    nudges off-WebSocket, never through a model turn. The one surface that keeps a model turn is
+    the editor Playground (``playground=True``, pinned ``persona_id``): a free conversation with a
+    BANK persona's synced agent to test its instructions, where the linear contract would just mute
+    it. External stays linear even there (it has no agent to converse with).
     """
     is_external = (getattr(persona, "interview_brain", "bank") or "bank") == "external"
     if is_external:
         return True
-    if playground:
-        return False
-    method = getattr(persona, "linear_turns_for", None)
-    if callable(method):
-        return bool(method("bank"))
-    return (getattr(persona, "bank_turn_mode", "linear") or "linear") != "model"
+    return not playground
 
 
 def is_mouth_persona(persona: InterviewerPersona, *, playground: bool = False) -> bool:
@@ -166,8 +159,9 @@ def is_mouth_persona(persona: InterviewerPersona, *, playground: bool = False) -
     ``pre_generated_assistant_message`` (server-side TTS of the exact text, no model inference —
     v0.39.2.3); the earlier ``response.instructions`` read was still a model turn and gpt-5-mini
     drifted on it mid-interview (2026-09-28: card said one bank question, the avatar asked another).
-    Bank MODEL-turn personas keep their agent (it owns the reaction between questions), as does the
-    editor Playground for any bank persona (free conversation).
+    Since v0.39.0.0 every candidate-facing bank session (linear OR judged) is a mouth; the only
+    surface that keeps the agent is the editor Playground for a bank persona (free conversation).
+    The pre-v0.39 ``bank_turn_mode="model"`` in-interview agent turn is retired and migrated away.
     """
     return linear_turns_for_persona(persona, playground=playground)
 
@@ -270,23 +264,22 @@ def build_avatar_session(
     # auto-REPLY is suppressed — so candidate-answer capture is unaffected; the interview advances
     # via the "I'm done" / commitAnswer path + the backend's next question.
     #
-    # Who is linear (see linear_turns_for_persona): EXTERNAL personas always — they are purely the
-    # external workflow's "mouth" and supply no brain. BANK personas follow the admin-set
-    # ``bank_turn_mode`` — "linear" (default since v0.38.2.0) or "model" (the pre-v0.38.2.0
-    # behaviour: the model keeps its turn and ``prompt_fragment`` governs what it says in it).
+    # Who is linear (see linear_turns_for_persona): every candidate-facing session. EXTERNAL
+    # personas supply no brain, and both BANK modes (``linear`` / ``judged``) read the backend's
+    # text verbatim — the judge nudges off-WebSocket, never through a model turn. Only the editor
+    # Playground (``playground=True``) keeps a model turn, to converse with a bank persona's synced
+    # agent.
     #
     # History: v0.38.1.1 closed this as "engine decides, no knob" because ``create_response`` is a
     # SINGLE boolean (the acknowledgment turn and the follow-up turn are the same turn —
     # "acknowledge but never follow up" is unreachable) and agent mode rejects overriding
-    # ``instructions`` inside
-    # ``response.create``. Both facts still hold; what changed (owner, 2026-09-24) is the preferred
-    # default: in practice the model turn produced a "Thank you." on every pause, so bank sessions
-    # now default to the silent linear contract and the model turn is an explicit opt-in. The
-    # frontend half is `linearTurns` in useInterviewVoice (suppresses the turn-advancing bare
-    # ``response.create``); both halves must agree, since either alone still leaves the model a way
-    # to speak — the page derives it from the same persona field via ``voice_linear_turns``.
-    # Guarded by test_voice_live_proxy.py (bank linear ⇒ False, bank model ⇒ True, external ⇒
-    # False).
+    # ``instructions`` inside ``response.create``. Both facts still hold; what changed (owner,
+    # 2026-09-24) is that the model turn said "Thank you." on every pause, so it was retired
+    # (v0.39.0.0) and every bank session is now the silent linear contract. The frontend half is
+    # `linearTurns` in useInterviewVoice (suppresses the turn-advancing bare ``response.create``);
+    # both halves must agree, since either alone still leaves the model a way to speak — the page
+    # derives it from the same persona field via ``voice_linear_turns``. Guarded by
+    # test_voice_live_proxy.py (bank ⇒ linear/False, external ⇒ False, playground bank ⇒ True).
     linear_turns = linear_turns_for_persona(persona, playground=playground)
     # Hoisted above the avatar guard below: ``input_audio_sampling_rate`` is a TOP-LEVEL session
     # field and applies to avatar-less personas too, so it cannot read settings from inside the

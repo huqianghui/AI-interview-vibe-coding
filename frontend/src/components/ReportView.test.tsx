@@ -36,6 +36,7 @@ const SCORED: Report = {
   per_question: [
     {
       question_id: "q1",
+      prompt: "Describe your deployment safety habit.",
       score: 80,
       grade: "B",
       is_stub: false,
@@ -226,5 +227,34 @@ describe("ReportView composition", () => {
     renderReport(SCORED);
     expect(screen.queryByTestId("report-detail")).toBeNull();
     expect(screen.getByTestId("toggle-detail")).toBeInTheDocument();
+  });
+});
+
+
+describe("the report names the question it is judging", () => {
+  it("leads the evidence block with the question text, not just an ordinal", () => {
+    // The report is the one screen whose entire claim is traceability, and until v0.42.6.0 it could
+    // only say "Question 1" — a reader had to carry the question in their head from the interview to
+    // make sense of the finding beside it.
+    renderReport(SCORED);
+    expect(screen.getByText("Describe your deployment safety habit.")).toBeInTheDocument();
+    // The ordinal survives as a small label above it, so the position is still readable.
+    expect(screen.getAllByText("Question 1").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("falls back to the ordinal when a report predates the field", () => {
+    // An older scored interview has no `prompt`, and an empty heading would be worse than a number.
+    const noPrompt: Report = {
+      ...SCORED,
+      per_question: SCORED.per_question.map(({ prompt, ...rest }) => {
+        void prompt; // dropped on purpose: this is what an older scored report looks like
+        return rest;
+      }),
+    };
+    renderReport(noPrompt);
+    // Exactly once: without a prompt the heading IS the ordinal, so the eyebrow is not rendered on
+    // top of it. Two "Question 1"s in a row was a defect this change introduced and then fixed.
+    expect(screen.getAllByText("Question 1")).toHaveLength(1);
+    expect(screen.queryByText("Describe your deployment safety habit.")).not.toBeInTheDocument();
   });
 });

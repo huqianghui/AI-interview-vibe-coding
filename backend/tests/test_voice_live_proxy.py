@@ -6,18 +6,19 @@ tests lock the shape that makes the digital human WORK end-to-end:
 
 - AVATAR modality present (+ h264 video) only when the persona has a character.
 - LINEAR TURNS decide `create_response` (whether server-VAD opens a MODEL turn on every candidate
-  pause). BANK personas follow the admin's `bank_turn_mode`: "linear" (default since v0.38.2.0) ⇒
-  False — the digital human only reads the backend's questions and never says "Thank you." per
-  pause; "model" ⇒ True — the pre-v0.38.2.0 hands-free turn where the prompt governs the reaction.
-  `interrupt_response` (barge-in) stays EXPLICITLY True in every mode.
-- EXTERNAL personas are ALWAYS `create_response=False` regardless of `bank_turn_mode`: the agent is
-  purely the external brain's mouth (reads the injected `speech_text` only) and must never improvise
-  its own turn — else it both duplicates the verbatim read and diverges from the question header.
-- The editor Playground (`playground=True`) keeps the model turn for a bank persona (it is a free
-  conversation with the agent, not the interview flow); external stays linear there too.
+  pause). Every candidate-facing session is linear ⇒ False: BANK "linear" (default) and BANK
+  "judged" both read the backend's questions and never say "Thank you." per pause (the judge nudges
+  off-WebSocket, not through a model turn). `interrupt_response` (barge-in) stays EXPLICITLY True in
+  every mode.
+- EXTERNAL personas are ALWAYS `create_response=False`: the agent is purely the external brain's
+  mouth (reads the injected `speech_text` only) and must never improvise its own turn — else it both
+  duplicates the verbatim read and diverges from the question header.
+- The editor Playground (`playground=True`) is the ONE surface that keeps a model turn for a bank
+  persona (a free conversation with its synced agent, not the interview flow); external stays linear
+  there too. (The retired pre-v0.39 `bank_turn_mode="model"` was the only other model-turn path.)
 - VAD shape (issue #114 PR-1): MOUTH sessions with the persona's `eou_detection` on get the
   multilingual VAD + end-of-utterance block (800 ms silence, filler removal, medium threshold,
-  1.5 s timeout); agent sessions (model-turn bank, Playground) and eou-off personas keep the plain
+  1.5 s timeout); agent sessions (the Playground) and eou-off personas keep the plain
   `azure_semantic_vad`. `create_response`/`interrupt_response` semantics are unchanged either way.
 """
 
@@ -71,15 +72,6 @@ def test_avatar_session_bank_linear_turns_by_default_disables_auto_response():
     assert td["interrupt_response"] is True
 
 
-def test_avatar_session_bank_model_turn_mode_enables_hands_free_vad_auto_response():
-    # Admin opt-in "model" mode = the pre-v0.38.2.0 behaviour: both EXPLICITLY set — hands-free
-    # auto-reply (the prompt governs what the model says) + barge-in (not Azure defaults).
-    session = build_avatar_session(FakePersona(bank_turn_mode="model"), locale="zh-CN")
-    td = _as_dict(session["turn_detection"])
-    assert td["create_response"] is True
-    assert td["interrupt_response"] is True
-
-
 def test_avatar_session_bank_persona_without_the_field_is_linear():
     # A duck-typed / legacy persona object with no bank_turn_mode attribute at all falls back to the
     # safe silent contract, never to a chatty model turn.
@@ -98,9 +90,9 @@ def test_avatar_session_bank_persona_without_the_field_is_linear():
 
 def test_avatar_session_disables_auto_response_for_external_brain_regardless_of_bank_mode():
     # External persona is the external brain's mouth only: it must NEVER auto-generate a turn (that
-    # both duplicates the injected verbatim read and desyncs from the question header) — even when
-    # the bank-only knob is set to "model". Barge-in stays enabled.
-    for mode in ("linear", "model"):
+    # both duplicates the injected verbatim read and desyncs from the question header) — whatever
+    # the bank-only knob says. Barge-in stays enabled.
+    for mode in ("linear", "judged"):
         session = build_avatar_session(
             FakePersona(interview_brain="external", bank_turn_mode=mode), locale="zh-CN"
         )
@@ -318,12 +310,13 @@ def test_eou_detection_off_keeps_the_plain_vad_for_mouth_sessions():
 
 
 def test_agent_sessions_keep_the_plain_vad_regardless_of_eou_knob():
-    # Model-turn bank persona and the editor Playground are AGENT sessions: untouched by PR-1.
-    for td in (_td(FakePersona(bank_turn_mode="model")), _td(FakePersona(), playground=True)):
-        assert td["type"] == "azure_semantic_vad"
-        assert "end_of_utterance_detection" not in td
-        assert td["create_response"] is True
-        assert td["interrupt_response"] is True
+    # The editor Playground is the one remaining AGENT session (a bank persona keeps its model turn
+    # there to converse with its synced agent): untouched by PR-1 — plain VAD, auto-reply on.
+    td = _td(FakePersona(), playground=True)
+    assert td["type"] == "azure_semantic_vad"
+    assert "end_of_utterance_detection" not in td
+    assert td["create_response"] is True
+    assert td["interrupt_response"] is True
 
 
 def test_legacy_persona_without_eou_field_defaults_to_eou_on():

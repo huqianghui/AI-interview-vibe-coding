@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.42.6.0 (2026-10-04)
+
+### Changed
+- **The report names the question it is judging.** The per-question payload carried `question_id`
+  and no text, so the evidence block and the detail accordion could only say "Question 3" — on the
+  one screen whose entire claim is traceability, which meant a reader had to hold the question in
+  their head from the interview to make sense of the finding beside it. `prompt` now rides on every
+  row, graded / stub / scoring-failed alike: a report that can name some of its questions and not
+  others is worse than one that names none. The evidence block leads with the question and keeps the
+  ordinal as an eyebrow above it; a report from before the field falls back to the ordinal rather
+  than showing an empty heading.
+
+### Fixed
+- Two defects the change above introduced, both caught by opening the regenerated screenshot rather
+  than by a test: without a prompt the eyebrow and the heading both printed "Question 1" (the
+  component now omits the eyebrow when the heading *is* the ordinal), and the XXL separation that
+  used to sit on the heading ended up *between* eyebrow and heading — jammed against the exec card
+  above, loose from its own title, the hierarchy inverted. The gap moved onto the eyebrow.
+
+### Notes
+- The screenshot-freshness guard added in v0.42.5.0 fired on its first real change: altering
+  `ReportView.tsx` turned both report images red with the recapture command attached, which is
+  exactly the omission that let the README go five weeks stale. It caught the author of the guard.
+
 ## 0.42.5.0 (2026-10-04)
 
 ### Added

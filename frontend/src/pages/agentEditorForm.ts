@@ -57,8 +57,9 @@ export interface PersonaFormState {
   bank_auto_submit_silence_seconds: number;
   external_auto_submit_enabled: boolean;
   external_auto_submit_silence_seconds: number;
-  // Bank-session turn contract ("linear" default / "model"). Bank-only: the rail shows it for the
-  // bank engine and it persists untouched while the persona runs external.
+  // Bank-session turn contract ("linear" default / "judged"; the pre-v0.39 "model" value is
+  // retired and coerced to "linear"). Bank-only: the rail shows it for the bank engine and it
+  // persists untouched while the persona runs external.
   bank_turn_mode: BankTurnMode;
   judge_silence_seconds: number;
   judge_max_calls_per_question: number;

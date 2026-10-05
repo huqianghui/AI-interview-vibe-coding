@@ -113,6 +113,10 @@ export type Outcome = "Meets Expectations" | "Needs Improvement" | "Does Not Mee
  */
 export interface QuestionScore {
   question_id: string;
+  /** The question's own text (v0.42.6.0). Present on every row — graded, stub and scoring-failed —
+   *  so the report can name the question it is judging instead of labelling it "Question 3". Falls
+   *  back to the ordinal when a report predates the field. */
+  prompt?: string;
   is_stub?: boolean;
   // Scored fields:
   score?: number;

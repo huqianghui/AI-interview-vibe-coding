@@ -74,8 +74,8 @@ class VoiceKnobs(BaseModel):
         default=3, ge=VOICE_AUTO_SUBMIT_MIN_SECONDS, le=VOICE_AUTO_SUBMIT_MAX_SECONDS
     )
     # BANK-session turn control: "linear" (default — silent between questions) or "judged" (a
-    # backend judge may nudge / follow up / redirect during pauses). External sessions are always
-    # linear and never consult this. See BANK_TURN_MODES. The retired "model" value is a 422.
+    # backend judge may nudge during pauses). External sessions are always linear and never consult
+    # this. See BANK_TURN_MODES. The retired pre-v0.39 "model" value is a 422.
     bank_turn_mode: str = "linear"
     judge_silence_seconds: int = Field(
         default=2, ge=JUDGE_SILENCE_MIN_SECONDS, le=JUDGE_SILENCE_MAX_SECONDS
