@@ -435,6 +435,14 @@ export function InterviewPage() {
     done: number;
     total: number;
   } | null>(null);
+  // The opt-in SOP coverage audit's OWN progress (null unless the candidate ticked the box). It runs
+  // after every answer is graded, so without a second line the screen froze on "N of N scored" for
+  // the length of the audit. Its total is the number of model calls the audit needs, which is
+  // usually fewer than the question count — see `CoverageProgress`.
+  const [coverageProgress, setCoverageProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
 
   const interviewRef = useRef<Interview | null>(null);
   interviewRef.current = interview;
@@ -828,6 +836,7 @@ export function InterviewPage() {
       if (!iv) return;
       setPhase("scoring");
       setScoringProgress(null);
+      setCoverageProgress(null);
       let r: Report;
       try {
         try {
@@ -836,6 +845,7 @@ export function InterviewPage() {
             iv.interview_session_id,
             sopCoverageCheck,
             (p) => setScoringProgress({ done: p.done, total: p.total }),
+            (p) => setCoverageProgress({ done: p.done, total: p.total }),
           );
         } catch {
           // Stream unavailable (older backend, proxy hiccup) — the batch endpoint returns the same
@@ -851,6 +861,7 @@ export function InterviewPage() {
         // action is to press it again. Rethrow so `guard` still surfaces what went wrong.
         setPhase("review");
         setScoringProgress(null);
+        setCoverageProgress(null);
         throw e;
       }
       setReport(r);
@@ -1096,6 +1107,15 @@ export function InterviewPage() {
       : Math.min(q?.index ?? 0, scoringTotal),
     total: scoringTotal,
   });
+  // Second line, only while the opt-in audit is running. Separate from the line above rather than
+  // replacing it: the scored count is the thing the candidate was watching, and swapping the copy
+  // out from under them would read as the first phase having been undone.
+  const coverageNarr = coverageProgress
+    ? t("transition.coverage", {
+        n: Math.min(coverageProgress.done, coverageProgress.total),
+        total: coverageProgress.total,
+      })
+    : null;
 
   const errorBanner = error && (
     <Body1
@@ -1602,13 +1622,28 @@ export function InterviewPage() {
               }}
             >
               <Spinner size="small" />
-              <Text>{scoringNarr}</Text>
+              <div>
+                <Text block>{scoringNarr}</Text>
+                {coverageNarr && (
+                  <Text block size={200} data-testid="coverage-progress">
+                    {coverageNarr}
+                  </Text>
+                )}
+              </div>
             </div>
             {scoringProgress && (
               <div style={{ padding: "0 12px 12px" }}>
                 <ProgressBar
                   value={scoringProgress.done}
                   max={scoringProgress.total}
+                />
+              </div>
+            )}
+            {coverageProgress && (
+              <div style={{ padding: "0 12px 12px" }}>
+                <ProgressBar
+                  value={coverageProgress.done}
+                  max={coverageProgress.total}
                 />
               </div>
             )}

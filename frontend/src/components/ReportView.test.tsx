@@ -64,6 +64,34 @@ const SCORED: Report = {
   ],
 };
 
+/** Two scored questions. The single-question fixture above cannot catch the defect this file's
+ *  newest assertions exist for: the report used to give the side-by-side treatment to the FIRST
+ *  question only, and draw that question twice. */
+const TWO_QUESTIONS: Report = {
+  ...SCORED,
+  per_question: [
+    SCORED.per_question[0],
+    {
+      question_id: "q2",
+      prompt: "How do you handle a regulatory difference?",
+      score: 40,
+      grade: "D",
+      is_stub: false,
+      items: [
+        {
+          kind: "required",
+          judgment: "partially_met",
+          weight: 50,
+          rationale: "named the regulator but not the escalation",
+          answer_quote: "I check the local regulator",
+          source_quote: "Escalate country-level divergence to the regional lead.",
+          source_page: "p.7",
+        },
+      ],
+    },
+  ],
+};
+
 describe("ReportView", () => {
   beforeEach(() => {
     vi.mocked(fetchSopDocument).mockReset();
@@ -75,10 +103,11 @@ describe("ReportView", () => {
     expect(screen.getByTestId("gauge-grade")).toHaveTextContent("B");
     expect(screen.getByText(/Main gap: safety/)).toBeInTheDocument();
     expect(screen.getByTestId("report-warning")).toHaveTextContent(/forbidden item triggered/i);
-    // The SOP-source-vs-answer proof is present in the exec view (P14).
-    const evidence = screen.getByTestId("report-evidence");
-    expect(evidence).toHaveTextContent("Follow the documented steps in order.");
-    expect(evidence).toHaveTextContent("I followed each documented step");
+    // The SOP-source-vs-answer proof is on screen with NO click: the first question's section is
+    // open by default. It used to live in a separate "evidence" block that drew question 1 twice.
+    const detail = screen.getByTestId("report-detail");
+    expect(detail).toHaveTextContent("Follow the documented steps in order.");
+    expect(detail).toHaveTextContent("I followed each documented step");
   });
 
   it("renders the classification outcome headline and a critical-error cap note", async () => {
@@ -112,13 +141,18 @@ describe("ReportView", () => {
     expect(screen.queryByTestId("report-capped")).not.toBeInTheDocument();
   });
 
-  it("progressively discloses the per-item detail", async () => {
+  it("opens the first question by default and leaves the rest collapsed", async () => {
     await i18n.changeLanguage("en-US");
     const user = userEvent.setup();
-    renderReport(SCORED);
-    expect(screen.queryByTestId("report-detail")).not.toBeInTheDocument();
-    await user.click(screen.getByTestId("toggle-detail"));
-    expect(screen.getByTestId("report-detail")).toBeInTheDocument();
+    renderReport(TWO_QUESTIONS);
+    // Q1's items are rendered; Q2's are not, until its header is clicked. There is no longer a
+    // "show detailed breakdown" gate — it would have pushed the proof below the fold.
+    expect(screen.queryByTestId("toggle-detail")).not.toBeInTheDocument();
+    expect(screen.getByTestId("report-detail")).toHaveTextContent("followed the steps");
+    expect(screen.getByTestId("report-detail")).not.toHaveTextContent("named the regulator");
+
+    await user.click(screen.getByText("How do you handle a regulatory difference?"));
+    expect(screen.getByTestId("report-detail")).toHaveTextContent("named the regulator");
   });
 
   it("renders the SOP source as a clickable link when the item cites a document", async () => {
@@ -156,8 +190,8 @@ describe("ReportView", () => {
     await i18n.changeLanguage("en-US");
     renderReport(SCORED); // SCORED items carry no source_document_id
     expect(screen.queryByTestId("sop-source-link")).not.toBeInTheDocument();
-    // The source label text is still present in the evidence card.
-    expect(screen.getByTestId("report-evidence")).toHaveTextContent(/SOP source/i);
+    // The source label text is still present on the item card.
+    expect(screen.getAllByTestId("report-item")[0]).toHaveTextContent(/SOP source/i);
   });
 
   it("renders a stub report as a minimal list", async () => {
@@ -198,38 +232,174 @@ describe("ReportView composition", () => {
     expect(exec.textContent).toMatch(/questions scored/i);
   });
 
-  it("shows a question's worth of SOP-vs-answer evidence, not a single pair", () => {
-    // This was one quote pair. The evidence block is the credibility claim, so it now carries the
-    // first question's items that have both quotes — capped at three so the executive view does
-    // not become the detail view.
-    renderReport(SCORED);
-    const ev = screen.getByTestId("report-evidence");
-    const cards = ev.children;
-    expect(cards.length).toBeGreaterThanOrEqual(1);
-    expect(cards.length).toBeLessThanOrEqual(3);
-    // Each card pairs the two panels side by side.
-    const first = cards[0] as HTMLElement;
-    expect(first.textContent).toMatch(/sop source/i);
-    expect(first.textContent).toMatch(/candidate answer/i);
+  it("gives EVERY question the side-by-side card, not just the first", async () => {
+    // The defect this replaces: one renderer drew question 1 as colour-panelled cards above the
+    // fold and every other question as a plain italic-grey text list, so the product's whole
+    // credibility claim rested on question 1 alone.
+    const user = userEvent.setup();
+    renderReport(TWO_QUESTIONS);
+    await user.click(screen.getByText("How do you handle a regulatory difference?"));
+
+    const cards = screen.getAllByTestId("report-item");
+    expect(cards).toHaveLength(3); // 2 items on q1 + 1 on q2
+    for (const card of cards) {
+      expect(card.textContent).toMatch(/sop source/i);
+      expect(card.textContent).toMatch(/candidate answer/i);
+    }
+    // Specifically q2's own quotes, in the same shape — not a grey one-liner.
+    const q2 = cards[2];
+    expect(q2.textContent).toContain("Escalate country-level divergence to the regional lead.");
+    expect(q2.textContent).toContain("I check the local regulator");
   });
 
   it("puts the SOP panel and the answer panel in two columns", () => {
-    // The side-by-side IS the claim. One column would make it a list of quotes, which is what the
-    // detail accordion already is.
+    // The side-by-side IS the claim. One column would make it a list of quotes.
     renderReport(SCORED);
     const grids = Array.from(
-      screen.getByTestId("report-evidence").querySelectorAll("div"),
+      screen.getByTestId("report-detail").querySelectorAll("div"),
     ).filter((d) => getComputedStyle(d).gridTemplateColumns === "1fr 1fr");
     expect(grids.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("keeps the detail breakdown progressively disclosed", () => {
-    renderReport(SCORED);
-    expect(screen.queryByTestId("report-detail")).toBeNull();
-    expect(screen.getByTestId("toggle-detail")).toBeInTheDocument();
+  it("renders each question exactly once", async () => {
+    // The owner's report (2026-10-05): question 1 appeared twice — once as the "evidence" block and
+    // again in the accordion below it — in two different visual languages, which read as a bug.
+    const user = userEvent.setup();
+    renderReport(TWO_QUESTIONS);
+    await user.click(screen.getByText("How do you handle a regulatory difference?"));
+    for (const prompt of [
+      "Describe your deployment safety habit.",
+      "How do you handle a regulatory difference?",
+    ]) {
+      expect(screen.getAllByText(prompt)).toHaveLength(1);
+    }
+    // And each question's quotes appear once, not duplicated across two renderers.
+    expect(screen.getAllByText(/Follow the documented steps in order\./)).toHaveLength(1);
   });
 });
 
+
+describe("an item with only one usable quote", () => {
+  it("gives the lone panel the full width instead of stranding it in half a grid", () => {
+    // A judgement can land with only one usable span (no quotable answer, or no linked SOP line).
+    // Rendering it in a 1fr 1fr grid left it floating in the left half with dead space beside it.
+    renderReport({
+      ...SCORED,
+      per_question: [
+        {
+          ...SCORED.per_question[0],
+          items: [
+            {
+              kind: "required",
+              judgment: "not_met",
+              weight: 100,
+              rationale: "nothing in the answer to quote",
+              source_quote: "Follow the documented steps in order.",
+              // The backend always SENDS these fields; an unusable span arrives as "", not as a
+              // missing key (`str(raw.get("answer_quote", "")).strip()` in the scoring engine).
+              answer_quote: "",
+              source_page: null,
+            },
+          ],
+        },
+      ],
+    });
+    const card = screen.getAllByTestId("report-item")[0];
+    expect(card).toHaveTextContent(/sop source/i);
+    expect(card).not.toHaveTextContent(/candidate answer/i);
+    const oneColumn = Array.from(card.querySelectorAll("div")).filter(
+      (d) => getComputedStyle(d).gridTemplateColumns === "1fr",
+    );
+    expect(oneColumn.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("drops the pair block entirely when the item has neither quote", () => {
+    renderReport({
+      ...SCORED,
+      per_question: [
+        {
+          ...SCORED.per_question[0],
+          items: [
+            {
+              kind: "required",
+              judgment: "not_met",
+              weight: 100,
+              rationale: "judged with no quotable span on either side",
+              answer_quote: "",
+              source_quote: "",
+              source_page: null,
+            },
+          ],
+        },
+      ],
+    });
+    const card = screen.getAllByTestId("report-item")[0];
+    expect(card).toHaveTextContent("judged with no quotable span on either side");
+    expect(card).not.toHaveTextContent(/sop source:/i);
+    expect(card).not.toHaveTextContent(/candidate answer/i);
+  });
+});
+
+describe("a question nobody could score is not a question scored zero", () => {
+  /** A report where question 2's grading failed — the shape the backend emits (P7): no score, no
+   *  grade, no items, `scoring_failed` true, and the id echoed in `unscored_question_ids`. */
+  const WITH_FAILURE: Report = {
+    ...SCORED,
+    total_score: 80, // the surviving question only — the failed one is out of the denominator
+    unscored_question_ids: ["q2"],
+    per_question: [
+      SCORED.per_question[0],
+      {
+        question_id: "q2",
+        prompt: "How do you handle a regulatory difference?",
+        is_stub: false,
+        scoring_failed: true,
+        scoring_error: "ScoringIncomplete",
+        items: [],
+      },
+    ],
+  };
+
+  it("labels it 'Not scored' instead of 0/100", () => {
+    renderReport(WITH_FAILURE);
+    // Assert on the FAILED question's own header, not the whole accordion: a sibling scored 80 and
+    // "80/100" contains "0/100", so a whole-tree assertion cannot tell the two apart.
+    const failedHeader = screen
+      .getByText("How do you handle a regulatory difference?")
+      .closest("button")!;
+    expect(failedHeader).toHaveTextContent(/not scored/i);
+    // The specific regression: `Math.round(q.score ?? 0)` fabricated a zero for a question that has
+    // no score, which reads as "answered badly" — the one meaning the backend refuses to imply.
+    expect(failedHeader.textContent).not.toMatch(/\d+\s*\/\s*100/);
+
+    // The question that DID score still shows its number.
+    const scoredHeader = screen
+      .getByText("Describe your deployment safety habit.")
+      .closest("button")!;
+    expect(scoredHeader).toHaveTextContent("80/100");
+  });
+
+  it("says so at report level too, and says it is not a zero", () => {
+    renderReport(WITH_FAILURE);
+    const banner = screen.getByTestId("report-unscored");
+    expect(banner).toHaveTextContent(/1 question/i);
+    expect(banner).toHaveTextContent(/not counted as zero/i);
+  });
+
+  it("explains it inside the question, as a neutral note rather than a warning", async () => {
+    const user = userEvent.setup();
+    renderReport(WITH_FAILURE);
+    await user.click(screen.getByText("How do you handle a regulatory difference?"));
+    expect(screen.getByTestId("question-not-scored")).toHaveTextContent(/not counted as zero/i);
+    // Not a red warning: the grading failing is the system's problem, not the candidate's.
+    expect(screen.queryByTestId("report-warning")).not.toHaveTextContent(/not scored/i);
+  });
+
+  it("shows no banner when every question scored", () => {
+    renderReport(SCORED);
+    expect(screen.queryByTestId("report-unscored")).not.toBeInTheDocument();
+  });
+});
 
 describe("the report names the question it is judging", () => {
   it("leads the evidence block with the question text, not just an ordinal", () => {

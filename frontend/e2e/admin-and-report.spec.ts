@@ -95,11 +95,28 @@ test("admin authors a bank + checklist, candidate gets a scored report", async (
   await expect(page.getByTestId("report-exec")).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId("score-gauge")).toBeVisible();
   await expect(page.getByTestId("gauge-grade")).toHaveText(/[A-F]/);
-  await expect(page.getByTestId("report-evidence")).toBeVisible();
-
-  // Detail view discloses per-item judgments.
-  await page.getByTestId("toggle-detail").click();
+  // The per-item judgments are on screen with NO click: the first question's section opens by
+  // default. There is no "show detailed breakdown" gate any more, and no separate evidence block
+  // (v0.45.0.0 — it drew question 1 twice, in a visual language the other questions never got).
   await expect(page.getByTestId("report-detail")).toBeVisible();
+  const firstItem = page.getByTestId("report-item").first();
+  await expect(firstItem).toBeVisible();
+  await expect(firstItem).toContainText(/SOP source|SOP 出处/);
+  await expect(firstItem).toContainText(/Candidate answer|候选人回答/);
+
+  // Every other question offers the SAME card, not a plain-text list: expand the second one.
+  // `button[aria-expanded]` and NOT "any button in the accordion": each expanded item carries its
+  // own `sop-source-link` button, so the looser selector matches items instead of headers — which
+  // is how the first attempt at this produced a detail screenshot identical to the executive one.
+  const headers = page.locator('[data-testid="report-detail"] button[aria-expanded]');
+  if ((await headers.count()) > 1) {
+    const before = await page.getByTestId("report-item").count();
+    await headers.nth(1).click();
+    await expect(page.getByTestId("report-item")).not.toHaveCount(before);
+    await expect(page.getByTestId("report-item").last()).toContainText(
+      /SOP source|SOP 出处/,
+    );
+  }
 });
 
 test("voice channel with no mic falls back to the mic-permission dialog (F9 AC#4)", async ({

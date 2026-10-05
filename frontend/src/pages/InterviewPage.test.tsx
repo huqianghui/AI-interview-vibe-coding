@@ -138,8 +138,81 @@ describe("InterviewPage", () => {
     await user.click(screen.getByTestId("submit-and-evaluate"));
     await waitFor(() => expect(screen.getByText(/100%/)).toBeInTheDocument());
     expect(getReportSpy).toHaveBeenCalledTimes(1);
-    expect(getReportSpy).toHaveBeenCalledWith("iv1", false, expect.any(Function));
+    // Two progress callbacks: answer grading, then the opt-in SOP coverage audit (v0.45.0.0).
+    expect(getReportSpy).toHaveBeenCalledWith(
+      "iv1",
+      false,
+      expect.any(Function),
+      expect.any(Function),
+    );
     expect(screen.getByText(/met/)).toBeInTheDocument();
+  });
+
+  it("gives the SOP coverage audit its own progress line instead of a frozen 'N of N scored'", async () => {
+    // The 2026-10-05 report: with the coverage box ticked, the screen sat on "9 of 9 answers against
+    // the SOP" with a live spinner for minutes. The audit runs AFTER every answer is graded and used
+    // to emit nothing at all, so the only line on screen was already at its maximum.
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "in_progress",
+      current_question: { question_id: "q1", prompt: "Question one?", index: 0, total: 1 },
+    });
+    vi.spyOn(client, "submitAnswer").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "completed",
+      current_question: null,
+    });
+    vi.spyOn(client, "getReview").mockResolvedValue({
+      interview_session_id: "iv1",
+      status: "completed",
+      answers: [
+        { question_id: "q1", prompt: "Question one?", index: 0, answer_text: "a sufficiently long answer" },
+      ],
+    });
+
+    // Hold the report back so the scoring screen stays on display while we assert what it says.
+    let release: (r: client.Report) => void = () => {};
+    const held = new Promise<client.Report>((res) => {
+      release = res;
+    });
+    vi.spyOn(client, "getReportStream").mockImplementation(
+      async (_id, _coverage, onProgress, onCoverage) => {
+        onProgress?.({ done: 1, total: 1, question_id: "q1" });
+        onCoverage?.({ done: 0, total: 1 });
+        return held;
+      },
+    );
+
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+    await screen.findByText("Question one?");
+    await user.type(screen.getByRole("textbox"), "a sufficiently long answer");
+    await user.click(screen.getByRole("button", { name: /submit answer/i }));
+    await screen.findByTestId("review");
+    await user.click(screen.getByTestId("sop-coverage-check"));
+    await user.click(screen.getByTestId("submit-and-evaluate"));
+
+    // Grading is finished AND the audit is reporting its own, separate count. Both lines are on
+    // screen: swapping the first one out would read as the scored answers having been undone.
+    const audit = await screen.findByTestId("coverage-progress");
+    expect(audit).toHaveTextContent(/auditing sop coverage/i);
+    expect(audit).toHaveTextContent("0 of 1");
+    expect(screen.getByText(/scored 1 of 1 answers/i)).toBeInTheDocument();
+
+    await act(async () => {
+      release({
+        interview_session_id: "iv1",
+        status: "scored",
+        coverage_pct: 100,
+        per_question: [{ question_id: "q1", judgment: "met", rationale: "ok" }],
+        is_stub: true,
+      });
+    });
+    // And the line is gone once the report lands — it belongs to the scoring screen only.
+    await waitFor(() => expect(screen.queryByTestId("coverage-progress")).not.toBeInTheDocument());
   });
 
   it("returns to review when scoring fails, instead of stranding on the scoring screen", async () => {
@@ -259,7 +332,12 @@ describe("InterviewPage", () => {
     expect(toggle).toBeChecked();
     await user.click(screen.getByTestId("submit-and-evaluate"));
     await waitFor(() =>
-      expect(getReportSpy).toHaveBeenCalledWith("iv1", true, expect.any(Function)),
+      expect(getReportSpy).toHaveBeenCalledWith(
+        "iv1",
+        true,
+        expect.any(Function),
+        expect.any(Function),
+      ),
     );
 
     // The advisory panel renders the uncovered point; it is reference-only, not a score change.

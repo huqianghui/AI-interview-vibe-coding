@@ -118,6 +118,14 @@ export interface QuestionScore {
    *  back to the ordinal when a report predates the field. */
   prompt?: string;
   is_stub?: boolean;
+  /** True when this question's grading FAILED outright. The backend has always sent it; nothing
+   *  read it, so a question nobody could judge rendered identically to one judged at zero. It is
+   *  excluded from the interview score (numerator AND denominator), never scored zero — P7: an
+   *  unjudged question is not a badly answered one, and the report must not imply otherwise. */
+  scoring_failed?: boolean;
+  /** The failure's exception type (e.g. "ScoringIncomplete", "TimeoutError"). Diagnostic, not a
+   *  message for the candidate. */
+  scoring_error?: string;
   // Scored fields:
   score?: number;
   coverage_pct?: number;
@@ -169,6 +177,9 @@ export interface Report {
   // Present only when the candidate ticked the coverage check AND something was found. Never
   // affects the score.
   sop_coverage?: SopCoverageQuestion[] | null;
+  /** Questions whose grading failed, so the report can say so instead of quietly averaging fewer
+   *  questions than the candidate answered. Present only when there are any. */
+  unscored_question_ids?: string[] | null;
 }
 
 /** One question + the candidate's finalized answer, for the pre-scoring review screen. Mirrors
@@ -495,12 +506,25 @@ export async function getReport(
   });
 }
 
-/** One NDJSON progress line from the streaming report endpoint: `done` answers already graded
- * out of `total`. Emitted before each grading call, so the last one is `done = total - 1`. */
+/** One NDJSON progress line from the streaming report endpoint: `done` answers graded out of
+ * `total`, emitted as each grading call finishes. */
 export interface ScoringProgress {
   done: number;
   total: number;
   question_id: string;
+}
+
+/**
+ * Progress of the OPT-IN SOP coverage audit, which runs after every answer is graded (v0.45.0.0).
+ *
+ * Its own counter, because `total` here is NOT the question count: only a question with a checklist
+ * AND a linked SOP passage costs a model round-trip, so this denominator is usually smaller. The
+ * audit used to emit nothing, which is why the scoring screen sat at "9 of 9" for minutes.
+ */
+export interface CoverageProgress {
+  done: number;
+  total: number;
+  question_id?: string;
 }
 
 /**
@@ -516,6 +540,7 @@ export async function getReportStream(
   interviewId: string,
   sopCoverageCheck = false,
   onProgress?: (p: ScoringProgress) => void,
+  onCoverage?: (p: CoverageProgress) => void,
 ): Promise<Report> {
   const headers = new Headers({ "Content-Type": "application/json" });
   const token = getToken();
@@ -541,11 +566,15 @@ export async function getReportStream(
     const event = JSON.parse(line);
     if (event.type === "progress" && onProgress) {
       onProgress(event as ScoringProgress);
+    } else if (event.type === "coverage" && onCoverage) {
+      onCoverage(event as CoverageProgress);
     } else if (event.type === "report") {
       report = event.report as Report;
     } else if (event.type === "error") {
       throw new Error(String(event.detail ?? "scoring failed"));
     }
+    // Any other type (today: "ping", "question_error") is ignored on purpose. A ping exists only to
+    // put bytes on the wire so the connection does not idle out; it carries nothing to show.
   };
 
   for (;;) {
