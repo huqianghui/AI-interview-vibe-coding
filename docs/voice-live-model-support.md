@@ -481,6 +481,60 @@ phi4-mm-realtime  azure-realtime
 
 ---
 
+### 4.4 BYOM 实测（2026-10-05，同资源 swedencentral）
+
+> 本节更正了本文早先的一句**未经验证**的话（旧 §4 附注写"本仓库当前没有 BYOM deployment，故只覆盖
+> 原生路径"）。实际去查之后：该 Foundry 资源里有 **14 个真实部署**，BYOM 完全可以实测，而且**现在就
+> 测完了**。下面每一行都是真实建连的结果，不是推断。
+
+资源里的真实部署（`/api/projects/{project}/deployments` 实际返回，14 个）：
+
+```
+gpt-4o  gpt-4o-mini  gpt-4o-mini-2  gpt-4.1-mini
+gpt-5  gpt-5-mini  gpt-5.4  gpt-5.4-mini
+gpt-5.6-terra  gpt-5.6-luna  gpt-5.6-sol
+gpt-6-luna  gpt-6-sol  gpt-6-astra
+```
+
+**注意这张表和 §4.1 的 ACCEPTED 名单不是同一张表** —— `gpt-5.4-mini`、`gpt-6-*`、`gpt-5.6-sol` 都是
+**真实部署但原生被拒**。这就是 §3.6 "两种语义" 的直接证据。
+
+| # | 探测 | api-version | 结果 | 含义 |
+| --- | --- | --- | --- | --- |
+| A | `gpt-5.4-mini` **原生** | 2026-01-01-preview | ❌ `REJECTED_REGION`（3.44s） | 它是真部署，但不在本 region 原生清单 |
+| B | `gpt-5.4-mini` **BYOM** `byom-azure-openai-chat-completion` | 同上 | ✅ **ACCEPTED** | **同名同资源，原生被拒、BYOM 能连** |
+| C | `gpt-6-luna` **BYOM** 同 profile | 同上 | ✅ ACCEPTED | gpt-6 一代原生 12/12 全拒（§4.1b），BYOM 可用 |
+| D | `no-such-deployment-xyz` **BYOM** 同 profile | 同上 | ⚠️ **ACCEPTED** | **建连阶段不校验 deployment 名** |
+| E | `gpt-5-mini` + profile `byom-not-a-real-profile` | 同上 | ❌ 明确报错 | profile **会**在建连时校验 |
+| F | `gpt-5-mini` + profile `byom-azure-openai-realtime`（chat 部署配 realtime 协议） | 同上 | ❌ 明确报错 | **协议不匹配会**在建连时被抓 |
+
+E / F 的服务器原始报文（逐字）：
+
+```json
+{"message": "Profile byom-not-a-real-profile is not supported.",
+ "type": "invalid_request_error", "code": "invalid_profile", "param": null, "event_id": null}
+
+{"message": "Connection error to BYOM Realtime service: status 400, message: Invalid response status",
+ "type": "invalid_request_error", "code": "byom_realtime_connection_error", "param": null, "event_id": null}
+```
+
+**由这六条实测得到的四个结论：**
+
+1. **BYOM 在本资源上用当前的 `2026-01-01-preview` 就能工作** —— 不需要文档示例里出现过的 `2026-04-10`。
+   原先"BYOM 可能需要更新 api-version"这个待验项，**已证伪**。
+2. **Entra 下 Foundry MI 的权限已经通** —— B/C 两条都是 `auth=entra` 建连成功。另一个待验项**已解**。
+3. **"region not supported" 在 BYOM 路径上压根不会发生** —— 那是原生路径独有的错误（`invalid_model`）。
+   所以「让自带部署连得上」这件事，BYOM 是确定可行的解法，不是猜测。
+4. **BYOM 的 deployment 名在建连时不被校验（D）。** 推论很重要：
+   - 保存时的实测校验对 BYOM **证明不了"这个部署存在"**，只能抓住 **profile 选错（E）** 和
+     **协议不匹配（F）**；而"部署名合法"由部署下拉框本身保证（它列的是 deployments API 的真实返回）。
+   - 更深一层：候选人面试里 Voice Live 是 **mouth**（`create_response=False`，§3.3），**从不请求"想"
+     这一步**，所以 BYOM 级联里你那个模型**根本不会被调用**。D 这条实测正好印证了这点 —— 连一个不存在
+     的部署名都能把会话建起来。所以**在候选人面试上给语音腿开 BYOM，不会改变任何面试行为**，它改变的
+     只是会话宿主/计费口径。这也正是「推理模型」与「语音会话模型」应当拆成两个配置的实测依据。
+
+---
+
 ## 5. 一句话决策树
 
 ```
@@ -496,7 +550,8 @@ phi4-mm-realtime  azure-realtime
 ```
 
 **本项目现状**：外部/MODEL 模式走路径 ①，默认 `gpt-5-mini`（§4 实测 ACCEPTED）；数字人 agent 走
-路径 ③。尚未使用 BYOM——若将来要接 Claude 之类非预部署模型，按 §3.2 走路径 ②。
+路径 ③。路径 ② 尚未在产品里启用，但**已在本资源上实测可用**（§4.4）——正在把「推理模型」与
+「语音会话模型」拆成两个配置，语音侧带 native / BYOM 模式开关。
 
 ---
 
@@ -504,8 +559,9 @@ phi4-mm-realtime  azure-realtime
 
 - 脚本：`backend/scripts/voice_live_model_probe.py`。支持 `--models a,b,c` 自定清单、
   `--byom-profile/--byom-model` 测 BYOM、`--out` 落 JSON。
-- BYOM 实测需要你 **先在 Foundry 资源里真实部署** 一个模型，再把 deployment 名传给 `--byom-model`；
-  本仓库当前没有 BYOM deployment，故 §4 只覆盖原生路径的 20 vs 3。
+- BYOM 实测需要一个真实部署的模型名传给 `--byom-model`。**本资源有 14 个真实部署，BYOM 已于
+  2026-10-05 实测完成——见 §4.4。**（本文早先写过"本仓库当前没有 BYOM deployment"，那是一句**未经验证**
+  的话，已更正：去查之后资源里有 14 个部署。）
 - 本文刻意不写出真实资源名/密钥（记忆 `ai-interview-live-azure-testing`）；endpoint 以
   `<your-resource>` 占位，region 与 api-version 为真实值。
 - 探测清单随 Azure rollout 变化，`gpt-5.6-*` 一代尤其易变——**以对目标资源的实测为准**。
