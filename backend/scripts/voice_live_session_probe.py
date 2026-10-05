@@ -87,23 +87,16 @@ async def probe_shape(
     from app.services.voice_live_probe import classify_probe_result
     from app.services.voice_live_proxy import _certifi_ssl_context, build_avatar_session
 
+    # audio_eou maps straight onto the product's own pipeline switch, so the probe exercises exactly
+    # the shape a real session of that kind would send — no shape built by the tool itself.
     session = build_avatar_session(
-        _Persona(avatar=avatar), locale=locale, playground=False, background=None
+        _Persona(avatar=avatar),
+        locale=locale,
+        playground=False,
+        background=None,
+        realtime_pipeline=audio_eou,
     )
     shape = dict(session)
-    if not audio_eou:
-        # Production ships only the audio-based detector now; this probe can still build the RETIRED
-        # text-based shape, because reproducing WHY it was retired is the point of the tool.
-        from azure.ai.voicelive.models import AzureSemanticDetectionMultilingual
-
-        from app.services.voice_live_proxy import MOUTH_EOU_THRESHOLD_LEVEL
-
-        td = dict(shape["turn_detection"])
-        if td.get("end_of_utterance_detection") is not None:
-            td["end_of_utterance_detection"] = AzureSemanticDetectionMultilingual(
-                threshold_level=MOUTH_EOU_THRESHOLD_LEVEL, timeout_ms=1500
-            )
-            shape["turn_detection"] = td
     if not voice:
         # Dropping `voice` is how you ask "can the MODEL own the audio?" — a realtime model then
         # answers with its own voice (measured: openai/marin) while a cascaded one has Azure fill in

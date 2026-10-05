@@ -2,22 +2,40 @@
 
 ## 0.44.0.0 (2026-10-05)
 
+### Added
+- **Realtime voice models work, and the end-of-utterance detector is now chosen by PIPELINE.** The
+  session always asked for the TEXT detector (`semantic_detection_v1_multilingual`), which reads the
+  recognised transcript and therefore only exists on a cascaded pipeline — so every speech-to-speech
+  model (native `gpt-realtime-*`, or a `byom-azure-openai-realtime` profile) refused the whole session
+  with *"Text-based end-of-utterance detection requires a local speech recognizer and is only
+  supported on cascaded pipelines"*. Those sessions now get the AUDIO-based
+  `smart_end_of_turn_detection` at 1000 ms instead, which Azure accepts on every pipeline measured.
+- `voice_live_probe.uses_realtime_pipeline(model, byom_profile)` — the single place that decides, and
+  it is **measured, not pattern-matched**. Every native candidate was probed with the text detector:
+  six refused (`azure-realtime`, `gpt-realtime`, `gpt-realtime-mini`, `gpt-realtime-1.5`,
+  `gpt-realtime-2.1`, `gpt-realtime-2.1-mini`) and fourteen accepted — including
+  **`phi4-mm-realtime`**, which is cascaded despite its name, so a `"realtime" in name` test would
+  have mis-classified it. In BYOM mode only the profile counts: our own `gpt-realtime-2.1` deployment
+  under `byom-azure-openai-chat-completion` accepts the text detector, so that path is cascaded
+  whatever the deployment is called. The chosen pipeline is reported in the `proxy.connected` frame.
+
 ### Changed
-- **One end-of-utterance detector, and realtime voice models now work.** The session asked for the
-  TEXT detector (`semantic_detection_v1_multilingual`), which reads the recognised transcript and
-  therefore only exists on a cascaded pipeline — so every speech-to-speech model (native
-  `gpt-realtime-*`, or a `byom-azure-openai-realtime` profile) refused the whole session with
-  *"Text-based end-of-utterance detection requires a local speech recognizer and is only supported on
-  cascaded pipelines"*. It is now the AUDIO-based `smart_end_of_turn_detection`, accepted on every
-  pipeline measured, so realtime models are usable and there is no second code path to maintain.
-- `MOUTH_EOU_TIMEOUT_MS` 1500 → **1000**, because that is what the measurement says. The audio
-  detector at 1500 ms ends a turn ~0.45-0.6 s later than the text one it replaces; at 1000 ms it is
-  level (English last-stop 7.68 s vs 7.57 s, Chinese 8.96 s vs 8.98 s). At 700 ms the behaviour
-  *changes* rather than speeds up — it stopped splitting at a 1.2 s pause and merged the answer into
-  one segment — so the constant is guarded by a test that explains why.
+- **Chat models keep exactly the configuration they have always shipped with**: cascaded sessions
+  still use `semantic_detection_v1_multilingual` with `MOUTH_EOU_TIMEOUT_MS = 1500`. The audio
+  detector is accepted on cascaded pipelines too, but the A/B only showed the two to be *equivalent*
+  (English last-stop 7.68 s vs 7.57 s, Chinese 8.96 s vs 8.98 s) — equivalent is not better, so the
+  one path already running in production is not moved for zero functional gain.
+- The new `MOUTH_EOU_AUDIO_TIMEOUT_MS = 1000` is the measured value for the audio detector, not a
+  round number: at 1500 ms it ends a turn ~0.45-0.6 s later than the text one, at 1000 ms it is level,
+  and at 700 ms the behaviour *changes* rather than speeds up — it stopped splitting at a 1.2 s pause
+  and merged the answer into one segment. Both constants are guarded by a test that says why.
 - Nothing else about the voice session moved: Azure TTS output, verbatim reads, `azure-speech` input
   transcription, the avatar, and the inference leg (judge / scoring / the Foundry agent on a **chat**
-  deployment) are unchanged.
+  deployment) are unchanged. A realtime session is therefore the product group's **hybrid** route —
+  realtime as the speech-LLM, Azure TTS as the mouth, so lip-sync is still TTS-driven and the voice
+  does not change with the model (measured: the session reports `azure-standard/en-US-AvaNeural` on
+  realtime exactly as on chat; the model's own `openai/marin` voice only appears if `session.voice` is
+  omitted, which this product never does).
 
 ### Added
 - `backend/scripts/voice_live_eou_ab.py` — A/Bs the two detectors on the same real audio (segment
@@ -25,12 +43,15 @@
 - `backend/scripts/voice_live_session_probe.py` — asks the real service whether a given (model, BYOM
   profile, detector, avatar, voice) shape is accepted, and keeps Azure's verbatim refusal; `--matrix`
   reproduces the evidence tables in one run.
-- `docs/planning/spec-voice-live-eou-unification.md` — requirements, design, test plan, and the two
-  decisions still open about a no-STT/no-TTS realtime mode.
+- `docs/planning/spec-voice-live-eou-unification.md` — requirements, design and test plan, including
+  the two decisions about a no-STT/no-TTS realtime mode, both resolved as **keep both** (so realtime
+  runs as the hybrid route and no new product mode is needed).
 
 ### Notes
 - Measured, all on the live resource and written up in `docs/voice-live-model-support.md` §4.7-§4.10:
-  the audio detector is accepted on native realtime, native chat, BYOM realtime and BYOM chat alike;
+  the audio detector is accepted on native realtime, native chat, BYOM realtime and BYOM chat alike
+  (which is why a mis-classification in either direction is benign — the wrong-way one is refused
+  outright at `session.update` rather than silently degrading);
   a realtime session still reads bank questions **verbatim** via server-side TTS (188000 bytes,
   word-for-word, 1.4 s vs the cascaded 1.8 s); the avatar negotiates and streams on a realtime session
   (`avatar ice=1`, first video frame 317 ms *before* the read was even created); and realtime is

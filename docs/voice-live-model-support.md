@@ -693,9 +693,50 @@ embedding"筛，`gpt-image-2-1` 也会被捞进来（**这是跑真实接口才�
 | 原生 `gpt-realtime-1.5` | ❌ | ✅ |
 | 原生 `gpt-5-mini`（今天线上） | ✅ | ✅ |
 | BYOM `byom-azure-openai-realtime` | ❌ | ✅ |
-| BYOM `byom-azure-openai-chat-completion` | ✅ | ✅ |
+| BYOM `byom-azure-openai-chat-completion`（chat 部署 `gpt-5.4-mini`） | ✅ | ✅ |
+| BYOM `byom-azure-openai-chat-completion` + **realtime 部署 `gpt-realtime-2.1`** | ✅ | ✅ |
 
 **换过去不损失"轮次检测"这个能力本身**，只是换实现；而且它把 realtime 这一整列从"不可用"变成"可用"。
+
+最后一行（2026-10-05 补测）回答了一个只靠名字猜一定会猜错的问题：**BYOM 模式下管线由 profile 决定，
+部署名里有没有 "realtime" 不作数。** 自有的 `gpt-realtime-2.1` 部署挂在 chat-completion profile 下，
+**文本型 EoU 照样 ACCEPTED** —— 那条路是级联。所以 `uses_realtime_pipeline()` 里 profile 一旦非空就只看
+profile，只有原生模式才按名字查实测集合。
+
+### 产品怎么选：按管线分流，不是全量切换
+
+两个检测器**都留着**，由管线决定（`voice_live_probe.uses_realtime_pipeline` → `build_turn_detection`）：
+
+| 用户在 admin 选的语音模型 | 管线 | EoU 检测器 | `timeout_ms` |
+| --- | --- | --- | --- |
+| chat 模型（`gpt-5-mini` 等，今天线上的默认） | 级联 | `semantic_detection_v1_multilingual`（**不变**） | 1500 |
+| realtime 模型（`gpt-realtime-*`、`azure-realtime`） | 语音到语音 | `smart_end_of_turn_detection` | 1000 |
+| BYOM + `byom-azure-openai-realtime` | 语音到语音 | `smart_end_of_turn_detection` | 1000 |
+| BYOM + 其它 profile | 级联 | `semantic_detection_v1_multilingual` | 1500 |
+
+**为什么不统一成一个（owner 决定 2026-10-05）：** 音频型在级联上也能用（上表），但那会把今天唯一在
+线上跑的那条路换掉，而 §4.8 的 A/B 只证明了"两者等价"，没有证明"换了更好"。所以 realtime 吃新的，
+chat 保持原样 —— 新路线的风险不落到已经在跑的路线上。
+
+**谁算 realtime 是实测出来的，不是匹配名字的。** 把全部原生候选逐个用**文本型** EoU 探一遍，拒掉的
+就是语音到语音的：`azure-realtime`、`gpt-realtime`、`gpt-realtime-mini`、`gpt-realtime-1.5`、
+`gpt-realtime-2.1`、`gpt-realtime-2.1-mini`（6 个）；其余 14 个接受。**反例是 `phi4-mm-realtime`
+—— 名字里带 realtime，但它接受文本型，按 Azure 自己的回答它是级联。** 一个 `"realtime" in name`
+的判断会把它错分，白白改掉它的轮次行为。
+
+### 音色不随模型变（2026-10-05 实测）
+
+换成 realtime 之后"声音会不会变/不一致"是个合理的担心，答案是不会 —— 因为产品**永远**会发
+`session.voice`（`voice_live_proxy.py` 的 `AzureStandardVoice`，取自人物的 `voice_map` × locale）：
+
+| 会话形状 | Azure 回显的 `session.voice` |
+| --- | --- |
+| `gpt-realtime-2.1` + 产品实际会话（带 `voice`） | `azure-standard/en-US-AvaNeural` |
+| `gpt-realtime-2.1`，**不发** `voice` | `openai/marin`（模型自带音色） |
+| `gpt-5-mini`（级联对照） | `azure-standard/en-US-AvaNeural` |
+
+只有**省掉** `voice` 才会落到模型自带音色上，而产品从不这么发。音色数量也与模型无关：按人物 × 语言
+配置，当前内置 6 个（`zh-CN`：Xiaoxiao/Yunxi/Xiaoyi；`en-US`：Ava/Andrew/Emma）。
 
 **数字人怎么办 —— realtime 能不能驱动 avatar？能，而且这正是「混合式」的形态。** 实测（会话里
 `voice` 是 `AzureStandardVoice`，即 Azure Speech TTS）：

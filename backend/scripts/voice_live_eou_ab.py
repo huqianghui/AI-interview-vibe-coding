@@ -121,6 +121,7 @@ async def _one_run(
     )
 
     from app.services.voice_live_proxy import (
+        MOUTH_EOU_AUDIO_TIMEOUT_MS,
         MOUTH_EOU_THRESHOLD_LEVEL,
         MOUTH_EOU_TIMEOUT_MS,
         _certifi_ssl_context,
@@ -128,22 +129,22 @@ async def _one_run(
         build_avatar_session,
     )
 
-    # Production ships ONE detector (the audio-based one). This script is the tool that decided
-    # that, so it builds the text-based shape itself rather than asking the product for a variant it
-    # no longer has — the comparison lives here, the product stays single-path.
+    # The product picks the detector by PIPELINE (cascaded -> text, realtime -> audio). This script
+    # compares the two detectors on ONE pipeline, so it overrides that choice directly — the only
+    # way the comparison is apples-to-apples.
     session = build_avatar_session(_Persona(), locale=locale, playground=False, background=None)
     shape = dict(session)
     shape.pop("avatar", None)
     detector = (
         SmartEndOfTurnDetection(
             threshold_level=MOUTH_EOU_THRESHOLD_LEVEL,
-            timeout_ms=timeout_ms or MOUTH_EOU_TIMEOUT_MS,
+            timeout_ms=timeout_ms or MOUTH_EOU_AUDIO_TIMEOUT_MS,
         )
         if audio_eou
         else AzureSemanticDetectionMultilingual(
             threshold_level=MOUTH_EOU_THRESHOLD_LEVEL,
             timeout_ms=timeout_ms
-            or 1500,  # what the text detector shipped with, for a fair baseline
+            or MOUTH_EOU_TIMEOUT_MS,  # the cascaded default, for a fair baseline
         )
     )
     td = dict(shape["turn_detection"])

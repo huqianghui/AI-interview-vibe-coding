@@ -114,7 +114,7 @@ async def get_ai_foundry_config(db: AsyncSession = Depends(get_db)) -> AiFoundry
     return _to_out(master, config_service.mask_key(key))
 
 
-async def _production_voice_session(db: AsyncSession) -> Any:
+async def _production_voice_session(db: AsyncSession, *, realtime_pipeline: bool = False) -> Any:
     """The session shape a real interview sends, so the save-time check validates THAT.
 
     A minimal probe session is a false green: measured, ``gpt-realtime-2.1`` under
@@ -135,7 +135,13 @@ async def _production_voice_session(db: AsyncSession) -> Any:
         persona = await get_default_persona(db)
         if persona is None:
             return None
-        session = build_avatar_session(persona, locale=None, playground=False, background=None)
+        session = build_avatar_session(
+            persona,
+            locale=None,
+            playground=False,
+            background=None,
+            realtime_pipeline=realtime_pipeline,
+        )
         # Strip the avatar before probing. AVATAR creation is rate-limited to roughly 3 per 60s
         # (measured), so probing WITH it would make every config save consume a slot and compete
         # with real candidates — and it is unnecessary: the incompatibility this check must catch
@@ -217,6 +223,8 @@ async def update_ai_foundry_config(
     and never lands in the row (the whole point of the split: whatever an operator can save must be
     connectable). The inference model is not probed here — it has nothing to do with Voice Live.
     """
+    from app.services import voice_live_probe as probe
+
     prior = await config_service.get_master_config(db)
     voice_changed = prior is None or (
         (prior.voice_model, prior.voice_model_mode, prior.voice_byom_profile)
@@ -261,7 +269,15 @@ async def update_ai_foundry_config(
                 voice_model=body.voice_model.strip(),
                 mode=body.voice_model_mode,
                 profile=body.voice_byom_profile.strip(),
-                session=await _production_voice_session(db),
+                # Build it for the pipeline the SAVED model implies, or the check validates a
+                # shape the app would never send — the false green this check exists to remove.
+                session=await _production_voice_session(
+                    db,
+                    realtime_pipeline=probe.uses_realtime_pipeline(
+                        body.voice_model.strip(),
+                        body.voice_byom_profile.strip() if body.voice_model_mode == "byom" else "",
+                    ),
+                ),
             )
         except HTTPException:
             await db.rollback()

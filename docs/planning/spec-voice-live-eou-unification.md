@@ -1,8 +1,12 @@
-# 统一 Voice Live 的 end-of-utterance 检测，并让 realtime 管线可用
+# 按管线选择 Voice Live 的 end-of-utterance 检测，并让 realtime 管线可用
 
 > 2026-10-05。需求来自 owner 的两句话：**"统一删掉，就保留支持音频和文本两种都支持的"** 和
-> **"那些一次性探针脚本纳入仓库"**。本文是实现前的需求 + 设计 + 测试计划，**不是已完成的报告** ——
-> §7 有一条**阻塞项**尚未解决，所以删除动作不应先做。
+> **"那些一次性探针脚本纳入仓库"**。
+>
+> **落地口径在实现过程中由 owner 收窄了一次（本文已按最终口径改写）。** 先按"统一到音频型、删掉文本
+> 分支"实现并跑绿，随后 owner 定下：**"确保如果用户选择了 chat 模型，还是原来的配置。只是 realtime
+> 的时候，改成现在的方式来处理。"** 所以最终形态是**按管线分流**，不是全量替换 —— 理由见 §3。
+> §7 原先的阻塞项已解除。
 >
 > 事实依据全部在 [`../voice-live-model-support.md`](../voice-live-model-support.md) §4.7–§4.9，
 > 本文不重复推导，只引用结论。
@@ -83,22 +87,26 @@ param: session.turn_detection.end_of_utterance_detection
 
 ---
 
-## 2.5 需要 owner 决定的两个问题（第 3 条的前提）
+## 2.5 两个前提问题 —— 已由 owner 决定：**两项都保留**（2026-10-05）
 
 1. **realtime 模式下的题目**：接受**模型即兴发问**（放弃逐字引用与 SOP 可审计性），还是仍然用 **Azure TTS
-   逐字念**（即「混合式」）？实测：模型念的逐字命中率 1/3。
+   逐字念**（即「混合式」）？实测：模型念的逐字命中率 1/3，chat 模型 3/3。
+   → **决定：保留 Azure TTS 逐字念**（`pre_generated_assistant_message`）。
 2. **realtime 模式下的作答转写**：接受**没有候选人文本**（judge / 打分 / 报告失去输入），还是**保留输入
    转写**？
+   → **决定：保留 `azure-speech` 输入转写。**
 
-> 如果两个都选"保留"，那第 3 条就等于 §3 已经做掉的事（统一音频型 EoU）+ 允许把语音模型设成 realtime
-> —— **代码已经可以支持，不需要再写新模式**。如果有任一选"放弃"，那是一个独立的新产品模式，需要单独
-> 设计（题目来源、打分输入、报告形态都要重新定义）。
+> 两项都"保留"，所以**不需要新产品模式**：realtime 走的就是产品组图里的「混合式」—— realtime 当
+> Speech-LLM（听 + 想），**嘴仍然是 Azure TTS**，口型因此照旧由 TTS 驱动。现有代码加上按管线选 EoU
+> 就已经支持，题目来源 / 打分输入 / 报告形态全部不变。
 
 ---
 
 ## 2. 需求
 
-1. **R1 一条代码路径**：不保留"两份做同一件事的实现"。owner 的原话是不想再留"没用的代码没被重构掉"。
+1. **R1 一条判断入口**：检测器的选择只能有**一处**决定（`uses_realtime_pipeline`），不允许调用方各自
+   拼条件。两个检测器都保留 —— 它们不是"做同一件事的两份实现"，而是**两条管线各自唯一可用的那一个**
+   （文本型在 realtime 上被 Azure 直接拒），所以留着不违反 owner 那句"没用的代码没被重构掉"。
 2. **R2 realtime 管线可用**：选 realtime 模型（原生或 BYOM）时语音会话能正常建立并跑完一场面试。
 3. **R3 行为不回退**：统一之后，级联（今天线上的那条）的作答分段与判定时机**不得变差**。
 4. **R4 评估不动**：judge / 打分 / agent 继续用 **text（chat）部署**。owner 确认："评估和 judge 还是基于
@@ -109,21 +117,34 @@ param: session.turn_detection.end_of_utterance_detection
 
 ---
 
-## 3. 设计
+## 3. 设计：**按管线分流，没有运维旋钮**
 
-**统一到音频型 `SmartEndOfTurnDetection`，`timeout_ms = 1000`。**
+检测器由**语音模型推导**，不是由人去配：
+
+| 语音模型（admin 里选的那个） | 管线 | EoU 检测器 | `timeout_ms` |
+| --- | --- | --- | --- |
+| chat 模型（`gpt-5-mini` 等，今天线上） | 级联 | `semantic_detection_v1_multilingual` | **1500（原值不动）** |
+| realtime 原生（实测 6 个） | 语音到语音 | `smart_end_of_turn_detection` | **1000** |
+| BYOM `byom-azure-openai-realtime` | 语音到语音 | `smart_end_of_turn_detection` | **1000** |
+| BYOM 其它 profile | 级联 | `semantic_detection_v1_multilingual` | 1500 |
 
 | 动作 | 细节 |
 | --- | --- |
-| 删 | `build_turn_detection` 里的文本型分支（`AzureSemanticDetectionMultilingual`）|
-| 删 | `audio_eou` 参数本身（没有第二种选择之后它就是死参数）|
-| 删 | **`service_configs.voice_pipeline` 开关**（含列、迁移、schema、UI）—— 一种检测器同时覆盖两种管线，运维就不必选管线 |
-| 改 | `MOUTH_EOU_TIMEOUT_MS` 1500 → **1000**（见 §4 的实测依据；1500 会让音频型晚 0.45–0.6s）|
+| 加 | `voice_live_probe.uses_realtime_pipeline(model, byom_profile)` —— **唯一**的判断入口。原生按**实测集合**查名字；BYOM 只看 profile（实测：自有 `gpt-realtime-2.1` 挂在 chat-completion profile 下，文本型 EoU **照样 ACCEPTED**，所以名字不作数）|
+| 加 | `MOUTH_EOU_AUDIO_TIMEOUT_MS = 1000`，与保留原值的 `MOUTH_EOU_TIMEOUT_MS = 1500` 并存 |
+| 穿线 | `realtime_pipeline` 从 `voice_live_ws` / `admin_config` 一路传到 `build_turn_detection`，并出现在 `proxy.connected` 诊断帧里（线上可直接看出走的是哪条）|
+| 不加 | **没有 `voice_pipeline` 配置列、没有 UI 开关** —— 管线由模型唯一决定，让运维去选只会配错 |
 | 不改 | `MOUTH_VAD_SILENCE_MS=800`、`remove_filler_words`、`azure_semantic_vad_multilingual` 外层、`voice`（Azure TTS）、`input_audio_transcription`（`azure-speech`）、avatar、逐字念题 |
-| 不改 | 推理腿（R4）；`persona.eou_detection` 这个开关保留（关掉仍然退回普通 `azure_semantic_vad`）|
+| 不改 | 推理腿（R4）；`persona.eou_detection` 关掉时**两条管线都**退回普通 `azure_semantic_vad` |
 
-> **为什么不是"保留开关、两种都能选"**：开关存在的唯一理由是"文本型在 realtime 上不可用"。统一到音频型
-> 之后这个理由消失，留着开关就等于留一个**只会配错、不会配对**的旋钮 —— 正是 R1 要避免的。
+> **为什么不统一到音频型（owner 2026-10-05 收窄）**：音频型在级联上也 ACCEPTED，§4 的 A/B 也只证明了
+> **两者等价**（英文 7.68s vs 7.57s、中文 8.96s vs 8.98s）—— 等价不是"更好"。统一就意味着把**今天唯一
+> 在线上跑的那条路**换掉，去换一个零功能收益。所以新路线的风险只落在新路线上：**chat 保持原样，
+> realtime 吃新的。**
+>
+> 这不会复活"只会配错的旋钮"：没有任何人工开关，`uses_realtime_pipeline` 一处决定，错配的两个方向
+> 也都是良性的 —— 把级联误判成 realtime 只是换个等价检测器，把 realtime 误判成级联则在 `session.update`
+> 当场被 Azure 拒掉（不会静默劣化）。
 
 ---
 
@@ -167,10 +188,15 @@ WAV 的造法写进脚本 docstring（macOS `say` + `afconvert`，24kHz 单声�
 
 ### 5.2 单元测试（azure-free）
 
-- `build_turn_detection` 只产出 `smart_end_of_turn_detection`；`eou_detection=False` 仍退回普通 VAD；
-  agent 会话不变。
-- `MOUTH_EOU_TIMEOUT_MS == 1000` 锁死（带注释说明这是实测出来的值，不要顺手改）。
-- 回归：`audio_eou` 参数与 `voice_pipeline` 字段**不再存在**（防止删一半）。
+- `build_turn_detection`：**级联** → `semantic_detection_v1_multilingual` @1500（锁死"chat 不变"）；
+  **realtime** → `smart_end_of_turn_detection` @1000。
+- `eou_detection=False` 在**两条管线上都**退回普通 `azure_semantic_vad`（管线只选检测器，不会把关掉的
+  检测重新打开）；agent 会话不变。
+- 两个常量都锁死，注释写明各自的来历（1500 = 一直在跑的值，1000 = A/B 实测点）。
+- `uses_realtime_pipeline`：6 个原生 realtime → True；chat 模型 → False；**`phi4-mm-realtime` → False**
+  （实测反例，防止有人改成按名字匹配）；BYOM realtime profile → True；**BYOM chat profile + 名字叫
+  `gpt-realtime` 的部署 → False**（实测：那条路文本型 EoU 照样 ACCEPTED）。
+- 回归：`audio_eou` 这个旧参数名不再存在（管线信息只以 `realtime_pipeline` 一个名字流动）。
 
 ### 5.3 真实连接验收
 

@@ -280,57 +280,62 @@ def test_mouth_session_gets_multilingual_vad_with_eou_block():
     assert td["silence_duration_ms"] == 800
     assert td["remove_filler_words"] is True
     eou = _as_dict(td["end_of_utterance_detection"])
-    assert eou["model"] == "smart_end_of_turn_detection"
+    # Cascaded (a chat model) is the default and keeps exactly what it has always shipped.
+    assert eou["model"] == "semantic_detection_v1_multilingual"
     assert eou["threshold_level"] == "medium"
-    assert eou["timeout_ms"] == 1000
+    assert eou["timeout_ms"] == 1500
     assert td["create_response"] is False
     assert td["interrupt_response"] is True
 
 
-def test_the_end_of_utterance_detector_is_audio_based_so_realtime_pipelines_can_connect():
-    """The whole reason this is ``smart_end_of_turn_detection`` and not ``semantic_detection_v1*``.
+def test_realtime_sessions_switch_to_the_audio_detector_and_cascaded_ones_do_not():
+    """The detector is chosen by PIPELINE, and getting it wrong breaks the session outright.
 
-    The text-based detector reads the recognised transcript, which only exists on a CASCADED
-    pipeline: a speech-to-speech model (native ``gpt-realtime-*`` or a
-    ``byom-azure-openai-realtime`` profile) refuses the whole session with "Text-based
-    end-of-utterance detection requires a local speech recognizer and is only supported on cascaded
-    pipelines". The audio-based one is accepted on every pipeline measured, and an A/B on real audio
-    found the segmentation identical in English and Chinese alike — so there is exactly one detector
-    and no variant flag. Guarding the literal here
-    because swapping it back would silently make every realtime voice model unusable again.
+    The text detector reads the recognised transcript, which only exists on a cascaded pipeline, so
+    a speech-to-speech model refuses the whole session: "Text-based end-of-utterance detection
+    requires a local speech recognizer and is only supported on cascaded pipelines"
+    (``param: session.turn_detection.end_of_utterance_detection``). That one line was the only
+    thing keeping realtime voice models out. Cascaded sessions keep the text detector, so the chat
+    path this product ships on is unchanged.
     """
-    import inspect
+    cascaded = _as_dict(_td(FakePersona())["end_of_utterance_detection"])
+    assert cascaded["model"] == "semantic_detection_v1_multilingual"
+    assert cascaded["timeout_ms"] == 1500
 
-    from app.services import voice_live_proxy as mod
-
-    eou = _as_dict(_td(FakePersona())["end_of_utterance_detection"])
-    assert eou["model"] == "smart_end_of_turn_detection"
-    assert "semantic_detection_v1" not in eou["model"]
-    # And the retired variant is gone from the module, not merely unused.
-    src = inspect.getsource(mod.build_turn_detection)
-    assert "AzureSemanticDetectionMultilingual" not in src
-    assert "audio_eou" not in inspect.signature(mod.build_turn_detection).parameters
+    realtime = _as_dict(_td(FakePersona(), realtime_pipeline=True)["end_of_utterance_detection"])
+    assert realtime["model"] == "smart_end_of_turn_detection"
+    assert realtime["timeout_ms"] == 1000
 
 
-def test_the_eou_timeout_is_the_measured_value_not_a_round_number():
-    """1000 ms came out of an A/B, so a casual edit should fail a test rather than ship.
+def test_the_two_eou_timeouts_are_the_measured_values_not_round_numbers():
+    """1500 is what cascaded always shipped; 1000 came out of an A/B on real audio.
 
-    At the inherited 1500 ms the audio detector called the end of a turn ~0.45-0.6 s later than
-    the text one it replaced; at 1000 ms it is level (English last-stop 7.68 s vs 7.57 s, Chinese
-    8.96 s vs 8.98 s). At 700 ms the behaviour CHANGED rather than sped up — it stopped splitting
-    at a 1.2 s pause and merged the answer into one segment ending at 9.08 s — unexplained.
-    Re-run scripts/voice_live_eou_ab.py before touching this.
+    The audio detector at 1500 ms ends a turn ~0.45-0.6 s later than the text one; at 1000 ms it is
+    level (English last-stop 7.68 s vs 7.57 s, Chinese 8.96 s vs 8.98 s). At 700 ms the behaviour
+    CHANGED rather than sped up — it stopped splitting at a 1.2 s pause and merged the answer into
+    one segment ending at 9.08 s, unexplained. Re-run scripts/voice_live_eou_ab.py before touching
+    either value.
     """
-    from app.services.voice_live_proxy import MOUTH_EOU_TIMEOUT_MS
+    from app.services.voice_live_proxy import MOUTH_EOU_AUDIO_TIMEOUT_MS, MOUTH_EOU_TIMEOUT_MS
 
-    assert MOUTH_EOU_TIMEOUT_MS == 1000
+    assert MOUTH_EOU_TIMEOUT_MS == 1500
+    assert MOUTH_EOU_AUDIO_TIMEOUT_MS == 1000
+
+
+def test_eou_off_wins_over_the_pipeline_choice():
+    # A persona that turned end-of-utterance detection off keeps the plain VAD on BOTH pipelines —
+    # the pipeline picks the detector, it does not re-enable one.
+    for realtime in (False, True):
+        td = _td(FakePersona(eou_detection=False), realtime_pipeline=realtime)
+        assert td["type"] == "azure_semantic_vad"
+        assert "end_of_utterance_detection" not in td
 
 
 def test_external_mouth_session_gets_the_same_vad_shape():
     td = _td(FakePersona(interview_brain="external"))
     assert td["type"] == "azure_semantic_vad_multilingual"
     eou = _as_dict(td["end_of_utterance_detection"])
-    assert eou["model"] == "smart_end_of_turn_detection"
+    assert eou["model"] == "semantic_detection_v1_multilingual"
     assert td["create_response"] is False
 
 
