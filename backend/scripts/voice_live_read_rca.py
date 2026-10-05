@@ -13,6 +13,20 @@ model inference), and counts what Azure sends back: every event type, how many a
 and whether the avatar was told to start speaking. Run it N times per model and the difference
 between the two pipelines is either reproducible or it is not.
 
+Switches worth knowing (each one retired a hypothesis — docs/voice-live-model-support.md §4.12):
+
+* ``--avatar`` / ``--character`` — attach the avatar; photo (vasa-1) vs video character
+* ``--proxy-items`` — also inject the two system items the proxy injects on a mouth session
+* ``--mic <wav>`` — stream candidate audio while the read happens
+* ``--session-as-dict`` — hand the SDK the raw dict, the way ``run_proxy`` does
+* ``--modalities audio`` — drop ``text`` from the declared modalities
+* ``--no-voice`` — omit ``session.voice`` so the model owns the audio (its own voice)
+* ``--read-mode model_turn`` — let the model generate a turn instead of reading given text
+* ``--agent name:version`` — AGENT mode (brain path ③): no ``model=`` is sent at all
+
+The per-rep line prints **the voice Azure says it applied** — the field that finally located the bug
+this script was written for.
+
 What the counts mean:
 
 * ``audio_bytes > 0`` — Azure synthesised the read. If the browser is then silent, the fault is in
@@ -27,6 +41,8 @@ Run (from backend/):
 
     .venv/bin/python scripts/voice_live_read_rca.py --model gpt-realtime-2.1 --reps 3
     .venv/bin/python scripts/voice_live_read_rca.py --model gpt-5-mini --reps 3 --out /tmp/chat.json
+    .venv/bin/python scripts/voice_live_read_rca.py --agent my-agent:12 --no-voice
+    .venv/bin/python scripts/voice_live_read_rca.py --model gpt-realtime-2.1 --read-mode model_turn
 
 NOTE: with ``--avatar`` each rep creates an avatar connection, and that is rate-limited to roughly 3
 per 60 s (measured). The default is voice-only, which is not.
@@ -38,6 +54,7 @@ import argparse
 import asyncio
 import json
 import sys
+import time
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -100,6 +117,7 @@ async def one_read(
     model: str,
     byom_profile: str,
     realtime_pipeline: bool,
+    project: str,
     avatar: bool,
     character: str,
     proxy_items: bool,
@@ -109,6 +127,10 @@ async def one_read(
     background: str,
     session_as_dict: bool,
     read_mode: str,
+    drop_voice: bool,
+    agent: tuple[str, str] | None,
+    voice_override: str,
+    auto_response: bool,
     locale: str,
     timeout_s: float,
 ) -> dict[str, Any]:
@@ -135,6 +157,28 @@ async def one_read(
         background=background or None,
         realtime_pipeline=realtime_pipeline,
     )
+    if auto_response:
+        # A REAL speech-in -> speech-out turn: let server VAD open the model's turn when the
+        # candidate stops talking, instead of the product's linear contract (create_response=False).
+        # Without this the session never answers the audio on its own and the input side cannot be
+        # timed at all.
+        session = dict(session)
+        td = dict(session["turn_detection"])
+        td["create_response"] = True
+        session["turn_detection"] = td
+    if voice_override:
+        # Send a voice DIFFERENT from the one configured on the agent, so the echo says whose
+        # setting wins in agent mode — "both were en-US-AvaNeural" cannot answer that.
+        from azure.ai.voicelive.models import AzureStandardVoice
+
+        session = dict(session)
+        session["voice"] = AzureStandardVoice(name=voice_override, type="azure-standard")
+    if drop_voice:
+        # Ask "can the MODEL's own voice drive this session?" — with no session.voice a realtime
+        # model answers in its own voice (measured: openai/marin) instead of Azure TTS. The product
+        # never sends this shape; it is the shape a future speech-to-speech scenario would use.
+        session = dict(session)
+        session.pop("voice", None)
     if modalities:
         # Hypothesis: with `text` among the declared modalities a realtime session answers a
         # pre-generated read with `response.text.delta` instead of synthesising it. Drop `text` and
@@ -142,15 +186,34 @@ async def one_read(
         session = dict(session)
         session["modalities"] = [m.strip() for m in modalities.split(",") if m.strip()]
 
-    kwargs: dict[str, Any] = {
-        "endpoint": endpoint,
-        "credential": credential,
-        "api_version": api_version,
-        "model": model,
-        "connection_options": {"vendor_options": {"ssl": _certifi_ssl_context()}},
-    }
-    if byom_profile:
-        kwargs["query"] = {"profile": byom_profile}
+    if agent is not None:
+        # AGENT mode (brain path ③): Voice Live gets agent_name/agent_version/project_name and NO
+        # `model=`. Measured 2026-10-05: in this mode the voice is ALWAYS Azure TTS — even with no
+        # `session.voice` of ours Azure applied `azure-standard/en-US-AvaNeural`, never the model's
+        # own voice. So "use the realtime model's own voice" is unreachable through an agent.
+        from app.services.voice_live_proxy import build_connect_kwargs
+
+        kwargs = build_connect_kwargs(
+            endpoint=endpoint,
+            credential=credential,
+            api_version=api_version,
+            ssl_ctx=_certifi_ssl_context(),
+            is_agent=True,
+            agent_name=agent[0],
+            agent_version=agent[1],
+            project=project,
+            default_model="",
+        )
+    else:
+        kwargs = {
+            "endpoint": endpoint,
+            "credential": credential,
+            "api_version": api_version,
+            "model": model,
+            "connection_options": {"vendor_options": {"ssl": _certifi_ssl_context()}},
+        }
+        if byom_profile:
+            kwargs["query"] = {"profile": byom_profile}
 
     # Streaming mic audio is the OTHER thing the browser does that this script did not. On a
     # speech-native session that audio is the model's input, so "the read came back as text because
@@ -166,6 +229,16 @@ async def one_read(
 
     applied_session: dict[str, Any] = {}
     applied_session: dict[str, Any] = {}
+    # Time from asking for speech to the FIRST audio byte: the number that says whether routing the
+    # output through Azure TTS costs anything against the model speaking in its own voice. Only
+    # meaningful WITHOUT --auto-response: there the clock starts at session.updated while the mic
+    # WAV may still be in its leading silence, so read `stop_to_audio_ms` instead.
+    asked_at = 0.0
+    first_audio_ms = -1
+    # The input side: from "the candidate stopped talking" to "the interviewer is heard" — the hop a
+    # speech-to-speech model is supposed to shorten, since no STT runs before the brain.
+    stopped_at = 0.0
+    stop_to_audio_ms = -1
     types: Counter[str] = Counter()
     audio_bytes = 0
     transcript = ""
@@ -188,7 +261,13 @@ async def one_read(
                         types[etype] += 1
                         if etype.endswith("error"):
                             errors.append(json.dumps(raw.get("error", raw))[:300])
+                        if etype.endswith("input_audio_buffer.speech_stopped"):
+                            stopped_at = time.monotonic()
                         if etype.endswith("response.audio.delta"):
+                            if stop_to_audio_ms < 0 and stopped_at:
+                                stop_to_audio_ms = int((time.monotonic() - stopped_at) * 1000)
+                            if first_audio_ms < 0 and asked_at:
+                                first_audio_ms = int((time.monotonic() - asked_at) * 1000)
                             audio_bytes += len(str(raw.get("delta", "")))
                         if etype.endswith("response.audio_transcript.delta"):
                             transcript += str(raw.get("delta", ""))
@@ -229,7 +308,11 @@ async def one_read(
                                     await conn.send(build_audio_append(frame))
                                 feeder = asyncio.create_task(feed())
                                 feeders.append(feeder)
-                            if read_mode == "model_turn":
+                            if auto_response:
+                                # Nothing to send: the mic audio drives it. Just start the clock.
+                                read_sent = True
+                                asked_at = time.monotonic()
+                            elif read_mode == "model_turn":
                                 # The OTHER way to make it talk: give the model something to answer
                                 # and let it generate the turn itself (no pre-generated text, so no
                                 # server-side TTS shortcut). Answers "does a realtime model's OWN
@@ -255,6 +338,7 @@ async def one_read(
                                 # Session is live: ask for the read exactly as the product does.
                                 await conn.send(build_read_frame(READ_TEXT))
                             read_sent = True
+                            asked_at = time.monotonic()
                         if etype.endswith("response.done") and read_sent:
                             break
             except TimeoutError:
@@ -278,9 +362,12 @@ async def one_read(
         "background": background,
         "session_as_dict": session_as_dict,
         "read_mode": read_mode,
+        "drop_voice": drop_voice,
         "read_sent": read_sent,
         "audio_bytes": audio_bytes,
         "audio_deltas": types.get("response.audio.delta", 0),
+        "first_audio_ms": first_audio_ms,
+        "stop_to_audio_ms": stop_to_audio_ms,
         "spoke": types.get("session.avatar.switch_to_speaking", 0),
         "response_done": types.get("response.done", 0),
         "transcript_chars": len(transcript),
@@ -338,6 +425,26 @@ async def main() -> None:
         default="pre_generated",
         help="pre_generated = the product's verbatim read; model_turn = let the model answer",
     )
+    ap.add_argument(
+        "--no-voice",
+        action="store_true",
+        help="omit session.voice so the model owns the audio (its own voice)",
+    )
+    ap.add_argument(
+        "--agent",
+        default="",
+        help='AGENT mode: "name:version" — drive that Foundry agent; no model= is sent',
+    )
+    ap.add_argument(
+        "--voice",
+        default="",
+        help="send this Azure voice name instead of the persona's (agent-mode precedence test)",
+    )
+    ap.add_argument(
+        "--auto-response",
+        action="store_true",
+        help="let server VAD open the model's turn (real speech-in -> speech-out timing)",
+    )
     ap.add_argument("--locale", default="en-US")
     ap.add_argument("--timeout", type=float, default=25.0)
     ap.add_argument("--out", default=None)
@@ -365,9 +472,13 @@ async def main() -> None:
         s.azure_foundry_api_key or s.foundry_api_key
     )
     realtime = uses_realtime_pipeline(args.model, args.byom_profile)
+    # In AGENT mode no `model=` is sent at all, so printing the resolved voice model there would
+    # suggest it is in play when it is not (measured: the agent's own model drives the brain, and
+    # the voice is Azure TTS either way).
+    brain = f"agent={args.agent}" if args.agent else f"model={args.model}"
     print(
-        f"[rca] model={args.model} profile={args.byom_profile or '-'} "
-        f"realtime_pipeline={realtime} avatar={args.avatar}"
+        f"[rca] {brain} profile={args.byom_profile or '-'} "
+        f"realtime_pipeline={'n/a (agent)' if args.agent else realtime} avatar={args.avatar}"
         f"{'/' + args.character if args.avatar else ''} api={s.voice_live_api_version} "
         f"auth={'entra' if is_entra else 'key'}"
     )
@@ -408,12 +519,23 @@ async def main() -> None:
                 background=args.background,
                 session_as_dict=args.session_as_dict,
                 read_mode=args.read_mode,
+                drop_voice=args.no_voice,
+                agent=(
+                    (args.agent.rsplit(":", 1)[0], args.agent.rsplit(":", 1)[-1])
+                    if args.agent
+                    else None
+                ),
+                voice_override=args.voice,
+                auto_response=args.auto_response,
+                project=s.azure_foundry_default_project or "",
                 locale=args.locale,
                 timeout_s=args.timeout,
             )
             rows.append(row)
             print(
-                f"  rep {i}: audio_deltas={row['audio_deltas']:4d} "
+                f"  rep {i}: stop→audio={row['stop_to_audio_ms']:5d}ms "
+                f"first_audio={row['first_audio_ms']:5d}ms "
+                f"audio_deltas={row['audio_deltas']:4d} "
                 f"audio_bytes={row['audio_bytes']:7d} spoke={row['spoke']} "
                 f"response.done={row['response_done']} text_deltas={row['text_deltas']} "
                 f"voice={(row['applied_session'].get('voice') or {}).get('type', '?')}/"

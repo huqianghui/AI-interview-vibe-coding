@@ -1269,6 +1269,45 @@ WS 音频字节 0，与 Azure TTS 同一签名）。但**口型是否真跟着�
 agent（chat 模型），`model=` 根本不发；而新建人物会自动同步出一个 agent，所以拿不到"无 agent 的人物"。
 要验证需要从页面侧注入一条去掉 voice 的 `session.update` 再发一次模型轮 —— 未做。
 
+#### Voice Live 确实把 speech-in 和 speech-out 拆开了，开关就是 `session.voice`
+
+owner：「gpt-realtime 的优势就是 input 可以直接得到 voice 的内容和音色、情绪，output 里面可以直接出
+audio，不用走一遍 text-to-speech。难道放到 voice live api 里面就已经拆开了？」**拆开了**，而且两半的开关
+不同：
+
+| | 输入侧（模型听到什么） | 输出侧（谁发声） |
+| --- | --- | --- |
+| 不配 `session.voice`（原生 speech-to-speech） | **音频直达模型**，音色/情绪都在 | 模型直接出 audio（回显 `openai/marin`），**不过 TTS** |
+| 配 `azure-standard`（产品当前，混合式） | **仍然是音频直达模型** | 模型出文本 → **Azure Speech TTS 合成** |
+
+**"输入侧始终是原生"有硬证据**，不是推测：realtime 管线把**文本型 EoU** 整个拒掉，Azure 原话
+*"requires a local speech recognizer"* —— 那条路**大脑前面没有识别器**，所以模型拿到的是音频。
+`azure-speech` 输入转写是**旁路**（供 judge / 报告用文本），不在大脑的输入路径上。Portal 的 agent 页里
+Voice 下拉明确有 "real-time model native voices" 这一类，选它就是输出侧不走 TTS。
+
+#### 延迟：输出侧单独看 TTS 更快，完整一轮原生更快（都是小样本）
+
+| 测的是哪一段 | 模型原生音色 | Azure TTS | 与"原生更快"的理论 |
+| --- | --- | --- | --- |
+| **只看输出侧**（文字触发模型轮 → 首个音频包，各 3 次） | 2553 / 5217 / 2651 ms | **1148 / 1048 / 1381 ms** | ❌ 相反 |
+| **完整一轮**（`speech_stopped` → 首个音频包，各 2 次） | **938 / 4250 ms** | 1613 / 4360 ms | ✅ 一致（−675 ms / −110 ms） |
+
+那个 **675 ms** 的差值，量级上正像一次 TTS 首包的成本。但两组都是 **n = 2~3、方差极大**（同一配置内
+938 ms 到 4250 ms）、且模型每次生成的文本长度不同（269–409 字），所以**只能当方向，不能当数字**。要做成可
+引用的数字需要：同一段输入音频、用提示把回答长度固定住、同时段每侧 10 次以上。复现命令：
+
+```bash
+# 只看输出侧
+.venv/bin/python scripts/voice_live_read_rca.py --model gpt-realtime-2.1 --read-mode model_turn [--no-voice]
+# 完整一轮（服务端 VAD 自己开模型轮；--no-voice 即真正的 speech-to-speech）
+.venv/bin/python scripts/voice_live_read_rca.py --model gpt-realtime-2.1 --auto-response \
+    --mic /tmp/mic24.wav --timeout 45 [--no-voice]
+```
+
+**对本产品的意义**：输出侧必须是 Azure TTS（逐字念题靠它，`pre_generated` 在原生音色下失效，且数字人口型
+由 TTS 的 viseme 驱动），所以"混合式"不是折中而是**必须**；真正的 speech-to-speech 省下的那几百毫秒，要以
+放弃逐字念题为代价。
+
 #### agent 里能配 gpt-realtime 吗？能配，但跑不起来；而且 agent 模式下声音永远是 Azure TTS
 
 owner：「在 agent 里面能否配置 gpt-realtime 模型，那个时候的声音是否可以是 gpt-realtime 的声音？怎么达到
