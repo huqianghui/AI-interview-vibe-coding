@@ -137,9 +137,9 @@ def build_read_directive(reader_prompt: str) -> str:
 
 # Bank-session turn control (see ``InterviewerPersona.bank_turn_mode``): "linear" = the interviewer
 # only reads the backend's questions and is silent in between; "judged" = the same silent transport,
-# plus a backend LLM judge that may nudge / follow up / redirect DURING the candidate's pauses
-# (issue #114). The pre-v0.39 "model" value (Foundry agent speaking in its own server-VAD turn) is
-# retired — the migration maps it to "linear". Vendor-neutral tokens, never Azure field names.
+# plus a backend LLM judge that may nudge DURING the candidate's pauses (issue #114). The pre-v0.39
+# "model" value (the model took its own server-VAD turn) is retired — the migration maps it to
+# "linear". Vendor-neutral tokens, never Azure field names.
 BANK_TURN_MODES = ("linear", "judged")
 
 
@@ -235,20 +235,21 @@ class InterviewerPersona(TimestampMixin, Base):
             enabled, seconds = self.bank_auto_submit_enabled, self.bank_auto_submit_silence_seconds
         return seconds if enabled else 0
 
-    # Turn control for BANK voice sessions — does the model get a generative turn of its own between
-    # questions? ``"linear"`` (default): no turn at all — the digital human only reads each backend
-    # question verbatim and is silent in between (Azure ``create_response=False`` + the page never
-    # nudges a bare ``response.create``), the same contract EXTERNAL sessions always run.
-    # ``"model"``: the previous behaviour — server-VAD opens a model turn every time the candidate
-    # pauses and ``prompt_fragment`` governs what it says ("Thank you." / "Please go on." / a
-    # follow-up).
+    # Turn control for BANK voice sessions — the model never takes a generative turn of its own
+    # between questions (that behaviour was retired, see below). ``"linear"`` (default): the digital
+    # human only reads each backend question verbatim and is silent in between (Azure
+    # ``create_response=False`` + the page never nudges a bare ``response.create``), the same
+    # contract EXTERNAL sessions always run. ``"judged"``: the same silent transport plus a backend
+    # LLM judge that may nudge during the candidate's pauses (issue #114) — the nudge text is still
+    # read through the verbatim path, not a model turn.
     #
-    # Owner reversal (2026-09-24) of the 2026-09-23 "engine decides, no knob" call (v0.38.1.1): in
-    # practice the model-turn contract said "Thank you." once per PAUSE, not once per answer — the
-    # prompt cannot make a single boolean turn selective — and the owner prefers a silent
-    # interviewer with the reaction available as an explicit opt-in. Bank sessions only: external
-    # sessions are linear by construction (they supply no brain), so the flag is never consulted
-    # for them (see :meth:`linear_turns_for`). Server default mirrors the migration's.
+    # The pre-v0.39 ``"model"`` value (server-VAD opened a model turn on every pause and
+    # ``prompt_fragment`` governed what it said) is retired: a single ``create_response`` boolean
+    # cannot make the turn selective, so in practice it said "Thank you." once per PAUSE, not once
+    # per answer — the owner (2026-09-24) chose a silent interviewer. The migration rewrites stored
+    # ``"model"`` → ``"linear"``. External sessions are linear by construction (they supply no
+    # brain), so this flag is never consulted for them (see :meth:`linear_turns_for`). Server
+    # default mirrors the migration's.
     bank_turn_mode: Mapped[str] = mapped_column(
         String(16), default="linear", server_default="linear", nullable=False
     )
@@ -256,9 +257,10 @@ class InterviewerPersona(TimestampMixin, Base):
     def linear_turns_for(self, brain_mode: str) -> bool:
         """Whether a session on ``brain_mode`` runs LINEAR TURNS (the model has no turn of its own).
 
-        Since v0.39.0.0 this is True for EVERY session: external (no brain of its own), bank
-        ``linear`` and bank ``judged`` (the judge speaks through the backend, never through a model
-        turn). The retired ``model`` value is treated as linear too — the migration rewrites it.
+        Since v0.39.0.0 this is True for EVERY candidate session: external (no brain of its own),
+        bank ``linear`` and bank ``judged`` (the judge speaks through the backend, never through a
+        model turn). ``brain_mode`` is accepted for call-site symmetry but no longer changes the
+        answer; the editor Playground's model turn is handled in ``linear_turns_for_persona``.
         """
         return True
 

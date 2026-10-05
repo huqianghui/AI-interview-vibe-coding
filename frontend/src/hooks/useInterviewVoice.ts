@@ -93,18 +93,19 @@ export interface UseInterviewVoiceOptions {
    * field that sets Azure's `create_response` (`voice_live_proxy.py`) — both halves must agree,
    * since either one alone still leaves the model a way to speak.
    *
-   * true for EXTERNAL-brain sessions always (Phase 2): the external workflow supplies the brain, the
-   * digital human is a pure "mouth". true for BANK sessions by default since v0.38.2.0
-   * (`bank_turn_mode: "linear"`): the model turn used to say "Thank you." once per PAUSE, not once
-   * per answer — `create_response` is a single boolean, so the acknowledgment turn and the follow-up
-   * turn are the same turn, and agent mode rejects overriding `instructions` per `response.create`
-   * (see the emitSpeak branch below), so it cannot be made selective by prompt. When true,
-   * `commitAnswer` skips its turn-advancing bare `response.create` (in agent mode that makes the
-   * Foundry agent autonomously produce an off-script turn) and the page reads follow-ups verbatim.
+   * true for every candidate session since v0.39.0.0: EXTERNAL-brain sessions (the external
+   * workflow supplies the brain, the digital human is a pure "mouth") and both BANK modes —
+   * `bank_turn_mode: "linear"` (silent between questions) and `"judged"` (a backend judge nudges
+   * off-WebSocket, still read verbatim). The retired `"model"` turn said "Thank you." once per
+   * PAUSE, not once per answer — `create_response` is a single boolean, so the acknowledgment turn
+   * and the follow-up turn are the same turn, and agent mode rejects overriding `instructions` per
+   * `response.create` (see the emitSpeak branch below), so it could not be made selective by
+   * prompt; it was dropped. When true, `commitAnswer` skips its turn-advancing bare
+   * `response.create` (in agent mode that makes the Foundry agent autonomously produce an off-script
+   * turn) and the page reads follow-ups verbatim.
    *
-   * false when an admin opts a bank persona into `bank_turn_mode: "model"`: the model keeps its turn
-   * and the PROMPT governs what it says in it — all reaction between questions, at the price of a
-   * possible reaction per pause. */
+   * false only in the editor Playground, where a bank persona keeps a model turn to converse with
+   * its synced agent — never on the candidate page. */
   linearTurns?: boolean;
   /**
    * Silence auto-submit window in ms (admin-controlled per persona; the page derives it from the

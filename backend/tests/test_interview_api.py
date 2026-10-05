@@ -853,13 +853,13 @@ async def test_external_voice_linear_turns_always_true_regardless_of_bank_mode(c
     from app.services import persona_service as psvc
 
     # External sessions supply no brain of their own and are linear by construction; the bank-only
-    # knob is never consulted for them.
+    # knob is never consulted for them (even when set to a non-default bank value).
     await psvc.create_persona(
         db_session,
         name="Interviewer",
         is_default=True,
         interview_brain="external",
-        bank_turn_mode="model",
+        bank_turn_mode="judged",
     )
     headers = await _new_candidate_headers(client)
     body = (await client.post("/candidate/interview/start", headers=headers)).json()
