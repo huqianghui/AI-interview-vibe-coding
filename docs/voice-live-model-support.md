@@ -303,6 +303,108 @@ WebSocket 上**到底有没有"大脑"在推理、每句话是谁产出的**—�
 > `session.instructions`（agent 模式它住在 Foundry agent 里，model 模式它当会话系统消息注入）。
 > 代码佐证：`build_avatar_session` 的 `session_kwargs` 里根本没有 `instructions` 这个键。
 
+
+### 3.5 judge 已经用了一个模型，为什么不把它接到 `create_response`？
+
+> 2026-10-05 补记。顺着 §3.3 的"judge 是第三条独立链"再追一问：既然 judged 模式里**确实调了一个
+> 真模型**（`LLMAdapter`，默认 gpt-5-mini，和打分共用 `get_llm_adapter`），为什么不干脆把它当成
+> Voice Live `create_response` 的那个大脑，而要留在 WebSocket 之外？因为 **judge 和 `create_response`
+> 干的是两个不同的活，本产品是刻意把"判断"和"开口"拆开的。**
+
+**先厘清一个常见误解：judge 用到的那个"model"，不是 Voice Live 的 `model=`。** 面试会话仍是 mouth
+（`create_response=False`，§3.3），WS 上的 `model=` 只是不推理的宿主；judge 是 **WS 之外**一条独立的
+chat-completion 调用（`POST /{id}/judge` → `app.interview.judge.run_judge`）。所以"judge 用了模型"和
+"把模型接进 `create_response`"从来不是同一个开关。
+
+**judge 的模型产出的是"判决"，不是"台词"：**
+
+- 输出只有一个 verdict —— **`wait | nudge`，NOTHING ELSE**（`api/interview.py:140`）。`follow_up` /
+  `redirect` 已于 2026-09-28 退役，模型若仍吐一个按 `wait` 处理。
+- 它是 **"a pacing aid, not a prober"**（`interview/judge.py` 开头）：**从不写一个 interviewer 回合、
+  从不追问、从不 redirect**（`api/interview.py:145` 原话 "the judge never writes a turn"）。
+- 候选人的话对它是 **DATA（delimited），不是指令**；任何失败（超时 / 坏 JSON / 不合法 verdict）
+  → **`wait`（沉默）**，绝不模板兜底。
+- 即使判成 nudge，**那句 nudge 文本仍交回给"嘴"用 `pre_generated_assistant_message` 逐字念**
+  （见 `voice-live-control-notes.md` 的链路图："题目和 nudge 都是" pre_generated TTS）。模型**从没拿到
+  麦克风**。
+
+**`create_response=True` 产出的是"台词"，而且它是个管不住的单开关：**
+
+| | judge 的模型 | `create_response` 的模型 |
+| --- | --- | --- |
+| 回答什么 | "候选人说完了吗 / 要不要催" | "面试官这一轮说什么" |
+| 产出形态 | 结构化判决 `wait \| nudge` | 自由语音 turn |
+| 能否"只判决、绝不编题" | 能（结构化契约 + 超时 + leak_guard + prefetch） | **不能**（单布尔，一开全开） |
+| 题目来源 | 题库逐字（嘴念） | **模型自己编** |
+| 在哪 | WS 之外，和打分共用 `get_llm_adapter` | WS 上 |
+
+挡着你把 judge 塞进 `create_response` 的，是三道各自独立的墙：
+
+1. **一个是裁判，一个是嘴——题从哪来变了。** 面试官要说的**题目永远来自题库逐字**（SOP 引用、与打分
+   rubric 对齐、可审计）。一旦 `create_response=True`，模型开始**自己编题**，这正是题库设计明令禁止
+   的，也是 mouth 存在的全部理由（"Thank you." 漂移、卡片与口播不一致，记忆
+   `ai-interview-external-filler-root-cause`）。
+2. **`create_response` 是一个布尔，"只判决、绝不即兴"表达不出来。** `voice_live_proxy.py:273` 的历史
+   注释写死：`create_response` 是**单个布尔**，"acknowledge turn"与"follow-up turn"**是同一个 turn**，
+   "acknowledge but never follow up" **unreachable**。打开它就同时拿到"确认 + 追问 + 即兴"，**没法只
+   要 nudge**。off-WS 的 judge 能表达这个窄合同，**正因为它返回结构化判决、不是自由语音**——这也正是
+   当初把它挪到 WS 之外的原因（2026-09-24：WS 上的模型每次停顿都说 "Thank you."，于是 v0.39.0.0 退役
+   了 in-interview 的模型回合）。
+3. **judge 需要的那套，一条 WS 语音 turn 全给不了。** ordered 契约 + 逐项引用检查 + `leak_guard` +
+   JSON 解析 + 10s 超时 + 失败转 `wait` + prefetch/apply —— WS 的语音 turn 是自由音频，你拿不到结构化
+   判决、跑不了引用检查、也绑不住它。
+
+> **一句话：judge "用了模型" 和 `create_response` "用模型" 不是同一个杠杆，不能互相替换。** judge 用
+> 模型来**判决**并返回一个决定，然后把开口权交回给**那张逐字念题的嘴**；`create_response` 是让模型
+> **自己当面试官开口**。本产品刻意把"判断"（模型，WS 外，结构化）与"开口"（TTS，逐字，可审计）拆开
+> —— **把 judge 接到 `create_response` = 让模型自己编面试 = 就是范围 B，要动架构**，并撞上题库逐字 /
+> 打分对齐 / 单布尔管不住这三道墙。所以这不是"能复用却没复用"，而是这两个活天生要分开。
+
+### 3.6 这些模型分别是"配置的"还是"写死的"？四条解析链
+
+> 2026-10-05 补记。接着问："judge 用的 model 是 admin 配的还是写死的？打分呢？agent 里面呢？"
+> 结论：**全部来自配置，写死的只有兜底默认值 `gpt-5-mini`**。但它们是**四条不同的解析链**，
+> 生效时机也不同——而且 admin 里那**一个** model 字段同时喂了其中三条，这正是客户 region 报错的根因。
+
+| 用到模型的地方 | 解析链（左优先）| 何时生效 | 代码 |
+| --- | --- | --- | --- |
+| **judge**（judged 模式的 wait/nudge）| master `model_or_deployment` → env `FOUNDRY_AGENT_MODEL` → `gpt-5-mini` | adapter **注册时**钉死；admin 保存后 `refresh_azure_adapters()` 重建，**不用重启** | `judge.py:376` → `registry.py:103/83` → `config_overlay.py:49` |
+| **评估 / 打分**（含 checklist 起草、SOP 覆盖）| **同上，同一条链、同一个 adapter 实例** | 同上 | `scoring_service.py:299`、`checklist_service.py:123`、`sop_coverage.py:111` |
+| **Foundry agent 的底层模型** | `persona.model` → 上面那条链 | **"同步到 Foundry"时**写进 agent，**不在连接时传** | `azure_agent_sync.py:127` |
+| **Voice Live `model=`**（路径①）| `persona.model` → master `model_or_deployment` → env `VOICE_LIVE_DEFAULT_MODEL` | **每次建连**时读 DB，改了下一场面试即生效 | `voice_live_ws.py:41-52`、`:158-166` |
+
+三个最容易误会的点：
+
+1. **"写死"只剩兜底。** `config.py:86` 的 `foundry_agent_model: str = "gpt-5-mini"`、`config.py:104`
+   的 `voice_live_default_model: str = "gpt-5-mini"`、`azure_agent_sync.py:44` 的 `_MODEL_ENV_DEFAULT`
+   都只是**配置缺失时的兜底**，admin 一填就被盖掉。
+2. **`get_llm_adapter(name)` 的 `name` 是 provider（`azure` / `mock`），不是模型名。** 模型在注册时就
+   固定在 adapter 实例上，调用方选不了。推论：**judge 和打分今天必然是同一个模型**，想让它们用不同模型
+   需要新开关（目前没有）。另外 judge / 打分**都不读 `persona.model`**——per-persona model 只影响
+   agent 同步和 Voice Live 连接。
+3. **admin 那一个 model 字段，一条链喂三处用途。** 它同时是 ① judge/打分的 chat 模型、② agent 同步时的
+   底层模型、③ Voice Live 的 `model=`。前两个接受**你自己的 deployment 名**，第三个只认**本 region 的
+   原生预部署清单**（§2 / §3.1）——所以把一个自有 deployment 名填进这个字段，chat 侧正常、语音侧立刻
+   报 "not supported in this region"。**这就是 BYOM 方案要把这两种语义拆开的根因**（见
+   `docs/planning/spec-voice-live-byom-model-selection.md`）。
+
+**推论（也是本文最该带走的一句）：自有 deployment 不是"没用"，它在这四处里有三处是唯一正确的填法。**
+
+| 用到模型的地方 | 吃不吃"你自己的 deployment 名" | 为什么 |
+| --- | --- | --- |
+| judge | ✅ 吃，而且这就是正确的东西 | 走 Foundry Responses API，Azure 侧的 `model=` **本来就是 deployment 名** |
+| 评估 / 打分 | ✅ 同上（同一个 adapter 实例）| 同上 |
+| Foundry agent 的底层模型 | ✅ 吃 | agent 建在你的 Foundry project 里，它的模型只能是你的 deployment |
+| Voice Live `model=`（路径①）| ❌ **唯一不吃** | 只认本 region 的**原生预部署清单**（§2 / §3.1），自有名字 → `invalid_model` |
+
+所以毛病不在"自有 deployment 不该用"，而在 **admin 只有一个 `model_or_deployment` 字段，却同时承载了
+两种互不兼容的语义**：填上你的 deployment，前三处全对、第四处立刻报 "not supported in this region"。
+要让第四处也吃自有 deployment，**只有 BYOM 一条路**（`profile=byom-...` + 你的 deployment，§3.2）——
+这就是把这一个字段拆成"原生 model"和"BYOM deployment + profile"两种语义的理由。
+
+> 旁注：`config_overlay.py` **故意不**覆盖 `settings.voice_live_default_model`（注释里写明覆盖它会让
+> 每个语音会话在 admin 保存的瞬间就挂掉）；但 `voice_live_ws.py` 在**每次连接时直接读 master row**，
+> 所以 master 的 model 仍会进 Voice Live——绕过 settings，不绕过问题。
 ---
 
 ## 4. 证据：真实连接探测（swedencentral，2026-10-05）
