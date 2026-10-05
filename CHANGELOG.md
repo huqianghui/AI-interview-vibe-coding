@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.44.0.0 (2026-10-05)
+
+### Changed
+- **One end-of-utterance detector, and realtime voice models now work.** The session asked for the
+  TEXT detector (`semantic_detection_v1_multilingual`), which reads the recognised transcript and
+  therefore only exists on a cascaded pipeline — so every speech-to-speech model (native
+  `gpt-realtime-*`, or a `byom-azure-openai-realtime` profile) refused the whole session with
+  *"Text-based end-of-utterance detection requires a local speech recognizer and is only supported on
+  cascaded pipelines"*. It is now the AUDIO-based `smart_end_of_turn_detection`, accepted on every
+  pipeline measured, so realtime models are usable and there is no second code path to maintain.
+- `MOUTH_EOU_TIMEOUT_MS` 1500 → **1000**, because that is what the measurement says. The audio
+  detector at 1500 ms ends a turn ~0.45-0.6 s later than the text one it replaces; at 1000 ms it is
+  level (English last-stop 7.68 s vs 7.57 s, Chinese 8.96 s vs 8.98 s). At 700 ms the behaviour
+  *changes* rather than speeds up — it stopped splitting at a 1.2 s pause and merged the answer into
+  one segment — so the constant is guarded by a test that explains why.
+- Nothing else about the voice session moved: Azure TTS output, verbatim reads, `azure-speech` input
+  transcription, the avatar, and the inference leg (judge / scoring / the Foundry agent on a **chat**
+  deployment) are unchanged.
+
+### Added
+- `backend/scripts/voice_live_eou_ab.py` — A/Bs the two detectors on the same real audio (segment
+  count, `speech_stopped` timing, transcript), `--variants text:1500,audio:1000 --reps N --locale`.
+- `backend/scripts/voice_live_session_probe.py` — asks the real service whether a given (model, BYOM
+  profile, detector, avatar, voice) shape is accepted, and keeps Azure's verbatim refusal; `--matrix`
+  reproduces the evidence tables in one run.
+- `docs/planning/spec-voice-live-eou-unification.md` — requirements, design, test plan, and the two
+  decisions still open about a no-STT/no-TTS realtime mode.
+
+### Notes
+- Measured, all on the live resource and written up in `docs/voice-live-model-support.md` §4.7-§4.10:
+  the audio detector is accepted on native realtime, native chat, BYOM realtime and BYOM chat alike;
+  a realtime session still reads bank questions **verbatim** via server-side TTS (188000 bytes,
+  word-for-word, 1.4 s vs the cascaded 1.8 s); the avatar negotiates and streams on a realtime session
+  (`avatar ice=1`, first video frame 317 ms *before* the read was even created); and realtime is
+  ~113 ms faster to audible than the cascaded baseline (1135 ms vs a 1248 ms median) — indicative, one
+  run against three from another day.
+- The text detector's claimed advantage — "cleaner, less fragmented segments" — **did not appear**: on
+  a 1.2 s mid-sentence pause both detectors split identically, with byte-identical transcripts.
+- A realtime model is *worse* at reading text aloud than a chat model (verbatim 1/3 vs 3/3 when asked
+  to read verbatim; 0/3 for both when handed an assistant item). Verbatim reads therefore stay on
+  `pre_generated_assistant_message`, which bypasses the model entirely — unchanged by this release.
+- `byom-foundry-anthropic-messages` remains **unverifiable** here: this tenant cannot deploy Claude.
+
 ## 0.43.2.0 (2026-10-05)
 
 ### Fixed

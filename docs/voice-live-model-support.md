@@ -812,13 +812,34 @@ TTS"，理由换了一个。**
 | **音频型 @1000ms** | 2 | **3.04s, 7.63s** | **+0.20 / −0.16 —— 基本持平** |
 | 音频型 @700ms | **1** | 9.08s | ⚠️ **行为变质**：不再在停顿处切，合成一段并推迟到 9s |
 
+**用例 C：中文（1.2s 停顿）—— 第一轮不可结论，换素材后持平**
+
+第一轮用 macOS `say -v Tingting`：`text@1500` 两次都 **0 段**（`speech_stopped` 正常在 4.6s 触发、之后
+没有转写），`audio@1000` 一次把整句合并、一次正确切分 —— **两边都不干净**。会话配置已排除（`zh-CN`
+正确传给了转写与音色）。
+
+第二轮改用 **Azure 自己的 TTS** 合成中文素材（`pre_generated_assistant_message` 录下
+`zh-CN-XiaoxiaoNeural` 的 PCM，拼成 1.2s 停顿）——和线上说话的引擎同一个：
+
+| 变体 | 分段（2 次）| 末次 stop 中位 |
+| --- | --- | --- |
+| `text@1500` | 2, 2 | 8.98s |
+| **`audio@1000`** | 2, 2 | **8.96s（−0.02）** |
+
+**所以第一轮的失败是素材问题，不是 EoU 差异。** macOS `say` 的中文合成音不适合做转写素材；换成产品实际
+使用的 TTS 之后中文同样持平，而且比英文更紧（英文 +0.11s，中文 −0.02s）。
+
+> 会被误读的一点：这一轮 `transcript identical = False`，但原因只是 ASR 同音词抖动（`附合`/`复合`，
+> 都不是原文"复核"）—— **分段点与第二段逐字四次全同**。别把它读成两种 EoU 行为不同。
+
 **结论（按证据分级）：**
 
 1. **接受层面**：音频型是**严格超集** —— 文本型能用的地方它都能用，还多覆盖 realtime / 直通（§4.7）。
 2. **分段行为**：在测过的两种输入上**两者等价**（分段数相同、转写文本逐字相同）。文本型声称的抗碎片
    优势**未被观测到**。
 3. **判定延迟**：音频型默认晚约 **0.45–0.6s**（4 个样本一致），但**可调** —— `timeout_ms=1000` 即与今天
-   的文本型 @1500ms 持平。
+   的文本型 @1500ms 持平：英文重复 2 次（末次 stop 7.68 vs 7.57）、2.5s 长停顿（9.14 vs 8.91）、
+   中文重复 2 次（**8.96 vs 8.98**）。
 4. **knob 很敏感**：700ms 会让行为变质（合段 + 整体推迟到 9s），所以不是"越小越快"。
 
 **因此"统一成一条"是有证据支持的**：统一到**音频型 @1000ms**，可以
@@ -953,6 +974,75 @@ realtime 能产出文本，但**只能走 realtime 自己的协议**（`modaliti
 
 所以推理模型下拉按 `chat_completion == "true"` 过滤（因此排除 realtime 部署，§4.5）**不再只是"照 Portal 抄"**
 —— 它挡住的是一个会在打分时 400 的配置。
+
+---
+
+### 4.10 realtime 驱动数字人：浏览器实测的延迟指标，以及所有脚本/文档在哪
+
+> 2026-10-05。owner 要的两件事：**realtime 驱动数字人的指标（含延迟）**，以及**这些测试脚本和文档都在哪**。
+
+**测量工具**：仓库既有的 `frontend/e2e/avatar-speak-start-live.spec.ts`（不是新写的）。它在**真实浏览器**里
+分段计时，并且区分"包在到"和"听得见"——用 W3C 的 `totalAudioEnergy` 而不是 `totalSamplesReceived`，因为
+舒适噪声会推高后者（那正是曾让五次弱网测量作废的错误）。记录追加在 `frontend/e2e/output/speak-start.jsonl`。
+
+**语音模型 = `gpt-realtime-2.1`（原生，混合式）+ avatar + Azure 音色 + 音频型 EoU：**
+
+| 分段 | 毫秒 |
+| --- | --- |
+| 点击 → `proxy.connected` | 2565 |
+| `proxy.connected` → `session.updated` | 477 |
+| `session.updated` → 发 `session.avatar.connect` | 597 |
+| avatar offer → server answer | 597 |
+| answer → PeerConnection connected | 904 |
+| PC connected → 发朗读请求 | 865 |
+| 朗读请求 → `response.created` | 273 |
+| **`response.created` → 真正听得见** | **862** |
+| **合计：点击 → 听得见** | **7140** |
+| **合计：朗读请求 → 听得见** | **1135** |
+
+**与级联基线的对比**（同一个 spec、同一台机器，级联 `gpt-5-mini` 的三次历史记录 2026-10-01）：
+
+| 指标 | 级联 `gpt-5-mini`（3 次）| **realtime `gpt-realtime-2.1`（1 次）** |
+| --- | --- | --- |
+| 朗读请求 → 听得见 | 1258 / 1210 / 1248（中位 **1248**）| **1135（−113ms）** |
+| `response.created` → 听得见 | 1009 / 877 / 988（中位 **988**）| **862（−126ms）** |
+
+**realtime 更快，而且和另一处独立测量一致**：§4.9 的逐字念题是 1.4s vs 级联 1.8s。
+
+> **证据强度要说清**：realtime 只有 **1 次**，级联三次是**另一天**跑的（网络条件不同）。所以这是**指示性
+> 结论，不是定论** —— 两处独立测量方向一致（都更快），但要当数字用就需要同日、多次重复。
+
+**数字人本身：**
+
+| 观察 | 值 |
+| --- | --- |
+| avatar SDP 握手 | ✅ 完成（`avatar_connect_sent` → `avatar_answer` 597ms）|
+| 视频/音频轨 | ✅ `pc_track_video`、`pc_track_audio` 都协商出来 |
+| ICE | ✅ `pc_ice_connected`（浏览器里成功；我用 aiortc 的脚本卡在 `checking`，所以脚本路线不可用）|
+| **`response.created` → 首个视频帧** | **−317ms**（负值：帧在朗读被创建前就已经在流）|
+
+**模型自己拥有声音时（不设 Azure 音色）**：avatar 视频帧照常在流、模型声音可听 —— 那一轮 spec 自行判
+`voided`，原因是*"audio was already playing when the read was requested"*，即**模型自己先开口了**。
+所以整条链路**不以 Azure TTS 为前提**。
+
+> **仍未验证、不下结论的一格**：口型是否真的跟着词动。avatar 是服务端渲染，**待机动画也会产生帧**，所以
+> 帧数区分不了"在动嘴"和"在待机"。要判只能靠人眼或 CV。
+
+**所有脚本与文档的位置（owner 问的"在哪"）：**
+
+| 东西 | 路径 | 回答什么 |
+| --- | --- | --- |
+| EoU A/B（两种检测器对比）| `backend/scripts/voice_live_eou_ab.py` | 分段数 / `speech_stopped` 时刻 / 转写文本；`--variants text:1500,audio:1000 --reps N --locale zh-CN` |
+| 会话形状探针 | `backend/scripts/voice_live_session_probe.py` | 某个（模型, profile, EoU, avatar, voice）组合会不会被接受 + Azure 原话；`--matrix` 一次重跑 §4.7 全矩阵 |
+| region 原生清单 / BYOM 连通 | `backend/scripts/voice_live_model_probe.py` | 哪些原生模型在本 region 可用；BYOM 能不能连 |
+| 浏览器延迟（本节数据）| `frontend/e2e/avatar-speak-start-live.spec.ts` | 点击→可听的逐段耗时、首帧时刻；输出 `frontend/e2e/output/speak-start.jsonl` |
+| 浏览器 BYOM 端到端 | `frontend/e2e/byom-voice-live.spec.ts` | BYOM profile 是否上到 wire、会话是否真能跑、native 对照 |
+| 浏览器级联回归 | `frontend/e2e/voice-live-azure.spec.ts` | 级联语音路径无回归 |
+| 需求 / 设计 | `docs/planning/spec-voice-live-eou-unification.md` | 四条需求、设计、测试计划、两个待决问题 |
+| 事实与证据总集 | 本文件 §4.4–§4.10 | BYOM 实测、四条路线、EoU A/B、realtime vs text、本节指标 |
+
+> WAV 素材的造法写在 `voice_live_eou_ab.py` 的 docstring 里（macOS `say` + `afconvert`）。**中文不要用
+> `say`** —— 实测它的中文合成音做转写素材不可靠（§4.8 用例 C），要用 Azure 自己的 TTS 合成。
 
 ---
 

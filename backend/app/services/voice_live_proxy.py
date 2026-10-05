@@ -173,7 +173,14 @@ MOUTH_VAD_TYPE = "azure_semantic_vad_multilingual"
 MOUTH_VAD_SILENCE_MS = 800
 MOUTH_VAD_REMOVE_FILLER_WORDS = True
 MOUTH_EOU_THRESHOLD_LEVEL = "medium"
-MOUTH_EOU_TIMEOUT_MS = 1500
+# 1000, not 1500, and not lower — measured, not tuned by feel (model-support §4.8,
+# spec-voice-live-eou-unification.md §4). The audio-based detector at 1500 ms calls the end of a
+# turn ~0.45-0.6 s later than the text-based one it replaced; at 1000 ms it is level with it
+# (English last-stop 7.68 s vs 7.57 s, Chinese 8.96 s vs 8.98 s). At 700 ms the behaviour CHANGES
+# rather than speeds up: it stopped splitting at a 1.2 s pause and merged the answer into one
+# segment ending at 9.08 s. That mechanism is not understood, so do not lower this without
+# re-running scripts/voice_live_eou_ab.py.
+MOUTH_EOU_TIMEOUT_MS = 1000
 
 
 def build_turn_detection(*, linear_turns: bool, mouth: bool, eou_detection: bool) -> Any:
@@ -184,26 +191,39 @@ def build_turn_detection(*, linear_turns: bool, mouth: bool, eou_detection: bool
     * Agent sessions (bank model-turn, editor Playground) keep the plain ``azure_semantic_vad`` they
       always had — the Foundry agent's own turn contract is tuned around it.
     * MOUTH sessions (external, linear/judged bank) get ``azure_semantic_vad_multilingual`` with
-      end-of-utterance detection (``semantic_detection_v1_multilingual``, medium threshold, 1.5 s
-      timeout), an 800 ms silence window and filler-word removal — cleaner, less fragmented segments
-      for the transcript buffer and for the judge's silence trigger — unless the persona turned
+      end-of-utterance detection (``smart_end_of_turn_detection``, medium threshold, 1 s timeout),
+      an 800 ms silence window and filler-word removal — unless the persona turned
       ``eou_detection`` off, in which case they keep the plain VAD.
+
+    **Why the AUDIO-based detector, and why there is only one.** Voice Live ships two:
+    ``semantic_detection_v1_multilingual`` reads the recognised TEXT, and
+    ``smart_end_of_turn_detection`` works on the input AUDIO. The text one is cascaded-only — any
+    speech-to-speech model (native ``gpt-realtime-*`` or a ``byom-azure-openai-realtime`` profile)
+    refuses the whole session with *"Text-based end-of-utterance detection requires a local speech
+    recognizer and is only supported on cascaded pipelines"*. The audio one is accepted on every
+    pipeline measured, so it is a strict superset for acceptance, and an A/B on real audio found the
+    segmentation identical (same segment count, same split point, same transcript) on English and
+    Chinese alike — the text detector's supposed "cleaner, less fragmented segments" advantage did
+    not show up. So there is nothing left for a second code path to buy: one detector, no variant
+    flag, and realtime pipelines work for free. Evidence:
+    ``docs/voice-live-model-support.md`` §4.7-§4.8, reproducible via
+    ``scripts/voice_live_eou_ab.py``.
 
     ``create_response`` is always ``not linear_turns`` (the linear-turns contract; mouth ⇒ False)
     and barge-in is always on. Pure shaping (SDK import inside so the module stays importable
     without the azure extra); guarded by test_voice_live_proxy.py.
     """
     from azure.ai.voicelive.models import (
-        AzureSemanticDetectionMultilingual,
         AzureSemanticVad,
         AzureSemanticVadMultilingual,
+        SmartEndOfTurnDetection,
     )
 
     if mouth and eou_detection:
         return AzureSemanticVadMultilingual(
             silence_duration_ms=MOUTH_VAD_SILENCE_MS,
             remove_filler_words=MOUTH_VAD_REMOVE_FILLER_WORDS,
-            end_of_utterance_detection=AzureSemanticDetectionMultilingual(
+            end_of_utterance_detection=SmartEndOfTurnDetection(
                 threshold_level=MOUTH_EOU_THRESHOLD_LEVEL,
                 timeout_ms=MOUTH_EOU_TIMEOUT_MS,
             ),
