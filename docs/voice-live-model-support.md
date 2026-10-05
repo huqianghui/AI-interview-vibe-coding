@@ -1087,6 +1087,64 @@ realtime 能产出文本，但**只能走 realtime 自己的协议**（`modaliti
 
 ---
 
+### 4.11 逐阶段对比：chat 模型 vs `gpt-realtime`，各自用了什么组件
+
+> 2026-10-05，owner 问：「对比一下 gpt-realtime 和 chat 模型在不同阶段的不同」「分别是用什么组件，声音」。
+
+| 阶段 | chat 模型（级联，今天线上默认） | `gpt-realtime-*`（混合式） |
+| --- | --- | --- |
+| **听（喂给大脑的那一路）** | Azure Speech **STT** → 把**文本**喂给模型 | 音频**直通模型**，模型自己听；这一路**没有** Voice Live 识别器（这正是文本型 EoU 在它上面被拒的原因） |
+| **候选人答案转写（给 judge / 打分 / 报告）** | 就是上面那次 STT 的产物，一份两用 | `input_audio_transcription: azure-speech` **另外单独跑一份**（生产会话形状实测 ACCEPTED） |
+| **轮次检测 EoU** | 文本型 `semantic_detection_v1_multilingual` @**1500 ms** | 音频型 `smart_end_of_turn_detection` @**1000 ms** |
+| **想（大脑）** | 你资源里的 chat 部署（`gpt-5-mini`）或 Foundry agent | Speech-LLM（`gpt-realtime-2.1` 等） |
+| **说（嘴）** | Azure Speech **TTS** | **同一个** Azure Speech TTS —— 没有换 |
+| **音色** | `session.voice = azure-standard`；按人物 × 语言，内置 6 个 | **完全相同**（实测回显 `azure-standard/en-US-AvaNeural`）。只有**省掉** `session.voice` 才会落到模型自带的 `openai/marin` |
+| **数字人口型** | 服务端渲染，viseme 由 **TTS** 驱动，`avatar ice=1` | 同上，驱动源没变，`avatar ice=1` |
+| **逐字念题** | `pre_generated_assistant_message` → TTS，**绕过大脑** | 同上，绕过大脑，所以两边字节一致（188000 字节逐字相同） |
+| **judge / 打分 / agent** | 同一个 chat 部署，Responses API（HTTP） | **用不了** —— 7 个 HTTP 文本面 + Responses 的 WS 模式全部拒掉，必须回 chat 部署 |
+
+**只有两格不同：谁来听、谁来判断轮次结束。嘴和脸两边完全一样。** 内置音色清单（`ConfigurationRail.tsx`）：
+`zh-CN` → `zh-CN-XiaoxiaoNeural`（默认）/ `YunxiNeural` / `XiaoyiNeural`；`en-US` → `en-US-AvaNeural`（默认）
+/ `AndrewNeural` / `EmmaNeural`。换语音模型不会改变其中任何一项。
+
+#### 先说清一件影响预期的事：**本产品所有已发布流程里，语音模型都不负责"想"**
+
+这是读代码确认的，不是推断（`voice_live_proxy.linear_turns_for_persona` / `is_mouth_persona` /
+`build_connect_kwargs`，以及 `voice_live_ws` 的 `is_agent` 判断）：
+
+| 流程 | 大脑是谁 | 发 `model=` 吗 | 模型会自己生成一轮吗 |
+| --- | --- | --- | --- |
+| 候选人面试（bank linear / judged） | 题目来自题库文本、judge 走 **HTTP chat** | ✅ 发（语音模型 = 会话宿主） | ❌ `create_response=False` |
+| 候选人面试（external） | 客户的外部工作流 | ✅ 发 | ❌ |
+| 人物编辑器 Playground（bank 人物） | **Foundry agent**（chat 模型） | ❌ **不发**（走 agent 分支） | ✅ |
+
+链条是闭合的：`create_response = not linear_turns`，而 `linear_turns` 只在 Playground + bank 人物时为
+假 —— 那恰好也是挂 **agent**、因此**不发** `model=` 的唯一场合。所以
+**`create_response=True` 与 `model=` 两者永不同时出现**：语音模型在任何已发布流程里都不做推理。
+
+**所以选 `gpt-realtime` 改变的是两件事：① EoU 检测器；② 谁托管这个会话。** 不包括"谁思考"。
+把 realtime 真当大脑用（§4.9 验证过它能做到）需要一个**没有 agent 的人物**，而现在新建人物会自动同步
+出一个 agent —— 要支持那条路得单独做，不在本次范围内。
+
+#### 「realtime 为什么快」—— §4.10 那个 113 ms 证明不了「少了 STT」
+
+owner 的推断是：realtime 快是因为**没有 STT 这一步**。方向对，但要对上号：
+
+§4.10 量的是「**朗读请求 → 听得见**」，而这一段**两边都没有 STT**，连大脑都绕过（`pre_generated` 直接进
+TTS）。所以那 113 ms 不能用"少了 STT"来解释；再加上 realtime 只有 1 次、级联那 3 次是**另一天**跑的，
+它完全可能只是噪声。
+
+真正能体现"少一跳"的是**完整一轮**（候选人说完 → 面试官出声）：
+
+```
+级联      音频 → STT → 文本 → LLM → 文本 → TTS → 音频      STT 在关键路径上
+realtime  音频 →        模型       → 文本 → TTS → 音频      STT 只在旁路，供转写用
+```
+
+结构上确实少一跳。
+
+---
+
 ## 5. 一句话决策树
 
 ```
