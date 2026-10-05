@@ -124,6 +124,44 @@ HTTP 网关)。这是独立的大 epic,**不在 v1 范围**,仅在 §12 作为�
 
 ---
 
+## 4.1 owner 决定(2026-10-05):一个模型值,四处统一吃
+
+> owner 原话:"还是需要把这个模型,自己默认的,还是自己的,都统一使用这个模型来做。"
+
+**决定:不新增"语音专用模型"字段。** 配置里仍然只有**一个**模型值(`model_or_deployment`),
+无论它是平台原生模型(如 `gpt-5-mini`)还是客户自己的 deployment,**四个消费端都吃同一个值**:
+
+| 消费端 | 吃自有 deployment 吗 | 解析链 | 代码 |
+| --- | --- | --- | --- |
+| judge(judged 模式的 wait/nudge) | ✅ 本来就吃(Foundry Responses API 的 `model=` 就是部署名) | master `model_or_deployment` → env `FOUNDRY_AGENT_MODEL` → 默认 | `judge.py:376` → `registry.py:103/83` → `config_overlay.py:49` |
+| 评估 / 打分(含 checklist、SOP 覆盖) | ✅ 同上,**与 judge 同一个 adapter 实例、必然同模型** | 同上 | `scoring_service.py:299`、`checklist_service.py:123`、`sop_coverage.py:111` |
+| Foundry agent 的底层模型 | ✅ 吃 | `persona.model` → 上面那条链 | `azure_agent_sync.py:127`(**同步时**写进 Foundry,非连接时传) |
+| Voice Live `model=` | ❌ **唯一不吃** → 本功能要修的就是它 | `persona.model` → master → env `VOICE_LIVE_DEFAULT_MODEL` | `voice_live_ws.py:41-52`、`:158-166`(**每次建连**读 DB) |
+
+**所以本功能的定位被这条决定收窄得更干净了:不是"再加一个模型字段",而是"让第四个消费端也能吃同一个值"。**
+前三处早就吃自有 deployment —— 把一个自有部署名填进 admin,三处正确、只有语音腿报
+"not supported in this region"。统一的办法只有 BYOM(路径②)。
+
+**这条决定关掉与留下的:**
+
+- ✅ **关掉**:新增第二个"Voice Live 专用模型"字段这一选项(曾是最省事的绕法)。统一诉求否决它。
+- ✅ **关掉**:§9 方案 C(从名字推断 profile)——统一模型值不等于能推断协议,仍需显式声明(model-support §3.2.1 追问二)。
+- ⚠️ **仍需要一个伴随标志(不是第二个模型)**:`model_mode`(native|byom) + `byom_profile`。它回答的是
+  **"怎么连"**,不是"连什么";模型名依旧只有一个。这正是 §10 影响面里那两列。
+- 🔓 **未被这条决定关掉**:§12 的 #1(范围 A vs B)、#2(全局单档 vs 逐层)。"四处吃同一个值"讲的是
+  **消费端统一**,并没有说要取消 per-persona 的模型覆盖能力。
+
+**必须一并承认的三个后果(不藏):**
+
+1. **统一值一旦是客户自有 deployment,Voice Live 就必须走 BYOM**,于是吃到 §11 的两条硬约束:
+   必须是 Microsoft Foundry 资源(普通 Speech 资源不支持)+ Entra 下 Foundry MI 需有该 deployment 权限。
+2. **若该 deployment 是 chat 模型(预计 99%),语音腿变成级联**:STT/TTS 仍由 Voice Live 做,多一层拼接
+   延迟,拿不到 realtime 直通(model-support §3.2)。
+3. **这不提升"面试质量"**:候选人面试里 Voice Live 恒为一张嘴(`create_response=False`),模型不推理。
+   统一买到的是**治理 / 计费 / 内容安全口径一致**,不是更强的面试官。想让模型真的主导面试仍是范围 B。
+
+---
+
 ## 5. 功能目标(v1 = 范围 A)
 
 1. admin 能**显式声明**:当前配置的 model 是**原生内置**(路径①,默认,保持现状)还是**客户自带部署 BYOM**(路径②)。
@@ -252,7 +290,10 @@ else:
 ## 12. 开放设计决策(待 owner / 客户拍板)
 
 1. **范围 A vs B(§4)**:v1 只做"连接兼容"(推荐),还是要一并做"自带模型真正当面试大脑"(大 epic)?
+   **此项需向客户确认,不由实现方默认**——A/B 的事实差别(A 不动架构 / B 动架构)已在 §4 写清,
+   但"客户到底想要哪一层"取决于其意图(只想消错 / 要治理计费归自己 / 要模型真的主导面试),实现方无从代答。
 2. **作用域 A vs B(§9)**:全局单档(推荐)还是逐层 per-persona?客户是否需要混用原生/BYOM?
+   注:§4.1 的"一个模型值四处统一"**没有**关掉这一项——它统一的是消费端,不是取消 per-persona 覆盖。
 3. **客户实际用哪种 deployment**:是 chat-completion(默认)、realtime,还是 Foundry 上的 Claude?直接决定默认 profile 是否要改。
 4. **checkbox 落点**:只在全局卡片(方案 A),还是也进 per-persona 编辑器(方案 B)?
 5. **是否暴露 `foundry_resource_override`**:v1 是否支持跨资源 BYOM,还是先只支持同资源、把跨资源留到后续。
