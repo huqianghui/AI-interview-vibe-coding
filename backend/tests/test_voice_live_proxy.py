@@ -579,3 +579,35 @@ def test_the_realtime_session_differs_from_the_shipped_one_in_exactly_one_field(
     assert {
         k for k in set(realtime_td) | set(cascaded_td) if realtime_td.get(k) != cascaded_td.get(k)
     } == {"end_of_utterance_detection"}
+
+
+def test_a_voice_that_azure_did_not_apply_is_reported():
+    """The guard for the silence that took hours to find (model-support §4.12).
+
+    A session whose `voice` never took effect says nothing and reports nothing: on a cascaded
+    pipeline Azure quietly substitutes a TTS voice so no symptom appears, and on a speech-to-speech
+    model the audio becomes the model's own, which leaves a `pre_generated_assistant_message` read
+    with no TTS to run — answered as `response.text.delta`, with zero error frames, while the avatar
+    keeps animating. One log line is worth more than any amount of re-reading the diff.
+    """
+    from app.services.voice_live_proxy import applied_voice_mismatch
+
+    sent = {"type": "azure-standard", "name": "en-US-AvaNeural", "rate": "1.0"}
+    # The exact shape measured on the stale process: the model's own voice came back instead.
+    problem = applied_voice_mismatch(sent, {"type": "openai", "name": "marin"})
+    assert "azure-standard/en-US-AvaNeural" in problem
+    assert "openai/marin" in problem
+
+    # Dropped entirely is the same failure, and must not read as "matched".
+    assert applied_voice_mismatch(sent, None)
+
+    # The happy path is silent, and extra fields Azure fills in are not a mismatch.
+    assert (
+        applied_voice_mismatch(
+            sent,
+            {"type": "azure-standard", "name": "en-US-AvaNeural", "pitch": None, "style": None},
+        )
+        == ""
+    )
+    # A session that asked for nothing cannot have its wish denied.
+    assert applied_voice_mismatch(None, {"type": "openai", "name": "marin"}) == ""

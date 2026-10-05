@@ -35,8 +35,9 @@
   <path class="edge" d="M600 176 L600 196"/>
 
   <!-- four cells -->
-  <path class="edge" d="M600 278 L600 300 L300 300 L300 326"/>
-  <path class="edge" d="M600 278 L600 300 L900 300 L900 326"/>
+  <!-- routed off-centre so they do not cut through the column headings -->
+  <path class="edge" d="M600 278 L600 300 L170 300 L170 332"/>
+  <path class="edge" d="M600 278 L600 300 L1030 300 L1030 332"/>
 
   <text x="300" y="320" class="tt" text-anchor="middle">级联(chat 模型,如 gpt-5-mini)</text>
   <text x="900" y="320" class="tt" text-anchor="middle">语音到语音(gpt-realtime-*)</text>

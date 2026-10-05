@@ -406,6 +406,41 @@ def build_avatar_session(
     return RequestSession(**session_kwargs)  # type: ignore[arg-type]
 
 
+def applied_voice_mismatch(sent: Any, applied: Any) -> str:
+    """Did Azure actually apply the voice we asked for? Returns a message, or "" when it matches.
+
+    Why this exists, measured 2026-10-05: a session whose ``voice`` never took effect is **silent
+    in the worst possible way**. On a cascaded pipeline Azure quietly fills in a TTS voice, so
+    nothing looks wrong; on a speech-to-speech model the audio becomes the model's own
+    (``openai/marin``), and then a ``pre_generated_assistant_message`` read — which exists precisely
+    to have the SERVER speak exact text — has no TTS to run. Azure answers it with
+    ``response.text.delta``, emits **no error frame at all**, and the picture keeps animating while
+    nothing is said. The frontend watchdog then retries three times and gives up. Hours went into
+    that silence (docs/voice-live-model-support.md §4.12); this check turns it into one log line.
+
+    Compares only what the product sets and cares about — the voice TYPE and NAME. Everything else
+    in the echo (nulls Azure fills in, field order) is noise.
+    """
+
+    def _pair(voice: Any) -> tuple[str, str]:
+        if voice is None:
+            return "", ""
+        data = dict(voice) if hasattr(voice, "keys") else {}
+        return str(data.get("type") or ""), str(data.get("name") or "")
+
+    want_type, want_name = _pair(sent)
+    got_type, got_name = _pair(applied)
+    if not want_type and not want_name:
+        return ""  # we asked for nothing, so nothing can be wrong
+    if (want_type, want_name) == (got_type, got_name):
+        return ""
+    return (
+        f"session.voice was NOT applied: sent {want_type or '?'}/{want_name or '?'}, "
+        f"Azure applied {got_type or '(none)'}/{got_name or '(none)'} — a pre-generated read will "
+        "not be synthesised on a speech-to-speech model, and Azure reports no error"
+    )
+
+
 async def _resolve_voice_live_credential(api_key: str) -> tuple[Any, bool]:  # pragma: no cover
     """Entra-first, API-key-fallback credential resolution (mirrors ``azure_auth`` elsewhere).
 
@@ -614,7 +649,7 @@ async def run_proxy(
                 )
             )
 
-            await _relay(ws, conn, ConnectionClosed)
+            await _relay(ws, conn, ConnectionClosed, session.get("voice"))
     except ConnectionClosed:
         logger.info("Voice Live proxy: Azure connection closed")
     except WebSocketDisconnect:
@@ -622,12 +657,12 @@ async def run_proxy(
 
 
 async def _relay(
-    ws: WebSocket, conn: Any, connection_closed: type
+    ws: WebSocket, conn: Any, connection_closed: type, sent_voice: Any = None
 ) -> None:  # pragma: no cover — live relay
     """Run the two forwarding loops; return as soon as either side ends."""
     tasks = [
         asyncio.create_task(_forward_client_to_azure(ws, conn, connection_closed)),
-        asyncio.create_task(_forward_azure_to_client(conn, ws, connection_closed)),
+        asyncio.create_task(_forward_azure_to_client(conn, ws, connection_closed, sent_voice)),
     ]
     _, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
     for task in pending:
@@ -685,12 +720,27 @@ async def _forward_client_to_azure(
 
 
 async def _forward_azure_to_client(
-    conn: Any, ws: WebSocket, connection_closed: type
+    conn: Any,
+    ws: WebSocket,
+    connection_closed: type,
+    sent_voice: Any = None,
 ) -> None:  # pragma: no cover — live relay
-    """Azure -> browser: forward every server event (incl. avatar ICE/SDP) as JSON text."""
+    """Azure -> browser: forward every server event (incl. avatar ICE/SDP) as JSON text.
+
+    Also checks the first ``session.updated`` against the voice we asked for — see
+    :func:`applied_voice_mismatch` for the silence that check exists to make audible.
+    """
+    checked_voice = False
     try:
         async for event in conn:
             event_dict = event.as_dict() if hasattr(event, "as_dict") else dict(event)
+            if not checked_voice and str(event_dict.get("type", "")).endswith("session.updated"):
+                checked_voice = True
+                problem = applied_voice_mismatch(
+                    sent_voice, (event_dict.get("session") or {}).get("voice")
+                )
+                if problem:
+                    logger.warning("Voice Live proxy: %s", problem)
             await ws.send_text(json.dumps(event_dict))
     except connection_closed:
         logger.debug("Voice Live proxy: Azure->client forwarding stopped (Azure closed)")
