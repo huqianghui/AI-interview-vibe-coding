@@ -3,6 +3,7 @@ cross-language path, retry-on-incomplete, and end-to-end scoring through the sta
 
 import asyncio
 import json
+import re
 
 import pytest
 
@@ -273,9 +274,16 @@ async def test_retry_re_asks_only_the_missing_items_and_keeps_the_partial_answer
     assert len(result.items) == len(items)
     assert len(llm.prompts) == 2
     # The retry prompt carries ONLY the missing item, so the model cannot omit what it never saw.
+    # Asserted on the checklist BLOCK rather than on the item's id: since v0.45.0.0 the prompt
+    # numbers items 1..N instead of printing their 36-char UUIDs, so an id-substring check would
+    # test the id format rather than the claim.
     retry = llm.prompts[1]
-    assert dropped in retry
-    assert sum(1 for it in items if it.id in retry) == 1
+    item_lines = re.findall(r"^\[\d+\] \(", retry, re.MULTILINE)
+    assert len(item_lines) == 1, f"retry should re-ask exactly one item, got {len(item_lines)}"
+    dropped_text = next(it.text for it in items if it.id == dropped)
+    assert dropped_text in retry
+    # And the ids themselves are gone from the prompt — that is the point of the change.
+    assert not any(it.id in retry for it in items)
 
 
 @pytest.mark.asyncio
@@ -514,3 +522,154 @@ async def test_concurrency_divisor_splits_the_questions_into_generations(monkeyp
     assert state_machine.scoring_concurrency(1) == 1  # never zero
     monkeypatch.setattr(state_machine, "SCORING_CONCURRENCY_DIVISOR", 3)
     assert state_machine.scoring_concurrency(9) == 3
+
+
+# --- ordinal item ids in the judging prompt (v0.45.0.0) --------------------
+#
+# RCA for `scoring_failed`: the prompt used to print each checklist item's 36-char UUID and require
+# the model to echo it verbatim, up to 17 of them per call. One wrong character and that item
+# counted as unjudged while the mistyped id counted as invented; with only two attempts the question
+# could end up unscored. Items are numbered 1..N now and mapped back in code.
+
+
+def test_the_prompt_numbers_items_and_never_prints_their_ids():
+    rubric = [
+        scoring_engine.RubricItem(
+            item_id="11111111-2222-3333-4444-555555555555",
+            kind="required",
+            text="does X",
+            weight=50,
+        ),
+        scoring_engine.RubricItem(
+            item_id="66666666-7777-8888-9999-000000000000",
+            kind="forbidden",
+            text="does Z",
+            weight=0,
+        ),
+    ]
+    prompt = scoring_service._build_scoring_prompt("Q?", "A", rubric)
+    assert "[1] (required) does X" in prompt
+    assert "[2] (forbidden) does Z" in prompt
+    for it in rubric:
+        assert it.item_id not in prompt
+
+
+def test_an_ordinal_answer_resolves_to_the_right_item():
+    rubric = [
+        scoring_engine.RubricItem(item_id="uuid-a", kind="required", text="A", weight=50),
+        scoring_engine.RubricItem(item_id="uuid-b", kind="required", text="B", weight=50),
+    ]
+    # "[1]" FIRST because it is what the live model actually sends: gpt-5-mini copies the token as
+    # printed in the prompt, brackets included. A bare-digits pattern shipped green here (the mock
+    # adapter's regex captures the bracket contents, so it only ever answers "1") and then failed
+    # 3 of 3 items on every attempt against real Azure.
+    assert scoring_service._resolve_item_id("[1]", rubric) == "uuid-a"
+    assert scoring_service._resolve_item_id("[2]", rubric) == "uuid-b"
+    assert scoring_service._resolve_item_id("1", rubric) == "uuid-a"
+    assert scoring_service._resolve_item_id(2, rubric) == "uuid-b"
+    assert scoring_service._resolve_item_id(" #2 ", rubric) == "uuid-b"
+    assert scoring_service._resolve_item_id("2.", rubric) == "uuid-b"
+    # A model that echoes the real id anyway is still honoured rather than discarded.
+    assert scoring_service._resolve_item_id("uuid-b", rubric) == "uuid-b"
+    # Out of range, or not in this checklist at all: dropped, NEVER mapped to a neighbour.
+    assert scoring_service._resolve_item_id("0", rubric) is None
+    assert scoring_service._resolve_item_id("3", rubric) is None
+    assert scoring_service._resolve_item_id("[3]", rubric) is None
+    assert scoring_service._resolve_item_id("12x", rubric) is None
+    assert scoring_service._resolve_item_id("[]", rubric) is None
+    assert scoring_service._resolve_item_id("uuid-ghost", rubric) is None
+    assert scoring_service._resolve_item_id("", rubric) is None
+
+
+@pytest.mark.asyncio
+async def test_a_retrys_renumbering_lands_on_the_item_it_re_asked(db_session, monkeypatch):
+    """The retry re-asks only what is pending, so it renumbers from 1 — and "1" on attempt two is a
+    DIFFERENT item than "1" on attempt one.
+
+    This is the failure mode the ordinal scheme could introduce and the UUID scheme could not:
+    mapping attempt two's "1" against the full rubric would attribute the judgment to the wrong
+    checklist item and score the answer against the wrong requirement, silently.
+    """
+    q = await _question_with_checklist(db_session)
+    checklist = await checklist_service.get_default_checklist(db_session, q.id)
+    items = await checklist_service.list_items(db_session, checklist.id)
+    assert len(items) >= 2, "fixture needs a multi-item checklist to drop one"
+    last = items[-1]
+
+    class _OmitsTheLast:
+        name = "omits-last"
+
+        def __init__(self):
+            self.calls = 0
+
+        async def complete(self, prompt, *, json_mode=False):
+            self.calls += 1
+            if self.calls == 1:
+                # Judge every item EXCEPT the last, by ordinal.
+                judged = [
+                    {
+                        "item_id": str(n),
+                        "judgment": "met",
+                        "rationale": "first pass",
+                        "answer_quote": "q",
+                    }
+                    for n in range(1, len(items))
+                ]
+            else:
+                # The sole pending item is renumbered to 1 on this attempt.
+                judged = [
+                    {
+                        "item_id": "1",
+                        "judgment": "not_met",
+                        "rationale": "second pass",
+                        "answer_quote": "q",
+                    }
+                ]
+            return json.dumps({"judgments": judged})
+
+        async def stream(self, prompt):
+            yield ""
+
+    llm = _OmitsTheLast()
+    monkeypatch.setattr(scoring_service, "get_llm_adapter", lambda name=None: llm)
+
+    result = await scoring_service.score_answer_against_checklist(
+        db_session, question_id=q.id, question_text=q.text, answer_text="a long enough answer"
+    )
+    assert llm.calls == 2
+    assert len(result.items) == len(items)
+    by_id = {it.item_id: it for it in result.items}
+    # The retry's judgment is on the item it re-asked — not on rubric position 1.
+    assert by_id[last.id].rationale == "second pass"
+    assert by_id[items[0].id].rationale == "first pass"
+
+
+@pytest.mark.asyncio
+async def test_an_out_of_range_ordinal_is_dropped_not_mismapped(db_session, monkeypatch):
+    """A number the model was never given is discarded; the rest of the question still scores."""
+    q = await _question_with_checklist(db_session)
+    checklist = await checklist_service.get_default_checklist(db_session, q.id)
+    items = await checklist_service.list_items(db_session, checklist.id)
+
+    class _InventsANumber:
+        name = "invents"
+
+        async def complete(self, prompt, *, json_mode=False):
+            judged = [
+                {"item_id": str(n), "judgment": "met", "rationale": "r", "answer_quote": "q"}
+                for n in range(1, len(items) + 1)
+            ]
+            judged.append(
+                {"item_id": "99", "judgment": "violated", "rationale": "ghost", "answer_quote": "g"}
+            )
+            return json.dumps({"judgments": judged})
+
+        async def stream(self, prompt):
+            yield ""
+
+    monkeypatch.setattr(scoring_service, "get_llm_adapter", lambda name=None: _InventsANumber())
+    result = await scoring_service.score_answer_against_checklist(
+        db_session, question_id=q.id, question_text=q.text, answer_text="a long enough answer"
+    )
+    assert len(result.items) == len(items)
+    assert all(it.rationale != "ghost" for it in result.items)

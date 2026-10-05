@@ -110,6 +110,9 @@ export const resources = {
       },
       transition: {
         scoring: "Scored {{n}} of {{total}} answers against the SOP…",
+        // The opt-in coverage audit's own line. It runs AFTER every answer is graded, so without it
+        // the screen sat on "9 of 9 scored" for the length of the audit with nothing moving.
+        coverage: "Auditing SOP coverage — {{n}} of {{total}} checked…",
         reportReady: "Your report is ready.",
       },
       report: {
@@ -121,12 +124,25 @@ export const resources = {
         openingSource: "Opening…",
         openSourceFailed: "Couldn't open the source document.",
         candidateAnswer: "Candidate answer",
-        showDetail: "Show detailed breakdown",
-        hideDetail: "Hide detailed breakdown",
         questionN: "Question {{n}}",
         questionsScored: "{{count}} questions scored",
-        moreQuestions: "{{count}} more questions",
         weight: "weight",
+        // NOT SCORED is not zero. A question whose grading failed is excluded from the total
+        // entirely (P7: nobody judged it, so there is no basis for a number) — and the UI used to
+        // render it as "0/100", which is the one reading the backend deliberately refuses.
+        notScored: "Not scored",
+        notScoredNote:
+          "This question could not be scored, so it is left out of the total above — it is not counted as zero.",
+        unscoredBanner:
+          "{{count}} question(s) could not be scored. They are excluded from the score above, not counted as zero.",
+        // A checklist item's kind. Translated rather than printed raw: the detail list used to show
+        // the backend slug ("required"/"forbidden") verbatim, which read as English debris in zh-CN
+        // and is now on the primary card instead of a buried grey line.
+        itemKind: {
+          required: "Required",
+          recommended: "Recommended",
+          forbidden: "Forbidden",
+        },
         judgment: {
           met: "Met",
           partially_met: "Partially met",
@@ -163,9 +179,12 @@ export const resources = {
         consequence: "Scoring takes about a minute. You can't change your answers afterwards.",
         action: "Submit & evaluate",
         // Feature D opt-in: default off. Ticking it runs an advisory SOP-coverage audit.
+        // What this audit is, in the one sentence a candidate needs: it examines the RUBRIC, not
+        // their answers. "SOP coverage check" alone reads like a stricter grading pass, which is the
+        // opposite of what it does — its prompt is not even given the candidate's answer.
         sopCoverageCheck: {
-          label: "Also run an SOP coverage check",
-          hint: "Optional. Compares your checklist against the original SOP and flags points it may not cover — added to the report for reference only. It does not affect your score and takes a little longer.",
+          label: "Also audit the rubric against the SOP",
+          hint: "Optional, and it does not grade your answers. It compares this interview's rubric against the original SOP text and lists SOP requirements the rubric may not cover — a note for whoever maintains the questions. Your score is computed from the rubric alone either way; this only appends a reference section to the report, and takes a little longer.",
         },
       },
       // Admin surfaces (/admin, /admin/agent). Single-language: driven by the header selector, so
@@ -367,6 +386,7 @@ export const resources = {
       },
       transition: {
         scoring: "已按 SOP 评完 {{n}} / {{total}} 个回答…",
+        coverage: "正在核对 SOP 覆盖情况 —— 已完成 {{n}} / {{total}}…",
         reportReady: "你的报告已就绪。",
       },
       report: {
@@ -377,12 +397,17 @@ export const resources = {
         openingSource: "打开中…",
         openSourceFailed: "无法打开来源文件。",
         candidateAnswer: "候选人回答",
-        showDetail: "展开详细拆解",
-        hideDetail: "收起详细拆解",
         questionN: "第 {{n}} 题",
         questionsScored: "已评测 {{count}} 道题",
-        moreQuestions: "还有 {{count}} 道题",
         weight: "权重",
+        notScored: "未评分",
+        notScoredNote: "这道题没能完成评分，因此不计入上面的总分 —— 它不等于 0 分。",
+        unscoredBanner: "有 {{count}} 道题没能完成评分。它们被排除在上面的分数之外，不是按 0 分计算。",
+        itemKind: {
+          required: "必答",
+          recommended: "加分",
+          forbidden: "禁止",
+        },
         judgment: {
           met: "达标",
           partially_met: "部分达标",
@@ -416,8 +441,8 @@ export const resources = {
         action: "提交并评测",
         // 功能 D 可选项:默认关闭。勾选后额外做一次 SOP 原文覆盖度体检(仅作提示)。
         sopCoverageCheck: {
-          label: "同时进行 SOP 原文覆盖度体检",
-          hint: "可选项。将本次评价标准与 SOP 原文比对,标出可能未覆盖的要点,追加到报告中仅供参考。不影响你的评分,且会略微增加耗时。",
+          label: "同时核对评分标准与 SOP 原文",
+          hint: "可选项，而且它不评价你的回答。它把本次面试的评分标准和 SOP 原文做比对，列出标准可能没覆盖到的 SOP 要求，供维护题库的人参考。你的分数始终只由评分标准算出，勾选它只会在报告末尾追加一节参考信息，并多花一点时间。",
         },
       },
       // 管理端(/admin、/admin/agent)。单语:由页头语言选择器驱动,选中文时只显示中文

@@ -237,6 +237,44 @@ describe("getReportStream", () => {
     expect(new Headers(init.headers).get("X-Anon-Session")).toBe("tok-stream");
   });
 
+  it("reports the coverage audit on its own callback, with its own smaller total", async () => {
+    // The audit runs after grading and has a different denominator: only a question with a linked
+    // SOP passage costs a call. Two questions scored, one audited. Heartbeat pings carry nothing and
+    // must not be mistaken for progress.
+    vi.stubGlobal(
+      "fetch",
+      mockStreamFetch([
+        '{"type":"progress","done":2,"total":2,"question_id":"q2"}\n',
+        '{"type":"coverage","done":0,"total":1}\n',
+        '{"type":"ping","done":0,"total":1}\n',
+        `{"type":"coverage","done":1,"total":1,"question_id":"q1"}\n${reportLine}\n`,
+      ]),
+    );
+
+    const scoring: Array<{ done: number; total: number }> = [];
+    const coverage: Array<{ done: number; total: number }> = [];
+    const report = await getReportStream(
+      "iv1",
+      true,
+      (p) => scoring.push(p),
+      (c) => coverage.push(c),
+    );
+
+    expect(scoring.map((p) => `${p.done}/${p.total}`)).toEqual(["2/2"]);
+    expect(coverage.map((c) => `${c.done}/${c.total}`)).toEqual(["0/1", "1/1"]);
+    expect(report.status).toBe("scored");
+  });
+
+  it("ignores an unknown line type rather than failing the stream", async () => {
+    // Forward compatibility: the backend may add event types (it added "coverage" in v0.45.0.0),
+    // and an older frontend must still get its report.
+    vi.stubGlobal(
+      "fetch",
+      mockStreamFetch([`{"type":"something_new","x":1}\n${reportLine}\n`]),
+    );
+    await expect(getReportStream("iv1")).resolves.toMatchObject({ status: "scored" });
+  });
+
   it("rejects on an in-band error line", async () => {
     vi.stubGlobal(
       "fetch",

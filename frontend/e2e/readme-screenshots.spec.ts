@@ -135,9 +135,34 @@ test("capture candidate flow: idle → orientation → interview → review → 
   await expect(page.getByTestId("score-gauge")).toBeVisible();
   await page.screenshot({ path: `${OUT}/05-report-executive.png`, fullPage: true });
 
-  await page.getByTestId("toggle-detail").click();
+  // The detail shot now means "every question expanded", not "the gate clicked": there is no gate,
+  // and what this image has to document is that all questions get the same side-by-side card.
   await expect(page.getByTestId("report-detail")).toBeVisible();
-  await page.screenshot({ path: `${OUT}/06-report-detail.png`, fullPage: true });
+  // `button[aria-expanded]` and NOT "any button in the accordion": each expanded item carries its
+  // own `sop-source-link` button, so the looser selector matches items instead of headers — which
+  // is how the first attempt at this produced a detail screenshot identical to the executive one.
+  const headers = page.locator('[data-testid="report-detail"] button[aria-expanded]');
+  const headerCount = await headers.count();
+  const itemsBefore = await page.getByTestId("report-item").count();
+  for (let i = 1; i < headerCount; i++) await headers.nth(i).click();
+  // Prove the expansion actually RENDERED. `aria-expanded` alone is not proof: it flipped to "true"
+  // on a run whose detail screenshot was still byte-identical to the executive one.
+  // Prove the expansion actually RENDERED, by item count. `aria-expanded` is not proof: it flipped
+  // to "true" on a run whose detail screenshot was still byte-identical to the executive one.
+  const itemsAfter = await page.getByTestId("report-item").count();
+  if (headerCount > 1) expect(itemsAfter).toBeGreaterThan(itemsBefore);
+
+  // ELEMENT screenshot, deliberately — this is the one README image that is the content column
+  // rather than the whole 1440px page, because `fullPage` cannot capture this screen.
+  //
+  // The report sits inside the shell's own box, so `document.body` does not grow when a question
+  // expands: measured at 2150px both before and after seven more cards rendered. `fullPage` follows
+  // the body, so it silently clipped everything past roughly one viewport and the detail capture kept
+  // coming out the same height as the executive one no matter how many sections were open — twice,
+  // including once while an `aria-expanded` assertion passed. Growing the viewport to the report's
+  // bounding box first does not fix it either (measured: +88px for six more cards). Screenshotting
+  // the element is the only form that actually contains the expanded report.
+  await page.getByTestId("report").screenshot({ path: `${OUT}/06-report-detail.png` });
 });
 
 test("capture admin: content workspace + rubric editor", async ({ page }) => {

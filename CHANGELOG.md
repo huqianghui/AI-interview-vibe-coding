@@ -1,5 +1,68 @@
 # Changelog
 
+## 0.45.0.0 (2026-10-05)
+
+### Fixed
+- **Ticking "SOP coverage" no longer freezes the scoring screen on "9 of 9 answers" for minutes with
+  nothing moving.** That line only ever reported answer GRADING. The opt-in audit runs afterwards and
+  emitted no event at all, so the only progress bar on screen was already at its maximum while the
+  work continued — and the audit was strictly serial, on a code comment's wrong claim that it was
+  "another DB call" when it ends in an LLM round-trip. It now runs every question at once (the same
+  shape grading uses), sends a 20-second heartbeat so the connection cannot idle out, and reports its
+  own progress on a second line: "Auditing SOP coverage — i of m checked". `m` is the number of model
+  round-trips the audit will actually make, not the question count — a question with no checklist or
+  no linked SOP passage costs no call — so the bar can never stall short of its total. Each call is
+  now bounded by the same 90 s budget the judge uses; before, its only bound was the OpenAI SDK
+  default (measured: read=600 s × 2 retries), far past the ingress idle timeout that turns a slow
+  report into a dead stream and makes the page silently re-score the whole interview from scratch.
+  Measured per call against live Azure: min 8.5 s, median 12.1 s, max 17.0 s (n=6).
+- **The coverage audit now reads every SOP document a question cites, not just the first.** Measured
+  on the default bank, 7 of the 9 checklists that cite a source cite TWO documents — so for most
+  questions the audit answered "does the rubric cover this SOP?" while silently ignoring the other
+  one, and a requirement living only in the ignored document could never be reported as uncovered.
+  The page label was also picked by a separate lookup, so it could come from a different item and
+  narrow the first document to a section that item never cited. Document and page are now paired per
+  item, and the passage budget is split across the cited documents with a per-document floor.
+- **A question whose grading failed no longer shows as 0/100.** The backend has always excluded such
+  a question from the score rather than scoring it zero — nobody judged that answer, so there is no
+  basis for calling it bad — and it sent both `scoring_failed` and `unscored_question_ids` to say so.
+  Nothing on the page read either field, so the one unjudged question was indistinguishable from a
+  genuinely zero one. It now reads "Not scored", explains inside the question that it is left out of
+  the total rather than counted as zero, and the report says how many questions could not be scored.
+  The same fabricated zero is gone from questions that have no checklist authored yet.
+
+### Changed
+- **Every question in the report now gets the side-by-side SOP-source-vs-answer cards.** They used to
+  go to ONE question — the first with both quotes — while the other eight got a plain italic-grey
+  text list, so the product's whole credibility claim rested on a single question. That question was
+  also the only one drawn twice, in two different visual languages, which read as a bug. There is now
+  one renderer for every question, the first question's section is open so the proof is on screen
+  without a click, and the "show detailed breakdown" gate is gone (its only job was hiding a wall of
+  plain text, and keeping it would have pushed the evidence below the fold). Checklist item kinds are
+  translated instead of printing the backend's `required` / `forbidden` slugs into a Chinese page.
+- **The judging prompt numbers checklist items `[1]`..`[N]` instead of printing their 36-char UUIDs.**
+  A question can carry up to 17 items (measured on the default bank), so every grading call asked the
+  model to transcribe 17 distinct UUIDs exactly; one wrong character left that item counted as
+  unjudged while the mistyped id counted as invented, and with only two attempts the question could
+  end up unscored. Ids are mapped back in code. The parse is deliberately permissive because the real
+  model's answer shape VARIES between calls on the same prompt — measured: `"item_id": "[1]"` (the
+  token copied verbatim) on one call and a bare `1` on the next.
+- The submit screen's SOP-coverage checkbox now says what the audit actually examines: the rubric, not
+  your answers. Its prompt is not even given the candidate's answer.
+
+### Added
+- **A CI job that fails when `VERSION` disagrees with the newest CHANGELOG entry.** VERSION silently
+  drifted four releases: 0.43.0.0, 0.43.1.0, 0.43.2.0 and 0.44.0.0 each shipped a CHANGELOG entry and
+  a versioned PR title while the file sat at 0.42.7.0, so the repo's declared version disagreed with
+  its own release history and the next release was about to pick a number below four published ones.
+  Nothing caught it because nothing compared the two. This does, in two seconds, and it is the first
+  job in the workflow.
+- `docs/sop-coverage-audit.md` — what ticking the SOP checkbox actually evaluates (the rubric, not the
+  candidate), why binding each rubric item to a SOP quote cannot answer "did the rubric miss
+  anything", what the audit costs, and when it costs nothing.
+- `scripts/live_verify_sop_features.py` gained a section that proves every cited document reaches the
+  audit prompt and measures one audit call's wall clock (`--runs N`).
+
 ## 0.44.0.0 (2026-10-05)
 
 ### Added

@@ -19,7 +19,6 @@ import {
   AccordionPanel,
   Badge,
   Body1,
-  Button,
   Card,
   CardHeader,
   Link,
@@ -63,33 +62,43 @@ const useStyles = makeStyles({
     margin: `${tokens.spacingVerticalXS} 0 ${tokens.spacingVerticalM}`,
   },
   facts: { display: "flex", gap: tokens.spacingHorizontalS, flexWrap: "wrap", marginBottom: tokens.spacingVerticalM },
-  /** The evidence block, given the weight the credibility claim deserves. */
-  /** The ordinal eyebrow owns the gap that separates the block from the exec card above it. The
-   *  heading used to carry it, but putting the eyebrow in front left that XXL space BETWEEN the two
-   *  — eyebrow jammed against the card, loose from its own heading, the hierarchy inverted. */
-  evidenceOrdinal: {
-    display: "block",
+  /** One question's accordion header: ordinal eyebrow, the question itself, then its verdict.
+   *  Stacked rather than one run-on line — the prompt is a full sentence, and a verdict wedged
+   *  after it reads as part of the question. */
+  qHead: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "2px",
+    minWidth: 0,
+    paddingBlock: tokens.spacingVerticalXS,
+  },
+  qOrdinal: {
     fontFamily: fonts.display,
     fontSize: tokens.fontSizeBase200,
     fontWeight: 700,
     color: palette.magenta,
     letterSpacing: "0.02em",
-    marginTop: tokens.spacingVerticalXXL,
-    marginBottom: tokens.spacingVerticalXS,
   },
-  evidenceHead: {
+  qPrompt: {
     fontFamily: fonts.display,
     fontWeight: 700,
-    fontSize: tokens.fontSizeBase500,
-    letterSpacing: "-0.02em",
+    fontSize: tokens.fontSizeBase400,
+    lineHeight: tokens.lineHeightBase400,
+    letterSpacing: "-0.015em",
     color: palette.ink,
-    // No top margin: the eyebrow above supplies the separation when it is rendered, and when it is
-    // not (an older report with no prompt) this heading needs it instead — hence the sibling rule.
-    margin: `0 0 ${tokens.spacingVerticalM}`,
   },
-  /** Fallback for a report with no question text: the heading stands alone, so it takes the gap. */
-  evidenceHeadAlone: { marginTop: tokens.spacingVerticalXXL },
-  evidenceList: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalL },
+  qVerdict: {
+    fontFamily: fonts.display,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+  },
+  /** The cards inside one question's panel. */
+  itemList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalL,
+    paddingBlock: tokens.spacingVerticalM,
+  },
   itemCard: {
     backgroundColor: tokens.colorNeutralBackground1,
     borderRadius: tokens.borderRadiusXLarge,
@@ -118,6 +127,9 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalL,
     "@media (max-width: 900px)": { gridTemplateColumns: "1fr" },
   },
+  /** An item can be judged with only one usable span; the lone panel takes the full width rather
+   *  than sitting stranded in half of a two-column grid. */
+  pairOne: { gridTemplateColumns: "1fr" },
   sopPanel: {
     padding: tokens.spacingVerticalL,
     borderRadius: tokens.borderRadiusLarge,
@@ -146,14 +158,6 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
   },
   sopQuote: { fontStyle: "italic" },
-  detailRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalL,
-    flexWrap: "wrap",
-    marginTop: tokens.spacingVerticalXL,
-  },
-  detailNote: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 },
   outcomeHead: { display: "flex", alignItems: "baseline", gap: "8px", marginBottom: "4px" },
   outcomeLabel: { color: tokens.colorNeutralForeground3 },
   warning: {
@@ -193,15 +197,6 @@ const useStyles = makeStyles({
     background: tokens.colorNeutralBackground2,
   },
   quoteLabel: { color: tokens.colorNeutralForeground3, display: "block", marginBottom: "4px" },
-  itemRow: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "4px",
-    padding: "8px 0",
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-  },
-  itemHead: { display: "flex", gap: "8px", alignItems: "center" },
-  quote: { color: tokens.colorNeutralForeground2, fontStyle: "italic" },
   // Feature D (opt-in): the advisory "SOP points the checklist may not cover" panel. Neutral
   // styling — it is reference-only and explicitly does NOT affect the score, so it must not read as
   // a failure. Sits below the scored detail.
@@ -235,33 +230,6 @@ const JUDGMENT_COLOR: Record<string, "success" | "warning" | "danger" | "subtle"
 /** The backend tags an advisory (CONFLICT-001) disclosure with this stable English prefix so it can
  * be told apart from a hard critical-error warning regardless of the display locale. */
 const ADVISORY_PREFIX = "Advisory item disclosed";
-
-/**
- * The side-by-side proof that the RAG is real (P14), now a question's worth of it rather than one
- * pair. Returns the first question that has any item carrying BOTH quotes, with those items.
- *
- * Capped at three items: this block is the executive view's evidence, and a rubric with eight
- * items would turn the headline screen into the detail screen. The rest stays behind the existing
- * "show detailed breakdown" toggle, which is unchanged.
- *
- * NOTE: `QuestionScore` carries no question TEXT — the report payload has `question_id` only — so
- * this block can label itself "Question N" and nothing more. Showing the prompt here needs a
- * backend field; filed in TODOS.md rather than faked.
- */
-const EVIDENCE_ITEM_CAP = 3;
-
-function firstEvidenceGroup(
-  report: Report,
-): { index: number; question: QuestionScore; items: ScoredItem[] } | null {
-  for (let i = 0; i < report.per_question.length; i++) {
-    const q = report.per_question[i];
-    const items = (q.items ?? []).filter((it) => it.source_quote && it.answer_quote);
-    if (items.length > 0) {
-      return { index: i, question: q, items: items.slice(0, EVIDENCE_ITEM_CAP) };
-    }
-  }
-  return null;
-}
 
 /**
  * The report's SOP-source label. When the cited item carries a ``source_document_id`` we render the
@@ -332,10 +300,76 @@ function SopSourceLink({
   );
 }
 
+/**
+ * One judged checklist item, rendered as the side-by-side proof the whole report is built on: the
+ * SOP sentence it was measured against beside the candidate's own words (P14).
+ *
+ * ONE renderer, used for every question. Until v0.45.0.0 this shape was reserved for a single
+ * "evidence" question above the fold while the other eight got a plain italic-grey text list — so
+ * the product's entire credibility claim landed on question 1 only, and question 1 was also the
+ * only one drawn twice (once here, once in the accordion). Both oddities were the same defect:
+ * two renderers for one kind of content.
+ *
+ * A panel is omitted when its quote is absent (an item can be judged with no usable span), and the
+ * grid collapses to one column so the remaining panel is not stranded at half width.
+ */
+function ScoredItemCard({
+  interviewId,
+  item,
+}: {
+  interviewId: string;
+  item: ScoredItem;
+}) {
+  const styles = useStyles();
+  const { t } = useTranslation();
+  const both = Boolean(item.source_quote) && Boolean(item.answer_quote);
+  const any = Boolean(item.source_quote) || Boolean(item.answer_quote);
+
+  return (
+    <article className={styles.itemCard} data-testid="report-item">
+      <div className={styles.itemTop}>
+        <Badge color={JUDGMENT_COLOR[item.judgment] ?? "subtle"} appearance="tint">
+          {t(`report.judgment.${item.judgment}`)}
+        </Badge>
+        <Text size={200} className={styles.answerLabel}>
+          {t(`report.itemKind.${item.kind}`, { defaultValue: item.kind })} ·{" "}
+          {t("report.weight")} {item.weight}
+        </Text>
+        <span className={styles.itemSpacer} />
+        <Text size={200}>
+          <SopSourceLink interviewId={interviewId} item={item} />
+        </Text>
+      </div>
+      {item.rationale && <p className={styles.itemRationale}>{item.rationale}</p>}
+      {any && (
+        <div className={both ? styles.pair : mergeClasses(styles.pair, styles.pairOne)}>
+          {item.source_quote && (
+            <div className={styles.sopPanel}>
+              <span className={mergeClasses(styles.panelLabel, styles.sopLabel)}>
+                {t("report.sopSource")}
+              </span>
+              <Text className={mergeClasses(styles.panelQuote, styles.sopQuote)}>
+                &ldquo;{item.source_quote}&rdquo;
+              </Text>
+            </div>
+          )}
+          {item.answer_quote && (
+            <div className={styles.answerPanel}>
+              <span className={mergeClasses(styles.panelLabel, styles.answerLabel)}>
+                {t("report.candidateAnswer")}
+              </span>
+              <Text className={styles.panelQuote}>&ldquo;{item.answer_quote}&rdquo;</Text>
+            </div>
+          )}
+        </div>
+      )}
+    </article>
+  );
+}
+
 export function ReportView({ report }: { report: Report }) {
   const styles = useStyles();
   const { t } = useTranslation();
-  const [showDetail, setShowDetail] = useState(false);
 
   // Stub report (no checklist authored) → minimal list, pre-F4 shape.
   if (report.is_stub) {
@@ -357,7 +391,14 @@ export function ReportView({ report }: { report: Report }) {
     );
   }
 
-  const evidence = firstEvidenceGroup(report);
+  // The first question's section opens by default: the report's whole claim is that a judgement is
+  // traceable to an SOP sentence, and a reader should see one without hunting for the control.
+  const firstQuestionId = report.per_question[0]?.question_id;
+  // Prefer the per-question flag over the id list: both come from the same decision, and the flag is
+  // what the rows are actually rendered from, so the banner's count can never disagree with them.
+  const unscoredCount =
+    report.per_question.filter((q) => q.scoring_failed).length ||
+    (report.unscored_question_ids?.length ?? 0);
   const grade = report.grade ?? "F";
   const score = report.total_score ?? 0;
   const outcome = report.outcome ?? null;
@@ -369,7 +410,7 @@ export function ReportView({ report }: { report: Report }) {
   const criticalWarnings = warnings.filter((w) => !w.startsWith(ADVISORY_PREFIX));
 
   return (
-    <div className={styles.root}>
+    <div className={styles.root} data-testid="report">
       <p className={styles.kicker}>{t("report.title")}</p>
 
       {/* Executive band: the one-glance verdict on its own raised surface. */}
@@ -418,145 +459,88 @@ export function ReportView({ report }: { report: Report }) {
               {t("report.disclosureNote")}
             </div>
           ))}
+          {/* "N questions could not be scored." The backend has sent `unscored_question_ids` since
+              it learned to isolate a failed question, with a comment saying the report could now
+              say this instead of quietly averaging fewer questions than the candidate answered —
+              but no screen ever read the field, so the only trace was a silent "0/100" row. */}
+          {unscoredCount > 0 && (
+            <div className={styles.disclosure} data-testid="report-unscored">
+              {t("report.unscoredBanner", { count: unscoredCount })}
+            </div>
+          )}
           </div>
         </div>
       </section>
 
-      {/* The credibility claim, given room: every judgement beside the SOP sentence it was measured
-          against AND the candidate's own words (P14). This used to be a single quote pair; it is
-          now the first question's worth of them, capped at three.
+      {/* Every question, one renderer: each judgement beside the SOP sentence it was measured
+          against AND the candidate's own words (P14). Collapsible per question so a nine-question
+          report stays navigable, with the FIRST question open so that proof is on screen without a
+          click — the job the separate "evidence" block used to do by drawing question 1 twice.
 
-          The heading can only say "Question N" — `QuestionScore` carries no question text, the
-          report payload has `question_id` alone. Adding the prompt needs a backend field; it is in
-          TODOS.md rather than invented here. */}
-      {evidence && (
-        <>
-          {/* The report's whole claim is traceability, so the evidence block leads with the
-              question itself and keeps the ordinal as a small label above it. Older reports have no
-              `prompt`, so the ordinal is still the fallback rather than an empty heading. */}
-          {/* The ordinal is an eyebrow ONLY when the heading carries the question text. Without a
-              prompt (an older report) the heading IS the ordinal, and rendering both would print
-              "Question 1" twice. */}
-          {evidence.question.prompt && (
-            <span className={styles.evidenceOrdinal}>
-              {t("report.questionN", { n: evidence.index + 1 })}
-            </span>
-          )}
-          <h3
-            className={
-              evidence.question.prompt
-                ? styles.evidenceHead
-                : mergeClasses(styles.evidenceHead, styles.evidenceHeadAlone)
-            }
-          >
-            {evidence.question.prompt || t("report.questionN", { n: evidence.index + 1 })}
-          </h3>
-          <div className={styles.evidenceList} data-testid="report-evidence">
-            {evidence.items.map((it, ii) => (
-              <article key={ii} className={styles.itemCard}>
-                <div className={styles.itemTop}>
-                  <Badge
-                    color={JUDGMENT_COLOR[it.judgment] ?? "subtle"}
-                    appearance="tint"
-                  >
-                    {t(`report.judgment.${it.judgment}`)}
-                  </Badge>
-                  <Text size={200} className={styles.answerLabel}>
-                    {t("report.weight")} {it.weight}
-                  </Text>
-                  <span className={styles.itemSpacer} />
-                  <Text size={200}>
-                    <SopSourceLink
+          There is deliberately no "show detailed breakdown" gate any more. Its only job was to hide
+          a wall of plain-text items; the items are now cards inside collapsed sections, and keeping
+          the gate would have pushed the evidence below the fold, losing the one-glance proof. */}
+      <Accordion
+        collapsible
+        multiple
+        defaultOpenItems={firstQuestionId ? [firstQuestionId] : []}
+        data-testid="report-detail"
+      >
+        {report.per_question.map((q: QuestionScore, qi) => {
+          const ordinal = t("report.questionN", { n: qi + 1 });
+          const verdict = q.outcome ? t(`report.outcome.${q.outcome}`) : (q.grade ?? "");
+          // `Math.round(q.score ?? 0)` printed "0/100" for a question that HAS no score — one whose
+          // grading failed, or a stub with no checklist. The backend excludes both from the total
+          // rather than scoring them zero (P7), so showing a zero contradicted the number above it.
+          const hasScore = typeof q.score === "number";
+          return (
+            <AccordionItem value={q.question_id} key={q.question_id}>
+              <AccordionHeader>
+                <span className={styles.qHead}>
+                  {/* The ordinal is an eyebrow ONLY when the heading carries the question text.
+                      Without a prompt (an older report) the heading IS the ordinal, and rendering
+                      both would print "Question 1" twice. */}
+                  {q.prompt && <span className={styles.qOrdinal}>{ordinal}</span>}
+                  <span className={styles.qPrompt}>{q.prompt || ordinal}</span>
+                  <span className={styles.qVerdict}>
+                    {hasScore ? (
+                      <>
+                        {verdict ? `${verdict} · ` : ""}
+                        {Math.round(q.score as number)}/100
+                        {q.capped ? " ⚑" : ""}
+                      </>
+                    ) : (
+                      t("report.notScored")
+                    )}
+                  </span>
+                </span>
+              </AccordionHeader>
+              <AccordionPanel>
+                <div className={styles.itemList}>
+                  {/* A failed or stub question has no items, and an empty panel says nothing. The
+                      note is styled as a neutral disclosure, not a warning: grading failing is the
+                      system's problem, never the candidate's. */}
+                  {q.scoring_failed && (
+                    <div className={styles.disclosure} data-testid="question-not-scored">
+                      {t("report.notScoredNote")}
+                    </div>
+                  )}
+                  {q.is_stub && !q.scoring_failed && (
+                    <div className={styles.disclosure}>{t("stubNote")}</div>
+                  )}
+                  {(q.items ?? []).map((it, ii) => (
+                    <ScoredItemCard
+                      key={ii}
                       interviewId={report.interview_session_id}
                       item={it}
                     />
-                  </Text>
+                  ))}
                 </div>
-                {it.rationale && <p className={styles.itemRationale}>{it.rationale}</p>}
-                <div className={styles.pair}>
-                  <div className={styles.sopPanel}>
-                    <span className={mergeClasses(styles.panelLabel, styles.sopLabel)}>
-                      {t("report.sopSource")}
-                    </span>
-                    <Text className={mergeClasses(styles.panelQuote, styles.sopQuote)}>
-                      &ldquo;{it.source_quote}&rdquo;
-                    </Text>
-                  </div>
-                  <div className={styles.answerPanel}>
-                    <span className={mergeClasses(styles.panelLabel, styles.answerLabel)}>
-                      {t("report.candidateAnswer")}
-                    </span>
-                    <Text className={styles.panelQuote}>
-                      &ldquo;{it.answer_quote}&rdquo;
-                    </Text>
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-        </>
-      )}
-
-      {/* Detail view — progressively disclosed, behaviour unchanged. */}
-      <div className={styles.detailRow}>
-        <Button
-          appearance="secondary"
-          onClick={() => setShowDetail((v) => !v)}
-          data-testid="toggle-detail"
-        >
-          {showDetail ? t("report.hideDetail") : t("report.showDetail")}
-        </Button>
-        {!showDetail && report.per_question.length > 1 && (
-          <span className={styles.detailNote}>
-            {t("report.moreQuestions", { count: report.per_question.length - 1 })}
-          </span>
-        )}
-      </div>
-
-      {showDetail && (
-        <Accordion collapsible multiple data-testid="report-detail">
-          {report.per_question.map((q: QuestionScore, qi) => (
-            <AccordionItem value={q.question_id} key={q.question_id}>
-              <AccordionHeader>
-                {t("report.questionN", { n: qi + 1 })}
-                {q.prompt ? `: ${q.prompt}` : ""} —{" "}
-                {q.outcome ? t(`report.outcome.${q.outcome}`) : (q.grade ?? "")} (
-                {Math.round(q.score ?? 0)}
-                /100){q.capped ? " ⚑" : ""}
-              </AccordionHeader>
-              <AccordionPanel>
-                {(q.items ?? []).map((it, ii) => (
-                  <div key={ii} className={styles.itemRow}>
-                    <div className={styles.itemHead}>
-                      <Badge color={JUDGMENT_COLOR[it.judgment] ?? "subtle"} appearance="tint">
-                        {t(`report.judgment.${it.judgment}`)}
-                      </Badge>
-                      <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
-                        {it.kind} · {t("report.weight")} {it.weight}
-                      </Text>
-                    </div>
-                    {it.rationale && <Text>{it.rationale}</Text>}
-                    {it.answer_quote && (
-                      <Text size={200} className={styles.quote}>
-                        {t("report.candidateAnswer")}: "{it.answer_quote}"
-                      </Text>
-                    )}
-                    {it.source_quote && (
-                      <Text size={200} className={styles.quote}>
-                        <SopSourceLink
-                          interviewId={report.interview_session_id}
-                          item={it}
-                          suffix={`: "${it.source_quote}"`}
-                        />
-                      </Text>
-                    )}
-                  </div>
-                ))}
               </AccordionPanel>
             </AccordionItem>
-          ))}
-        </Accordion>
-      )}
+          );
+        })}
+      </Accordion>
 
       {/* Feature D (opt-in): advisory SOP-coverage findings. Rendered only when the candidate ran
           the check AND it surfaced something. Reference-only — it never affected the score above. */}
