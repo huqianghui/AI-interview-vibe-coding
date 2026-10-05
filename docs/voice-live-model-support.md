@@ -1153,136 +1153,86 @@ realtime  音频 →        模型       → 文本 → TTS → 音频      STT 
 
 ---
 
-### 4.12 RCA：realtime + 数字人时，念题变成了「文本」——一次也没出声
+### 4.12 RCA：念题"没声音"的根因是 `session.voice` 丢了 —— 而丢它的是我本机一个陈旧进程
 
-> 2026-10-05。owner：「能否在好好测试一下，找出 RCA？」本节是排查过程本身，每一步都是实测，**被排除的
-> 假设也留着**，因为它们是结论可信的一部分。工具：`backend/scripts/voice_live_read_rca.py`（本次新增）
-> 和 `frontend/e2e/avatar-lipsync-record.spec.ts`（帧直方图 + 发出帧）。
+> 2026-10-05。owner 连着追了四次：「这个还需要记一步找出 RCA 啊」「一定要确保这一块功能没有任何影响」
+> 「这个一定需要把 RCA 找出来」「需要把测试脚本的拿过来对比」。找到了，而且结论与我中途写下的两版都不同
+> —— 本节按最终事实重写，中途那两版（"realtime 挂数字人不可用"/"不稳定"）**都是错的**，错因见文末。
 
-#### 症状
+![session.voice 决定念题走不走 TTS：四种组合的实测对比，以及陈旧 dev 进程这个根因](images/voice-rca-session-voice.svg)
 
-把 admin 的语音模型设成 `gpt-realtime-2.1`，浏览器里跑真实面试：**数字人一句话都不说**，视频帧照常在流
-（600-700 帧），`totalAudioEnergy = 0`。换回 `gpt-5-mini`、同一台机器、相隔几分钟、同一个假麦克风 WAV：
-**0.273 / 0.279**，声音正常。
+#### 结论先行
 
-#### 关键证据：同一个请求，两种回答
+**`gpt-realtime-*` 配数字人是正常的**：会话建立、数字人出流、**念题出声、口型随词动**，浏览器实测
+`recorded peak 0.155`、`session.avatar.switch_to_speaking`、`response.audio.done` 齐全。
 
-浏览器**发出**的帧被逐字抓下来了，realtime 和级联**完全一样**（连重试都是同一份）：
+今天所有"realtime 静音"的观测，**全部来自本机一个陈旧的 dev 后端进程**：它从 15:22 起一直在执行那一刻磁盘
+上的一个**实验版 `voice_live_proxy.py`，那个版本把 `session.voice` 去掉了**（当时正在测"不发 voice、让模型
+自己出声"，见 `/tmp/avatar_drive.py` 与 `/tmp/vlp_before_exp.py` 这个名字本身）。
 
-```
-> {"type":"response.create","response":{"pre_generated_assistant_message":
-   {"type":"message","role":"assistant","content":[{"type":"text","text":"Describe how you handle …"}]}}}
-```
+#### 机制：少发一个字段，两条路线表现完全不同
 
-Azure 的回答却不同：
-
-| 收到的帧 | 级联 `gpt-5-mini` | realtime `gpt-realtime-2.1` |
+| 会话里的 `session.voice` | 级联（chat 模型） | 语音到语音（realtime） |
 | --- | --- | --- |
-| `response.audio_transcript.delta` | 1 | **0** |
-| `response.audio.done` | 1 | **0** |
-| `session.avatar.switch_to_speaking` | 1 | **0** |
-| **`response.text.delta`** | 0 | **3** |
-| `response.created` | 1 | **3**（看门狗重试 3 次后放弃） |
-| `error` | 0 | **0 —— 什么都没报错** |
+| `azure-standard / en-US-AvaNeural`（产品正常发送） | ✅ Azure TTS 念 → 数字人开口 | ✅ 同样 Azure TTS 念 → 数字人开口（混合式） |
+| **缺失**（那个实验版） | ✅ **仍然出声** —— Azure 自动补一个 TTS 音色 | ❌ 音频归模型自己（回显 `openai/marin`）→ `pre_generated` 没 TTS 可用 → 回 `response.text.delta` |
 
-**realtime 把念题请求当成文本回答了**：返回 `response.text.delta`，既不合成语音，也不通知数字人开口。
-前端看门狗等不到朗读确认，按设计重试 3 次，然后放弃 —— 全程静音且**没有任何报错**。
+**所以这个缺陷被级联路线完整掩盖了**：少发 `voice` 在级联上没有任何症状，于是"线上一切正常"；它只在
+realtime 上暴露，并且暴露形态是**最难查的那一种** —— 画面在动、一句话不说、`error` 帧为 0（服务端认为自己
+正常完成了一次响应），前端看门狗等不到朗读确认，按设计重试 3 次后放弃。
 
-#### 排除掉的假设（按顺序，每条都实测）
+#### 定位它的那一步：对比 Azure 回显的 `session.updated`
 
-| # | 假设 | 实测 | 结论 |
-| --- | --- | --- | --- |
-| 1 | realtime 根本不能做 pre-generated 朗读 | 纯语音会话（无 avatar）**3/3 出声**，515200 字节，转写 135 字 = 原文逐字 | ❌ 排除 |
-| 2 | 请求帧不一样 | 抓到浏览器发出的帧，两条路**逐字相同** | ❌ 排除 |
-| 3 | Azure 报了错我们没看见 | `ws_errors = 0`，服务端一个 error 帧都没发 | ❌ 排除 |
-| 4 | 照片数字人（`vasa-1`）与视频数字人不同 | 脚本里 `--character amira`（照片）与 `lisa`（视频）**都是音频模态** | ❌ 排除 |
-| 5 | 代理注入的两个系统项（语言锁定 + 朗读提示）把模型带偏 | `--proxy-items` 下 realtime **2/2 出声**，`text_deltas=0` | ❌ 排除 |
-| 6 | 浏览器一直在上传麦克风音频，语音原生会话因此进入「在听」状态 | `--mic` 边喂真实候选人音频边念题，realtime **2/2 出声**，`text_deltas=0` | ❌ 排除 |
-| 7 | 数字人媒体连接**建立**本身就会把 realtime 的朗读降级成文本 | ❌ **被自己的历史数据推翻** —— 07:21 那次握手同样完成（`pc_connected` 在 `read_sent` 之前），却**听得见**（1135ms）。见下 |
+绕了很久之后，真正定位的是**一步**：把同一个念题请求分别**直连 Azure** 和**走我们的代理**，然后 diff
+Azure 回显的 `session.updated`（它说的是"我实际应用了什么"，不是"你以为你发了什么"）：
 
-#### 复现
-
-```bash
-# Azure 侧没问题（纯语音会话）：3/3 出声
-cd backend && .venv/bin/python scripts/voice_live_read_rca.py --model gpt-realtime-2.1 --reps 3
-# 加上代理注入的系统项、再加上边喂麦克风音频，依然出声
-.venv/bin/python scripts/voice_live_read_rca.py --model gpt-realtime-2.1 --reps 2 --proxy-items
-.venv/bin/python scripts/voice_live_read_rca.py --model gpt-realtime-2.1 --reps 2 --proxy-items \
-    --mic /tmp/mic24.wav   # 24kHz 单声道 16-bit
-# 浏览器里（真实 avatar 握手）才会复现文本模态，帧直方图在 e2e/output/lipsync-*.txt
-cd frontend && LIVE_VOICE=1 … LIPSYNC_LOCALE=en-US npx playwright test avatar-lipsync-record \
-    --config=e2e/live.config.ts
+```
+ "voice": {                          |  "voice": {
+-  "name": "en-US-AvaNeural",        |+   "name": "marin",
+-  "type": "azure-standard",         |+   "type": "openai"
+-  "rate": "1.0", "temperature": 0.8 |   }
+ }                                   |
+   直连 → 出声                        |     走代理 → 回文本
 ```
 
-#### owner 的提醒推翻了第 7 条：realtime **驱动过**数字人
+其它字段（`turn_detection`、`modalities`、`input_audio_transcription`、采样率）**全部一致**，只有 `voice`
+这一格不同。拿到这一格之后，"为什么 TTS 没跑"就不再是谜。
 
-owner：「之前是测试过 gpt-realtime 是可以驱动数字人的」—— 对，而且是本仓库自己的记录：
-`frontend/e2e/output/speak-start.jsonl` 里 **2026-10-05 07:21** 那条，同一个浏览器面试流程、realtime +
-数字人，「朗读请求 → 听得见」**1135 ms**（§4.10），`avatar ice=1`、逐字念题一致（§4.7/§4.9）。所以
-「握手完成 ⇒ 文本」不成立：那次握手也完成了。
+#### 确认根因：那个进程根本没在执行当前代码
 
-**所以真实形状是「不稳定」，不是「不能」。** 浏览器里挂数字人的 realtime 共 5 次：**1 次出声，4 次静音**。
-失败形态每次都一样 —— `response.text.delta`、无音频事件、无 `switch_to_speaking`、**无 error**。
-
-把那两条相邻记录（07:21 听得见 / 07:23 从未听得见）逐标记对齐，流程完全一样，只有一个量不同：
-
-| 标记 | 07:21（听得见） | 07:23（静音） |
-| --- | --- | --- |
-| `pc_connected` → `read_sent` | **865 ms** | **312 ms** |
-
-两次的 `proxy_connected`/`session_updated`/`avatar_connect_sent`/`avatar_answer`/`pc_track_video`/
-`pc_track_audio`/`pc_ice_connected`/`pc_connected`/`read_sent`/`read_created` 顺序**一模一样**。
-
-于是测了**竞态**假设：数字人媒体刚连上就马上发朗读请求时 realtime 用文本回答，等一会儿再发则正常。
-重复 4 次 realtime 后相关性看起来很诱人 —— 唯一出声的那次 gap 是 **865 ms**，三次静音是
-**312 / 322 / 376 / 379 ms**，而级联在 381 ms 就能出声（所以阈值若存在，是 realtime 自己的）。
-
-**但直接实验把它否掉了。** 在页面里把第一帧朗读请求**硬压 2500 ms**（`LIPSYNC_DELAY_READ_MS=2500`，
-patch `WebSocket.prototype.send`，不动产品代码）：realtime 仍然回 `response.text.delta`，仍然静音。
-所以**不是时序**。
-
-| # | 假设 | 实测 | 结论 |
-| --- | --- | --- | --- |
-| 8 | 朗读请求发得太早（竞态） | 人为延迟 2500 ms 后仍是文本、仍静音（`read_delayed_ms=2500` 写在产物里） | ❌ 排除 |
-
-#### 代码侧已排除：会话字节与「那次出声」的版本完全相同
-
-把三个历史版本的 `voice_live_proxy.py` 取出来，在同一个进程里为同一组人物形态生成 `session.update` 并
-逐字节比较（5 种形态 × 2 种语言）：
-
-| 比较 | 结果 |
+| 证据 | 内容 |
 | --- | --- |
-| **级联会话** vs `v0.42.6.0`（语音模型拆分之前） | **IDENTICAL** |
-| **级联会话** vs `v0.43.1.0`（拆分后、EoU 工作之前） | **IDENTICAL** |
-| **realtime 会话** vs `e617e44` —— 07:21 那次**听得见**的版本 | **IDENTICAL** |
+| 启动命令 | `uvicorn app.main:app --host 127.0.0.1 --port 8000` —— **没有 `--reload`** |
+| 直接验证 | 往 `run_proxy` 里临时插一行 `print`，跑一次 WS，**日志里一个字都没出现** |
+| 时间线 | `07:21Z = 本地 15:21` 那次 realtime + 数字人**听得见**（1135ms），正好在实验重启**之前**；之后每次都静音 |
+| 重启后 | 同一个请求：回显 `openai/marin → azure-standard/en-US-AvaNeural`，回答 `response.text.delta → response.audio.done`，浏览器 `recorded peak 0.155` + `switch_to_speaking`，测试 **passed** |
 
-两条结论：**(a) 线上跑的那条路（chat/级联）与本次全部改动之前逐字节相同**；**(b) realtime 会话形状自
-「那次出声」以来没有变过**，所以本次改动无法解释「先出声后静音」。守卫已进单测
-（`test_the_cascaded_session_still_matches_what_shipped_field_for_field` 锁死级联整份会话，
-`test_the_realtime_session_differs_from_the_shipped_one_in_exactly_one_field` 锁死 realtime 只许改检测器）。
+#### 在找到它之前被逐条实测排除的假设（留着，它们是结论可信度的一部分）
 
-#### 对结论的修正
+| # | 假设 | 实测 |
+| --- | --- | --- |
+| 1 | realtime 不能做 pre-generated 朗读 | ❌ 纯语音 7/7 出声，515200 字节，转写 135 字 = 原文逐字 |
+| 2 | 请求帧不一样 | ❌ 抓到浏览器发出的帧，两条路逐字相同 |
+| 3 | 有报错没看见 | ❌ `ws_errors = 0` |
+| 4 | 照片(vasa-1) vs 视频数字人 | ❌ 两者都是音频模态 |
+| 5 | 代理注入的系统项（含真实 1375 字阅读提示） | ❌ 带上仍 2/2 出声 |
+| 6 | 麦克风音频在流 | ❌ 边喂边念仍 2/2 出声 |
+| 7 | 数字人握手本身 | ❌ 07:21 那次握手也完成了却听得见 |
+| 8 | 发送时序（竞态） | ❌ 硬延迟 2500ms 仍回文本 |
+| 9 | 交给 SDK 的方式（dict vs `RequestSession`） | ❌ 两种交法回显都是 azure-standard |
+| 10 | 产品代码改动 | ❌ 三个历史版本的会话逐字节比较：级联与 `v0.42.6.0` / `v0.43.1.0` **IDENTICAL**，realtime 与 `e617e44` **IDENTICAL** |
 
-PR #168 写的「realtime 语音模型可用」**说得太满**。准确的说法是：
+#### 这次我自己的错误，以及下次怎么避免
 
-- ✅ 会话能建立、数字人能协商出流、音频型 EoU 工作正常 —— 这些都实测过；
-- ✅ **纯语音**（不挂数字人）的 realtime 朗读正常出声；
-- ⚠️ **挂上数字人之后，realtime 的念题基本不出声**：浏览器里共 **10 次尝试，只有 1 次出声**（07:21 那
-  次，至今无法解释），失败时静默无报错。而**不挂数字人**时同一个模型、同一个请求 **7/7 出声**。所以
-  **现在不要把带数字人的面试切到 realtime** —— 不是"不能"，是"不可靠"，而面试场景下静音一次就等于废掉
-  一场面试。
-- 代码对级联零影响（chat 那条路一个字节没动），所以线上没有风险：默认仍是 `gpt-5-mini`。
-
-#### 还不知道的
-
-为什么「挂上数字人」会把模态从音频切成文本 —— 这需要 Azure 侧的解释，或者一个能在脚本里完成 avatar WebRTC
-握手的装置（aiortc 那次装置本身跑不通，见 §4.10 的诚实缺口）。在此之前**不要**把第 7 条写成机制，它只是
-与数据一致的唯一剩余解释。
-
-还有一条没试的廉价分支：realtime + 数字人下，把朗读换成**普通模型轮**（不用
-`pre_generated_assistant_message`）看是否出声。若出声，触发条件就能再收窄到
-「pre_generated + 数字人 + realtime」三者同时成立。**但这不会改变建议** —— 模型轮念题的逐字命中率实测
-只有 1/3（§4.9），本产品不会用它来念题。
+1. **把装置的故障当成了服务的行为。** 我在"代码逐字节未变"已经证明之后，仍然去推断 Azure 的行为，而正确
+   的下一步是怀疑**正在运行的进程**。`--reload` 不在命令行里，这件事我在第一次 `ps` 时就看到了，却没有当成
+   信号。
+2. **中途下过两个过硬的结论**（"realtime 挂数字人不可用"→"不稳定 1/10"），都写进了文档和
+   `IMPLEMENTATION-STATUS.md`，又都被推翻。owner 两次用自己的记忆纠正了我（"之前是测试过 gpt-realtime
+   是可以驱动数字人的"）。
+3. **可操作的规则**：本机实测如果与"代码没变"相矛盾，先确认**跑的是不是这份代码**（无 `--reload` 的 dev
+   server、容器里的旧镜像、另一个端口上的进程），再怀疑服务端。一行 `print` + 一次请求就能判定，比十个假设
+   便宜。
 
 ---
 

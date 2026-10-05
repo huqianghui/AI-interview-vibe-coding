@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 980" width="1200" height="980"
+     font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', Helvetica, Arial, sans-serif"
+     role="img" aria-label="Root cause: whether session.voice holds an Azure TTS voice decides whether a pre-generated read is synthesised. Four measured combinations of pipeline (cascaded or realtime) against voice present or absent.">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#6b5b7b"/>
+    </marker>
+    <style>
+      .t  { fill:#2b2520; font-size:14px; }
+      .tt { fill:#2b2520; font-size:16px; font-weight:600; }
+      .s  { fill:#6b625a; font-size:12.5px; }
+      .m  { fill:#5c5349; font-size:11.5px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .ok { fill:#2f6d4f; font-size:13px; font-weight:600; }
+      .bad{ fill:#9c3b32; font-size:13px; font-weight:600; }
+      .edge { stroke:#6b5b7b; stroke-width:1.6; fill:none; marker-end:url(#ar); }
+      .box { fill:#ffffff; stroke:#d9d2c8; stroke-width:1.2; rx:9; }
+    </style>
+  </defs>
+  <rect x="0" y="0" width="1200" height="980" fill="#faf7f2"/>
+
+  <text x="32" y="42" class="tt" font-size="20">念题为什么会"没声音":`session.voice` 决定它走不走 TTS</text>
+  <text x="32" y="66" class="s">RCA 2026-10-05 · 每一格都是实测 · 复现:<tspan class="m">backend/scripts/voice_live_read_rca.py</tspan> + <tspan class="m">frontend/e2e/avatar-lipsync-record.spec.ts</tspan></text>
+
+  <!-- the request -->
+  <rect class="box" x="32" y="90" width="1136" height="86"/>
+  <text x="50" y="116" class="tt">① 念题请求(两条路线逐字相同,已抓取)</text>
+  <text x="50" y="140" class="m">{"type":"response.create","response":{"pre_generated_assistant_message":{"type":"message","role":"assistant","content":[{"type":"text","text":"&lt;题目原文&gt;"}]}}}</text>
+  <text x="50" y="162" class="s">设计意图:<tspan font-weight="600">绕过模型推理</tspan>,让服务端把这段文字原样 TTS 念出来 —— 所以"用哪个模型"本不该影响它。</text>
+
+  <!-- the hinge -->
+  <rect class="box" x="360" y="200" width="480" height="78" fill="#f3efe6"/>
+  <text x="380" y="226" class="tt">② 这一帧交给谁念,由会话里的 <tspan class="m" font-size="14px">session.voice</tspan> 决定</text>
+  <text x="380" y="250" class="s">Azure 回显的 <tspan class="m">session.updated</tspan> 里能直接看到它生效成了什么</text>
+  <text x="380" y="268" class="s">—— 这就是本次 RCA 的那一格</text>
+  <path class="edge" d="M600 176 L600 196"/>
+
+  <!-- four cells -->
+  <path class="edge" d="M600 278 L600 300 L300 300 L300 326"/>
+  <path class="edge" d="M600 278 L600 300 L900 300 L900 326"/>
+
+  <text x="300" y="320" class="tt" text-anchor="middle">级联(chat 模型,如 gpt-5-mini)</text>
+  <text x="900" y="320" class="tt" text-anchor="middle">语音到语音(gpt-realtime-*)</text>
+
+  <!-- row A: voice present -->
+  <rect x="60" y="336" width="480" height="150" rx="12" fill="#eef3ee" stroke="#cfdccf" stroke-width="1.2"/>
+  <text x="80" y="362" class="t"><tspan class="m">voice = azure-standard / en-US-AvaNeural</tspan>(产品正常发送)</text>
+  <text x="80" y="386" class="ok">✅ Azure TTS 合成 → 数字人开口</text>
+  <text x="80" y="408" class="m">response.audio_transcript.delta · response.audio.done</text>
+  <text x="80" y="428" class="m">session.avatar.switch_to_speaking · RTP 音频能量 0.27–0.28</text>
+  <text x="80" y="452" class="s">这就是今天线上一直在跑的那条路,本次改动前后<tspan font-weight="600">逐字节相同</tspan>。</text>
+  <text x="80" y="472" class="s">录像证据:中英两段数字人念题,口型随词变化。</text>
+
+  <rect x="660" y="336" width="480" height="150" rx="12" fill="#eef3ee" stroke="#cfdccf" stroke-width="1.2"/>
+  <text x="680" y="362" class="t"><tspan class="m">voice = azure-standard / en-US-AvaNeural</tspan>(产品正常发送)</text>
+  <text x="680" y="386" class="ok">✅ 同样走 Azure TTS → 数字人开口(混合式)</text>
+  <text x="680" y="408" class="m">response.audio_transcript.delta · response.audio.done</text>
+  <text x="680" y="428" class="s">纯语音会话实测 <tspan font-weight="600">7/7 出声</tspan>,515200 字节,转写 135 字 = 原文逐字;</text>
+  <text x="680" y="448" class="s">浏览器 + 数字人实测 1135ms 听得见(§4.10)。</text>
+  <text x="680" y="472" class="s"><tspan font-weight="600">realtime 并不妨碍逐字念题</tspan> —— 嘴仍然是 Azure TTS。</text>
+
+  <!-- row B: voice absent -->
+  <rect x="60" y="506" width="480" height="168" rx="12" fill="#f6f0ec" stroke="#e2cfc6" stroke-width="1.2"/>
+  <text x="80" y="532" class="t"><tspan class="m">voice</tspan> 缺失(本次事故里那个陈旧实验版)</text>
+  <text x="80" y="556" class="ok">✅ 仍然出声 —— Azure <tspan font-weight="600">自动补一个</tspan> TTS 音色</text>
+  <text x="80" y="578" class="m">回显:voice = azure-standard / en-US-AvaNeural</text>
+  <text x="80" y="600" class="s">所以级联路线<tspan font-weight="600">掩盖了这个缺陷</tspan>:少发了 voice 也照样能念,</text>
+  <text x="80" y="620" class="s">于是"线上一切正常"没有任何异常信号。</text>
+  <text x="80" y="648" class="s">这正是它只在 realtime 上暴露的原因。</text>
+
+  <rect x="660" y="506" width="480" height="168" rx="12" fill="#f8ebe9" stroke="#e3c4bf" stroke-width="1.2"/>
+  <text x="680" y="532" class="t"><tspan class="m">voice</tspan> 缺失(本次事故里那个陈旧实验版)</text>
+  <text x="680" y="556" class="bad">❌ 音频归模型自己 → 没有 TTS 可用 → 回文本</text>
+  <text x="680" y="578" class="m">回显:voice = openai / marin(模型自带音色)</text>
+  <text x="680" y="600" class="m">response.text.delta ×3 · 无 audio 事件 · 无 switch_to_speaking</text>
+  <text x="680" y="622" class="bad">而且 error 帧为 0 —— 服务端认为自己正常完成了一次响应</text>
+  <text x="680" y="646" class="s">前端看门狗等不到朗读确认,按设计重试 3 次后放弃:</text>
+  <text x="680" y="666" class="s"><tspan font-weight="600">画面在动、一句话没说、日志里没有报错。</tspan></text>
+
+  <!-- RCA band -->
+  <rect x="32" y="700" width="1136" height="140" rx="12" fill="#f1ece3" stroke="#ddd5c9" stroke-width="1.2"/>
+  <text x="52" y="728" class="tt">③ 根因:本机那个 dev 后端进程是陈旧的,它在跑一个「去掉 session.voice」的实验版</text>
+  <text x="52" y="754" class="s">后端启动命令是 <tspan class="m">uvicorn app.main:app --host 127.0.0.1 --port 8000</tspan> —— <tspan font-weight="600">没有 --reload</tspan>,所以它从 15:22 起一直执行那一刻的磁盘代码。</text>
+  <text x="52" y="776" class="s">证据:往 <tspan class="m">run_proxy</tspan> 里临时插一行 <tspan class="m">print</tspan>,跑一次 WS,<tspan font-weight="600">日志里一个字都没出现</tspan> → 它执行的不是当前代码。</text>
+  <text x="52" y="798" class="s">时间线也对得上:<tspan class="m">07:21Z = 本地 15:21</tspan> 那次 realtime + 数字人<tspan font-weight="600">听得见</tspan>(1135ms),正好在实验重启<tspan font-weight="600">之前</tspan>;之后的每一次都静音。</text>
+  <text x="52" y="822" class="s">重启到当前代码后,同一个请求立刻恢复:回显音色 <tspan class="m">openai/marin → azure-standard/en-US-AvaNeural</tspan>,回答 <tspan class="m">response.text.delta → response.audio.done</tspan>。</text>
+
+  <!-- excluded band -->
+  <rect x="32" y="860" width="1136" height="96" rx="12" fill="#f3f1ec" stroke="#ddd5c9" stroke-width="1.2" stroke-dasharray="6 4"/>
+  <text x="52" y="886" class="tt" font-size="14">④ 在找到它之前被逐条实测排除的(留着,因为它们是结论可信度的一部分)</text>
+  <text x="52" y="910" class="s">realtime 不能逐字念(7/7 能) · 请求帧不同(逐字相同) · 漏看 error(0 个) · 照片 vs 视频数字人 · 代理注入的系统项(含真实 1375 字阅读提示)</text>
+  <text x="52" y="932" class="s">· 麦克风音频在流 · 数字人握手本身 · 发送时序(硬延迟 2500ms 无效) · dict vs RequestSession 交法 · 产品代码(三个版本会话逐字节相同)</text>
+  <text x="52" y="950" class="s">最后靠「<tspan font-weight="600">对比 Azure 回显的 session.updated</tspan>」一步定位 —— 它直接说出了生效的音色不是我们发的那个。</text>
+</svg>
