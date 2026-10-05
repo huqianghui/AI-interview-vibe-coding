@@ -1190,7 +1190,7 @@ Azure 的回答却不同：
 | 4 | 照片数字人（`vasa-1`）与视频数字人不同 | 脚本里 `--character amira`（照片）与 `lisa`（视频）**都是音频模态** | ❌ 排除 |
 | 5 | 代理注入的两个系统项（语言锁定 + 朗读提示）把模型带偏 | `--proxy-items` 下 realtime **2/2 出声**，`text_deltas=0` | ❌ 排除 |
 | 6 | 浏览器一直在上传麦克风音频，语音原生会话因此进入「在听」状态 | `--mic` 边喂真实候选人音频边念题，realtime **2/2 出声**，`text_deltas=0` | ❌ 排除 |
-| 7 | **数字人媒体连接建立之后，realtime 的朗读被降级成文本** | 脚本只「声明」avatar 不做 WebRTC 握手 → 仍是音频模态；浏览器**完成握手** → 文本模态 | ✅ **目前唯一与全部数据一致的解释** |
+| 7 | 数字人媒体连接**建立**本身就会把 realtime 的朗读降级成文本 | ❌ **被自己的历史数据推翻** —— 07:21 那次握手同样完成（`pc_connected` 在 `read_sent` 之前），却**听得见**（1135ms）。见下 |
 
 #### 复现
 
@@ -1206,13 +1206,36 @@ cd frontend && LIVE_VOICE=1 … LIPSYNC_LOCALE=en-US npx playwright test avatar-
     --config=e2e/live.config.ts
 ```
 
+#### owner 的提醒推翻了第 7 条：realtime **驱动过**数字人
+
+owner：「之前是测试过 gpt-realtime 是可以驱动数字人的」—— 对，而且是本仓库自己的记录：
+`frontend/e2e/output/speak-start.jsonl` 里 **2026-10-05 07:21** 那条，同一个浏览器面试流程、realtime +
+数字人，「朗读请求 → 听得见」**1135 ms**（§4.10），`avatar ice=1`、逐字念题一致（§4.7/§4.9）。所以
+「握手完成 ⇒ 文本」不成立：那次握手也完成了。
+
+**所以真实形状是「不稳定」，不是「不能」。** 浏览器里挂数字人的 realtime 共 5 次：**1 次出声，4 次静音**。
+失败形态每次都一样 —— `response.text.delta`、无音频事件、无 `switch_to_speaking`、**无 error**。
+
+把那两条相邻记录（07:21 听得见 / 07:23 从未听得见）逐标记对齐，流程完全一样，只有一个量不同：
+
+| 标记 | 07:21（听得见） | 07:23（静音） |
+| --- | --- | --- |
+| `pc_connected` → `read_sent` | **865 ms** | **312 ms** |
+
+两次的 `proxy_connected`/`session_updated`/`avatar_connect_sent`/`avatar_answer`/`pc_track_video`/
+`pc_track_audio`/`pc_ice_connected`/`pc_connected`/`read_sent`/`read_created` 顺序**一模一样**。于是下一个
+待验证的假设是**竞态**：数字人媒体刚连上就马上发朗读请求时，realtime 会用文本回答；等一会儿再发则正常。
+这条正在用 `avatar-speak-start-live` 重复测（它本来就记录这两个标记），**在拿到相关性之前不写成结论**。
+
 #### 对结论的修正
 
 PR #168 写的「realtime 语音模型可用」**说得太满**。准确的说法是：
 
 - ✅ 会话能建立、数字人能协商出流、音频型 EoU 工作正常 —— 这些都实测过；
 - ✅ **纯语音**（不挂数字人）的 realtime 朗读正常出声；
-- ❌ **挂上数字人之后，realtime 的念题不出声**（本节），所以**现在不要把带数字人的面试切到 realtime**。
+- ⚠️ **挂上数字人之后，realtime 的念题不稳定**：5 次里 1 次出声（本节），失败时静默无报错。所以
+  **现在不要把带数字人的面试切到 realtime** —— 不是"不能"，是"不可靠"，而面试场景下静音一次就等于废掉
+  一场面试。
 - 代码对级联零影响（chat 那条路一个字节没动），所以线上没有风险：默认仍是 `gpt-5-mini`。
 
 #### 还不知道的
