@@ -159,8 +159,9 @@ def is_mouth_persona(persona: InterviewerPersona, *, playground: bool = False) -
     ``pre_generated_assistant_message`` (server-side TTS of the exact text, no model inference —
     v0.39.2.3); the earlier ``response.instructions`` read was still a model turn and gpt-5-mini
     drifted on it mid-interview (2026-09-28: card said one bank question, the avatar asked another).
-    Bank MODEL-turn personas keep their agent (it owns the reaction between questions), as does the
-    editor Playground for any bank persona (free conversation).
+    Since v0.39.0.0 every candidate-facing bank session (linear OR judged) is a mouth; the only
+    surface that keeps the agent is the editor Playground for a bank persona (free conversation).
+    The pre-v0.39 ``bank_turn_mode="model"`` in-interview agent turn is retired and migrated away.
     """
     return linear_turns_for_persona(persona, playground=playground)
 
