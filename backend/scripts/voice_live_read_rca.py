@@ -13,6 +13,20 @@ model inference), and counts what Azure sends back: every event type, how many a
 and whether the avatar was told to start speaking. Run it N times per model and the difference
 between the two pipelines is either reproducible or it is not.
 
+Switches worth knowing (each one retired a hypothesis — docs/voice-live-model-support.md §4.12):
+
+* ``--avatar`` / ``--character`` — attach the avatar; photo (vasa-1) vs video character
+* ``--proxy-items`` — also inject the two system items the proxy injects on a mouth session
+* ``--mic <wav>`` — stream candidate audio while the read happens
+* ``--session-as-dict`` — hand the SDK the raw dict, the way ``run_proxy`` does
+* ``--modalities audio`` — drop ``text`` from the declared modalities
+* ``--no-voice`` — omit ``session.voice`` so the model owns the audio (its own voice)
+* ``--read-mode model_turn`` — let the model generate a turn instead of reading given text
+* ``--agent name:version`` — AGENT mode (brain path ③): no ``model=`` is sent at all
+
+The per-rep line prints **the voice Azure says it applied** — the field that finally located the bug
+this script was written for.
+
 What the counts mean:
 
 * ``audio_bytes > 0`` — Azure synthesised the read. If the browser is then silent, the fault is in
@@ -27,6 +41,8 @@ Run (from backend/):
 
     .venv/bin/python scripts/voice_live_read_rca.py --model gpt-realtime-2.1 --reps 3
     .venv/bin/python scripts/voice_live_read_rca.py --model gpt-5-mini --reps 3 --out /tmp/chat.json
+    .venv/bin/python scripts/voice_live_read_rca.py --agent my-agent:12 --no-voice
+    .venv/bin/python scripts/voice_live_read_rca.py --model gpt-realtime-2.1 --read-mode model_turn
 
 NOTE: with ``--avatar`` each rep creates an avatar connection, and that is rate-limited to roughly 3
 per 60 s (measured). The default is voice-only, which is not.
@@ -100,6 +116,7 @@ async def one_read(
     model: str,
     byom_profile: str,
     realtime_pipeline: bool,
+    project: str,
     avatar: bool,
     character: str,
     proxy_items: bool,
@@ -109,6 +126,8 @@ async def one_read(
     background: str,
     session_as_dict: bool,
     read_mode: str,
+    drop_voice: bool,
+    agent: tuple[str, str] | None,
     locale: str,
     timeout_s: float,
 ) -> dict[str, Any]:
@@ -135,6 +154,12 @@ async def one_read(
         background=background or None,
         realtime_pipeline=realtime_pipeline,
     )
+    if drop_voice:
+        # Ask "can the MODEL's own voice drive this session?" — with no session.voice a realtime
+        # model answers in its own voice (measured: openai/marin) instead of Azure TTS. The product
+        # never sends this shape; it is the shape a future speech-to-speech scenario would use.
+        session = dict(session)
+        session.pop("voice", None)
     if modalities:
         # Hypothesis: with `text` among the declared modalities a realtime session answers a
         # pre-generated read with `response.text.delta` instead of synthesising it. Drop `text` and
@@ -142,15 +167,34 @@ async def one_read(
         session = dict(session)
         session["modalities"] = [m.strip() for m in modalities.split(",") if m.strip()]
 
-    kwargs: dict[str, Any] = {
-        "endpoint": endpoint,
-        "credential": credential,
-        "api_version": api_version,
-        "model": model,
-        "connection_options": {"vendor_options": {"ssl": _certifi_ssl_context()}},
-    }
-    if byom_profile:
-        kwargs["query"] = {"profile": byom_profile}
+    if agent is not None:
+        # AGENT mode (brain path ③): Voice Live gets agent_name/agent_version/project_name and NO
+        # `model=`. Measured 2026-10-05: in this mode the voice is ALWAYS Azure TTS — even with no
+        # `session.voice` of ours Azure applied `azure-standard/en-US-AvaNeural`, never the model's
+        # own voice. So "use the realtime model's own voice" is unreachable through an agent.
+        from app.services.voice_live_proxy import build_connect_kwargs
+
+        kwargs = build_connect_kwargs(
+            endpoint=endpoint,
+            credential=credential,
+            api_version=api_version,
+            ssl_ctx=_certifi_ssl_context(),
+            is_agent=True,
+            agent_name=agent[0],
+            agent_version=agent[1],
+            project=project,
+            default_model="",
+        )
+    else:
+        kwargs = {
+            "endpoint": endpoint,
+            "credential": credential,
+            "api_version": api_version,
+            "model": model,
+            "connection_options": {"vendor_options": {"ssl": _certifi_ssl_context()}},
+        }
+        if byom_profile:
+            kwargs["query"] = {"profile": byom_profile}
 
     # Streaming mic audio is the OTHER thing the browser does that this script did not. On a
     # speech-native session that audio is the model's input, so "the read came back as text because
@@ -278,6 +322,7 @@ async def one_read(
         "background": background,
         "session_as_dict": session_as_dict,
         "read_mode": read_mode,
+        "drop_voice": drop_voice,
         "read_sent": read_sent,
         "audio_bytes": audio_bytes,
         "audio_deltas": types.get("response.audio.delta", 0),
@@ -338,6 +383,16 @@ async def main() -> None:
         default="pre_generated",
         help="pre_generated = the product's verbatim read; model_turn = let the model answer",
     )
+    ap.add_argument(
+        "--no-voice",
+        action="store_true",
+        help="omit session.voice so the model owns the audio (its own voice)",
+    )
+    ap.add_argument(
+        "--agent",
+        default="",
+        help='AGENT mode: "name:version" — drive that Foundry agent; no model= is sent',
+    )
     ap.add_argument("--locale", default="en-US")
     ap.add_argument("--timeout", type=float, default=25.0)
     ap.add_argument("--out", default=None)
@@ -365,9 +420,13 @@ async def main() -> None:
         s.azure_foundry_api_key or s.foundry_api_key
     )
     realtime = uses_realtime_pipeline(args.model, args.byom_profile)
+    # In AGENT mode no `model=` is sent at all, so printing the resolved voice model there would
+    # suggest it is in play when it is not (measured: the agent's own model drives the brain, and
+    # the voice is Azure TTS either way).
+    brain = f"agent={args.agent}" if args.agent else f"model={args.model}"
     print(
-        f"[rca] model={args.model} profile={args.byom_profile or '-'} "
-        f"realtime_pipeline={realtime} avatar={args.avatar}"
+        f"[rca] {brain} profile={args.byom_profile or '-'} "
+        f"realtime_pipeline={'n/a (agent)' if args.agent else realtime} avatar={args.avatar}"
         f"{'/' + args.character if args.avatar else ''} api={s.voice_live_api_version} "
         f"auth={'entra' if is_entra else 'key'}"
     )
@@ -408,6 +467,13 @@ async def main() -> None:
                 background=args.background,
                 session_as_dict=args.session_as_dict,
                 read_mode=args.read_mode,
+                drop_voice=args.no_voice,
+                agent=(
+                    (args.agent.rsplit(":", 1)[0], args.agent.rsplit(":", 1)[-1])
+                    if args.agent
+                    else None
+                ),
+                project=s.azure_foundry_default_project or "",
                 locale=args.locale,
                 timeout_s=args.timeout,
             )
