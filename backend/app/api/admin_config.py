@@ -10,6 +10,7 @@ admin routers). The API key is write-only: responses return only a masked value,
 """
 
 import logging
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -113,8 +114,45 @@ async def get_ai_foundry_config(db: AsyncSession = Depends(get_db)) -> AiFoundry
     return _to_out(master, config_service.mask_key(key))
 
 
+async def _production_voice_session(db: AsyncSession) -> Any:
+    """The session shape a real interview sends, so the save-time check validates THAT.
+
+    A minimal probe session is a false green: measured, ``gpt-realtime-2.1`` under
+    ``byom-azure-openai-realtime`` accepts ``RequestSession(instructions="probe")`` and rejects the
+    production session with "Text-based end-of-utterance detection requires a local speech
+    recognizer" — speech-native passthrough has no Voice Live recognizer for text EOU or
+    ``azure-speech`` transcription. Checking the minimal shape would let an operator save a config
+    under which EVERY interview fails.
+
+    Built from the default persona when there is one, so the avatar/voice/VAD block matches what the
+    candidate session will actually carry. Returns ``None`` (the probe then falls back to minimal)
+    if the shape cannot be built — a missing azure extra, or no persona yet on a fresh install.
+    """
+    try:
+        from app.services.persona_service import get_default_persona
+        from app.services.voice_live_proxy import build_avatar_session
+
+        persona = await get_default_persona(db)
+        if persona is None:
+            return None
+        session = build_avatar_session(persona, locale=None, playground=False, background=None)
+        # Strip the avatar before probing. AVATAR creation is rate-limited to roughly 3 per 60s
+        # (measured), so probing WITH it would make every config save consume a slot and compete
+        # with real candidates — and it is unnecessary: the incompatibility this check must catch
+        # lives in turn_detection / input_audio_transcription, and the bisect shows "full session
+        # minus avatar" still returns the end-of-utterance refusal under speech-native passthrough.
+        try:
+            del session["avatar"]
+        except (KeyError, TypeError):
+            pass
+        return session
+    except Exception as exc:  # noqa: BLE001 — shape-building must never break a save
+        logger.warning("Could not build the production voice session for the check: %s", exc)
+        return None
+
+
 async def _check_voice_model(
-    *, endpoint: str, api_key: str, voice_model: str, mode: str, profile: str
+    *, endpoint: str, api_key: str, voice_model: str, mode: str, profile: str, session: Any = None
 ) -> str:
     """Live-check a chosen voice model, returning a note. Raises 422 on a DEFINITIVE rejection.
 
@@ -150,6 +188,7 @@ async def _check_voice_model(
         api_version=get_settings().voice_live_api_version,
         model=voice_model,
         byom_profile=profile if mode == "byom" else "",
+        session=session,
     )
     verdict, detail = result["verdict"], result["detail"]
     if probe.is_definitive_rejection(verdict):
@@ -222,6 +261,7 @@ async def update_ai_foundry_config(
                 voice_model=body.voice_model.strip(),
                 mode=body.voice_model_mode,
                 profile=body.voice_byom_profile.strip(),
+                session=await _production_voice_session(db),
             )
         except HTTPException:
             await db.rollback()
@@ -294,25 +334,87 @@ async def test_ai_foundry_config(db: AsyncSession = Depends(get_db)) -> Connecti
         return ConnectionTestResult(success=False, message=f"Connection failed: {exc}")
 
 
-def _chat_deployment_options(items: list[dict]) -> list[Option]:
-    """Map Foundry project-API deployment items to dropdown options, Portal-style.
+# Which deployments are legal for which consumer. The INFERENCE model and the chat-completion BYOM
+# profile need a chat deployment; the realtime BYOM profile needs a realtime one; the Anthropic
+# profile needs a Claude one. Offering the wrong kind is how an operator configures something that
+# cannot work, so the dropdown filters instead of listing everything.
+DEPLOYMENT_KINDS = ("chat", "realtime", "all")
 
-    The Portal's agent model dropdown lists only chat-capable deployments — not embeddings, image,
-    or realtime deployments (``capabilities.chat_completion != "true"``). Mirror that filter so the
-    admin dropdown matches the Portal; if the capability field is absent on every item (older API
-    shape), fall back to listing everything rather than an empty dropdown.
+
+def _deployment_options(items: list[dict], kind: str = "chat") -> list[Option]:
+    """Map Foundry project-API deployment items to dropdown options, filtered by ``kind``.
+
+    Measured against the real resource (2026-10-05): the project deployments API returns 18 items
+    whose ``capabilities`` only ever carry the keys ``chat_completion``, ``completion`` and
+    ``embeddings`` — **there is no positive "realtime" flag**. A realtime deployment looks like
+    ``{"chat_completion": "false", "completion": "false"}``, identical in shape to anything else
+    that is neither chat nor embeddings. So realtime is identified NEGATIVELY. That is a
+    measurement, not a guess, and it is why this cannot simply key off a capability name.
+
+    * ``chat`` (default) — ``chat_completion == "true"``. What the Portal's agent model dropdown
+      shows, and what judge / scoring / the Foundry agent need. Back-compatible default: callers
+      that predate the BYOM split keep the old behaviour.
+    * ``realtime`` — declares ``chat_completion`` and declares it ``"false"``, and is not an
+      embedding. The "declares it" half is load-bearing and also measured: a realtime deployment
+      carries ``{"chat_completion": "false", "completion": "false"}`` while the resource's image
+      deployment (``gpt-image-2-1``) carries an **empty** ``capabilities: {}``. Filtering on
+      "not chat" alone therefore offered the image model too — caught by running the real endpoint,
+      not by the unit test. On this resource the rule now yields exactly ``gpt-realtime-1.5`` /
+      ``gpt-realtime-2.1``, both live-verified to connect under ``byom-azure-openai-realtime``.
+      Without any of this, a chat-only list made that profile **unreachable from the UI** even
+      though the path works.
+    * ``all`` — every named deployment. This is what the **Anthropic** profile uses, deliberately:
+      Claude cannot be deployed in this tenant, so there is no way to measure how a Claude
+      deployment is labelled, and an invented filter that guessed wrong would leave that
+      dropdown EMPTY — the exact bug this function is fixing for realtime. A too-wide list is
+      recoverable (the operator picks from real deployments, and the save-time probe rejects a bad
+      pairing); a too-narrow one makes the profile unreachable. So: no unverified filter.
+
+    The realtime rule can still be too wide — a future type that also declares
+    ``chat_completion: "false"`` would land in it — and that stays the deliberate direction:
+    too wide beats too narrow, because Azure rejects a bad pairing at connect
+    (``byom_realtime_connection_error``, measured) while an empty dropdown has no recourse.
+
+    If the capability field is absent on every item (older API shape) the chat filter falls back to
+    listing everything rather than an empty dropdown.
     """
+
+    def cap(d: dict, name: str) -> str:
+        return str((d.get("capabilities") or {}).get(name, ""))
+
     named = [d for d in items if d.get("name")]
-    chat = [d for d in named if str(d.get("capabilities", {}).get("chat_completion")) == "true"]
+    if kind == "all":
+        picked = named
+    elif kind == "realtime":
+        picked = [
+            d
+            for d in named
+            if (d.get("capabilities") or {}).get("chat_completion") is not None
+            and cap(d, "chat_completion") != "true"
+            and cap(d, "embeddings") != "true"
+        ]
+    else:
+        chat = [d for d in named if cap(d, "chat_completion") == "true"]
+        picked = chat or named
     return [
-        Option(value=d["name"], label=f"{d['name']} ({d.get('modelName', '')})")
-        for d in (chat or named)
+        Option(value=d["name"], label=f"{d['name']} ({d.get('modelName', '')})") for d in picked
     ]
 
 
 @router.get("/ai-foundry/model-deployments", response_model=list[Option])
-async def list_model_deployments(db: AsyncSession = Depends(get_db)) -> list[Option]:
+async def list_model_deployments(
+    kind: str = Query(
+        default="chat",
+        description="which deployments are legal for the consumer asking: chat | realtime | all",
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> list[Option]:
     """List the resource's real model deployments for the config-page dropdown.
+
+    ``kind`` selects the filter (see :func:`_deployment_options`). It defaults to ``chat`` so the
+    inference-model dropdown and the per-persona editor keep their behaviour; the BYOM voice
+    dropdown passes the kind its profile needs. An unknown value falls back to ``chat`` rather
+    than erroring — a dropdown that 422s is worse than one showing the safe default.
 
     Tries the AI Foundry project-scoped deployments API (Entra bearer first — key auth is disabled
     on this resource class and 403s; api-key as fallback), then the legacy Azure OpenAI deployments
@@ -320,6 +422,10 @@ async def list_model_deployments(db: AsyncSession = Depends(get_db)) -> list[Opt
     """
     # Imported lazily like the other azure_auth users to keep module import light for tests.
     from app.services.azure_auth import FOUNDRY_SCOPE, get_bearer_token
+
+    if kind not in DEPLOYMENT_KINDS:
+        logger.warning("Unknown deployment kind %r; falling back to 'chat'", kind)
+        kind = "chat"
 
     # Resolve from the saved master row, falling back to .env when no row exists yet (a fresh
     # deploy has creds only in .env). Without this fallback the dropdown is empty on day one.
@@ -346,7 +452,7 @@ async def list_model_deployments(db: AsyncSession = Depends(get_db)) -> list[Opt
                         if r.status_code == 200:
                             body = r.json()
                             items = body.get("data", body.get("value", []))
-                            out = _chat_deployment_options(items)
+                            out = _deployment_options(items, kind)
                             if out:
                                 return out
                         else:

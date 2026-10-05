@@ -8,6 +8,7 @@ import "../i18n"; // AdminPage uses useTranslation — ensure the i18n singleton
 import { AdminPage } from "./AdminPage";
 import * as admin from "../api/admin";
 import * as auth from "../api/auth";
+import * as personas from "../api/personas";
 
 // AdminPage now uses react-router `Link` (top-bar nav to /admin/agent), so it must render inside a
 // router. A stub route for /admin/agent lets the nav test assert navigation lands there.
@@ -514,6 +515,172 @@ describe("AdminPage", () => {
     // refresh=true: the cached answer can be up to 6h old, so a just-rolled-out model needs a sweep.
     await waitFor(() => expect(reprobe).toHaveBeenCalledWith(true));
     await waitFor(() => expect(screen.getByTestId("cfg-status")).toHaveTextContent(/re-probed/i));
+  });
+
+  // --- The inference model is the agent's FALLBACK, not its source ---------------------------
+  // judge and scoring always read the admin value; the Foundry agent reads persona.model first and
+  // only falls back to it (azure_agent_sync: `persona.model or global`), and reconcile backfills the
+  // live agent's model onto the persona — so a synced persona usually overrides it. The page says so
+  // and names the overriding personas instead of silently rewriting them.
+
+  function personaRow(name: string, model: string | null) {
+    return {
+      id: name,
+      name,
+      model,
+      enabled: true,
+      is_default: false,
+      agent_id: "a:1",
+      agent_version: "1",
+      agent_sync_status: "synced",
+    } as unknown as Awaited<ReturnType<typeof personas.listPersonas>>[number];
+  }
+
+  it("names the personas whose own model ignores the inference setting", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    vi.spyOn(admin, "listBanks").mockResolvedValue([]);
+    vi.spyOn(admin, "getAiFoundryConfig").mockResolvedValue({
+      ...EMPTY_CFG,
+      endpoint: "https://demo.services.ai.azure.com",
+      model_or_deployment: "gpt-5-mini",
+      is_active: true,
+    });
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([
+      personaRow("Interviewer", "gpt-5-mini"),
+      personaRow("Repro Photo Avatar", ""),
+      personaRow("Legacy", null),
+    ]);
+
+    renderPage();
+    await signIn(user);
+    await user.click(await screen.findByTestId("admin-tab-connection"));
+
+    const notice = await screen.findByTestId("cfg-model-overrides");
+    // Only the persona with a non-empty model is listed; "" and null mean "follow the global".
+    expect(notice).toHaveTextContent(/1 persona\(s\) carry their own model/i);
+    expect(notice).toHaveTextContent("Interviewer (gpt-5-mini)");
+    expect(notice).not.toHaveTextContent("Repro Photo Avatar");
+    expect(notice).not.toHaveTextContent("Legacy");
+  });
+
+  it("says so plainly when no persona overrides the inference model", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    vi.spyOn(admin, "listBanks").mockResolvedValue([]);
+    vi.spyOn(admin, "getAiFoundryConfig").mockResolvedValue({
+      ...EMPTY_CFG,
+      endpoint: "https://demo.services.ai.azure.com",
+      is_active: true,
+    });
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([personaRow("Fresh", "")]);
+
+    renderPage();
+    await signIn(user);
+    await user.click(await screen.findByTestId("admin-tab-connection"));
+
+    expect(await screen.findByTestId("cfg-model-overrides-none")).toBeInTheDocument();
+    expect(screen.queryByTestId("cfg-model-overrides")).not.toBeInTheDocument();
+  });
+
+  it("keeps the config panel usable when the persona list cannot be read", async () => {
+    // The notice is informational; a failing persona list must not take the connection panel down.
+    const user = userEvent.setup();
+    mockAdminLogin();
+    vi.spyOn(admin, "listBanks").mockResolvedValue([]);
+    vi.spyOn(admin, "getAiFoundryConfig").mockResolvedValue({
+      ...EMPTY_CFG,
+      endpoint: "https://demo.services.ai.azure.com",
+      is_active: true,
+    });
+    vi.spyOn(personas, "listPersonas").mockRejectedValue(new Error("boom"));
+
+    renderPage();
+    await signIn(user);
+    await user.click(await screen.findByTestId("admin-tab-connection"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("cfg-endpoint")).toHaveValue("https://demo.services.ai.azure.com"),
+    );
+    expect(screen.getByTestId("cfg-model-overrides-none")).toBeInTheDocument();
+  });
+
+  // --- The BYOM deployment list must follow the chosen profile -----------------------------------
+  // The bug this guards: the BYOM voice dropdown reused the chat-only deployment list, and a
+  // realtime deployment is NOT chat-capable (measured: capabilities {chat_completion:"false",
+  // completion:"false"}), so byom-azure-openai-realtime had nothing selectable — unreachable from the
+  // UI even though both gpt-realtime-1.5 and gpt-realtime-2.1 are live-verified under that profile.
+
+  it("asks for realtime deployments when the realtime profile is chosen", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    vi.spyOn(admin, "listBanks").mockResolvedValue([]);
+    vi.spyOn(admin, "getAiFoundryConfig").mockResolvedValue({
+      ...EMPTY_CFG,
+      endpoint: "https://demo.services.ai.azure.com",
+      model_or_deployment: "gpt-5-mini",
+      is_active: true,
+    });
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([]);
+    vi.spyOn(admin, "listKnowledgeBases").mockResolvedValue([]);
+    vi.spyOn(admin, "listVoiceLiveModels").mockResolvedValue([]);
+    const listDeployments = vi
+      .spyOn(admin, "listModelDeployments")
+      .mockImplementation(async (kind = "chat") =>
+        kind === "realtime"
+          ? [{ value: "gpt-realtime-2.1", label: "gpt-realtime-2.1 (gpt-realtime-2.1)" }]
+          : [{ value: "gpt-5-mini", label: "gpt-5-mini (gpt-5-mini)" }],
+      );
+
+    renderPage();
+    await signIn(user);
+    await user.click(await screen.findByTestId("admin-tab-connection"));
+    await user.click(await screen.findByTestId("cfg-voice-byom"));
+
+    // Default profile is chat-completion -> the chat list.
+    await waitFor(() => expect(listDeployments).toHaveBeenCalledWith("chat"));
+    await user.click(screen.getByTestId("cfg-voice-model-dropdown"));
+    expect(await screen.findByRole("option", { name: /gpt-5-mini/ })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+
+    // Switch to the realtime profile -> the realtime list, which the chat-only list could not show.
+    await user.click(screen.getByTestId("cfg-byom-profile"));
+    await user.click(await screen.findByRole("option", { name: /Realtime/i }));
+    await waitFor(() => expect(listDeployments).toHaveBeenCalledWith("realtime"));
+    await user.click(screen.getByTestId("cfg-voice-model-dropdown"));
+    expect(await screen.findByRole("option", { name: /gpt-realtime-2\.1/ })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.getByTestId("cfg-byom-kind")).toHaveTextContent(/realtime deployments/i);
+    // The operator is warned BEFORE saving: the save is refused, because this product's session
+    // needs text EOU + azure-speech transcription, which passthrough cannot run (measured live).
+    expect(screen.getByTestId("cfg-byom-realtime-warning")).toHaveTextContent(
+      /saving will be refused/i,
+    );
+  });
+
+  it("lists every deployment for the Anthropic profile, since no filter can be verified", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    vi.spyOn(admin, "listBanks").mockResolvedValue([]);
+    vi.spyOn(admin, "getAiFoundryConfig").mockResolvedValue({
+      ...EMPTY_CFG,
+      endpoint: "https://demo.services.ai.azure.com",
+      is_active: true,
+    });
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([]);
+    vi.spyOn(admin, "listKnowledgeBases").mockResolvedValue([]);
+    vi.spyOn(admin, "listVoiceLiveModels").mockResolvedValue([]);
+    const listDeployments = vi.spyOn(admin, "listModelDeployments").mockResolvedValue([]);
+
+    renderPage();
+    await signIn(user);
+    await user.click(await screen.findByTestId("admin-tab-connection"));
+    await user.click(await screen.findByTestId("cfg-voice-byom"));
+    await user.click(await screen.findByTestId("cfg-byom-profile"));
+    await user.click(await screen.findByRole("option", { name: /Anthropic/i }));
+
+    await waitFor(() => expect(listDeployments).toHaveBeenCalledWith("all"));
+    expect(screen.getByTestId("cfg-byom-kind")).toHaveTextContent(/no filter can be verified/i);
   });
 
   it("links from the top bar to the digital-human agent editor", async () => {

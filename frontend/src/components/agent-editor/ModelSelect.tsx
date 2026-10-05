@@ -90,8 +90,8 @@ export function ModelSelect({ value, onChange }: ModelSelectProps) {
       </Field>
       <Caption1>
         {value
-          ? "This model is saved on the persona and synced to its Foundry agent."
-          : `Using the global default${configured ? ` (${configured})` : ""}. Pick a model to set it per persona.`}
+          ? `This model is saved on the persona and synced to its Foundry agent. It OVERRIDES the inference model on Admin → Azure connection${configured ? ` (${configured})` : ""}, which is why a change there does not move this persona.`
+          : `Using the global default${configured ? ` (${configured})` : ""} from Admin → Azure connection. Pick a model to set it per persona.`}
       </Caption1>
     </div>
   );

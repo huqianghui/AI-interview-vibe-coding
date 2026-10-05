@@ -472,3 +472,72 @@ def test_a_missing_azure_extra_is_inconclusive_not_an_exception():
     assert result["verdict"] == probe.ERROR
     assert not probe.is_definitive_rejection(result["verdict"])
     assert result["mode"] == "native"
+
+
+# --- A refused SESSION SHAPE is definitive, and the minimal probe cannot see it ------------------
+# Found by the first browser-level BYOM run: byom-azure-openai-realtime ACCEPTS a minimal
+# RequestSession and REJECTS the production session, because speech-native passthrough has no
+# Voice Live speech recognizer to run text end-of-utterance detection or azure-speech transcription
+# on. The save-time check was therefore a false green for that profile until it started sending the
+# real shape. Both payloads below are VERBATIM from that run.
+
+SESSION_EOU_REFUSAL = (
+    '{"message": "Text-based end-of-utterance detection requires a local speech recognizer and is '
+    'only supported on cascaded pipelines.", "type": "invalid_request_error", '
+    '"code": "invalid_request_error", '
+    '"param": "session.turn_detection.end_of_utterance_detection", "event_id": null}'
+)
+SESSION_BAD_ENVELOPE = (
+    '{"event_id": "evt", "type": "error", "error": {"message": "The `type` '
+    "field of SessionUpdatedMessage message should be 'session.update'.\", "
+    '"type": "invalid_request_error", "code": "invalid_session_update_message", "param": "type", '
+    '"event_id": null}}'
+)
+
+
+def test_a_refused_session_shape_is_definitive_even_with_a_generic_code():
+    # The giveaway is the structured `param`, NOT the code: this payload's code is the generic
+    # invalid_request_error, so matching on codes or phrases would have let it through as
+    # "inconclusive" and the save would have gone ahead.
+    verdict, detail = probe.classify_probe_result(None, SESSION_EOU_REFUSAL)
+    assert verdict == probe.REJECTED_SESSION
+    assert probe.is_definitive_rejection(verdict)
+    assert "cascaded pipelines" in detail  # the operator sees Azure's own explanation
+
+
+def test_a_rejected_session_update_envelope_is_also_definitive():
+    verdict, _ = probe.classify_probe_result(None, SESSION_BAD_ENVELOPE)
+    assert verdict == probe.REJECTED_SESSION
+    assert probe.is_definitive_rejection(verdict)
+
+
+def test_a_param_outside_session_is_not_treated_as_a_session_refusal():
+    # Only `session.*` params mean "your session configuration is wrong". A param naming something
+    # else must not be escalated into a save-blocking verdict.
+    payload = '{"message": "bad thing", "code": "invalid_request_error", "param": "audio.format"}'
+    assert probe.classify_probe_result(None, payload)[0] == probe.ERROR
+
+
+def test_a_non_json_transport_error_is_still_inconclusive():
+    # The param check must never make a plain connection failure look like a refusal.
+    verdict, _ = probe.classify_probe_result(None, "ClientConnectorError: cannot connect to host")
+    assert verdict == probe.ERROR
+    assert not probe.is_definitive_rejection(verdict)
+
+
+def test_probe_model_sends_the_session_it_is_given(stub_voicelive_sdk):
+    # The whole point of the fix: the caller decides what shape gets validated.
+    sentinel = object()
+    asyncio.run(
+        probe.probe_model(
+            endpoint="https://x.services.ai.azure.com",
+            credential=object(),
+            api_version="v",
+            model="gpt-5-mini",
+            session=sentinel,
+        )
+    )
+    import sys
+
+    conn = sys.modules["azure.ai.voicelive.aio"].connect
+    assert conn.captured, "connect was never called"
