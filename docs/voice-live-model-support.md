@@ -1145,6 +1145,89 @@ realtime  音频 →        模型       → 文本 → TTS → 音频      STT 
 
 ---
 
+### 4.12 RCA：realtime + 数字人时，念题变成了「文本」——一次也没出声
+
+> 2026-10-05。owner：「能否在好好测试一下，找出 RCA？」本节是排查过程本身，每一步都是实测，**被排除的
+> 假设也留着**，因为它们是结论可信的一部分。工具：`backend/scripts/voice_live_read_rca.py`（本次新增）
+> 和 `frontend/e2e/avatar-lipsync-record.spec.ts`（帧直方图 + 发出帧）。
+
+#### 症状
+
+把 admin 的语音模型设成 `gpt-realtime-2.1`，浏览器里跑真实面试：**数字人一句话都不说**，视频帧照常在流
+（600-700 帧），`totalAudioEnergy = 0`。换回 `gpt-5-mini`、同一台机器、相隔几分钟、同一个假麦克风 WAV：
+**0.273 / 0.279**，声音正常。
+
+#### 关键证据：同一个请求，两种回答
+
+浏览器**发出**的帧被逐字抓下来了，realtime 和级联**完全一样**（连重试都是同一份）：
+
+```
+> {"type":"response.create","response":{"pre_generated_assistant_message":
+   {"type":"message","role":"assistant","content":[{"type":"text","text":"Describe how you handle …"}]}}}
+```
+
+Azure 的回答却不同：
+
+| 收到的帧 | 级联 `gpt-5-mini` | realtime `gpt-realtime-2.1` |
+| --- | --- | --- |
+| `response.audio_transcript.delta` | 1 | **0** |
+| `response.audio.done` | 1 | **0** |
+| `session.avatar.switch_to_speaking` | 1 | **0** |
+| **`response.text.delta`** | 0 | **3** |
+| `response.created` | 1 | **3**（看门狗重试 3 次后放弃） |
+| `error` | 0 | **0 —— 什么都没报错** |
+
+**realtime 把念题请求当成文本回答了**：返回 `response.text.delta`，既不合成语音，也不通知数字人开口。
+前端看门狗等不到朗读确认，按设计重试 3 次，然后放弃 —— 全程静音且**没有任何报错**。
+
+#### 排除掉的假设（按顺序，每条都实测）
+
+| # | 假设 | 实测 | 结论 |
+| --- | --- | --- | --- |
+| 1 | realtime 根本不能做 pre-generated 朗读 | 纯语音会话（无 avatar）**3/3 出声**，515200 字节，转写 135 字 = 原文逐字 | ❌ 排除 |
+| 2 | 请求帧不一样 | 抓到浏览器发出的帧，两条路**逐字相同** | ❌ 排除 |
+| 3 | Azure 报了错我们没看见 | `ws_errors = 0`，服务端一个 error 帧都没发 | ❌ 排除 |
+| 4 | 照片数字人（`vasa-1`）与视频数字人不同 | 脚本里 `--character amira`（照片）与 `lisa`（视频）**都是音频模态** | ❌ 排除 |
+| 5 | 代理注入的两个系统项（语言锁定 + 朗读提示）把模型带偏 | `--proxy-items` 下 realtime **2/2 出声**，`text_deltas=0` | ❌ 排除 |
+| 6 | 浏览器一直在上传麦克风音频，语音原生会话因此进入「在听」状态 | `--mic` 边喂真实候选人音频边念题，realtime **2/2 出声**，`text_deltas=0` | ❌ 排除 |
+| 7 | **数字人媒体连接建立之后，realtime 的朗读被降级成文本** | 脚本只「声明」avatar 不做 WebRTC 握手 → 仍是音频模态；浏览器**完成握手** → 文本模态 | ✅ **目前唯一与全部数据一致的解释** |
+
+#### 复现
+
+```bash
+# Azure 侧没问题（纯语音会话）：3/3 出声
+cd backend && .venv/bin/python scripts/voice_live_read_rca.py --model gpt-realtime-2.1 --reps 3
+# 加上代理注入的系统项、再加上边喂麦克风音频，依然出声
+.venv/bin/python scripts/voice_live_read_rca.py --model gpt-realtime-2.1 --reps 2 --proxy-items
+.venv/bin/python scripts/voice_live_read_rca.py --model gpt-realtime-2.1 --reps 2 --proxy-items \
+    --mic /tmp/mic24.wav   # 24kHz 单声道 16-bit
+# 浏览器里（真实 avatar 握手）才会复现文本模态，帧直方图在 e2e/output/lipsync-*.txt
+cd frontend && LIVE_VOICE=1 … LIPSYNC_LOCALE=en-US npx playwright test avatar-lipsync-record \
+    --config=e2e/live.config.ts
+```
+
+#### 对结论的修正
+
+PR #168 写的「realtime 语音模型可用」**说得太满**。准确的说法是：
+
+- ✅ 会话能建立、数字人能协商出流、音频型 EoU 工作正常 —— 这些都实测过；
+- ✅ **纯语音**（不挂数字人）的 realtime 朗读正常出声；
+- ❌ **挂上数字人之后，realtime 的念题不出声**（本节），所以**现在不要把带数字人的面试切到 realtime**。
+- 代码对级联零影响（chat 那条路一个字节没动），所以线上没有风险：默认仍是 `gpt-5-mini`。
+
+#### 还不知道的
+
+为什么「握手完成」会把模态从音频切成文本 —— 这需要 Azure 侧的解释，或者一个能在脚本里完成 avatar WebRTC
+握手的装置（aiortc 那次装置本身跑不通，见 §4.10 的诚实缺口）。在此之前**不要**把第 7 条写成机制，它只是
+与数据一致的唯一剩余解释。
+
+还有一条没试的廉价分支：realtime + 数字人下，把朗读换成**普通模型轮**（不用
+`pre_generated_assistant_message`）看是否出声。若出声，触发条件就能再收窄到
+「pre_generated + 数字人 + realtime」三者同时成立。**但这不会改变建议** —— 模型轮念题的逐字命中率实测
+只有 1/3（§4.9），本产品不会用它来念题。
+
+---
+
 ## 5. 一句话决策树
 
 ```
