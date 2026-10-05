@@ -197,6 +197,53 @@ avatar**（Speech SDK avatar synthesis，WebRTC）是纯 TTS + 数字人，不�
 对我们这种"题库驱动 + 需要听候选人 + 偶尔要 judge 出声"的场景，留在 Voice Live、把模型当宿主
 是更省的选择：读题走 TTS，模型输入成本归零，架构不变。
 
+
+### 2.4 `is_mouth_persona` 和 `linear_turns_for_persona` 是不是一回事？要不要传模型？
+
+这是最常被问的一组问题，拆成三句回答：
+
+**一、今天两个函数的返回值完全相同——因为一个就是调用另一个。** 看代码
+（`voice_live_proxy.py:133` 与 `:149`）：
+
+```python
+def linear_turns_for_persona(persona, *, playground=False) -> bool:
+    is_external = (getattr(persona, "interview_brain", "bank") or "bank") == "external"
+    if is_external:
+        return True            # 外部大脑永远逐字念
+    return not playground      # 题库：面试页 True，Playground False
+
+def is_mouth_persona(persona, *, playground=False) -> bool:
+    return linear_turns_for_persona(persona, playground=playground)   # 字面委托
+```
+
+所以此刻 `is_mouth_persona(p) == linear_turns_for_persona(p)`，恒等。但——
+
+**二、它们是两个概念，喂给两个不同的决策，只是今天恰好同真同假。** 保留两个名字不是冗余，是把
+"这一步该不该发生"分开表达，将来某个概念要独立演化时不必动另一个：
+
+| 判定 | 回答的问题 | 驱动哪个开关 | 代码位置 |
+| --- | --- | --- | --- |
+| `linear_turns_for_persona` | 这个会话里 Voice Live 的模型要不要**自己生成一个回合**？ | `create_response`（mouth ⇒ `False`，模型一句不说） | `:210` / `:215` |
+| `is_mouth_persona` | 这个会话要不要**摘掉 Foundry agent、以 MODEL 模式建连**？ | `is_agent`（mouth ⇒ 剥掉 agent） | `:428` |
+
+即 `is_agent = bool(agent_id) and not is_mouth`（`:428`）——是"嘴"就把 agent 显式摘掉，哪怕
+persona 同步出了 `agent_id`。两条链路：一条管"模型准不准张嘴"，一条管"连法挂不挂 agent"。
+
+**三、要不要传模型？——live Voice Live API 永远要恰好一条"大脑接法"，所以"嘴"也仍然传
+`model=`。** 一个会话必须且只能走 §1 开头那三条接法之一：① `model=<原生名>`、② BYOM
+（`model=<你的 deployment>` + `profile`）、③ agent 三件套。没有"一条都不选"的会话。本仓库只用 ①
+和 ③：是 agent 就填 agent 三件套且**不传** `model=`；否则填 `connect_kwargs["model"] =
+default_model`（`:446`）。
+
+> **关键：mouth 会话走的是 ①，照样传 `model=default_model`——但这个模型是"宿主"不是"大脑"。**
+> 它承载 VAD/STT/TTS/avatar（§2.1、§2.2），`create_response=False` 让它一句不生成（§2.2 第 2 点
+> 的"保险丝"）。所以"不走 LLM 为什么还要传模型"和"是嘴为什么还要传模型"是同一个答案：传的是语音
+> 流水线的宿主，不是在用它推理。真正的"大脑"在别处——外部 API 产题、题库静态文本、或 off-WebSocket
+> 的 judge LLM（§3.2），都不经过这个 `model=`。
+>
+> 唯一真正把模型/agent 当大脑用的会话是编辑器 **Playground**（`playground=True`）：对一个 synced
+> 的 bank persona，`linear_turns_for_persona` 和 `is_mouth_persona` 都翻成 `False`，于是 agent
+> 不再被摘、`create_response` 打开，模型才"想"。详见 §3.2 与 [`voice-live-model-support.md`](./voice-live-model-support.md) §3.3 的运行期调用链表。
 ---
 
 ## 3. 既要"精确读题"，又要"保留部分 LLM 生成"：代码和 prompt 怎么分工
