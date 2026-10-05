@@ -6,6 +6,18 @@
  * models, so the model is tracked per persona. An empty selection means "fall back to the global AI
  * Foundry config" (DB > .env > default); on reconcile the live agent version's model is pulled in
  * here. Controlled by `value` / `onChange` from the definition panel.
+ *
+ * SCOPE, because the earlier copy here overstated it: this value reaches **the persona's Foundry
+ * agent definition only** (`azure_agent_sync`: a per-persona model wins over the global default).
+ * Judge and scoring never read it — they resolve through `registry` →
+ * `settings.foundry_agent_model`, which comes from the master row's `model_or_deployment` (the
+ * Admin page's "Inference model" field). Verified by grep, not by recollection.
+ *
+ * The list is fetched with the default `kind="chat"`, so realtime deployments are not offered. That
+ * is deliberate and measured: an agent defined on a realtime deployment IS accepted by
+ * `agents.create_version`, and then fails at run time with
+ * `400 This model is not supported by Responses API.` (docs/voice-live-model-support.md §4.12) —
+ * a configuration that saves and then breaks later is the worst kind to offer.
  */
 import { useEffect, useState } from "react";
 import {
@@ -90,8 +102,8 @@ export function ModelSelect({ value, onChange }: ModelSelectProps) {
       </Field>
       <Caption1>
         {value
-          ? `This model is saved on the persona and synced to its Foundry agent. It OVERRIDES the inference model on Admin → Azure connection${configured ? ` (${configured})` : ""}, which is why a change there does not move this persona.`
-          : `Using the global default${configured ? ` (${configured})` : ""} from Admin → Azure connection. Pick a model to set it per persona.`}
+          ? `This model is saved on the persona and synced to its Foundry agent: it decides which model THAT AGENT runs on, overriding the fallback from Admin → Azure connection${configured ? ` (${configured})` : ""} for this persona only. Judge and scoring are unaffected — they always use the inference model on that page.`
+          : `No per-persona model: this agent runs on the inference model from Admin → Azure connection${configured ? ` (${configured})` : ""}. Pick one to pin a model for this persona's agent alone.`}
       </Caption1>
     </div>
   );

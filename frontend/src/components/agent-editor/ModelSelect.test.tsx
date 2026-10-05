@@ -38,8 +38,19 @@ describe("ModelSelect", () => {
     renderModelSelect({ value: "", onChange: vi.fn() });
     const dd = await screen.findByTestId("model-dropdown");
     await waitFor(() => expect(dd).toHaveValue("gpt-5.4-mini"));
-    // Caption explains it's falling back to the global default.
-    expect(screen.getByText(/global default/i)).toBeInTheDocument();
+    // Caption says where the fallback comes from, and names the right consumer: this value drives
+    // the persona's AGENT, not judge/scoring (the copy used to claim it overrode the inference
+    // model, which it never did — see the component header).
+    expect(screen.getByText(/inference model from Admin/i)).toBeInTheDocument();
+    expect(screen.getByText(/this persona's agent alone/i)).toBeInTheDocument();
+  });
+
+  it("says the per-persona model scopes to the agent and spares judge/scoring", async () => {
+    mockDiscovery("gpt-5.4-mini");
+    renderModelSelect({ value: "gpt-5", onChange: vi.fn() });
+    await screen.findByTestId("model-dropdown");
+    expect(screen.getByText(/THAT AGENT runs on/i)).toBeInTheDocument();
+    expect(screen.getByText(/Judge and scoring are unaffected/i)).toBeInTheDocument();
   });
 
   it("prefers the persona's own model over the global default", async () => {
