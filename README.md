@@ -246,4 +246,5 @@ stored cloud credentials, managed identity everywhere, keyless. See
 | [`docs/VERIFICATION.md`](docs/VERIFICATION.md) | How to verify the requirements and run the system |
 | [`docs/planning/`](docs/planning/) | Spec lineage: design docs, plans, and reviews |
 | [`docs/avatar-weaknet-probe.md`](docs/avatar-weaknet-probe.md) | Weak-network digital-human media adaptation: measurement method, findings, and the shipped auto-downgrade implementation |
+| [`docs/sop-coverage-audit.md`](docs/sop-coverage-audit.md) | The opt-in SOP coverage audit: why binding the SOP to a rubric does not answer "did the rubric miss anything", what it costs, and the source-selection bugs fixed in v0.45.0.0 (中文) |
 | [`CHANGELOG.md`](CHANGELOG.md) | Per-release detail |
