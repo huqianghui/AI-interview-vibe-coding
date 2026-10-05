@@ -573,18 +573,72 @@ embedding"筛，`gpt-image-2-1` 也会被捞进来（**这是跑真实接口才�
 区分是：**声明了 `chat_completion` 且其值为 `"false"`** —— realtime 有这个 key，image 的
 `capabilities` 是空的。
 
-**三个 profile 的验证状态（全部真实建连）：**
+**三个 profile 的验证状态（全部真实建连；realtime 那一行已被 §4.6 更正，别只看这张表）：**
 
 | profile | 用的部署 | 结果 |
 | --- | --- | --- |
 | `byom-azure-openai-chat-completion` | `gpt-5.4-mini`、`gpt-6-luna` | ✅ ACCEPTED（§4.4） |
-| `byom-azure-openai-realtime` | **`gpt-realtime-1.5`**、**`gpt-realtime-2.1`** | ✅ **ACCEPTED** |
+| `byom-azure-openai-realtime` | **`gpt-realtime-1.5`**、**`gpt-realtime-2.1`** | ⚠️ 探针 ACCEPTED，**但本产品的会话跑不了 —— 见 §4.6** |
 | `byom-azure-openai-realtime`（错配）| `gpt-5-mini`（chat 部署） | ❌ `byom_realtime_connection_error` |
 | `byom-foundry-anthropic-messages` | — | ⚠️ **无法验证**：本租户不能部署 Claude |
 
 **对 anthropic 那一格刻意不发明过滤条件。** 既然无法测量 Claude 部署长什么样，猜一个过滤条件若猜错，
 下拉就会是空的——正是上面 realtime 那个 bug 的翻版。所以该 profile 列**全部部署**（`kind=all`）：清单
 过宽是可恢复的（Azure 在建连时会拒掉错配，§4.4 的 E/F 两条已实测），**过窄则让功能彻底不可达**。
+
+### 4.6 realtime profile 连得上，但本产品的会话它跑不了（浏览器 E2E 才抓到）
+
+> 2026-10-05 续。§4.5 用探针测出 realtime BYOM "ACCEPTED"。加了**真实浏览器 E2E** 之后，结论要修正：
+> **连得上 ≠ 能用。**
+
+**现象**：浏览器里真跑一场 BYOM-realtime 面试，Azure 拒掉 `session.update`。逐字段二分后的真实原因：
+
+```json
+{"message": "Text-based end-of-utterance detection requires a local speech recognizer and is
+  only supported on cascaded pipelines.",
+ "code": "invalid_request_error",
+ "param": "session.turn_detection.end_of_utterance_detection"}
+```
+
+**根因**：`byom-azure-openai-realtime` 是**语音直通** —— 音频直接进你的 realtime 模型，**Voice Live
+自己不做 STT**。而本产品的会话依赖 Voice Live 做 STT/VAD：`azure_semantic_vad` + **文本型 EOU** +
+`azure-speech` 输入转写，这三样都只存在于**级联**管线。去掉 `turn_detection` 会换成另一条错误
+（`When using azure-speech as InputAudioTranscription, turn_detection must …`），即两者互相耦合。
+
+**为什么探针之前说它可用 —— 一个真实的校验缺陷**：
+
+| 发什么会话 | realtime BYOM 的结果 |
+| --- | --- |
+| 最小 `RequestSession(instructions="probe")` | ✅ ACCEPTED |
+| **生产会话** `build_avatar_session(...)` | ❌ **ERROR（上面那条）** |
+
+保存时的实测校验原本只发最小会话，**所以它对这个 profile 是假绿灯** —— 管理员能存下一个让**每一场**
+语音面试都失败的配置。**只有浏览器级 E2E 才会发现这件事**，探针和单元测试都不会。
+
+**修法（两处）**：
+
+1. **保存校验改发生产会话形状**（`_production_voice_session`：取默认人物的 `build_avatar_session`）。
+   于是 realtime 在**保存阶段**就被 Azure 用它自己的原话挡住 → 422，不落库。
+2. **探针会话里剥掉 `avatar`**。因为 avatar 建连限额约 **3 次/60 秒**（实测），带 avatar 去探会让
+   每次保存都吃掉一个配额、和真实候选人抢资源 —— 而二分数据显示 `FULL minus avatar` 仍会报同一条 EOU
+   错误，所以**剥掉它不影响要抓的那个不兼容**。
+
+**分类器也跟着补了一类**：那条报文的 `code` 是通用的 `invalid_request_error`，真正的确定性信号是
+`param` 指向 `session.*`。所以新增 `REJECTED_SESSION`，**按 `param` 判而不是按某句话判**（这样
+`invalid_session_update_message` 那种形状也一并抓住）。
+
+**最终状态（真实浏览器 E2E，`e2e/byom-voice-live.spec.ts`，3/3 通过）：**
+
+| 用例 | 断言的真实行为 |
+| --- | --- |
+| BYOM chat-completion | 保存 200「已实测校验通过」；浏览器里真跑一场面试，`proxy.connected` 带 `byom_profile`，avatar ICE 到达，无 error |
+| BYOM **realtime** | 保存 **422**，带 Azure 原话，**且配置未被改动** —— 没有任何面试会看到它 |
+| native 对照 | wire 上**不带** profile（库里残留的旧 profile 不会泄漏） |
+
+> 顺带记一个测试工程上的坑：avatar 限额错误是在 `proxy.connected` **之后**才到的，所以"连上了"不等于
+> 成功；E2E 的重试条件一开始写成 `if (connected) return` 就漏掉了它，必须在连上之后再等一拍看有没有
+> 限流帧。
+
 
 **接口形态**：`GET /admin/config/ai-foundry/model-deployments?kind=chat|realtime|all`，默认 `chat`
 （推理模型下拉与人物编辑器保持原行为）；未知值回退到 `chat`，不 422——一个会报错的下拉比一个显示安全

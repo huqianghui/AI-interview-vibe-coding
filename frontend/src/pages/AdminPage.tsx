@@ -987,6 +987,14 @@ export function AdminPage() {
                   never asks a model to think (it reads prepared text), so this changes the session
                   host and billing path, not interview behaviour.
                 </Body1>
+                {cfgVoiceProfile === "byom-azure-openai-realtime" && (
+                  <Caption1 data-testid="cfg-byom-realtime-warning">
+                    Measured: a realtime deployment connects under this profile, but saving will be
+                    refused. Speech-native passthrough has no Voice Live speech recognizer, and this
+                    product&apos;s session needs text end-of-utterance detection plus azure-speech
+                    transcription — both cascaded-only. Azure names the field in the error.
+                  </Caption1>
+                )}
                 <Caption1 data-testid="cfg-byom-kind">
                   Listing{" "}
                   {admin.deploymentKindForProfile(cfgVoiceProfile) === "realtime"

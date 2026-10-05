@@ -649,7 +649,13 @@ describe("AdminPage", () => {
     await waitFor(() => expect(listDeployments).toHaveBeenCalledWith("realtime"));
     await user.click(screen.getByTestId("cfg-voice-model-dropdown"));
     expect(await screen.findByRole("option", { name: /gpt-realtime-2\.1/ })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
     expect(screen.getByTestId("cfg-byom-kind")).toHaveTextContent(/realtime deployments/i);
+    // The operator is warned BEFORE saving: the save is refused, because this product's session
+    // needs text EOU + azure-speech transcription, which passthrough cannot run (measured live).
+    expect(screen.getByTestId("cfg-byom-realtime-warning")).toHaveTextContent(
+      /saving will be refused/i,
+    );
   });
 
   it("lists every deployment for the Anthropic profile, since no filter can be verified", async () => {

@@ -10,6 +10,7 @@ admin routers). The API key is write-only: responses return only a masked value,
 """
 
 import logging
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -113,8 +114,45 @@ async def get_ai_foundry_config(db: AsyncSession = Depends(get_db)) -> AiFoundry
     return _to_out(master, config_service.mask_key(key))
 
 
+async def _production_voice_session(db: AsyncSession) -> Any:
+    """The session shape a real interview sends, so the save-time check validates THAT.
+
+    A minimal probe session is a false green: measured, ``gpt-realtime-2.1`` under
+    ``byom-azure-openai-realtime`` accepts ``RequestSession(instructions="probe")`` and rejects the
+    production session with "Text-based end-of-utterance detection requires a local speech
+    recognizer" — speech-native passthrough has no Voice Live recognizer for text EOU or
+    ``azure-speech`` transcription. Checking the minimal shape would let an operator save a config
+    under which EVERY interview fails.
+
+    Built from the default persona when there is one, so the avatar/voice/VAD block matches what the
+    candidate session will actually carry. Returns ``None`` (the probe then falls back to minimal)
+    if the shape cannot be built — a missing azure extra, or no persona yet on a fresh install.
+    """
+    try:
+        from app.services.persona_service import get_default_persona
+        from app.services.voice_live_proxy import build_avatar_session
+
+        persona = await get_default_persona(db)
+        if persona is None:
+            return None
+        session = build_avatar_session(persona, locale=None, playground=False, background=None)
+        # Strip the avatar before probing. AVATAR creation is rate-limited to roughly 3 per 60s
+        # (measured), so probing WITH it would make every config save consume a slot and compete
+        # with real candidates — and it is unnecessary: the incompatibility this check must catch
+        # lives in turn_detection / input_audio_transcription, and the bisect shows "full session
+        # minus avatar" still returns the end-of-utterance refusal under speech-native passthrough.
+        try:
+            del session["avatar"]
+        except (KeyError, TypeError):
+            pass
+        return session
+    except Exception as exc:  # noqa: BLE001 — shape-building must never break a save
+        logger.warning("Could not build the production voice session for the check: %s", exc)
+        return None
+
+
 async def _check_voice_model(
-    *, endpoint: str, api_key: str, voice_model: str, mode: str, profile: str
+    *, endpoint: str, api_key: str, voice_model: str, mode: str, profile: str, session: Any = None
 ) -> str:
     """Live-check a chosen voice model, returning a note. Raises 422 on a DEFINITIVE rejection.
 
@@ -150,6 +188,7 @@ async def _check_voice_model(
         api_version=get_settings().voice_live_api_version,
         model=voice_model,
         byom_profile=profile if mode == "byom" else "",
+        session=session,
     )
     verdict, detail = result["verdict"], result["detail"]
     if probe.is_definitive_rejection(verdict):
@@ -222,6 +261,7 @@ async def update_ai_foundry_config(
                 voice_model=body.voice_model.strip(),
                 mode=body.voice_model_mode,
                 profile=body.voice_byom_profile.strip(),
+                session=await _production_voice_session(db),
             )
         except HTTPException:
             await db.rollback()

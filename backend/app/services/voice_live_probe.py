@@ -37,10 +37,19 @@ REJECTED_REGION = "REJECTED_REGION"
 REJECTED_PROFILE = "REJECTED_PROFILE"
 REJECTED_BYOM = "REJECTED_BYOM"
 REJECTED_NOT_FOUND = "REJECTED_NOT_FOUND"
+# The service refused the SESSION CONFIGURATION itself — it named the offending field. Definitive by
+# construction: a param-scoped validation error is deterministic, so retrying or saving anyway only
+# moves the failure into every interview. Measured case: the production session under
+# byom-azure-openai-realtime answers
+#   param "session.turn_detection.end_of_utterance_detection", "Text-based end-of-utterance
+#   detection requires a local speech recognizer and is only supported on cascaded pipelines."
+# whose code is the GENERIC invalid_request_error — which is exactly why this is keyed off `param`
+# rather than off a code or a phrase.
+REJECTED_SESSION = "REJECTED_SESSION"
 ERROR = "ERROR"
 
 _DEFINITIVE_REJECTIONS = frozenset(
-    {REJECTED_REGION, REJECTED_PROFILE, REJECTED_BYOM, REJECTED_NOT_FOUND}
+    {REJECTED_REGION, REJECTED_PROFILE, REJECTED_BYOM, REJECTED_NOT_FOUND, REJECTED_SESSION}
 )
 
 # Verbatim markers from real server payloads (docs/voice-live-model-support.md §4.4). Matching the
@@ -109,6 +118,26 @@ def is_definitive_rejection(verdict: str) -> bool:
     return verdict in _DEFINITIVE_REJECTIONS
 
 
+def _names_a_session_param(error: str) -> bool:
+    """True when the payload blames a ``session.*`` field (or the session.update envelope).
+
+    Keyed off the structured ``param``, not off wording: the measured refusal of a speech-native
+    passthrough session carries the generic code ``invalid_request_error`` and only ``param`` says
+    what is actually wrong. ``invalid_session_update_message`` (``param: "type"``) is the other
+    shape seen live, hence the explicit code too.
+    """
+    try:
+        payload = json.loads(error)
+    except (TypeError, ValueError):
+        return False
+    inner = payload.get("error", payload) if isinstance(payload, dict) else {}
+    if not isinstance(inner, dict):
+        return False
+    if str(inner.get("code", "")) == "invalid_session_update_message":
+        return True
+    return str(inner.get("param", "") or "").startswith("session.")
+
+
 def classify_probe_result(first_event: dict[str, Any] | None, error: str | None) -> tuple[str, str]:
     """Map the first server event (or a connect-time exception) to ``(verdict, detail)``.
 
@@ -124,6 +153,8 @@ def classify_probe_result(first_event: dict[str, Any] | None, error: str | None)
             return REJECTED_BYOM, error
         if "not found" in low or "does not exist" in low:
             return REJECTED_NOT_FOUND, error
+        if _names_a_session_param(error):
+            return REJECTED_SESSION, error
         return ERROR, error
     if first_event is None:
         return ERROR, "no server event before timeout"
@@ -142,6 +173,7 @@ async def probe_model(
     api_version: str,
     model: str,
     byom_profile: str = "",
+    session: Any = None,
     timeout_s: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     """Open one Voice Live session for ``model`` and classify the first server event.
@@ -149,6 +181,15 @@ async def probe_model(
     NATIVE mode with an empty ``byom_profile``; BYOM mode otherwise, where ``model`` is a deployment
     name in the Foundry resource and the profile rides as a query param (the SDK maps ``query``
     straight onto the WebSocket URL). Never raises: a connect-time rejection is classified too.
+
+    ``session`` is what gets sent in the ``session.update``. Default: a minimal
+    ``RequestSession(instructions="probe")``, which answers "does the region host this model" and is
+    what the catalogue sweep wants. **Pass the production-shaped session when the question is "will
+    the app's real sessions work"** — the two answers differ, measured: ``gpt-realtime-2.1`` under
+    ``byom-azure-openai-realtime`` ACCEPTS the minimal session and REJECTS the real one with
+    "Text-based end-of-utterance detection requires a local speech recognizer", because
+    speech-native passthrough has no Voice Live recognizer to run text EOU or ``azure-speech``
+    transcription on. A check that only sends the minimal session is a false green for that profile.
     """
     mode = "byom" if byom_profile else "native"
     started = time.monotonic()
@@ -176,7 +217,9 @@ async def probe_model(
         async with connect(**kwargs) as conn:
             # The cheapest "did Azure accept this?" signal: a good model answers session.updated, a
             # bad one answers error. No audio is ever sent.
-            await conn.session.update(session=RequestSession(instructions="probe"))
+            await conn.session.update(
+                session=session if session is not None else RequestSession(instructions="probe")
+            )
             first: dict[str, Any] | None = None
             try:
                 async with asyncio.timeout(timeout_s):

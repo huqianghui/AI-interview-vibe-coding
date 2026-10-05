@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.43.2.0 (2026-10-05)
+
+### Fixed
+- **The save-time voice check was a false green for the realtime BYOM profile.** It probed with a
+  minimal `RequestSession`, which `byom-azure-openai-realtime` accepts — while the session the app
+  actually sends is refused: *"Text-based end-of-utterance detection requires a local speech
+  recognizer and is only supported on cascaded pipelines"* (`param:
+  session.turn_detection.end_of_utterance_detection`). Speech-native passthrough has no Voice Live
+  speech recognizer, and this product's session needs text EOU **and** `azure-speech` input
+  transcription, both cascaded-only. An operator could therefore save a config under which every
+  voice session fails. The check now sends the **production session shape**, so Azure refuses it at
+  save time with its own wording and the row is never written. **Only a browser-level E2E surfaced
+  this** — the probe CLI and the unit tests both said the profile was fine.
+- The probe session has its **avatar stripped**: avatar creation is rate-limited to roughly 3 per 60s
+  (measured), so probing with it would make every config save consume a slot and compete with real
+  candidates. The bisect shows the full session minus avatar still returns the same refusal, so
+  nothing is lost.
+- A refused **session shape** is now a definitive verdict (`REJECTED_SESSION`) rather than
+  "inconclusive". It is keyed off the structured `param` naming a `session.*` field, not off a code
+  or a phrase — the measured payload's code is the generic `invalid_request_error`, so matching codes
+  would have let it through and saved anyway.
+
+### Added
+- `e2e/byom-voice-live.spec.ts` — the first browser-level BYOM coverage, against real Azure: the
+  chat-completion profile runs a real interview with the profile on the wire and avatar ICE arriving;
+  the realtime profile is asserted to be refused at save with the row untouched; a native control
+  proves no stale profile leaks onto the wire. 3/3 passing. It retries only on Azure's own avatar
+  rate-limit, using the delay Azure states — and that retry has to trigger *after* `proxy.connected`,
+  because the rate-limit frame arrives after the connect succeeds.
+- The admin page warns before the save is attempted when the realtime profile is selected, instead of
+  letting the operator discover the 422.
+
 ## 0.43.1.0 (2026-10-05)
 
 ### Fixed
