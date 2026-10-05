@@ -912,7 +912,7 @@ TTS"，理由换了一个。**
 | avatar（数字人）| ✅ `ice=1` | ✅ **`ice=1`** | 实测 §4.7 |
 | 不设 `voice` 时的默认声音 | Azure 自动填 `azure-standard/en-US-AvaNeural` | **`openai/marin`（模型自带）** | 实测 §4.7 |
 | 配 Azure TTS 音色输出 | ✅ | ✅ **（这就是"混合式"）** | 实测 §4.7 |
-| **逐字念题**（`pre_generated_assistant_message`）| ✅ 188000 字节、逐字一致、1.8s | ⚠️ **纯语音会话下** 188000 字节、逐字一致、1.4s；**挂上数字人则 9/10 静音**（§4.12）| **实测，本节 + §4.12** |
+| **逐字念题**（`pre_generated_assistant_message`）| ✅ 188000 字节、逐字一致、1.8s | ✅ 188000 字节、逐字一致、1.4s（纯语音会话）；**挂数字人也正常**（§4.12 实测 `switch_to_speaking` + 录音 peak 0.155）| **实测，本节 + §4.12** |
 | 输入转写 `azure-speech` | ✅ | ✅（配音频型 EoU 时）| 实测 §4.7 |
 | BYOM profile | `byom-azure-openai-chat-completion` | `byom-azure-openai-realtime` | 实测 §4.4 / §4.5 |
 | 部署的 `capabilities` | `chat_completion: "true"` | `chat_completion: "false"`（**无正向 realtime 标记**）| 实测 §4.5 |
@@ -934,9 +934,9 @@ HYBRID   gpt-realtime-2.1: response.done=True  audio=188000B  verbatim=True  1.4
 > **怎么看出它没挂数字人**：`audio=188000B` 是从 WS 上的 `response.audio.delta` 数出来的，而挂上数字人
 > 之后那条路的 WS 音频帧数实测是 **0**（音频改走 WebRTC 音频轨，§4.12）。所以这两行都是**纯语音会话**。
 >
-> **挂上数字人之后的真实结果在 §4.12**：浏览器里 10 次尝试只有 1 次出声，失败时 Azure 用
-> `response.text.delta` 回答，静默无报错。所以本行只能证明"realtime 能逐字念"，**不能**证明
-> "realtime + 数字人能逐字念"。
+> **挂上数字人的情况在 §4.12 单独验过，也是正常的**（`session.avatar.switch_to_speaking` + 录音
+> peak 0.155）。中途我曾据此写下"realtime + 数字人念题不出声"，那是本机一个陈旧 dev 进程造成的 ——
+> 它跑的实验版把 `session.voice` 去掉了，详见 §4.12。
 
 **评估该用哪个模型 —— 这一格我先下过一个太宽的结论，owner 当场质疑，更正如下。**
 
@@ -1206,6 +1206,27 @@ Azure 回显的 `session.updated`（它说的是"我实际应用了什么"，不
 | 直接验证 | 往 `run_proxy` 里临时插一行 `print`，跑一次 WS，**日志里一个字都没出现** |
 | 时间线 | `07:21Z = 本地 15:21` 那次 realtime + 数字人**听得见**（1135ms），正好在实验重启**之前**；之后每次都静音 |
 | 重启后 | 同一个请求：回显 `openai/marin → azure-standard/en-US-AvaNeural`，回答 `response.text.delta → response.audio.done`，浏览器 `recorded peak 0.155` + `switch_to_speaking`，测试 **passed** |
+
+#### 顺带答一个问题：模型自己生成的回答能驱动数字人吗？能，且与念题同一条出口
+
+owner 2026-10-05：「如果不是 pre assistant message 这种情况下，如果是通过 gpt-realtime 生成的
+response creation 的情况是否可以正常驱动数字人呢？」实测（`--read-mode model_turn`，先放一条用户消息再发
+裸 `response.create`）：
+
+| realtime 会话形态 | 结果 |
+| --- | --- |
+| 模型生成回答，纯语音 | ✅ **459200 字节音频**、16 个 `response.audio.delta`、转写 107 字，音色回显 `azure-standard/en-US-AvaNeural` |
+| 模型生成回答，**挂数字人** | ✅ 27 个 `response.audio_transcript.delta` + `audio_transcript.done`；WS 音频字节 **0** —— 音频改走数字人的 WebRTC 轨，和念题一样 |
+
+两个要点：
+
+1. **模型生成的回答，输出音色仍是 `azure-standard`**，不是模型自带的 `marin` —— 只要 `session.voice` 配了
+   Azure 音色，**嘴始终是 Azure TTS**，模型只产出文字。所以 TTS → viseme → 口型这条链完全一样：
+   **"模型生成"与"预生成"对数字人没有区别。**
+2. 挂数字人后 WS 上看不到音频字节是**正常**的，不是异常。
+
+**但题目仍然必须用 `pre_generated_assistant_message`** —— 原因与数字人无关：模型念题的逐字命中率实测只有
+1/3（§4.9），题目内容不能被改写。
 
 #### 在找到它之前被逐条实测排除的假设（留着，它们是结论可信度的一部分）
 
