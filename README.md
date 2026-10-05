@@ -135,6 +135,30 @@ azure     AI Foundry agents (Responses API) · Voice Live (avatar, via a backend
 infra     Azure Container Apps (Sweden Central) · Bicep · GitHub Actions OIDC (keyless)
 ```
 
+### A voice session, stage by stage
+
+![Voice pipeline — browser, backend WS proxy, session assembly, then either the cascaded pipeline (Azure STT + text EoU + a chat deployment) or the speech-to-speech one (audio passthrough + audio EoU + a realtime model); both end in Azure Speech TTS, the avatar, and WebRTC back to the browser, with the inference leg always on a chat deployment](docs/images/voice-pipeline.svg)
+
+The **only** difference between the two pipelines is the end-of-utterance detector, and nobody
+configures it — it is derived from the voice model you pick in `/admin`
+(`voice_live_probe.uses_realtime_pipeline`):
+
+| Voice model | Pipeline | EoU detector | `timeout_ms` |
+| --- | --- | --- | --- |
+| A chat deployment (`gpt-5-mini`, today's default) | cascaded | `semantic_detection_v1_multilingual` | 1500 |
+| A realtime model (`gpt-realtime-*`, `azure-realtime`) | speech-to-speech | `smart_end_of_turn_detection` | 1000 |
+| BYOM `byom-azure-openai-realtime` | speech-to-speech | `smart_end_of_turn_detection` | 1000 |
+| BYOM, any other profile | cascaded | `semantic_detection_v1_multilingual` | 1500 |
+
+The text detector reads the recognised transcript, so it exists only on a cascaded pipeline and a
+speech-to-speech model refuses the whole session over it. The audio one works on both — but the A/B
+found the two merely *equivalent* (English last-stop 7.57 s vs 7.68 s, Chinese 8.98 s vs 8.96 s), so
+the path already running in production was left exactly as it was. Either way the **mouth is Azure
+Speech TTS**, which is what keeps lip-sync TTS-driven and the voice independent of the model. Full
+evidence, including which models are realtime (measured by probing, not by name — `phi4-mm-realtime`
+is cascaded despite its name): [`docs/voice-live-model-support.md`](docs/voice-live-model-support.md)
+§4.7-§4.10.
+
 - **Provider abstraction** — LLM / retrieval / voice each have a `mock` and an `azure`
   implementation; local dev and the whole CI suite run entirely on mocks.
 - **Voice transport** — the browser talks to `/api/voice-live/ws`; the backend proxy holds the
