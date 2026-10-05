@@ -1207,6 +1207,51 @@ Azure 回显的 `session.updated`（它说的是"我实际应用了什么"，不
 | 时间线 | `07:21Z = 本地 15:21` 那次 realtime + 数字人**听得见**（1135ms），正好在实验重启**之前**；之后每次都静音 |
 | 重启后 | 同一个请求：回显 `openai/marin → azure-standard/en-US-AvaNeural`，回答 `response.text.delta → response.audio.done`，浏览器 `recorded peak 0.155` + `switch_to_speaking`，测试 **passed** |
 
+#### 会话配置到底差几格？25 个字段里 2 格，而且都不在 voice 上
+
+owner：「如果 gpt-realtime 模型的话，生成 pre-assistant-message 的情况下，和级联的 session 配置到底有什么
+区别？为什么产生这个 bug？」把两份会话拍平逐字段比（`build_avatar_session`，同一人物同一语言）：
+
+```
+turn_detection.end_of_utterance_detection.model       级联 semantic_detection_v1_multilingual
+                                                   realtime smart_end_of_turn_detection
+turn_detection.end_of_utterance_detection.timeout_ms  级联 1500        realtime 1000
+```
+
+**其余 23 个字段完全相同** —— 包括 `voice.type/name/rate/temperature`、`modalities`、
+`input_audio_transcription`、`turn_detection.type/silence_duration_ms/create_response`、
+`input_audio_sampling_rate`、`avatar`。所以**在念题这件事上，两条管线的配置没有任何区别**。
+
+**那 bug 从哪来？** 不是两条路配得不一样，而是那个陈旧实验版**把 `voice` 整个删了**，而
+**Azure 对"缺少 voice"的默认处理按管线不同**：级联会自动补一个 TTS 音色（于是毫无症状），realtime 则把音频
+交给模型自己（`openai/marin`），`pre_generated_assistant_message` 于是没有 TTS 可用。
+
+**修法**：发送侧无需改动 —— `"voice": AzureStandardVoice(...)` 在 `build_avatar_session` 里是**无条件**的。
+补的是**检测**：`applied_voice_mismatch()` 核对 Azure 回显，音色不是我们发的那个就记 warning。若要更硬，可选
+① 直接让会话失败，② 把"实际生效的音色"放进诊断帧供 UI/E2E 断言 —— 两者都未实施，按需再做。
+
+#### 一个会话里只有一个声音：不会出现"两个声音驱动数字人"
+
+owner：「如果是用 gpt-realtime 说话的话，那么 pre-assistant-message 通过 TTS 说话的时候，是否有两个声音来
+驱动数字人？这样是否也会有一点点怪异？」
+
+**`session.voice` 是会话级设置，不是按响应设的**，所以一个会话里只有一个发声者。实测四格：
+
+| `session.voice` | 念题（`pre_generated`） | 模型自己生成的回答 |
+| --- | --- | --- |
+| `azure-standard/en-US-AvaNeural`（产品当前） | ✅ Azure TTS 念 | ✅ **也是 Azure TTS 念** —— 459200 字节，回显 `azure-standard` |
+| **缺失** | ❌ 回 `response.text.delta`（转写 0 字） | ✅ 模型自带音色 —— 460800 字节，回显 `openai/marin` |
+
+**所以"两个声音"在一个会话里构造不出来**：要么全程 Azure TTS，要么全程模型自带音色。这正是混合式干净的
+原因 —— realtime 只听和想，**所有发声都归 Azure TTS**，数字人永远只有一条音频源、一条 viseme 流。真正
+"怪异"的是另一头：丢掉 `voice` 之后模型用 marin 说话、而念题直接失声，也就是本节这个 bug。
+
+**模型自带音色能否驱动数字人** —— 服务层有正面信号：挂数字人时模型的音频**被路由到数字人通道**（转写 80 字、
+WS 音频字节 0，与 Azure TTS 同一签名）。但**口型是否真跟着模型自己的词动尚未验证**，那需要真实握手下的
+`session.avatar.switch_to_speaking`。**Playground 今天也试不了**：bank 人物在 Playground 里挂的是 Foundry
+agent（chat 模型），`model=` 根本不发；而新建人物会自动同步出一个 agent，所以拿不到"无 agent 的人物"。
+要验证需要从页面侧注入一条去掉 voice 的 `session.update` 再发一次模型轮 —— 未做。
+
 #### 顺带答一个问题：模型自己生成的回答能驱动数字人吗？能，且与念题同一条出口
 
 owner 2026-10-05：「如果不是 pre assistant message 这种情况下，如果是通过 gpt-realtime 生成的
