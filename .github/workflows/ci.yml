@@ -6,6 +6,32 @@ on:
   pull_request:
 
 jobs:
+  # Cheapest job, first: VERSION silently drifted FOUR releases before anything noticed. #166, #167
+  # and #168 each wrote a CHANGELOG entry and a versioned PR title (0.43.0.0, 0.43.1.0, 0.43.2.0,
+  # 0.44.0.0) without ever touching the VERSION file, which sat at 0.42.7.0 — so the repo's declared
+  # version disagreed with its own release history and the next /ship run was about to pick a number
+  # BELOW four already-published entries. Nothing caught it because nothing compared the two. This
+  # does, in two seconds. (No workflow consumes VERSION for an image tag, so the damage was to
+  # humans and docs rather than to a deploy — which is exactly why it went unnoticed for four turns.)
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: VERSION matches the newest CHANGELOG entry
+        run: |
+          file=$(tr -d '[:space:]' < VERSION)
+          top=$(grep -m1 -oE '^## [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' CHANGELOG.md | awk '{print $2}')
+          echo "VERSION file     = $file"
+          echo "CHANGELOG newest = $top"
+          if [ -z "$top" ]; then
+            echo "::error::No 4-digit '## x.y.z.w' heading found in CHANGELOG.md."
+            exit 1
+          fi
+          if [ "$file" != "$top" ]; then
+            echo "::error::VERSION ($file) != newest CHANGELOG entry ($top). Bump VERSION in the same PR as its CHANGELOG entry."
+            exit 1
+          fi
+
   backend:
     runs-on: ubuntu-latest
     defaults:
