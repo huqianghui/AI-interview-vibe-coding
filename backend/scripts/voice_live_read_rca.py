@@ -104,6 +104,11 @@ async def one_read(
     character: str,
     proxy_items: bool,
     mic_wav: str,
+    modalities: str,
+    persona: Any,
+    background: str,
+    session_as_dict: bool,
+    read_mode: str,
     locale: str,
     timeout_s: float,
 ) -> dict[str, Any]:
@@ -116,15 +121,27 @@ async def one_read(
         build_avatar_session,
         build_language_pin_item,
         build_reader_prompt_item,
+        default_external_reader_prompt,
     )
 
+    # `persona` lets the caller hand in the REAL default persona from the DB, and `background` the
+    # real `avatar_bg` the browser passes. Those were the last two differences between this script
+    # (which gets audio) and the browser (which gets text) once the handshake was ruled out, so they
+    # have to be reachable from here or the comparison is not a comparison.
     session = build_avatar_session(
-        _Persona(avatar=avatar, character=character),
+        persona if persona is not None else _Persona(avatar=avatar, character=character),
         locale=locale,
         playground=False,
-        background=None,
+        background=background or None,
         realtime_pipeline=realtime_pipeline,
     )
+    if modalities:
+        # Hypothesis: with `text` among the declared modalities a realtime session answers a
+        # pre-generated read with `response.text.delta` instead of synthesising it. Drop `text` and
+        # it has nothing to answer with but audio. Comma-separated, e.g. "audio,avatar".
+        session = dict(session)
+        session["modalities"] = [m.strip() for m in modalities.split(",") if m.strip()]
+
     kwargs: dict[str, Any] = {
         "endpoint": endpoint,
         "credential": credential,
@@ -147,6 +164,8 @@ async def one_read(
         chunk = 2 * 480  # 20 ms at 24 kHz, the rate the product uplinks at
         mic_frames = [raw[i : i + chunk] for i in range(0, len(raw), chunk)]
 
+    applied_session: dict[str, Any] = {}
+    applied_session: dict[str, Any] = {}
     types: Counter[str] = Counter()
     audio_bytes = 0
     transcript = ""
@@ -155,7 +174,12 @@ async def one_read(
     feeders: list[asyncio.Task[None]] = []
     try:
         async with connect(**kwargs) as conn:
-            await conn.session.update(session=RequestSession(**session))
+            # The proxy hands the SDK the raw dict; this script wrapped it in RequestSession. Those
+            # are two different wire payloads if the model class normalises or defaults anything,
+            # and "same session" has to mean same BYTES — so make the choice switchable.
+            await conn.session.update(
+                session=session if session_as_dict else RequestSession(**session)
+            )
             try:
                 async with asyncio.timeout(timeout_s):
                     async for ev in conn:
@@ -168,6 +192,11 @@ async def one_read(
                             audio_bytes += len(str(raw.get("delta", "")))
                         if etype.endswith("response.audio_transcript.delta"):
                             transcript += str(raw.get("delta", ""))
+                        if etype.endswith("session.updated"):
+                            # What Azure says it actually APPLIED. Comparing this across two code
+                            # paths is the only way to check "the same session" without trusting
+                            # either path's intent.
+                            applied_session = raw.get("session", raw)
                         if etype.endswith("session.updated") and not read_sent:
                             # The proxy injects two system conversation items right after
                             # session.update on a MOUTH session (language pin + reader prompt). They
@@ -177,8 +206,13 @@ async def one_read(
                             # different root causes.
                             if proxy_items:
                                 await conn.send(build_language_pin_item(locale))
+                                # The REAL reader prompt (1375 chars), not a one-line stub — the
+                                # stub produced audio, and the real one was the last thing the proxy
+                                # sends that this script did not.
                                 await conn.send(
-                                    build_reader_prompt_item("Read the given text aloud, verbatim.")
+                                    build_reader_prompt_item(
+                                        default_external_reader_prompt("Interviewer")
+                                    )
                                 )
                             if mic_frames:
                                 # Push a couple of seconds of the candidate's audio BEFORE the
@@ -195,8 +229,31 @@ async def one_read(
                                     await conn.send(build_audio_append(frame))
                                 feeder = asyncio.create_task(feed())
                                 feeders.append(feeder)
-                            # Session is live: ask for the read exactly as the product does.
-                            await conn.send(build_read_frame(READ_TEXT))
+                            if read_mode == "model_turn":
+                                # The OTHER way to make it talk: give the model something to answer
+                                # and let it generate the turn itself (no pre-generated text, so no
+                                # server-side TTS shortcut). Answers "does a realtime model's OWN
+                                # response drive the avatar the same way a read does?"
+                                await conn.send(
+                                    {
+                                        "type": "conversation.item.create",
+                                        "item": {
+                                            "type": "message",
+                                            "role": "user",
+                                            "content": [
+                                                {
+                                                    "type": "input_text",
+                                                    "text": "Please introduce yourself in one "
+                                                    "short sentence.",
+                                                }
+                                            ],
+                                        },
+                                    }
+                                )
+                                await conn.send({"type": "response.create"})
+                            else:
+                                # Session is live: ask for the read exactly as the product does.
+                                await conn.send(build_read_frame(READ_TEXT))
                             read_sent = True
                         if etype.endswith("response.done") and read_sent:
                             break
@@ -216,6 +273,11 @@ async def one_read(
         "character": character if avatar else "",
         "proxy_items": proxy_items,
         "mic": Path(mic_wav).name if mic_wav else "",
+        "modalities": modalities or "(session default)",
+        "persona": getattr(persona, "name", "(synthetic)"),
+        "background": background,
+        "session_as_dict": session_as_dict,
+        "read_mode": read_mode,
         "read_sent": read_sent,
         "audio_bytes": audio_bytes,
         "audio_deltas": types.get("response.audio.delta", 0),
@@ -225,6 +287,9 @@ async def one_read(
         "text_deltas": types.get("response.text.delta", 0),
         "errors": errors,
         "types": dict(types),
+        # What Azure says it actually applied — the only way to compare "the same session" across
+        # two code paths without trusting either one's intent.
+        "applied_session": applied_session,
     }
 
 
@@ -250,6 +315,28 @@ async def main() -> None:
         "--mic",
         default="",
         help="stream this WAV (24kHz mono 16-bit) as the candidate's microphone during the read",
+    )
+    ap.add_argument(
+        "--modalities",
+        default="",
+        help='override session.modalities, e.g. "audio,avatar" to drop text',
+    )
+    ap.add_argument(
+        "--persona-from-db",
+        action="store_true",
+        help="use the real DEFAULT persona instead of the synthetic one (matches the browser)",
+    )
+    ap.add_argument("--background", default="", help="avatar_bg the browser passes, e.g. f5f1ea")
+    ap.add_argument(
+        "--session-as-dict",
+        action="store_true",
+        help="hand the SDK the raw session dict, exactly as run_proxy does",
+    )
+    ap.add_argument(
+        "--read-mode",
+        choices=("pre_generated", "model_turn"),
+        default="pre_generated",
+        help="pre_generated = the product's verbatim read; model_turn = let the model answer",
     )
     ap.add_argument("--locale", default="en-US")
     ap.add_argument("--timeout", type=float, default=25.0)
@@ -285,6 +372,23 @@ async def main() -> None:
         f"auth={'entra' if is_entra else 'key'}"
     )
 
+    db_persona = None
+    if args.persona_from_db:
+        from sqlalchemy import select
+
+        from app.models.persona import InterviewerPersona
+
+        async with factory() as db:
+            rows_p = (await db.execute(select(InterviewerPersona))).scalars().all()
+        db_persona = next((r for r in rows_p if getattr(r, "is_default", False)), None) or next(
+            (r for r in rows_p if getattr(r, "enabled", False)), None
+        )
+        print(
+            f"[rca] persona={getattr(db_persona, 'name', None)!r} "
+            f"character={getattr(db_persona, 'character', None)!r} "
+            f"agent={getattr(db_persona, 'agent_id', None)!r}"
+        )
+
     rows: list[dict[str, Any]] = []
     try:
         for i in range(1, args.reps + 1):
@@ -299,6 +403,11 @@ async def main() -> None:
                 character=args.character,
                 proxy_items=args.proxy_items,
                 mic_wav=args.mic,
+                modalities=args.modalities,
+                persona=db_persona,
+                background=args.background,
+                session_as_dict=args.session_as_dict,
+                read_mode=args.read_mode,
                 locale=args.locale,
                 timeout_s=args.timeout,
             )
@@ -307,6 +416,8 @@ async def main() -> None:
                 f"  rep {i}: audio_deltas={row['audio_deltas']:4d} "
                 f"audio_bytes={row['audio_bytes']:7d} spoke={row['spoke']} "
                 f"response.done={row['response_done']} text_deltas={row['text_deltas']} "
+                f"voice={(row['applied_session'].get('voice') or {}).get('type', '?')}/"
+                f"{(row['applied_session'].get('voice') or {}).get('name', '?')} "
                 f"transcript_chars={row['transcript_chars']}"
                 + (f"  ERR {row['errors'][0][:120]}" if row["errors"] else "")
             )

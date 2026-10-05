@@ -52,6 +52,10 @@ const SOURCE = process.env.LIPSYNC_SOURCE === "playground" ? "playground" : "int
  *  `pc_connected` and `read_sent`; the three silent ones were 312-376 ms. Cascaded is audible at
  *  381 ms, so the threshold — if there is one — is realtime's. */
 const DELAY_READ_MS = Number(process.env.LIPSYNC_DELAY_READ_MS ?? 0);
+/** Hold the avatar HANDSHAKE this many ms so the first read goes out BEFORE it. Tests the ordering
+ *  hypothesis: a realtime session answers a pre-generated read with audio until the avatar is
+ *  attached, so asking for the read first may be the difference — and if it is, it is also the fix. */
+const DEFER_AVATAR_MS = Number(process.env.LIPSYNC_DEFER_AVATAR_MS ?? 0);
 const ADMIN_USER = process.env.E2E_ADMIN_USERNAME || "admin";
 const ADMIN_PW = process.env.E2E_ADMIN_PASSWORD || "e2e-admin-pw";
 
@@ -162,6 +166,20 @@ test.describe("avatar lip-sync recording (real Azure)", () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
     });
+    if (DEFER_AVATAR_MS > 0) {
+      await page.addInitScript((ms) => {
+        const origSend = WebSocket.prototype.send;
+        let held = false;
+        WebSocket.prototype.send = function (this: WebSocket, data: never) {
+          if (!held && typeof data === "string" && data.includes("session.avatar.connect")) {
+            held = true;
+            setTimeout(() => origSend.call(this, data), ms);
+            return;
+          }
+          return origSend.call(this, data);
+        };
+      }, DEFER_AVATAR_MS);
+    }
     if (DELAY_READ_MS > 0) {
       await page.addInitScript((ms) => {
         const origSend = WebSocket.prototype.send;
@@ -462,7 +480,7 @@ test.describe("avatar lip-sync recording (real Azure)", () => {
         `recorded_audio_peak=${recorded.peak}\ngate_peak=${recorded.gatePeak}\n` +
         `peak_measured=${recorded.measured}\ntap_rates=${recorded.taps.join(",")}\n` +
         `audio_source=${recorded.audioSource}\nsource=${SOURCE}\n` +
-        `read_delayed_ms=${DELAY_READ_MS}\n` +
+        `read_delayed_ms=${DELAY_READ_MS}\navatar_deferred_ms=${DEFER_AVATAR_MS}\n` +
         `ws_response_audio_delta_frames=${audioDeltaFrames}\n` +
         `ws_errors=${wsErrors.length}\n${wsErrors.map((e) => `  ! ${e}`).join("\n")}\n` +
         `ws_sent_frames=${sentFrames.length}\n${sentFrames.map((f) => `  > ${f}`).join("\n")}\n` +
