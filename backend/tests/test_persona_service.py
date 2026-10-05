@@ -292,6 +292,11 @@ async def test_reconcile_default_persona_propagates_model_to_master(db_session, 
         default_project="demo-prj",
         model_or_deployment="gpt-5.4-mini",
         updated_by="admin",
+        # The operator also configured the VOICE leg, which is a separate setting. Reconcile
+        # propagates the per-persona model to the INFERENCE model only and must leave these alone.
+        voice_model="gpt-5-mini",
+        voice_model_mode="byom",
+        voice_byom_profile="byom-azure-openai-chat-completion",
     )
     await db_session.commit()
 
@@ -312,6 +317,11 @@ async def test_reconcile_default_persona_propagates_model_to_master(db_session, 
 
     master = await config_service.get_master_config(db_session)
     assert master.model_or_deployment == "gpt-5"
+    # upsert_master_config rewrites every field, so _propagate_default_model has to echo the voice
+    # settings back; otherwise every reconcile would reset the operator's Voice Live config.
+    assert master.voice_model == "gpt-5-mini"
+    assert master.voice_model_mode == "byom"
+    assert master.voice_byom_profile == "byom-azure-openai-chat-completion"
 
 
 # --- external reader prompt: two independent, separately-stored config items -----------------

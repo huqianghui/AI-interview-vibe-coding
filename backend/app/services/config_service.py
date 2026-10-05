@@ -120,6 +120,9 @@ async def upsert_master_config(
     updated_by: str,
     knowledge_base: str = "",
     knowledge_source: str = "",
+    voice_model: str = "",
+    voice_model_mode: str = "native",
+    voice_byom_profile: str = "",
     clear_api_key: bool = False,
 ) -> ServiceConfig:
     """Create or update the master AI Foundry row.
@@ -128,6 +131,14 @@ async def upsert_master_config(
     encrypted key (so re-saving other fields from the masked UI never wipes the secret).
     ``clear_api_key=True`` deletes the stored key instead (Entra ID / Managed Identity auth only)
     and wins over ``api_key``. Saving always marks the row active.
+
+    ``model_or_deployment`` is the INFERENCE model (judge / scoring / the Foundry agent);
+    ``voice_model`` + ``voice_model_mode`` + ``voice_byom_profile`` are the separate Voice Live
+    session model. They are two settings because the legal values differ (see the ServiceConfig
+    docstring). The voice args default to the pre-split behaviour, so existing callers that only
+    know about the inference model keep working — but a caller that re-saves a whole row MUST echo
+    them back or it silently resets the operator's voice configuration (see
+    ``persona_service._propagate_default_model``).
     """
     # Validate the endpoint BEFORE any mutation — a swapped endpoint + preserved key is the
     # key-exfil path (P1). Raises InvalidEndpointError (→ 422 at the API) on a non-Azure host.
@@ -145,6 +156,9 @@ async def upsert_master_config(
     master.endpoint = endpoint
     master.default_project = default_project
     master.model_or_deployment = model_or_deployment
+    master.voice_model = voice_model
+    master.voice_model_mode = voice_model_mode
+    master.voice_byom_profile = voice_byom_profile
     master.knowledge_base = knowledge_base
     master.knowledge_source = knowledge_source
     master.is_active = True

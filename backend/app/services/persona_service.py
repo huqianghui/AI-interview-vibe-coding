@@ -277,6 +277,12 @@ async def _propagate_default_model(db: AsyncSession, model: str) -> None:
             updated_by="reconcile",
             knowledge_base=master.knowledge_base,
             knowledge_source=master.knowledge_source,
+            # Echo the voice settings back: upsert_master_config rewrites every field, so omitting
+            # these would reset the operator's Voice Live model/mode on every reconcile. The
+            # per-persona model propagates to the INFERENCE model only — the voice leg is global.
+            voice_model=master.voice_model,
+            voice_model_mode=master.voice_model_mode,
+            voice_byom_profile=master.voice_byom_profile,
         )
         await db.commit()
         await apply_master_config_to_settings(db)

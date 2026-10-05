@@ -536,3 +536,210 @@ async def test_clear_api_key_wins_over_api_key(client, _restore_settings):
         )
     ).json()
     assert body["masked_key"] == ""
+
+
+# --- The voice model is a SEPARATE setting from the inference model ----------------------------
+# One field used to feed both, and their legal values are different kinds of name: judge / scoring /
+# the Foundry agent address models by DEPLOYMENT NAME in the resource, while Voice Live MODEL mode
+# accepts only models it hosts natively in the region. Measured live: gpt-5.4-mini is a real
+# deployment and native Voice Live answers "not supported in this region"
+# (docs/voice-live-model-support.md §4.4).
+
+
+VOICE_BASE = {
+    "endpoint": "https://demo.services.ai.azure.com",
+    "api_key": "k",
+    "default_project": "demo-prj",
+    "model_or_deployment": "my-own-deployment",
+}
+
+
+async def test_voice_settings_persist_through_put_get(client, _restore_settings):
+    resp = await client.put(
+        "/admin/config/ai-foundry",
+        headers=AUTH,
+        json={
+            **VOICE_BASE,
+            "voice_model": "gpt-5-mini",
+            "voice_model_mode": "native",
+            "voice_byom_profile": "",
+        },
+    )
+    assert resp.status_code == 200
+    got = (await client.get("/admin/config/ai-foundry", headers=AUTH)).json()
+    # The two models are stored independently: the inference model stays an own deployment while the
+    # voice session runs on a natively hosted one.
+    assert got["model_or_deployment"] == "my-own-deployment"
+    assert got["voice_model"] == "gpt-5-mini"
+    assert got["voice_model_mode"] == "native"
+    assert got["voice_byom_profile"] == ""
+
+
+async def test_byom_settings_persist_through_put_get(client, _restore_settings):
+    await client.put(
+        "/admin/config/ai-foundry",
+        headers=AUTH,
+        json={
+            **VOICE_BASE,
+            "voice_model": "my-own-deployment",
+            "voice_model_mode": "byom",
+            "voice_byom_profile": "byom-azure-openai-chat-completion",
+        },
+    )
+    got = (await client.get("/admin/config/ai-foundry", headers=AUTH)).json()
+    assert got["voice_model_mode"] == "byom"
+    assert got["voice_byom_profile"] == "byom-azure-openai-chat-completion"
+
+
+async def test_byom_without_a_deployment_name_is_422(client, _restore_settings):
+    resp = await client.put(
+        "/admin/config/ai-foundry",
+        headers=AUTH,
+        json={**VOICE_BASE, "voice_model": "  ", "voice_model_mode": "byom"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_a_region_rejected_voice_model_is_422_and_is_not_stored(
+    client, _restore_settings, monkeypatch
+):
+    """The guarantee the split exists for: an unsupported voice model cannot be saved.
+
+    The probe is stubbed with the VERBATIM server payload rather than a live call (CI never touches
+    Azure); the live counterpart runs in the acceptance steps.
+    """
+    from app.services import voice_live_probe as probe
+
+    # Store a known-good config first, so we can prove the rejected save left it untouched.
+    await client.put(
+        "/admin/config/ai-foundry",
+        headers=AUTH,
+        json={**VOICE_BASE, "voice_model": "gpt-5-mini"},
+    )
+
+    async def fake_credential(_api_key):
+        return object(), True
+
+    async def fake_probe_model(**_kw):
+        return {
+            "model": "gpt-5.4-mini",
+            "verdict": probe.REJECTED_REGION,
+            "detail": "Model gpt-5.4-mini is not supported in this region.",
+        }
+
+    monkeypatch.setattr(
+        "app.services.voice_live_proxy._resolve_voice_live_credential", fake_credential
+    )
+    monkeypatch.setattr(probe, "probe_model", fake_probe_model)
+
+    resp = await client.put(
+        "/admin/config/ai-foundry",
+        headers=AUTH,
+        json={**VOICE_BASE, "api_key": "", "voice_model": "gpt-5.4-mini"},
+    )
+    assert resp.status_code == 422
+    assert "not supported in this region" in resp.json()["detail"]
+    # Rolled back, not half-written.
+    got = (await client.get("/admin/config/ai-foundry", headers=AUTH)).json()
+    assert got["voice_model"] == "gpt-5-mini"
+
+
+async def test_an_unverifiable_voice_model_still_saves(client, _restore_settings, monkeypatch):
+    """Inconclusive must never block a save.
+
+    No credential / no network is the normal state of an offline admin session, and every other
+    discovery path in this router fails soft. Blocking here would make the page unusable.
+    """
+
+    async def no_credential(_api_key):
+        raise RuntimeError("no Entra credential and no API key")
+
+    monkeypatch.setattr(
+        "app.services.voice_live_proxy._resolve_voice_live_credential", no_credential
+    )
+    resp = await client.put(
+        "/admin/config/ai-foundry",
+        headers=AUTH,
+        json={**VOICE_BASE, "voice_model": "gpt-5-mini"},
+    )
+    assert resp.status_code == 200
+    assert "Could not verify" in resp.json()["voice_model_check"]
+    assert (await client.get("/admin/config/ai-foundry", headers=AUTH)).json()[
+        "voice_model"
+    ] == "gpt-5-mini"
+
+
+async def test_resaving_an_unchanged_voice_model_does_not_reprobe(
+    client, _restore_settings, monkeypatch
+):
+    # Saving an unrelated field (e.g. the knowledge base) must not cost a live connection.
+    from app.services import voice_live_probe as probe
+
+    await client.put(
+        "/admin/config/ai-foundry",
+        headers=AUTH,
+        json={**VOICE_BASE, "voice_model": "gpt-5-mini"},
+    )
+    calls = 0
+
+    async def counting_probe(**_kw):
+        nonlocal calls
+        calls += 1
+        return {"model": "x", "verdict": probe.ACCEPTED, "detail": "session.updated"}
+
+    async def fake_credential(_api_key):
+        return object(), True
+
+    monkeypatch.setattr(probe, "probe_model", counting_probe)
+    monkeypatch.setattr(
+        "app.services.voice_live_proxy._resolve_voice_live_credential", fake_credential
+    )
+    resp = await client.put(
+        "/admin/config/ai-foundry",
+        headers=AUTH,
+        json={**VOICE_BASE, "api_key": "", "voice_model": "gpt-5-mini", "knowledge_base": "kb2"},
+    )
+    assert resp.status_code == 200
+    assert calls == 0
+
+
+async def test_voice_live_models_lists_only_accepted(client, _restore_settings, monkeypatch):
+    from app.services import voice_live_probe as probe
+
+    await client.put(
+        "/admin/config/ai-foundry",
+        headers=AUTH,
+        json={**VOICE_BASE, "voice_model": "gpt-5-mini"},
+    )
+
+    async def fake_list(**kwargs):
+        assert kwargs["endpoint"] == VOICE_BASE["endpoint"]
+        return ["gpt-5-mini", "gpt-4o"]
+
+    monkeypatch.setattr(probe, "list_native_models", fake_list)
+    resp = await client.get("/admin/config/ai-foundry/voice-live-models", headers=AUTH)
+    assert resp.status_code == 200
+    assert [o["value"] for o in resp.json()] == ["gpt-5-mini", "gpt-4o"]
+
+
+async def test_voice_live_models_fails_soft(client, _restore_settings, monkeypatch):
+    # A failed probe must leave the admin page usable, like the sibling dropdown routes.
+    from app.services import voice_live_probe as probe
+
+    await client.put(
+        "/admin/config/ai-foundry",
+        headers=AUTH,
+        json={**VOICE_BASE, "voice_model": "gpt-5-mini"},
+    )
+
+    async def boom(**_kw):
+        raise RuntimeError("probe exploded")
+
+    monkeypatch.setattr(probe, "list_native_models", boom)
+    resp = await client.get("/admin/config/ai-foundry/voice-live-models", headers=AUTH)
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+async def test_voice_live_models_requires_a_token(client):
+    assert (await client.get("/admin/config/ai-foundry/voice-live-models")).status_code == 401

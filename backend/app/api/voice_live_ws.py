@@ -38,18 +38,44 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["voice-live-ws"])
 
 
-def resolve_voice_model(persona_model: str | None, master_model: str | None, env_model: str) -> str:
-    """Pick the Voice Live model from USER CONFIG, not a hardcoded env value.
+def resolve_voice_model(master_voice_model: str | None, env_model: str) -> str:
+    """Pick the Voice Live SESSION model from USER CONFIG, not a hardcoded env value.
 
-    Priority (owner directive): per-persona ``persona.model`` → admin-saved master config
-    ``service_config.model_or_deployment`` → the ``.env`` ``VOICE_LIVE_DEFAULT_MODEL`` as a
-    last-resort fallback. The first two are read from the DB per-connection, so a model change in
-    the admin UI takes effect on the NEXT interview without a backend restart — the env value alone
-    is frozen at process start because ``get_settings()`` is ``lru_cache``d.
+    Priority: the admin-saved ``service_config.voice_model`` → the ``.env``
+    ``VOICE_LIVE_DEFAULT_MODEL`` as a last-resort fallback. The first is read from the DB
+    per-connection, so a change in the admin UI takes effect on the NEXT interview with no backend
+    restart — the env value alone is frozen at process start because ``get_settings()`` is
+    ``lru_cache``d. Blank/whitespace-only is skipped (an empty row must not shadow the env default).
 
-    Blank/whitespace-only values are skipped (an empty master row must not shadow the env default).
+    **Two tiers deliberately removed** when the voice model was split out of the inference model:
+
+    * ``service_config.model_or_deployment`` — that is the INFERENCE model (judge / scoring / the
+      Foundry agent) and is a deployment name in the resource. Voice Live MODEL mode accepts only
+      models it hosts natively in the region, so feeding the inference model in here is exactly what
+      produced "Model X is not supported in this region" (measured: gpt-5.4-mini is a real
+      deployment and native Voice Live rejects it).
+    * ``persona.model`` — same values, same problem, and a per-persona tier would let an illegal
+      model reach a session through the agent editor even when the global voice model is valid. The
+      voice model is global; ``persona.model`` now only drives the agent / inference side. If a
+      per-persona voice model is ever wanted, give it its OWN column and its own legal dropdown.
+
+    The intent of #99 (v0.37.4.6) is preserved in full: the model still comes from user config, is
+    still read from the DB per connection, and is still never frozen by the env cache.
     """
-    return (persona_model or "").strip() or (master_model or "").strip() or env_model
+    return (master_voice_model or "").strip() or env_model
+
+
+def resolve_byom_profile(voice_model_mode: str | None, voice_byom_profile: str | None) -> str:
+    """The BYOM profile to put on the wire, or "" for the native path.
+
+    The profile is the upstream API protocol Voice Live drives your deployment with; it is NOT
+    inferable from the deployment name, which is why it is stored explicitly. Native mode must never
+    carry one (a profile there is a different connection path altogether), and a mode of "byom" with
+    no profile stored also yields "" so the connection stays native rather than half-configured.
+    """
+    if (voice_model_mode or "").strip().lower() != "byom":
+        return ""
+    return (voice_byom_profile or "").strip()
 
 
 async def _send_error_and_close(
@@ -157,19 +183,22 @@ async def voice_live_websocket(ws: WebSocket) -> None:
 
         # Read the two user-config sources per-connection (see resolve_voice_model for the why).
         _master = await config_service.get_master_config(db)
-        _persona_model = persona.model
-        _master_model = _master.model_or_deployment if _master else None
+        # The VOICE leg only — persona.model and model_or_deployment are the inference model now
+        # (see resolve_voice_model).
+        _master_voice_model = _master.voice_model if _master else None
+        _voice_mode = _master.voice_model_mode if _master else None
+        _voice_profile = _master.voice_byom_profile if _master else None
 
     settings = get_settings()
-    resolved_model = resolve_voice_model(
-        _persona_model, _master_model, settings.voice_live_default_model
-    )
+    resolved_model = resolve_voice_model(_master_voice_model, settings.voice_live_default_model)
+    resolved_profile = resolve_byom_profile(_voice_mode, _voice_profile)
     logger.info(
-        "Voice Live model resolved to %r (persona.model=%r → master=%r → env=%r)",
+        "Voice Live model resolved to %r (master.voice_model=%r → env=%r); mode=%r profile=%r",
         resolved_model,
-        _persona_model or None,
-        _master_model or None,
+        _master_voice_model or None,
         settings.voice_live_default_model,
+        _voice_mode or "native",
+        resolved_profile or None,
     )
     try:
         await run_proxy(
@@ -181,6 +210,7 @@ async def voice_live_websocket(ws: WebSocket) -> None:
             api_key=settings.azure_foundry_api_key,
             api_version=settings.voice_live_api_version,
             default_model=resolved_model,
+            byom_profile=resolved_profile,
             # Editor Playground (pinned persona_id) is a free conversation with the agent, so a
             # linear-turn BANK persona keeps its model turn THERE only (see
             # linear_turns_for_persona).

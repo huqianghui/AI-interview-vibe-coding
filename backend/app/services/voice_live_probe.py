@@ -1,0 +1,273 @@
+"""Ask the real service which Voice Live models this resource's REGION accepts.
+
+There is no Azure API that lists "the Voice Live models pre-deployed in region X", and the Learn
+table runs ahead of regional rollout (measured: ``gpt-5.6-luna`` was REJECTED on 2026-09-23 and
+ACCEPTED on 2026-10-05 on the same resource). So the only trustworthy source is a real connection:
+open a session per candidate model, send the cheapest possible ``session.update``, and read the
+first server event. ``session.updated`` means the region accepts it; an ``error`` names why.
+
+This module is the shared implementation behind both the admin dropdown
+(``GET /admin/config/ai-foundry/voice-live-models``) and ``scripts/voice_live_model_probe.py``.
+
+**What a probe can and cannot prove** (all six behaviours measured 2026-10-05 against the
+swedencentral resource, api-version ``2026-01-01-preview``, Entra auth —
+see ``docs/voice-live-model-support.md`` §4.4):
+
+* NATIVE mode: decisive. ``gpt-5.4-mini`` is a REAL deployment in the resource and native Voice Live
+  still answers ``invalid_model`` / "not supported in this region".
+* BYOM mode: the ``profile`` IS validated at connect (``invalid_profile``), and so is a protocol
+  mismatch (a chat deployment under ``byom-azure-openai-realtime`` →
+  ``byom_realtime_connection_error``). But the **deployment name is NOT validated**: a nonexistent
+  name was ACCEPTED. So never claim a BYOM probe proves the deployment exists — that guarantee comes
+  from listing the resource's real deployments instead.
+"""
+
+import asyncio
+import json
+import logging
+import time
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+# Verdicts. Only the REJECTED_* ones are definitive enough to block a save (see
+# is_definitive_rejection): ERROR covers "we could not tell" (timeout, no credential, network).
+ACCEPTED = "ACCEPTED"
+REJECTED_REGION = "REJECTED_REGION"
+REJECTED_PROFILE = "REJECTED_PROFILE"
+REJECTED_BYOM = "REJECTED_BYOM"
+REJECTED_NOT_FOUND = "REJECTED_NOT_FOUND"
+ERROR = "ERROR"
+
+_DEFINITIVE_REJECTIONS = frozenset(
+    {REJECTED_REGION, REJECTED_PROFILE, REJECTED_BYOM, REJECTED_NOT_FOUND}
+)
+
+# Verbatim markers from real server payloads (docs/voice-live-model-support.md §4.4). Matching the
+# error *code* rather than prose keeps this stable if Azure rewords a message.
+_MARK_REGION = "not supported in this region"  # accompanies code "invalid_model"
+_MARK_PROFILE = "invalid_profile"
+_MARK_BYOM = "byom_realtime_connection_error"
+
+# The models Learn's "Voice Live overview" lists as natively pre-deployed (2026-10-05). The last
+# three are the ones the docs themselves call out as "supported and tested but NOT pre-deployed —
+# use BYOM", so a native probe is EXPECTED to reject them; keeping them in the list is what makes
+# the result self-checking.
+NATIVE_MODEL_CANDIDATES: tuple[str, ...] = (
+    "gpt-realtime-2.1",
+    "gpt-realtime-2.1-mini",
+    "gpt-realtime-1.5",
+    "gpt-realtime",
+    "gpt-realtime-mini",
+    "gpt-4o",
+    "gpt-4o-mini",
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-4.1-nano",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.4",
+    "gpt-5.2",
+    "gpt-5.1",
+    "gpt-5",
+    "gpt-5-mini",
+    "gpt-5-nano",
+    "phi4-mm-realtime",
+    "azure-realtime",
+    "gpt-5.5",
+    "gpt-5.4-mini",
+    "gpt-5.4-nano",
+)
+
+# The three BYOM integration modes (docs/voice-live-model-support.md §3.2). The profile is the wire
+# protocol Voice Live drives your deployment with; it is NOT inferable from the deployment name.
+BYOM_PROFILES: tuple[str, ...] = (
+    "byom-azure-openai-chat-completion",
+    "byom-azure-openai-realtime",
+    "byom-foundry-anthropic-messages",
+)
+DEFAULT_BYOM_PROFILE = "byom-azure-openai-chat-completion"
+
+DEFAULT_TIMEOUT_SECONDS = 8.0
+# A voice-only session (no avatar) measured ~120 connections/min, so a handful at a time is well
+# inside the limit; the 3-per-60s ceiling is an AVATAR-creation limit and does not apply here
+# (memory ai-interview-avatar-quota-not-a-quota). 6 keeps a 23-model sweep near 10-35s.
+DEFAULT_CONCURRENCY = 6
+
+# Probed ACCEPTED lists, keyed by (endpoint, api_version). Module-global + time.time() comparison,
+# matching azure_auth's credential cache rather than adding a cache dependency.
+_native_cache: dict[tuple[str, str], tuple[float, list[str]]] = {}
+_NATIVE_CACHE_TTL_SECONDS = 6 * 3600
+
+
+def is_definitive_rejection(verdict: str) -> bool:
+    """True when the service clearly refused, as opposed to "we could not tell".
+
+    Callers gate a hard failure (a 422 on save) on this: a timeout or a missing credential must not
+    stop an operator from saving, the way every other discovery path here fails soft.
+    """
+    return verdict in _DEFINITIVE_REJECTIONS
+
+
+def classify_probe_result(first_event: dict[str, Any] | None, error: str | None) -> tuple[str, str]:
+    """Map the first server event (or a connect-time exception) to ``(verdict, detail)``.
+
+    Pure, so the whole taxonomy is unit-testable against the real payloads captured in §4.4.
+    """
+    if error is not None:
+        low = error.lower()
+        if _MARK_REGION in low:
+            return REJECTED_REGION, error
+        if _MARK_PROFILE in low:
+            return REJECTED_PROFILE, error
+        if _MARK_BYOM in low:
+            return REJECTED_BYOM, error
+        if "not found" in low or "does not exist" in low:
+            return REJECTED_NOT_FOUND, error
+        return ERROR, error
+    if first_event is None:
+        return ERROR, "no server event before timeout"
+    etype = str(first_event.get("type", ""))
+    if etype.endswith("session.updated"):
+        return ACCEPTED, etype
+    if etype.endswith("error"):
+        return classify_probe_result(None, json.dumps(first_event.get("error", first_event)))
+    return ERROR, f"unexpected first event: {etype}"
+
+
+async def probe_model(
+    *,
+    endpoint: str,
+    credential: Any,
+    api_version: str,
+    model: str,
+    byom_profile: str = "",
+    timeout_s: float = DEFAULT_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    """Open one Voice Live session for ``model`` and classify the first server event.
+
+    NATIVE mode with an empty ``byom_profile``; BYOM mode otherwise, where ``model`` is a deployment
+    name in the Foundry resource and the profile rides as a query param (the SDK maps ``query``
+    straight onto the WebSocket URL). Never raises: a connect-time rejection is classified too.
+    """
+    from azure.ai.voicelive.aio import connect
+    from azure.ai.voicelive.models import RequestSession
+
+    # Same TLS trust store and same Entra-first credential order as the live proxy, so a probe
+    # result actually represents what a real session would do.
+    from app.services.voice_live_proxy import _certifi_ssl_context
+
+    kwargs: dict[str, Any] = {
+        "endpoint": endpoint,
+        "credential": credential,
+        "api_version": api_version,
+        "model": model,
+        "connection_options": {"vendor_options": {"ssl": _certifi_ssl_context()}},
+    }
+    mode = "native"
+    if byom_profile:
+        kwargs["query"] = {"profile": byom_profile}
+        mode = "byom"
+
+    started = time.monotonic()
+    try:
+        async with connect(**kwargs) as conn:
+            # The cheapest "did Azure accept this?" signal: a good model answers session.updated, a
+            # bad one answers error. No audio is ever sent.
+            await conn.session.update(session=RequestSession(instructions="probe"))
+            first: dict[str, Any] | None = None
+            try:
+                async with asyncio.timeout(timeout_s):
+                    async for event in conn:
+                        first = event.as_dict() if hasattr(event, "as_dict") else dict(event)
+                        etype = str(first.get("type", getattr(event, "type", "")))
+                        if etype.endswith("session.updated") or etype.endswith("error"):
+                            break
+            except TimeoutError:
+                first = None
+            verdict, detail = classify_probe_result(first, None)
+    except Exception as exc:  # noqa: BLE001 — a 4xx on the WS upgrade surfaces as an exception
+        verdict, detail = classify_probe_result(None, str(exc))
+
+    return {
+        "model": model,
+        "mode": mode,
+        "profile": byom_profile,
+        "verdict": verdict,
+        "detail": detail,
+        "elapsed_s": round(time.monotonic() - started, 2),
+    }
+
+
+async def probe_models(
+    *,
+    endpoint: str,
+    credential: Any,
+    api_version: str,
+    models: tuple[str, ...] | list[str],
+    timeout_s: float = DEFAULT_TIMEOUT_SECONDS,
+    concurrency: int = DEFAULT_CONCURRENCY,
+) -> list[dict[str, Any]]:
+    """Probe many models in NATIVE mode with bounded concurrency, preserving input order."""
+    sem = asyncio.Semaphore(max(1, concurrency))
+
+    async def one(name: str) -> dict[str, Any]:
+        async with sem:
+            return await probe_model(
+                endpoint=endpoint,
+                credential=credential,
+                api_version=api_version,
+                model=name,
+                timeout_s=timeout_s,
+            )
+
+    return list(await asyncio.gather(*(one(m) for m in models)))
+
+
+async def list_native_models(
+    *,
+    endpoint: str,
+    api_key: str,
+    api_version: str,
+    refresh: bool = False,
+    timeout_s: float = DEFAULT_TIMEOUT_SECONDS,
+    concurrency: int = DEFAULT_CONCURRENCY,
+) -> list[str]:
+    """The models this resource's region ACCEPTS in native mode, cached for 6h per endpoint.
+
+    Returns them in catalogue order. Raises nothing of its own: credential problems propagate from
+    the resolver so the caller can decide (the admin route fails soft and returns []).
+    """
+    key = (endpoint, api_version)
+    now = time.time()
+    if not refresh:
+        hit = _native_cache.get(key)
+        if hit is not None and (now - hit[0]) < _NATIVE_CACHE_TTL_SECONDS:
+            return list(hit[1])
+
+    from app.services.voice_live_proxy import _resolve_voice_live_credential
+
+    credential, _is_entra = await _resolve_voice_live_credential(api_key)
+    results = await probe_models(
+        endpoint=endpoint,
+        credential=credential,
+        api_version=api_version,
+        models=NATIVE_MODEL_CANDIDATES,
+        timeout_s=timeout_s,
+        concurrency=concurrency,
+    )
+    accepted = [r["model"] for r in results if r["verdict"] == ACCEPTED]
+    rejected = [r["model"] for r in results if r["verdict"] == REJECTED_REGION]
+    logger.info(
+        "Voice Live native probe: %d accepted, %d region-rejected (%s)",
+        len(accepted),
+        len(rejected),
+        endpoint,
+    )
+    _native_cache[key] = (now, accepted)
+    return list(accepted)
+
+
+def clear_native_cache() -> None:
+    """Drop the probe cache (tests, and an explicit admin refresh)."""
+    _native_cache.clear()

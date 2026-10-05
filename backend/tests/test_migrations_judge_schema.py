@@ -72,6 +72,29 @@ def test_alembic_head_schema_accepts_orm_style_inserts(tmp_path):
         assert cols["judge_max_calls_per_question"][4] == "2"
         scols = {r[1]: r for r in conn.execute("PRAGMA table_info(interview_sessions)")}
         assert scols["turn_mode"][4].strip("'") == "linear"
+
+        # The voice-model split (b5c6d7e8f9a0): three NOT NULL columns with server defaults, so the
+        # add succeeds on existing rows, plus the backfill that keeps an upgraded install on exactly
+        # the model it was already using for voice. conftest builds the suite's schema with
+        # create_all, so this subprocess run is the ONLY place a wrong migration would show up.
+        ccols = {r[1]: r for r in conn.execute("PRAGMA table_info(service_configs)")}
+        for name in ("voice_model", "voice_model_mode", "voice_byom_profile"):
+            assert name in ccols, f"{name} missing from the migrated schema"
+            assert ccols[name][3] == 1, f"{name} must be NOT NULL like every other column here"
+        assert ccols["voice_model_mode"][4].strip("'") == "native"
+        conn.execute(
+            "INSERT INTO service_configs (id, service_name, display_name, endpoint,"
+            " api_key_encrypted, model_or_deployment, default_project, knowledge_base,"
+            " knowledge_source, is_master, is_active, updated_by, created_at, updated_at)"
+            " VALUES ('c1', 'ai_foundry', 'Azure AI Foundry', 'https://x.services.ai.azure.com',"
+            " '', 'my-own-deployment', 'p', '', '', 1, 1, 'admin', CURRENT_TIMESTAMP,"
+            " CURRENT_TIMESTAMP)"
+        )
+        srow = conn.execute(
+            "SELECT voice_model, voice_model_mode, voice_byom_profile FROM service_configs"
+            " WHERE id='c1'"
+        ).fetchone()
+        assert srow == ("", "native", "")
     finally:
         conn.close()
 
