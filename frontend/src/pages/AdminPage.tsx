@@ -989,10 +989,14 @@ export function AdminPage() {
                 </Body1>
                 {cfgVoiceProfile === "byom-azure-openai-realtime" && (
                   <Caption1 data-testid="cfg-byom-realtime-warning">
-                    Measured: a realtime deployment connects under this profile, but saving will be
-                    refused. Speech-native passthrough has no Voice Live speech recognizer, and this
-                    product&apos;s session needs text end-of-utterance detection plus azure-speech
-                    transcription — both cascaded-only. Azure names the field in the error.
+                    Measured: this works only if the interviewer persona has{" "}
+                    <strong>text end-of-utterance detection turned off</strong> — it is ON by
+                    default, and saving is refused while it is. Speech-native passthrough sends audio
+                    straight to your model, so Voice Live runs no speech recognizer and cannot do
+                    text-based end-of-utterance detection. Turn it off in the agent editor
+                    (Configuration) and you lose the cleaner answer segmentation it gives the
+                    transcript buffer and the judge&apos;s silence trigger. Input transcription is
+                    fine either way.
                   </Caption1>
                 )}
                 <Caption1 data-testid="cfg-byom-kind">

@@ -578,7 +578,7 @@ embedding"筛，`gpt-image-2-1` 也会被捞进来（**这是跑真实接口才�
 | profile | 用的部署 | 结果 |
 | --- | --- | --- |
 | `byom-azure-openai-chat-completion` | `gpt-5.4-mini`、`gpt-6-luna` | ✅ ACCEPTED（§4.4） |
-| `byom-azure-openai-realtime` | **`gpt-realtime-1.5`**、**`gpt-realtime-2.1`** | ⚠️ 探针 ACCEPTED，**但本产品的会话跑不了 —— 见 §4.6** |
+| `byom-azure-openai-realtime` | **`gpt-realtime-1.5`**、**`gpt-realtime-2.1`** | ⚠️ 探针 ACCEPTED；生产会话**仅在该人物关掉文本 EOU 后**可用 —— 见 §4.6 |
 | `byom-azure-openai-realtime`（错配）| `gpt-5-mini`（chat 部署） | ❌ `byom_realtime_connection_error` |
 | `byom-foundry-anthropic-messages` | — | ⚠️ **无法验证**：本租户不能部署 Claude |
 
@@ -586,7 +586,11 @@ embedding"筛，`gpt-image-2-1` 也会被捞进来（**这是跑真实接口才�
 下拉就会是空的——正是上面 realtime 那个 bug 的翻版。所以该 profile 列**全部部署**（`kind=all`）：清单
 过宽是可恢复的（Azure 在建连时会拒掉错配，§4.4 的 E/F 两条已实测），**过窄则让功能彻底不可达**。
 
-### 4.6 realtime profile 连得上，但本产品的会话它跑不了（浏览器 E2E 才抓到）
+### 4.6 realtime profile 在默认配置下被拒，元凶是文本型 EOU（浏览器 E2E 才抓到）
+
+> **先读 §4.7。** 本节的结论"realtime 用不了"在同日被进一步更正：换成**音频型** EoU
+> （`SmartEndOfTurnDetection`）之后 realtime 完全可用，连 avatar 都能驱动。本节保留的价值在于它记录了
+> 问题是怎么被浏览器 E2E 抓出来的，以及保存校验为什么必须发生产会话形状。
 
 > 2026-10-05 续。§4.5 用探针测出 realtime BYOM "ACCEPTED"。加了**真实浏览器 E2E** 之后，结论要修正：
 > **连得上 ≠ 能用。**
@@ -601,9 +605,21 @@ embedding"筛，`gpt-image-2-1` 也会被捞进来（**这是跑真实接口才�
 ```
 
 **根因**：`byom-azure-openai-realtime` 是**语音直通** —— 音频直接进你的 realtime 模型，**Voice Live
-自己不做 STT**。而本产品的会话依赖 Voice Live 做 STT/VAD：`azure_semantic_vad` + **文本型 EOU** +
-`azure-speech` 输入转写，这三样都只存在于**级联**管线。去掉 `turn_detection` 会换成另一条错误
-（`When using azure-speech as InputAudioTranscription, turn_detection must …`），即两者互相耦合。
+自己不做 STT**，所以它无法做**文本型 EOU**（那需要先把语音识别成文字）。
+
+> **更正（同日续测）：元凶只有文本型 EOU 这一个。** 本节最初写的是"`azure_semantic_vad` + 文本型 EOU +
+> `azure-speech` 输入转写，这三样都只存在于级联管线"——**错了**。把人物的 `eou_detection` 关掉之后，
+> **带着 `azure-speech` 转写的完整生产会话是 ACCEPTED 的**：
+>
+> | 实测 | 结果 |
+> | --- | --- |
+> | 生产会话，`eou_detection=True` | ❌ ERR（`param: session.turn_detection.end_of_utterance_detection`）|
+> | 生产会话，**`eou_detection=False`** | ✅ **ACCEPTED** |
+> | EOU 关 + 连 `azure-speech` 转写也去掉 | ✅ ACCEPTED |
+>
+> 我当初看到的 `When using azure-speech as InputAudioTranscription, turn_detection must …` 是因为我把
+> `turn_detection` **整个删掉**造成的另一种非法形状，**不是** azure-speech 和直通不兼容。这是又一次
+> "把推断当证据"：从一个我自己制造的畸形请求的报错，推出了一条关于 azure-speech 的结论。
 
 **为什么探针之前说它可用 —— 一个真实的校验缺陷**：
 
@@ -614,6 +630,14 @@ embedding"筛，`gpt-image-2-1` 也会被捞进来（**这是跑真实接口才�
 
 保存时的实测校验原本只发最小会话，**所以它对这个 profile 是假绿灯** —— 管理员能存下一个让**每一场**
 语音面试都失败的配置。**只有浏览器级 E2E 才会发现这件事**，探针和单元测试都不会。
+
+**所以 realtime BYOM 的准确状态是"有条件可用"，不是"不可用"：**
+
+- `eou_detection` 的默认值是 **True**（`persona.py:194`），库里每个人物当前都是 True，而它在 agent
+  编辑器的 Configuration 里**可改**（`ConfigurationRail.tsx:220`）。
+- 所以**在默认配置下**保存 realtime 会被拒；**把该人物的文本 EOU 关掉，realtime 就能用**。
+- 代价是真实的：失去文本型 EOU 带来的更干净的作答分段（它正是为转写缓冲和 judge 的静默触发而加的，
+  见 `build_turn_detection` 的 docstring），退回普通 `azure_semantic_vad`。**输入转写两种情况下都正常。**
 
 **修法（两处）**：
 
@@ -632,7 +656,7 @@ embedding"筛，`gpt-image-2-1` 也会被捞进来（**这是跑真实接口才�
 | 用例 | 断言的真实行为 |
 | --- | --- |
 | BYOM chat-completion | 保存 200「已实测校验通过」；浏览器里真跑一场面试，`proxy.connected` 带 `byom_profile`，avatar ICE 到达，无 error |
-| BYOM **realtime** | 保存 **422**，带 Azure 原话，**且配置未被改动** —— 没有任何面试会看到它 |
+| BYOM **realtime** | 在默认人物（文本 EOU 开着）下保存 **422**，带 Azure 原话，**且配置未被改动**。注意这是**有前提的**断言：关掉该人物的 EOU 后同一配置会保存成功 |
 | native 对照 | wire 上**不带** profile（库里残留的旧 profile 不会泄漏） |
 
 > 顺带记一个测试工程上的坑：avatar 限额错误是在 `proxy.connected` **之后**才到的，所以"连上了"不等于
@@ -643,6 +667,292 @@ embedding"筛，`gpt-image-2-1` 也会被捞进来（**这是跑真实接口才�
 **接口形态**：`GET /admin/config/ai-foundry/model-deployments?kind=chat|realtime|all`，默认 `chat`
 （推理模型下拉与人物编辑器保持原行为）；未知值回退到 `chat`，不 422——一个会报错的下拉比一个显示安全
 默认值的下拉更糟。
+
+---
+
+### 4.7 四条路线与我们能走哪几条：realtime 不是不支持，是我们点错了 EoU 变体
+
+> 2026-10-05 第三次更正。起因是产品组的架构图（Azure Voice Live API — 架构，2026 年 9 月）把
+> **第 ③ 行「混合式」**画成 **智能轮次检测（Semantic VAD · EoU）+ GPT Realtime 2.1/1.5 (Speech-LLM)
+> + Azure Speech TTS** —— 也就是说 Azure **明确支持** EoU 配 realtime 模型。而本文 §4.6 当时写的是
+> "本产品用不了 realtime"。**图是对的，我错了。**
+
+**真正的原因：EoU 有两种实现，我们一直在用只有级联才有的那一种。** SDK 的类文档原话：
+
+| SDK 类型 | `model` 字面量 | 原话 |
+| --- | --- | --- |
+| `AzureSemanticDetectionMultilingual`（我们在用）| `semantic_detection_v1_multilingual` | 基于**文本**的 EoU |
+| **`SmartEndOfTurnDetection`** | `smart_end_of_turn_detection` | ***Audio-based** end-of-turn detection. Operates directly on the **input audio stream rather than text**.* |
+
+直通 / 语音到语音管线里没有 Voice Live 的语音识别器，所以**文本型**用不了；**音频型**直接在音频流上工作，
+所以到哪都能用。实测矩阵（同一份生产会话，只换 EoU 变体）：
+
+| 组合 | 文本型 EoU | **音频型 EoU** |
+| --- | --- | --- |
+| 原生 `gpt-realtime-2.1` | ❌ | ✅ |
+| 原生 `gpt-realtime-1.5` | ❌ | ✅ |
+| 原生 `gpt-5-mini`（今天线上） | ✅ | ✅ |
+| BYOM `byom-azure-openai-realtime` | ❌ | ✅ |
+| BYOM `byom-azure-openai-chat-completion` | ✅ | ✅ |
+
+**换过去不损失"轮次检测"这个能力本身**，只是换实现；而且它把 realtime 这一整列从"不可用"变成"可用"。
+
+**数字人怎么办 —— realtime 能不能驱动 avatar？能，而且这正是「混合式」的形态。** 实测（会话里
+`voice` 是 `AzureStandardVoice`，即 Azure Speech TTS）：
+
+| 组合 | 结果 |
+| --- | --- |
+| `gpt-realtime-2.1` + avatar + Azure 音色 + 音频型 EoU | ✅ `avatar_ice=1`，`voice.type=azure-standard`，`voice.name=en-US-AvaNeural` |
+| `gpt-realtime-1.5` + 同上 | ✅ 同上 |
+| `gpt-5-mini` + 同上 | ✅ 同上 |
+
+**所以输出仍然是 Azure TTS，avatar 的 ICE / viseme 链路照旧。** 图里第 ③ 行把 `Azure Speech TTS` 画在
+realtime 模型右边，就是这个意思：realtime 当 **Speech-LLM**（听 + 想），**嘴仍然是 Azure TTS** —— 对
+数字人恰好是我们要的，因为口型由 TTS 驱动。
+
+**追问："数字人是不是一定需要 speech（TTS）驱动？" —— 实测没证实这一条，但结论仍然是"我们必须用
+TTS"，理由换了一个。**
+
+| 实测（realtime 模型 `gpt-realtime-2.1`，音频型 EoU）| 结果 |
+| --- | --- |
+| + avatar + **Azure 音色** | ✅ `avatar ice=1`，`voice=azure-standard/en-US-AvaNeural` |
+| + avatar + **不设音色**（用模型自己的声音）| ✅ **`avatar ice=1`，`voice=openai/marin`** |
+| 无 avatar + 不设音色（纯语音到语音）| ✅ `avatar` 不存在，`voice=openai/marin` |
+| `gpt-5-mini` + avatar + 不设音色 | ✅ Azure **自动填** `azure-standard/en-US-AvaNeural`（级联没有模型自带声音）|
+
+第二行说明：**在会话配置层面，avatar 并不强制要 Azure TTS** —— Azure 接受 avatar 配模型自己的声音，
+而且照样下发 ICE server。所以"数字人一定需要 speech"**作为硬性约束没有被证实**。
+
+> **但"会话被接受"不等于"口型真能对上"。** avatar 视频是 viseme 驱动的，Azure 能否从模型自产音频里
+> 生成 viseme，本次**没有验证**（需要真跑一轮音频并看画面）。**这一条留作未验证项，不写成结论。**
+
+**而本产品必须用 Azure TTS，理由是另一个、且已验证的**：题库的**逐字念题**走
+`response.create.pre_generated_assistant_message`（服务端把准确文本 TTS 出来）。任何经模型中介的朗读都
+会漂移 —— 历史实测过 "Thank you." 漂移与卡片/口播不一致（记忆 `ai-interview-external-filler-root-cause`、
+`voice-live-control-notes.md`）。**声音一旦归模型，逐字念题就不存在了。** 所以准确的表述是：
+
+> 不是"数字人必须 speech 驱动"，而是**本产品的逐字念题必须走 Azure TTS**；而只要走了 Azure TTS，
+> 数字人就顺带成立。这也正是第 ③ 行「混合式」对我们合适、第 ② 行不合适的真正原因。
+
+> 与第 ② 行「语音到语音」的区别值得记住：那一行是模型**同时当耳朵和嘴**，音频由模型直接产出 ——
+> 那条路数字人会失去 Azure TTS 的 viseme，而且本产品的逐字念题（`pre_generated_assistant_message`）
+> 也无从落地。所以**我们要的是第 ③ 行，不是第 ② 行。**
+
+**四条路线对本产品的可达性（截至 2026-10-05 实测）：**
+
+| # | 路线 | 本产品可达？ |
+| --- | --- | --- |
+| ① | 全双工 GPT-Live-1 | ❌ 官方标注"即将推出" |
+| ② | 语音到语音（模型既听又说） | ⚠️ 能连，但丢 avatar viseme + 逐字念题，**不是我们要的** |
+| ③ | **混合式**：Semantic VAD + 音频型 EoU → realtime Speech-LLM → Azure TTS → avatar | ✅ **实测可达**（需把 EoU 换成音频型）|
+| ④ | **级联式**：Azure STT → 文本 LLM → Azure TTS → avatar | ✅ **今天线上就是这条** |
+
+**我在这一串里连错三次，值得写下来当教训**：
+
+1. 先说 `azure-speech` 转写也是元凶 —— 错。关掉 EOU 后带着转写的完整会话是 ACCEPTED 的；我那条结论来自
+   一个**我自己制造的畸形请求**（把 `turn_detection` 整个删掉）的报错。
+2. 再说"本产品用不了 realtime" —— 错。关掉 EOU 就能连。
+3. 再说"realtime 和 EoU 不可兼得" —— 也错。换音频型 EoU，两者都要得到。
+
+三次是同一个毛病：**从一次失败推出"不可能"，而没有去找正确的形态。** 正确的做法在这一节里被证明只花了
+两步：读 SDK 把同类型都列出来（`SmartEndOfTurnDetection` 一眼可见），然后各测一次。
+
+---
+
+### 4.8 两种 EoU 到底能不能统一成一条？真实音频 A/B
+
+> 2026-10-05。承 §4.7 的发现（文本型 EoU 只在级联管线可用、音频型到处可用），owner 提了两个问题，
+> 这一节用真实音频把它们测掉：
+>
+> 1. **音频型和文本型是兼容的吗？还是完全不兼容、必须分成两套？**
+> 2. 如果兼容，**就没必要留两份代码** —— "之前就是没用的代码没被重构掉"。
+>
+> 先纠正一个命名：**不存在"文本型的 `SmartEndOfTurnDetection`"**。SDK 里是两个不同的类：
+>
+> | 类 | `model` 字面量 | 依据 |
+> | --- | --- | --- |
+> | `AzureSemanticDetection{,En,Multilingual}` | `semantic_detection_v1*` | **文本**（读识别出的文字）|
+> | `SmartEndOfTurnDetection` | `smart_end_of_turn_detection` | **音频**（直接看输入音频流）|
+
+**方法**：同一段 WAV，以 20ms 帧**实时**喂进一个生产形态的 mouth 会话（VAD 开、`create_response=False`、
+去掉 avatar），只换 EoU 变体，记录每个服务端事件的相对时刻。模型固定 `gpt-5-mini`（**级联是两种变体都合法
+的唯一管线**，否则对比不公平）。音频用 macOS 自带 `say` + `afconvert` 生成 24kHz 单声道 16-bit，可复现。
+
+> **测量装置的一个坑，先记下来**：第一次跑两边都只有 `speech_started`、没有 `speech_stopped`、没有转写。
+> 原因是音频放完后我只 `sleep`，**没有继续发静音帧** —— VAD 判"说完了"靠的是收到**真实静音**，不是"收不到
+> 数据"。补上 3s 尾部静音帧之后才测得出来。（转写那篇文档里写的"含尾部静音"就是这个意思，我漏了。）
+
+**用例 A：一句连续说完（6.16s）**
+
+| | 文本型 | 音频型 |
+| --- | --- | --- |
+| `speech_started` | 0.52s | 0.66s |
+| `speech_stopped` | **7.31s** | **7.90s** |
+| 分段数 | 1 | 1 |
+| 转写文本 | 一致 | 一致 |
+
+**用例 B：中间有 1.2s 停顿（这才测得出"碎片"）**
+
+| | 文本型 | 音频型 |
+| --- | --- | --- |
+| 分段数 | **2** | **2** |
+| 转写文本 | 完全一致（两段都一样）| 完全一致 |
+| 第 1 次 `speech_stopped` | 2.90s | 3.34s（+0.44）|
+| 第 2 次 | 7.54s | 8.05s（+0.51）|
+
+**这一格推翻了文本型的卖点。** `build_turn_detection` 原本的注释说文本型给出"更干净、更少碎片的分段"，
+但在带停顿的输入上**它同样切成了两段**，和音频型一字不差。**所谓的抗碎片优势没有出现。**
+
+**用例 B 续：把音频型的 `timeout_ms` 扫一遍（看那 0.5s 能不能调回来）**
+
+| 配置 | 分段 | `speech_stopped` | 对比文本型 |
+| --- | --- | --- | --- |
+| 文本型 @1500ms（今天线上）| 2 | 2.84s, 7.79s | 基准 |
+| 音频型 @1500ms | 2 | 3.36s, 8.08s | +0.52 / +0.29 |
+| **音频型 @1000ms** | 2 | **3.04s, 7.63s** | **+0.20 / −0.16 —— 基本持平** |
+| 音频型 @700ms | **1** | 9.08s | ⚠️ **行为变质**：不再在停顿处切，合成一段并推迟到 9s |
+
+**结论（按证据分级）：**
+
+1. **接受层面**：音频型是**严格超集** —— 文本型能用的地方它都能用，还多覆盖 realtime / 直通（§4.7）。
+2. **分段行为**：在测过的两种输入上**两者等价**（分段数相同、转写文本逐字相同）。文本型声称的抗碎片
+   优势**未被观测到**。
+3. **判定延迟**：音频型默认晚约 **0.45–0.6s**（4 个样本一致），但**可调** —— `timeout_ms=1000` 即与今天
+   的文本型 @1500ms 持平。
+4. **knob 很敏感**：700ms 会让行为变质（合段 + 整体推迟到 9s），所以不是"越小越快"。
+
+**因此"统一成一条"是有证据支持的**：统一到**音频型 @1000ms**，可以
+
+- 删掉文本型那条分支和为它存在的管线开关（realtime 自动可用，不再需要让运维选管线）；
+- 保持今天的分段行为与判定时机（实测持平）。
+
+> **但这仍是一次行为变更，上线前要补的两件事（本节不假装已完成）：**
+> 1. 每种配置只跑了 **1 次**，`timeout_ms=1000` 的持平需要**重复 2–3 次**确认不是单次噪声。
+> 2. 只测了英文、一种停顿长度、一个说话人。至少再覆盖**中文**和**更长停顿**，因为 judge 的催促阈值
+>    （`voice_judge_silence_seconds`，默认 2s）就坐在这个时间尺度上。
+> 3. 700ms 那次"合段"的机理没有查清 —— 为什么**更短**的超时反而产生**更长**的单段。不解释清楚就不要
+>    把这个 knob 往下调。
+
+---
+
+### 4.9 realtime 模态 vs text 模态：在 Voice Live 里逐项对比（含"评估该用哪个"）
+
+> 2026-10-05。owner 的两个问题：**(1)** realtime 和 text 这两个模态在 Voice Live 里到底差在哪？
+> **(2)** realtime 会话里也有文本输出，那**评估（打分 / judge）该用 realtime 模型还是 text 模型？**
+> 下表每一格都标了是**实测**还是**未测**，没测的不写结论。
+
+| 维度 | text 模型（如 `gpt-5-mini`）| realtime 模型（如 `gpt-realtime-2.1`）| 依据 |
+| --- | --- | --- | --- |
+| Voice Live 走哪条管线 | **级联**（Azure STT → LLM → Azure TTS）| **语音到语音 / 混合** | 架构图 + 下面各行 |
+| 文本型 EoU（`semantic_detection_v1*`）| ✅ 接受 | ❌ **拒绝**（无本地语音识别器）| 实测 §4.7 |
+| 音频型 EoU（`smart_end_of_turn_detection`）| ✅ | ✅ | 实测 §4.7 |
+| 分段行为（两种 EoU 对比）| — | — | 实测等价，§4.8 |
+| avatar（数字人）| ✅ `ice=1` | ✅ **`ice=1`** | 实测 §4.7 |
+| 不设 `voice` 时的默认声音 | Azure 自动填 `azure-standard/en-US-AvaNeural` | **`openai/marin`（模型自带）** | 实测 §4.7 |
+| 配 Azure TTS 音色输出 | ✅ | ✅ **（这就是"混合式"）** | 实测 §4.7 |
+| **逐字念题**（`pre_generated_assistant_message`）| ✅ 188000 字节、逐字一致、1.8s | ✅ **188000 字节、逐字一致、1.4s（更快）** | **实测，本节** |
+| 输入转写 `azure-speech` | ✅ | ✅（配音频型 EoU 时）| 实测 §4.7 |
+| BYOM profile | `byom-azure-openai-chat-completion` | `byom-azure-openai-realtime` | 实测 §4.4 / §4.5 |
+| 部署的 `capabilities` | `chat_completion: "true"` | `chat_completion: "false"`（**无正向 realtime 标记**）| 实测 §4.5 |
+| 能产出**文本**吗 | ✅ | ✅ **能** —— 走 realtime WS 协议 + `modalities:["text"]` | **实测，本节** |
+| 能通过 **HTTP 文本接口**吗 | ✅ | ❌ **不能** —— 6 个接口 × 多个 api-version 全 400 | **实测，本节** |
+| **能否做评估 / judge**（我们的路径是 HTTP）| ✅ | ❌ 不能**按现状** —— 要用它就得把评估改走 WS | **实测，本节** |
+| 端到端轮次延迟（realtime 的经典卖点）| — | — | **未测** |
+| 打断（barge-in）行为差异 | — | — | **未测** |
+| 成本 | — | — | **未测** |
+
+**逐字念题在 realtime 会话上正常（实测）** —— 这是混合式对本产品可用的最后一块拼图：
+
+```
+CASCADED gpt-5-mini      : response.done=True  audio=188000B  verbatim=True  1.8s
+HYBRID   gpt-realtime-2.1: response.done=True  audio=188000B  verbatim=True  1.4s
+```
+
+**评估该用哪个模型 —— 这一格我先下过一个太宽的结论，owner 当场质疑，更正如下。**
+
+我最初写的是"realtime 做不了评估"，依据只有一条：`FoundryLLMAdapter` 调 Responses API 时回
+`400 "This model is not supported by Responses API."`。owner 指出这句报错**只否了 Responses 这一条路**，
+推不出"realtime 做不了文本"。**他是对的。** 于是把所有文本面都测了一遍：
+
+| 接口（realtime 部署）| 结果 |
+| --- | --- |
+| AOAI `chat/completions` api-version `2024-10-21` / `2025-04-01-preview` | 400 `The requested operation is unsupported.` |
+| 同上，api-version `2026-01-01-preview` | 404 Resource not found |
+| `openai/v1/chat/completions`（资源根）| 400 unsupported |
+| `openai/v1/responses`（资源根）| 400 unsupported |
+| inference `/models/chat/completions` | 400 unsupported |
+| **project-scoped** `openai/v1/chat/completions` | 400 unsupported |
+| **project-scoped** `openai/v1/responses` | 400 `This model is not supported by Responses API.` |
+
+> 前一版这两条 project-scoped 是 **401**，因为我用了错误的 token audience。按"必须好好验证"的要求用
+> `FOUNDRY_SCOPE = https://ai.azure.com/.default` 重测才得到上面的 400 —— **401 不是证据，别当证据用。**
+> 同一轮里 `gpt-5-mini` 在这两条上都是 200，构成对照。
+
+**而 realtime 确实能产出文本 —— 走 realtime 协议（实测）：**
+
+```
+model=gpt-realtime-2.1, session.modalities=["text"], 发一条 user 文本 + response.create
+  text out : '({"verdict":"wait"})'      <- 它返回了要求的精确 JSON
+  error    : (none)
+  events   : response.text.done, response.done, response.content_part.done, ...
+```
+
+**所以准确的结论是三句话，而不是一句：**
+
+1. **realtime 能做文本生成** —— 实测返回了结构化 JSON。
+2. **realtime 不能通过任何 HTTP 文本接口被调用**（上表 7 行）。
+3. **我们的评估 / judge 是 HTTP 调用**（`get_llm_adapter()` → `FoundryLLMAdapter`，§3.6），所以**按现状**
+   用不了 realtime 模型 —— 不是因为它不会写字，而是因为**协议对不上**。
+
+> **要不要为此把评估改走 realtime WS？这是评估（judgement），不是测量。** 我的看法是不值得：打分是一批
+> 并发的 HTTP 调用（实测中位 18.4s/题，并发数 = 题目数），改成 WS 需要按会话复用或每次建连、自己做重试与
+> 超时，而 realtime 协议本就不是为批量文本设计的；更关键的是**没有质量上的理由**偏好 realtime 做打分。
+> 所以结论留在"可以但不建议"，并明确标成判断。
+
+**追问："Responses API 包不包括 WebSocket？还是它就是 HTTP 协议？" —— 包括，我上面的说法不完整。**
+
+官方有 **Responses API 的 WebSocket 模式**（Microsoft Learn *Use the Responses API in WebSocket mode*）：
+持久连接到 `/v1/responses`，用**顶层** `response.create` 事件驱动（`model` / `store` / `input` / `tools`
+都在事件顶层，**不是**嵌在 `response` 里），后续轮次用 `previous_response_id` 只发增量；单连接串行、不支持
+多路复用、**60 分钟上限**、兼容 `store=false`。鉴权 scope 是 `https://ai.azure.com/.default`。
+
+> **我在这里连犯两个测量错误，值得记下来。** 第一次测 WS 时我 (a) 把 `model`/`input` 嵌进了 `response`
+> 对象，(b) 用了 `cognitiveservices` 的 token audience。结果 socket 升级成功（101）却被 1011 关闭，而我
+> 把这个 1011 读成了"**这条路不存在、101 只是网关泛化接受**"。**两处都是我的错，不是服务端的事实。**
+> 按官方文档改正形状之后，结论就变了。
+
+**在本资源上实测（正确帧 + 正确 scope，两个 host、四个 api-version 变体）：**
+
+| 目标 | 结果 |
+| --- | --- |
+| `gpt-5-mini`，`wss://…/openai/v1/responses`（无 api-version / `preview` / `2026-01-01-preview`；`services.ai` 与 `openai.azure.com` 两个 host）| ⚠️ **全部：无事件、1011 关闭** —— **原因未查明**，可能此资源/区域尚未开通，**不写成结论** |
+| **`gpt-realtime-2.1`，同一 WS 路径** | ❌ **收到结构化 error 帧 `"The requested operation is unsupported."`** |
+
+realtime 那一格是决定性的：它证明**这个 WS 端点是活的、会按协议回错误**，而它**拒绝 realtime 模型** ——
+与全部 7 个 HTTP 面完全一致。
+
+**所以最终定论（与传输无关）：**
+
+| | HTTP | WebSocket |
+| --- | --- | --- |
+| Responses API 存在吗 | ✅ | ✅ 官方文档有 |
+| chat 部署可用吗 | ✅ 实测 200 | ⚠️ 本资源 1011，未查明 |
+| **realtime 部署可用吗** | ❌ 400 | ❌ **error frame，同样不支持** |
+
+**"realtime 不能服务 Responses API"因此不是"HTTP 的限制"**，而是这个 API 本身不收 realtime 部署。
+realtime 能产出文本，但**只能走 realtime 自己的协议**（`modalities:["text"]`，上面已实测）。
+
+**这也给"两个设置分开"补上了实测依据**（§3.6 当初是从"名字语义不同"推出来的）：
+
+**这正好给"两个设置分开"补上了实测依据**（§3.6 当初是从"名字语义不同"推出来的）：
+
+| | 语音会话模型 | 推理模型（judge / 打分 / agent）|
+| --- | --- | --- |
+| 可以是 realtime 吗 | ✅ 可以（混合式）| ❌ **按现状不可以** —— 协议对不上，不是能力不够 |
+| 可以是 chat 吗 | ✅ 可以（级联，今天如此）| ✅ 必须 |
+
+所以推理模型下拉按 `chat_completion == "true"` 过滤（因此排除 realtime 部署，§4.5）**不再只是"照 Portal 抄"**
+—— 它挡住的是一个会在打分时 400 的配置。
 
 ---
 

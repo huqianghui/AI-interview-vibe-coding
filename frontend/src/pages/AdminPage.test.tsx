@@ -654,7 +654,7 @@ describe("AdminPage", () => {
     // The operator is warned BEFORE saving: the save is refused, because this product's session
     // needs text EOU + azure-speech transcription, which passthrough cannot run (measured live).
     expect(screen.getByTestId("cfg-byom-realtime-warning")).toHaveTextContent(
-      /saving will be refused/i,
+      /text end-of-utterance detection turned off/i,
     );
   });
 
