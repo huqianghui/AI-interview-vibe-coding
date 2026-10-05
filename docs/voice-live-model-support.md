@@ -1242,9 +1242,26 @@ owner：「如果是用 gpt-realtime 说话的话，那么 pre-assistant-message
 | `azure-standard/en-US-AvaNeural`（产品当前） | ✅ Azure TTS 念 | ✅ **也是 Azure TTS 念** —— 459200 字节，回显 `azure-standard` |
 | **缺失** | ❌ 回 `response.text.delta`（转写 0 字） | ✅ 模型自带音色 —— 460800 字节，回显 `openai/marin` |
 
-**所以"两个声音"在一个会话里构造不出来**：要么全程 Azure TTS，要么全程模型自带音色。这正是混合式干净的
-原因 —— realtime 只听和想，**所有发声都归 Azure TTS**，数字人永远只有一条音频源、一条 viseme 流。真正
-"怪异"的是另一头：丢掉 `voice` 之后模型用 marin 说话、而念题直接失声，也就是本节这个 bug。
+**而且"中途换音色"这条路是 Azure 自己堵死的（实测）。** owner 追问得更细：「同一个 session，
+pre-assistant-message 的时候配置了 azure standard，但是 response-creation 的时候去掉 azure standard，它就会
+使用 gpt-realtime 的默认声音吗？这样不就会出现两个声音？」在一个会话里按顺序做了四步：
+
+| 步骤 | 结果 |
+| --- | --- |
+| 1 初始会话 | 生效音色 `azure-standard/en-US-AvaNeural` |
+| 2 念题（`pre_generated`） | ✅ 音频 **188000 字节** |
+| 3 中途 `session.update` 把音色改成 `openai/marin` | ❌ **被拒**：`Cannot update voice from AzureVoice to OpenAIVoice`（`invalid_request_error`，`param: voice`） |
+| 4 之后的模型轮 | ✅ 音频 **404800 字节** —— 仍然是 `azure-standard` |
+| 5 再念一次题 | ✅ 音频 **188000 字节** |
+
+**所以"念题用 Ava、模型轮用 marin"这种混搭在协议层发不出去** —— 不是我们选择不这么做，是服务端直接拒。
+被拒之后会话保持原音色，后面念题和模型轮都是同一个 Azure TTS 声音（`text_deltas` 全为 0）。一个会话始终
+只有一个声音、一条 viseme 流。
+
+要用模型自带音色，只能**在建会话时就不配** `azure-standard` —— 那是整场会话的选择，且那样念题会失声（本节
+这个 bug）。反方向（开场用模型音色、中途换成 Azure）**未验证**，按这条错误信息推测同样会被拒。
+
+真正"怪异"的是另一头：丢掉 `voice` 之后模型用 marin 说话、而念题直接失声，也就是本节这个 bug。
 
 **模型自带音色能否驱动数字人** —— 服务层有正面信号：挂数字人时模型的音频**被路由到数字人通道**（转写 80 字、
 WS 音频字节 0，与 Azure TTS 同一签名）。但**口型是否真跟着模型自己的词动尚未验证**，那需要真实握手下的
