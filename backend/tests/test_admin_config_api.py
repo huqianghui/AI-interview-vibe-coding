@@ -743,3 +743,76 @@ async def test_voice_live_models_fails_soft(client, _restore_settings, monkeypat
 
 async def test_voice_live_models_requires_a_token(client):
     assert (await client.get("/admin/config/ai-foundry/voice-live-models")).status_code == 401
+
+
+async def test_a_verified_voice_model_reports_the_live_check(
+    client, _restore_settings, monkeypatch
+):
+    # The ACCEPTED branch of the save-time check. Stubbed because CI never reaches Azure; the live
+    # counterpart ("verified against the live service" on a real save) is in the acceptance runs.
+    from app.services import voice_live_probe as probe
+
+    async def fake_credential(_api_key):
+        return object(), True
+
+    async def accepted(**_kw):
+        return {"model": "gpt-5-mini", "verdict": probe.ACCEPTED, "detail": "session.updated"}
+
+    monkeypatch.setattr(
+        "app.services.voice_live_proxy._resolve_voice_live_credential", fake_credential
+    )
+    monkeypatch.setattr(probe, "probe_model", accepted)
+    resp = await client.put(
+        "/admin/config/ai-foundry",
+        headers=AUTH,
+        json={**VOICE_BASE, "voice_model": "gpt-5-mini"},
+    )
+    assert resp.status_code == 200
+    assert "verified" in resp.json()["voice_model_check"]
+
+
+async def test_an_inconclusive_probe_saves_with_a_note(client, _restore_settings, monkeypatch):
+    # Reachable service, unusable answer (timeout / transport error). Must NOT block the save —
+    # only a DEFINITIVE refusal does.
+    from app.services import voice_live_probe as probe
+
+    async def fake_credential(_api_key):
+        return object(), True
+
+    async def inconclusive(**_kw):
+        return {
+            "model": "gpt-5-mini",
+            "verdict": probe.ERROR,
+            "detail": "no server event before timeout",
+        }
+
+    monkeypatch.setattr(
+        "app.services.voice_live_proxy._resolve_voice_live_credential", fake_credential
+    )
+    monkeypatch.setattr(probe, "probe_model", inconclusive)
+    resp = await client.put(
+        "/admin/config/ai-foundry",
+        headers=AUTH,
+        json={**VOICE_BASE, "voice_model": "gpt-5-mini"},
+    )
+    assert resp.status_code == 200
+    assert "Could not verify" in resp.json()["voice_model_check"]
+    assert (await client.get("/admin/config/ai-foundry", headers=AUTH)).json()[
+        "voice_model"
+    ] == "gpt-5-mini"
+
+
+async def test_voice_live_models_without_an_endpoint_is_empty(client, _restore_settings):
+    # No saved config and no .env endpoint in CI -> the dropdown is simply empty, never a 500.
+    from app.config import get_settings
+
+    s = get_settings()
+    saved = (s.azure_foundry_endpoint, s.foundry_project_endpoint)
+    s.azure_foundry_endpoint = ""
+    s.foundry_project_endpoint = ""
+    try:
+        resp = await client.get("/admin/config/ai-foundry/voice-live-models", headers=AUTH)
+        assert resp.status_code == 200
+        assert resp.json() == []
+    finally:
+        s.azure_foundry_endpoint, s.foundry_project_endpoint = saved

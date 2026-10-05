@@ -150,27 +150,29 @@ async def probe_model(
     name in the Foundry resource and the profile rides as a query param (the SDK maps ``query``
     straight onto the WebSocket URL). Never raises: a connect-time rejection is classified too.
     """
-    from azure.ai.voicelive.aio import connect
-    from azure.ai.voicelive.models import RequestSession
-
-    # Same TLS trust store and same Entra-first credential order as the live proxy, so a probe
-    # result actually represents what a real session would do.
-    from app.services.voice_live_proxy import _certifi_ssl_context
-
-    kwargs: dict[str, Any] = {
-        "endpoint": endpoint,
-        "credential": credential,
-        "api_version": api_version,
-        "model": model,
-        "connection_options": {"vendor_options": {"ssl": _certifi_ssl_context()}},
-    }
-    mode = "native"
-    if byom_profile:
-        kwargs["query"] = {"profile": byom_profile}
-        mode = "byom"
-
+    mode = "byom" if byom_profile else "native"
     started = time.monotonic()
     try:
+        # Imports inside the try on purpose: without the azure extra installed this is an
+        # ImportError, and a missing optional dependency must come back as an inconclusive verdict
+        # (the admin route then saves with a note) rather than escape and 500 the save.
+        from azure.ai.voicelive.aio import connect
+        from azure.ai.voicelive.models import RequestSession
+
+        # Same TLS trust store and same Entra-first credential order as the live proxy, so a probe
+        # result actually represents what a real session would do.
+        from app.services.voice_live_proxy import _certifi_ssl_context
+
+        kwargs: dict[str, Any] = {
+            "endpoint": endpoint,
+            "credential": credential,
+            "api_version": api_version,
+            "model": model,
+            "connection_options": {"vendor_options": {"ssl": _certifi_ssl_context()}},
+        }
+        if byom_profile:
+            kwargs["query"] = {"profile": byom_profile}
+
         async with connect(**kwargs) as conn:
             # The cheapest "did Azure accept this?" signal: a good model answers session.updated, a
             # bad one answers error. No audio is ever sent.

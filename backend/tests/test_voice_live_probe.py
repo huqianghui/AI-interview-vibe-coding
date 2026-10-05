@@ -198,3 +198,277 @@ def test_probe_model_is_importable_without_the_azure_extra(mode):
     src = inspect.getsource(probe.probe_model)
     assert "from azure.ai.voicelive.aio import connect" in src
     assert mode in ("native", "byom")
+
+
+def test_not_found_and_unexpected_event_classifications():
+    # Two branches the live-Azure path happens to cover locally but CI (no credential) cannot reach,
+    # so they need explicit cases or the gate passes only on a developer machine.
+    verdict, _ = probe.classify_probe_result(None, "Deployment does not exist in this resource")
+    assert verdict == probe.REJECTED_NOT_FOUND
+    assert probe.is_definitive_rejection(verdict)
+    verdict, detail = probe.classify_probe_result({"type": "session.created"}, None)
+    assert verdict == probe.ERROR  # not a refusal — just not the answer we were waiting for
+    assert "session.created" in detail
+
+
+# --- probe_model's own wiring, with the SDK stubbed (NOT the service's judgment) ----------------
+# Locally this function runs against real Azure, which is why its branches look covered on a
+# developer machine and are NOT covered in CI — exactly the local/CI coverage gap that let a 85.23%
+# local run turn into 84.27% on the runner. What is faked here is only the transport (the SDK's
+# connect + event stream); every verdict still comes from classify_probe_result, and the real
+# connection behaviour is verified in the live acceptance runs recorded in the PR.
+
+
+class _FakeConn:
+    """Minimal stand-in for the SDK connection: one session.update, then one event."""
+
+    def __init__(self, events):
+        self._events = events
+        self.session = self
+        self.updated_with = None
+
+    async def update(self, *, session):  # conn.session.update(session=...)
+        self.updated_with = session
+
+    def __aiter__(self):
+        async def gen():
+            for ev in self._events:
+                yield ev
+
+        return gen()
+
+
+class _FakeConnect:
+    """Async context manager recording the kwargs probe_model passed to connect()."""
+
+    captured: dict = {}
+
+    def __init__(self, **kwargs):
+        type(self).captured = kwargs
+        # NOT `or [default]`: an EMPTY list is a meaningful case (a service that says nothing),
+        # and collapsing it to a default would silently turn that test into the happy path.
+        self._conn = _FakeConn(kwargs.pop("_events", [{"type": "session.updated"}]))
+
+    async def __aenter__(self):
+        return self._conn
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+@pytest.fixture
+def stub_voicelive_sdk(monkeypatch):
+    """Install a fake azure.ai.voicelive for the duration of a test.
+
+    probe_model imports the SDK INSIDE the function, so putting fakes in sys.modules is enough and
+    works whether or not the real package is installed (CI installs without the azure extra).
+    """
+    import sys
+    import types
+
+    events: list[dict] = [{"type": "session.updated"}]
+    raise_on_connect: list[Exception] = []
+
+    class _Connect(_FakeConnect):
+        def __init__(self, **kwargs):
+            if raise_on_connect:
+                type(self).captured = kwargs
+                raise raise_on_connect[0]
+            super().__init__(**kwargs, _events=events)
+
+    aio_mod = types.ModuleType("azure.ai.voicelive.aio")
+    aio_mod.connect = _Connect
+    models_mod = types.ModuleType("azure.ai.voicelive.models")
+
+    class RequestSession:
+        def __init__(self, *, instructions=""):
+            self.instructions = instructions
+
+    models_mod.RequestSession = RequestSession
+
+    saved = {k: sys.modules.get(k) for k in ("azure.ai.voicelive.aio", "azure.ai.voicelive.models")}
+    sys.modules["azure.ai.voicelive.aio"] = aio_mod
+    sys.modules["azure.ai.voicelive.models"] = models_mod
+    # _certifi_ssl_context builds a real SSL context; cheap, but stub it so the test needs nothing.
+    monkeypatch.setattr("app.services.voice_live_proxy._certifi_ssl_context", lambda: "ssl")
+    try:
+        yield {"events": events, "raise_on_connect": raise_on_connect, "connect": _Connect}
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = v
+
+
+def test_probe_model_native_sends_no_profile_and_reports_accepted(stub_voicelive_sdk):
+    result = asyncio.run(
+        probe.probe_model(
+            endpoint="https://x.services.ai.azure.com",
+            credential=object(),
+            api_version="2026-01-01-preview",
+            model="gpt-5-mini",
+        )
+    )
+    assert result["verdict"] == probe.ACCEPTED
+    assert result["mode"] == "native"
+    assert result["profile"] == ""
+    assert isinstance(result["elapsed_s"], float)
+    captured = stub_voicelive_sdk["connect"].captured
+    assert captured["model"] == "gpt-5-mini"
+    assert "query" not in captured
+
+
+def test_probe_model_byom_puts_the_profile_on_the_wire(stub_voicelive_sdk):
+    result = asyncio.run(
+        probe.probe_model(
+            endpoint="https://x.services.ai.azure.com",
+            credential=object(),
+            api_version="2026-01-01-preview",
+            model="my-own-deployment",
+            byom_profile="byom-azure-openai-chat-completion",
+        )
+    )
+    assert result["mode"] == "byom"
+    assert result["profile"] == "byom-azure-openai-chat-completion"
+    captured = stub_voicelive_sdk["connect"].captured
+    assert captured["query"] == {"profile": "byom-azure-openai-chat-completion"}
+
+
+def test_probe_model_classifies_an_error_event(stub_voicelive_sdk):
+    stub_voicelive_sdk["events"][:] = [
+        {
+            "type": "error",
+            "error": {
+                "message": "Model gpt-5.4-mini is not supported in this region.",
+                "code": "invalid_model",
+            },
+        }
+    ]
+    result = asyncio.run(
+        probe.probe_model(
+            endpoint="https://x.services.ai.azure.com",
+            credential=object(),
+            api_version="v",
+            model="gpt-5.4-mini",
+        )
+    )
+    assert result["verdict"] == probe.REJECTED_REGION
+
+
+def test_probe_model_classifies_a_connect_time_rejection(stub_voicelive_sdk):
+    # A 4xx on the WebSocket upgrade surfaces as an exception, not an event — it must still be
+    # classified rather than escaping to the caller (the admin route must never 500).
+    stub_voicelive_sdk["raise_on_connect"].append(
+        RuntimeError('{"code": "invalid_profile", "message": "Profile x is not supported."}')
+    )
+    result = asyncio.run(
+        probe.probe_model(
+            endpoint="https://x.services.ai.azure.com",
+            credential=object(),
+            api_version="v",
+            model="gpt-5-mini",
+            byom_profile="x",
+        )
+    )
+    assert result["verdict"] == probe.REJECTED_PROFILE
+
+
+def test_probe_model_treats_a_silent_service_as_inconclusive(stub_voicelive_sdk):
+    # No event before the timeout is ERROR, never a refusal: "we could not tell" must not block a
+    # save (see admin_config._check_voice_model).
+    stub_voicelive_sdk["events"][:] = []
+    result = asyncio.run(
+        probe.probe_model(
+            endpoint="https://x.services.ai.azure.com",
+            credential=object(),
+            api_version="v",
+            model="gpt-5-mini",
+            timeout_s=0.01,
+        )
+    )
+    assert result["verdict"] == probe.ERROR
+    assert not probe.is_definitive_rejection(result["verdict"])
+
+
+def test_probe_model_times_out_on_a_service_that_opens_but_never_answers(stub_voicelive_sdk):
+    """A connection that opens and then goes quiet is the worst case for an operator.
+
+    It must come back ERROR (inconclusive) rather than hang the admin save or look like an
+    acceptance — hence the asyncio.timeout around the event loop, and hence this test.
+    """
+
+    async def never_answers():
+        await asyncio.sleep(10)
+        yield {"type": "session.updated"}  # pragma: no cover — the timeout fires first
+
+    stub_voicelive_sdk["connect"].captured = {}
+    conn_events = stub_voicelive_sdk["events"]
+    conn_events[:] = []
+
+    class _Hanging(_FakeConn):
+        def __aiter__(self):
+            return never_answers()
+
+    import app.services.voice_live_probe as mod
+
+    original = mod.probe_model
+    assert original is probe.probe_model  # guard: we are stubbing the transport, not the function
+
+    # Swap the fake connection for one whose event stream never yields.
+    import sys
+
+    aio = sys.modules["azure.ai.voicelive.aio"]
+    prev_connect = aio.connect
+
+    class _HangingConnect(prev_connect):  # type: ignore[misc, valid-type]
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self._conn = _Hanging([])
+
+    aio.connect = _HangingConnect
+    try:
+        result = asyncio.run(
+            probe.probe_model(
+                endpoint="https://x.services.ai.azure.com",
+                credential=object(),
+                api_version="v",
+                model="gpt-5-mini",
+                timeout_s=0.01,
+            )
+        )
+    finally:
+        aio.connect = prev_connect
+    assert result["verdict"] == probe.ERROR
+    assert result["detail"] == "no server event before timeout"
+    assert not probe.is_definitive_rejection(result["verdict"])
+
+
+def test_a_missing_azure_extra_is_inconclusive_not_an_exception():
+    """CI installs without the azure extra, and an operator must still be able to save.
+
+    The SDK import lives inside probe_model's try for exactly this reason: a missing optional
+    dependency has to come back as ERROR (inconclusive) rather than escape and 500 the admin save.
+    """
+    import sys
+
+    saved = {k: sys.modules.get(k) for k in ("azure.ai.voicelive.aio",)}
+    sys.modules["azure.ai.voicelive.aio"] = None  # import from it raises
+    try:
+        result = asyncio.run(
+            probe.probe_model(
+                endpoint="https://x.services.ai.azure.com",
+                credential=object(),
+                api_version="v",
+                model="gpt-5-mini",
+            )
+        )
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = v
+    assert result["verdict"] == probe.ERROR
+    assert not probe.is_definitive_rejection(result["verdict"])
+    assert result["mode"] == "native"
