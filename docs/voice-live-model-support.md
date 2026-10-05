@@ -1269,6 +1269,32 @@ WS 音频字节 0，与 Azure TTS 同一签名）。但**口型是否真跟着�
 agent（chat 模型），`model=` 根本不发；而新建人物会自动同步出一个 agent，所以拿不到"无 agent 的人物"。
 要验证需要从页面侧注入一条去掉 voice 的 `session.update` 再发一次模型轮 —— 未做。
 
+#### agent 里能配 gpt-realtime 吗？能配，但跑不起来；而且 agent 模式下声音永远是 Azure TTS
+
+owner：「在 agent 里面能否配置 gpt-realtime 模型，那个时候的声音是否可以是 gpt-realtime 的声音？怎么达到
+这样的配置？」三问分开实测（探针 agent 用完即删）：
+
+| 问题 | 实测 |
+| --- | --- |
+| agent 定义里配 `model=gpt-realtime-2.1` | ✅ **接受** —— `agents.create_version` 返回 `version=1` |
+| 这个 agent 能运行吗 | ❌ **不能** —— `400 This model is not supported by Responses API.`（agent 执行在 Responses API 上，而它拒 realtime 部署，§4.9） |
+| agent 模式下声音能是模型自带的吗 | ❌ **不能** —— 即使**完全不发** `session.voice`，Azure 也补成 `azure-standard/en-US-AvaNeural`，不是 `openai/marin` |
+
+**所以 agent 模式下 Voice Live 永远由 Azure TTS 发声，与 agent 底层是什么模型无关。** 这也解释了为什么
+**推理模型下拉不列 realtime 部署**是对的（过滤条件：声明 `chat_completion == "true"`，realtime 部署声明
+`"false"`，§4.5）：那种配置**存得下、运行时才 400**，属于最坏的一类配置错误。
+
+**要让模型自己的声音说话，配置路径是（绕开 agent）：**
+
+1. 走 **model 模式**：语音模型设成 realtime 部署（`model=gpt-realtime-2.1`），人物**不能挂 agent**；
+2. 建会话时**不配 `session.voice`** —— 这是整场会话的选择，中途改不了（Azure 拒
+   `Cannot update voice from AzureVoice to OpenAIVoice`）；
+3. **代价**：逐字念题失效（`pre_generated` 回文本），所以只适合"模型自由对话"，不适合念题库；
+4. **今天产品没有这个入口**：候选人面试是 mouth 模式（`create_response=False`，不开模型轮），Playground 挂的
+   是 agent。要支持需要两样东西 —— 一个**无 agent 的人物**（现在新建人物会自动同步出 agent），以及一个
+   **"用模型自带音色"的开关**。口型是否跟着模型自己的词动，仍**未验证**（缺真实握手下的
+   `session.avatar.switch_to_speaking`）。
+
 #### 顺带答一个问题：模型自己生成的回答能驱动数字人吗？能，且与念题同一条出口
 
 owner 2026-10-05：「如果不是 pre assistant message 这种情况下，如果是通过 gpt-realtime 生成的
