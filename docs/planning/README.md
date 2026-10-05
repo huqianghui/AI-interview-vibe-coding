@@ -193,6 +193,9 @@ living specification is [`../../SPEC.md`](../../SPEC.md) at the repo root — st
   `delivery/.gitignore` + a `git add -n` dry-run. Delivered as a standalone zip, **not committed**;
   not deployed to a client tenant as of promotion.
 
+- [`spec-voice-live-byom-model-selection.md`](spec-voice-live-byom-model-selection.md) — **design only, not yet implemented** (2026-10-05). The admin "Azure AI Foundry connection" dropdown lists the customer's **own** Foundry deployments, but the live Voice Live connection sends the chosen name as a native `model=` (path ①), so a self-deployed model throws "not supported in this region". Proposes a native-vs-**BYOM** switch: a checkbox (checked = my own deployment) + an integration-profile dropdown (3 values, default `byom-azure-openai-chat-completion`) that makes `run_proxy` connect with `model=<deployment> + query={"profile": …}` (path ②). Scopes v1 to **connection compatibility** (the `model=` is a TTS host in every default mouth link, not a WS brain) and defers "make the BYOM model actually think" to a separate epic. Carries the full impact map, BYOM hard constraints + api-version/MI verify items, and the open scope decisions. Builds on [`../voice-live-model-support.md`](../voice-live-model-support.md).
+
+
 ## What was intentionally NOT promoted
 
 The gstack project dir also holds machine-local, per-developer working state that does **not**
