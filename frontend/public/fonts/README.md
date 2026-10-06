@@ -20,13 +20,15 @@ removes a third-party request from the candidate's critical path.
 
 | `noto-sans-sc-regular.otf` | Noto Sans SC Regular, unmodified | Report PDF body (answers, SOP quotes) | 8.0 MB |
 | `noto-sans-sc-bold-gb2312.otf` | Noto Sans SC Bold, subset | Report PDF headings and labels | 2.0 MB |
+| `noto-sans-regular.ttf` | Noto Sans Regular, unmodified | Report PDF fallback: Latin, Greek, Cyrillic | 607 KB |
+| `noto-sans-bold.ttf` | Noto Sans Bold, unmodified | Report PDF fallback, bold | 617 KB |
 
 The page faces are 206 KB total. All three are the **latin subset** only, declared with a matching `unicode-range` in
 `src/styles/global.css` — neither face carries CJK, so Chinese text resolves through the fallback
 chain (PingFang SC / Microsoft YaHei) by design and the browser does not download a latin face to
 render a string with no latin in it.
 
-### The two Noto Sans SC files are for the report PDF only
+### The Noto Sans SC and Noto Sans files are for the report PDF only
 
 They are never referenced by CSS, so no page load downloads them. `src/components/reportPdf.ts`
 fetches them the first time a candidate clicks "Download PDF" (the browser caches them after), and
@@ -39,10 +41,16 @@ prints as nothing, which is why the two faces are chosen as follows.
   An earlier subset kept only the CJK Unified Ideographs block plus Latin and punctuation, and it
   silently dropped `≤ ≥ ≠ ≈ μ α Ω ✓ ㎎` — exactly what pharma SOP text says ("≤ 25 °C",
   "5 μg/mL"). Two megabytes is cheaper than a candidate record missing characters.
-- A character even this face lacks (an emoji, CJK Extension B) prints as a visible □, not as
-  nothing: `src/components/pdfGlyphs.ts` lists the face's characters and `reportPdf.ts` replaces the
-  rest. `reportPdf.test.ts` fails if that list and the font disagree, so after replacing the font,
-  regenerate it:
+- **Noto Sans (Latin, Greek, Cyrillic) is the fallback** for what Noto Sans SC lacks. Its Latin
+  covers only 244 of the 560 Latin-extended slots, so Ł ř ğ ș ő and accented Greek printed as
+  boxes: "Łukasz Dvořák", "București", "Ελλάδα", which an EMEA interview meets. pdfmake cannot fall
+  back by itself (one font per run), so `reportPdf.ts` splits every string into runs by face:
+  Noto Sans SC first, Noto Sans for what only it has. Both weights have the same 2,965 characters,
+  from https://github.com/notofonts/notofonts.github.io (`fonts/NotoSans/hinted/ttf/`).
+- A character neither face has (an emoji, Hangul, CJK Extension B) prints as a visible □, not as
+  nothing: `src/components/pdfGlyphs.ts` lists both faces' characters and `reportPdf.ts` replaces
+  the rest. `reportPdf.test.ts` fails if a list and its font disagree, so after replacing a font,
+  regenerate its list (the same snippet on `noto-sans-regular.ttf` gives `LATIN_FACE_RUNS`):
 
   ```bash
   python3 -c "
@@ -77,6 +85,8 @@ bundled in an application) provided the licence travels with the files:
   https://github.com/ateliertriay/bricolage
 - `OFL-Literata.txt` — Copyright 2017 The Literata Project Authors,
   https://github.com/googlefonts/literata
+- `OFL-Noto-Sans.txt` — Noto Sans, Copyright 2022 The Noto Project Authors,
+  https://github.com/notofonts/latin-greek-cyrillic. No Reserved Font Name; files unmodified.
 - `OFL-Noto-Sans-CJK.txt` — Noto Sans CJK, Copyright 2014-2021 Adobe (http://www.adobe.com/),
   https://github.com/notofonts/noto-cjk. Its licence declares no Reserved Font Name, so the
   subsetted Bold file may keep the name "Noto Sans SC".
