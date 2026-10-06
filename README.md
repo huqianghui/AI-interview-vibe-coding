@@ -8,7 +8,12 @@ every judgment traces back to the
 client's own SOP document — **document name + page, item by item**.
 
 > This repo is public: it contains no client names, no real SOP content, and no candidate data.
-> Everything runs on mock providers by default — **zero Azure needed** to build, test, or demo.
+
+**Runs on Azure.** Every mode needs Azure services: the digital human, its voice and the spoken
+questions come from **Azure Voice Live**; scoring, the live judge and AI-drafted rubrics come from
+**Azure AI Foundry**; SOP citations come from **Azure AI Search** (Foundry IQ). The code also ships
+mock providers so it builds and the test suite runs without credentials, but they return canned
+placeholder output, not a working interview.
 
 **Four capabilities demonstrated:** AI · digital human · RAG · live judging.
 The differentiator is **SOP-traceable, source-cited compliance scoring**: the system scores whether
@@ -16,8 +21,9 @@ answers comply with the client's *own* SOP, and every judgment points back to it
 
 ## Key scenarios
 
-> Screenshots are captured on the zero-Azure mock stack (the one exception is the live
-> digital-human shot below, which needs real Azure). The appearance is the
+> Most screenshots are captured on the mock stack the test suite uses, so the scores, rubric items
+> and feedback in them are placeholder output; the live digital-human shot is real Azure. The
+> appearance is the
 > project's own design language, **Warm Editorial / Foundry Purple** — a warm sand ground,
 > Bricolage Grotesque + Literata, a purple action colour, and one shared content width — not
 > Fluent's factory defaults.
@@ -56,10 +62,10 @@ editor picks either from the live Azure roster.
 
 ![Voice mode — live digital-human avatar speaking the question, transcript streaming](docs/images/09-live-avatar-voice.png)
 
-### 3b. Text mode — same flow, no Azure needed
+### 3b. Text mode — answer by typing
 
-Every question can also be answered by text; on mock providers the avatar stage falls back to the
-audio orb, so the whole flow runs with zero Azure:
+Every question can also be answered by typing. Scoring and the judge still run on Azure AI Foundry;
+when there is no live avatar, the stage shows the audio orb instead:
 
 ![Interview page in text mode — question, orb fallback, progress rail](docs/images/02-interview-question.png)
 
@@ -155,7 +161,7 @@ model. Which models are realtime, and the measurements behind this table:
   marked *not scored* and excluded from the score rather than given a zero — nobody judged that
   answer — and the rest of the report still renders.
 
-## Quickstart (zero Azure, mock providers)
+## Quickstart
 
 **Backend** (Python 3.11+):
 
@@ -179,16 +185,17 @@ Open `http://localhost:5173/interview` for the candidate flow. Admin surfaces ar
 (banks + rubrics + Azure config) and `/admin/agent` (persona editor); seed an admin user via
 `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` env vars on backend boot.
 
-For a **real Azure** run, copy `backend/.env.example` → `backend/.env` and fill in the Foundry /
-Voice Live / Search values (or configure them in the `/admin` UI). The model must be a deployment
-that exists on your resource.
+These commands start on the mock providers: every screen works, but scores, rubrics and the
+interviewer's replies are placeholders and there is no voice or avatar. To run the real product,
+copy `backend/.env.example` → `backend/.env` and fill in the Foundry / Voice Live / Search values
+(or configure them in the `/admin` UI). The model must be a deployment that exists on your resource.
 
 ## Testing
 
 ```bash
 cd backend && pytest                     # unit + API tests, 85% coverage gate
 cd frontend && npm test                  # vitest unit/component tests
-cd frontend && npm run e2e               # Playwright E2E — boots both servers, real Chromium, zero Azure
+cd frontend && npm run e2e               # Playwright E2E — boots both servers, real Chromium, mock providers
 ```
 
 CI gates every commit on ruff (check + format), pytest, tsc, eslint, vitest, and the Playwright
@@ -198,7 +205,7 @@ in CI.
 The README screenshots regenerate with:
 
 ```bash
-# Mock-stack scenarios (zero Azure; boots its own servers).
+# Mock-stack scenarios (no credentials needed; boots its own servers).
 # Kill any stale stack FIRST: playwright reuses an already-running server, and that process serves
 # the code it booted with, not the code on disk.
 pkill -f "uvicorn app.main:app.*8100"; pkill -f "vite.*5273"
