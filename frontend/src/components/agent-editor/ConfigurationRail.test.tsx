@@ -161,3 +161,31 @@ describe("ConfigurationRail — bank turn mode (linear vs judged, issue #114)", 
     expect(screen.queryByTestId("config-turn-mode")).not.toBeInTheDocument();
   });
 });
+
+describe("ConfigurationRail — where each voice toggle takes effect", () => {
+  it("says interim response and proactive engagement only apply in the Playground", () => {
+    renderRail();
+    expect(screen.getByRole("switch", { name: "Interim response" })).toBeInTheDocument();
+    expect(screen.getByText(/never uses interim responses/i)).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Proactive engagement" })).toBeInTheDocument();
+    expect(screen.getByText(/does not use the agent/i)).toBeInTheDocument();
+  });
+
+  it("the interim switch still edits the persona field", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderRail({ interim_response: true });
+    await user.click(screen.getByRole("switch", { name: "Interim response" }));
+    expect(onChange).toHaveBeenCalledWith({ interim_response: false });
+  });
+
+  it("warns what turning echo cancellation off risks, and both audio switches edit their fields", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderRail({ noise_suppression: true, echo_cancellation: true });
+    await user.click(screen.getByRole("button", { name: "Advanced" }));
+    expect(screen.getByText(/pick up the interviewer's own voice/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("switch", { name: "Echo cancellation" }));
+    expect(onChange).toHaveBeenCalledWith({ echo_cancellation: false });
+    await user.click(screen.getByRole("switch", { name: "Noise suppression" }));
+    expect(onChange).toHaveBeenCalledWith({ noise_suppression: false });
+  });
+});

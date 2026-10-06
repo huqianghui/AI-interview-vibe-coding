@@ -54,6 +54,10 @@ class FakePersona:
     eou_detection: bool = True
     voice_temperature: float = 0.8
     playback_speed: float = 1.0
+    # The model's defaults: every persona starts with all three on.
+    noise_suppression: bool = True
+    echo_cancellation: bool = True
+    interim_response: bool = True
 
 
 def _as_dict(obj):
@@ -611,3 +615,126 @@ def test_a_voice_that_azure_did_not_apply_is_reported():
     )
     # A session that asked for nothing cannot have its wish denied.
     assert applied_voice_mismatch(None, {"type": "openai", "name": "marin"}) == ""
+
+
+# --- the persona's input-audio and interim-response toggles ---------------------------------------
+
+NOISE = {"type": "azure_deep_noise_suppression"}
+ECHO = {"type": "server_echo_cancellation"}
+INTERIM = {
+    "type": "llm_interim_response",
+    "triggers": ["tool", "latency"],
+    "latency_threshold_ms": 2000,
+}
+
+
+def _session(persona, **kw):
+    return _plain(build_avatar_session(persona, locale="en-US", **kw))
+
+
+def test_noise_and_echo_are_sent_when_on_which_is_the_default():
+    s = _session(FakePersona())
+    assert s["input_audio_noise_reduction"] == NOISE
+    assert s["input_audio_echo_cancellation"] == ECHO
+
+
+def test_noise_suppression_off_omits_only_that_field():
+    s = _session(FakePersona(noise_suppression=False))
+    assert "input_audio_noise_reduction" not in s
+    assert s["input_audio_echo_cancellation"] == ECHO
+
+
+def test_echo_cancellation_off_omits_only_that_field():
+    s = _session(FakePersona(echo_cancellation=False))
+    assert "input_audio_echo_cancellation" not in s
+    assert s["input_audio_noise_reduction"] == NOISE
+
+
+@pytest.mark.parametrize("brain", ["bank", "external"])
+def test_a_candidate_interview_never_gets_interim_response(brain):
+    # Every question is read verbatim; a filler line would be speech the card does not show.
+    assert "interim_response" not in _session(FakePersona(interview_brain=brain))
+
+
+def test_the_playground_bank_agent_gets_interim_response_when_on():
+    assert _session(FakePersona(), playground=True)["interim_response"] == INTERIM
+
+
+def test_the_playground_respects_the_toggle_being_off():
+    s = _session(FakePersona(interim_response=False), playground=True)
+    assert "interim_response" not in s
+
+
+def test_an_external_persona_never_gets_it_even_in_the_playground():
+    # External personas stay a mouth in the Playground too: there is no model turn to bridge.
+    s = _session(FakePersona(interview_brain="external"), playground=True)
+    assert "interim_response" not in s
+
+
+def test_model_mode_on_a_realtime_model_does_not_get_it():
+    # Azure documents interim responses as unsupported for speech-to-speech models in model mode.
+    s = _session(FakePersona(agent_id=""), playground=True, realtime_pipeline=True)
+    assert "interim_response" not in s
+
+
+def test_model_mode_on_a_cascaded_model_gets_it():
+    s = _session(FakePersona(agent_id=""), playground=True, realtime_pipeline=False)
+    assert s["interim_response"] == INTERIM
+
+
+def test_agent_mode_gets_it_whatever_the_voice_model():
+    # The realtime restriction is documented for model mode only; agent mode has none.
+    s = _session(FakePersona(), playground=True, realtime_pipeline=True)
+    assert s["interim_response"] == INTERIM
+
+
+# --- the toggles from the real ORM row (not the FakePersona) --------------------------------------
+
+
+async def test_a_persisted_persona_defaults_all_three_toggles_on(db_session):
+    from app.models.persona import InterviewerPersona
+
+    persona = InterviewerPersona(name="orm-defaults", prompt_fragment="x", character="", style="")
+    db_session.add(persona)
+    await db_session.commit()
+    await db_session.refresh(persona)
+    assert (persona.noise_suppression, persona.echo_cancellation, persona.interim_response) == (
+        True,
+        True,
+        True,
+    )
+    s = _session(persona, playground=True)
+    assert s["input_audio_noise_reduction"] == NOISE
+    assert s["input_audio_echo_cancellation"] == ECHO
+    assert s["interim_response"] == INTERIM
+
+
+async def test_the_seeded_default_persona_sends_all_three(db_session):
+    from app.services.persona_seed import seed_default_persona
+
+    persona = await seed_default_persona(db_session)
+    assert persona is not None
+    s = _session(persona, playground=True)
+    assert s["input_audio_noise_reduction"] == NOISE
+    assert s["input_audio_echo_cancellation"] == ECHO
+    assert s["interim_response"] == INTERIM
+
+
+async def test_toggles_saved_off_on_the_orm_row_reach_the_session(db_session):
+    from app.models.persona import InterviewerPersona
+
+    persona = InterviewerPersona(
+        name="orm-off",
+        character="",
+        style="",
+        prompt_fragment="x",
+        noise_suppression=False,
+        echo_cancellation=False,
+        interim_response=False,
+    )
+    db_session.add(persona)
+    await db_session.commit()
+    await db_session.refresh(persona)
+    s = _session(persona, playground=True)
+    for key in ("input_audio_noise_reduction", "input_audio_echo_cancellation", "interim_response"):
+        assert key not in s

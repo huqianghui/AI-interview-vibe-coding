@@ -65,14 +65,14 @@ async def _anon_token(db) -> str:
     return token
 
 
-async def _admin_token(db, *, active: bool = True) -> str:
+async def _admin_token(db, *, active: bool = True, role: str = "admin") -> str:
     from app.models.user import User
 
     user = User(
-        username=f"admin-{active}",
-        email=f"admin-{active}@local",
+        username=f"{role}-{active}",
+        email=f"{role}-{active}@local",
         hashed_password=get_password_hash("pw"),
-        role="admin",
+        role=role,
         is_active=active,
     )
     db.add(user)
@@ -253,3 +253,37 @@ async def test_a_client_disconnect_is_not_reported_as_an_error(db_session, monke
     ws = _FakeWs(token=await _anon_token(db_session))
     await _run(ws)
     assert ws.sent == [] and ws.closed is None
+
+
+# --- pinning a persona (the editor Playground) is admin-only ----------------------------------
+
+
+async def test_a_candidate_session_cannot_pin_a_persona(db_session, proxy_calls):
+    # A candidate who adds ?persona_id= by hand would otherwise get the Playground: a free
+    # conversation with the agent instead of the verbatim-read interview.
+    persona = await _default_persona(db_session)
+    persona.agent_sync_status = "synced"
+    await db_session.commit()
+    ws = _FakeWs(token=await _anon_token(db_session), persona_id=persona.id)
+    await _run(ws)
+    assert ws.error_code == "PLAYGROUND_ADMIN_ONLY"
+    assert ws.closed == (1008, "PLAYGROUND_ADMIN_ONLY")
+    assert proxy_calls == []
+
+
+async def test_a_non_admin_login_cannot_pin_a_persona(db_session, proxy_calls):
+    # A candidate's own login JWT (role=user) validates as a user, but is not an admin.
+    persona = await _default_persona(db_session)
+    persona.agent_sync_status = "synced"
+    await db_session.commit()
+    ws = _FakeWs(token=await _admin_token(db_session, role="user"), persona_id=persona.id)
+    await _run(ws)
+    assert ws.error_code == "PLAYGROUND_ADMIN_ONLY"
+    assert proxy_calls == []
+
+
+async def test_a_non_admin_login_still_opens_the_interview_path(db_session, proxy_calls):
+    await _default_persona(db_session)
+    await _run(_FakeWs(token=await _admin_token(db_session, role="user")))
+    (call,) = proxy_calls
+    assert call["playground"] is False

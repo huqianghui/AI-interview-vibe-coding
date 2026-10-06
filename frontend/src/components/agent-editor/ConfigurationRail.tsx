@@ -137,18 +137,22 @@ export function ConfigurationRail({
 
       {/* Named top-level toggles */}
       <div className={styles.section}>
-        <Switch
-          label="Interim response"
-          checked={form.interim_response}
-          onChange={(_, d) => onChange({ interim_response: d.checked })}
-          data-testid="config-interim"
-        />
-        <Switch
-          label="Proactive engagement"
-          checked={form.proactive_engagement}
-          onChange={(_, d) => onChange({ proactive_engagement: d.checked })}
-          data-testid="config-proactive"
-        />
+        <Field hint="Editor Playground only. A real interview reads every question word for word, so it never uses interim responses.">
+          <Switch
+            label="Interim response"
+            checked={form.interim_response}
+            onChange={(_, d) => onChange({ interim_response: d.checked })}
+            data-testid="config-interim"
+          />
+        </Field>
+        <Field hint="Editor Playground only: it is part of the Foundry agent, and a real interview does not use the agent.">
+          <Switch
+            label="Proactive engagement"
+            checked={form.proactive_engagement}
+            onChange={(_, d) => onChange({ proactive_engagement: d.checked })}
+            data-testid="config-proactive"
+          />
+        </Field>
       </div>
 
       <Divider />
@@ -227,12 +231,14 @@ export function ConfigurationRail({
                 onChange={(_, d) => onChange({ noise_suppression: d.checked })}
                 data-testid="config-noise"
               />
-              <Switch
-                label="Echo cancellation"
-                checked={form.echo_cancellation}
-                onChange={(_, d) => onChange({ echo_cancellation: d.checked })}
-                data-testid="config-echo"
-              />
+              <Field hint="Turn off only when candidates use headsets: without it, the microphone can pick up the interviewer's own voice from the speakers.">
+                <Switch
+                  label="Echo cancellation"
+                  checked={form.echo_cancellation}
+                  onChange={(_, d) => onChange({ echo_cancellation: d.checked })}
+                  data-testid="config-echo"
+                />
+              </Field>
               {/* Azure Voice Live bounds: temperature 0–1 (expressiveness of HD voices), rate
                   0.5–1.5. Since v0.39.3.3 these reach the live session, and the API refuses values
                   outside the range — the inputs advertise the same range. */}

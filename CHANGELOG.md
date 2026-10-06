@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.47.1.0 (2026-10-06)
+
+### Fixed
+- **The persona editor's noise suppression and echo cancellation switches now do something.**
+  Both used to be saved and then ignored: the voice session always sent both, whatever the switch
+  said. Now a switch that is on sends exactly what every session sent before (all personas default
+  to on, and the live deployment's only persona has both on, so nothing changes there), and a
+  switch that is off leaves that processing out, which Azure confirms by echoing it back as off.
+  Echo cancellation carries a hint: turn it off only when candidates use headsets, or the
+  microphone can pick up the interviewer's own voice.
+- **Interim response now works where it can, and says where that is.** It is the short "one moment"
+  line Azure speaks while the model is slow or calling a tool. It applies in the editor Playground,
+  where the persona has a turn of its own to bridge; a real interview reads every question word
+  for word, so it never uses it, and the switch now says so. Verified against Azure: the setting is
+  accepted, and Azure generates the line with its own small model. Proactive engagement gets the
+  same kind of hint: it is part of the Foundry agent, which a real interview does not use.
+- **Only an admin can open the editor Playground's voice session.** Choosing a persona on the voice
+  connection turns it into the Playground (a free conversation with the agent), and the server did
+  not check who asked: a candidate could add the persona to the URL by hand and get that instead of
+  the interview. A candidate session or a candidate's own login now gets a clear refusal.
+
 ## 0.47.0.0 (2026-10-06)
 
 ### Removed

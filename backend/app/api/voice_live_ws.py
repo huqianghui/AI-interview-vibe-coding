@@ -88,8 +88,13 @@ async def _send_error_and_close(
     await ws.close(code=1008, reason=code)
 
 
-async def _authenticate(ws: WebSocket, token: str) -> bool:
-    """Try admin JWT first, then candidate anonymous-session token. True on success.
+async def _authenticate(ws: WebSocket, token: str) -> str | None:
+    """Try a user JWT first, then a candidate anonymous-session token.
+
+    Returns who the caller is: ``"admin"`` (an active admin's JWT), ``"user"`` (any other active
+    user's JWT, e.g. a candidate's own login), ``"anon"`` (a live candidate interview session), or
+    ``None`` when nothing validates. The route needs the distinction because pinning a persona
+    (the editor Playground) is an admin-only surface.
 
     Accepts the socket before validating (browsers only learn about auth failure via a message +
     close, not a rejected handshake) and sends+closes on failure — mirrors the reference's
@@ -110,14 +115,14 @@ async def _authenticate(ws: WebSocket, token: str) -> bool:
                     await db.execute(select(User).where(User.id == user_id))
                 ).scalar_one_or_none()
             if user is not None and user.is_active:
-                return True
+                return "admin" if user.role == "admin" else "user"
 
     async with async_session_factory() as db:
         try:
             await verify_anonymous_token(db, token)
-            return True
+            return "anon"
         except AnonymousSessionError:
-            return False
+            return None
 
 
 @router.websocket("/voice-live/ws")
@@ -147,8 +152,17 @@ async def voice_live_websocket(ws: WebSocket) -> None:
         )
         return
 
-    if not await _authenticate(ws, token):
+    caller = await _authenticate(ws, token)
+    if caller is None:
         await _send_error_and_close(ws, "Authentication failed: invalid token", "AUTH_FAILED")
+        return
+    if persona_id and caller != "admin":
+        # Pinning a persona is the editor Playground: a free conversation with the agent (and, when
+        # the persona allows it, interim responses). A candidate who adds ?persona_id= by hand must
+        # not get that instead of the verbatim-read interview.
+        await _send_error_and_close(
+            ws, "Only an admin can pin a persona (editor Playground)", "PLAYGROUND_ADMIN_ONLY"
+        )
         return
 
     async with async_session_factory() as db:

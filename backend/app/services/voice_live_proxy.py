@@ -145,6 +145,30 @@ def linear_turns_for_persona(persona: InterviewerPersona, *, playground: bool = 
     return not playground
 
 
+# Interim response ("one moment, let me check" while the model is slow or calling a tool). Azure's
+# documented default threshold, made explicit so a server-side default change cannot move it.
+INTERIM_RESPONSE_LATENCY_MS = 2000
+
+
+def interim_response_applies(
+    persona: InterviewerPersona, *, playground: bool = False, realtime_pipeline: bool = False
+) -> bool:
+    """Whether the session carries ``interim_response``: the persona's toggle, Playground only.
+
+    A candidate interview never does. Every candidate session is a mouth (see is_mouth_persona):
+    each question is server-side TTS of the exact card text, so there is no model turn to bridge,
+    and a filler line would be speech the card does not show. In the Playground the persona keeps a
+    model turn, so the toggle applies — except in MODEL mode on a speech-to-speech model, which
+    Azure documents as unsupported (agent mode has no such restriction).
+    """
+    if not bool(getattr(persona, "interim_response", False)):
+        return False
+    if is_mouth_persona(persona, playground=playground):
+        return False
+    agent_mode = bool((getattr(persona, "agent_id", "") or "").strip())
+    return agent_mode or not realtime_pipeline
+
+
 def is_mouth_persona(persona: InterviewerPersona, *, playground: bool = False) -> bool:
     """Whether this voice session is a pure "MOUTH": MODEL mode + reader prompt, no Foundry agent.
 
@@ -282,6 +306,8 @@ def build_avatar_session(
         AudioNoiseReduction,
         AvatarConfig,
         AzureStandardVoice,
+        InterimResponseTrigger,
+        LlmInterimResponseConfig,
         Modality,
         RequestSession,
         VideoParams,
@@ -359,8 +385,6 @@ def build_avatar_session(
         "input_audio_transcription": AudioInputTranscriptionOptions(
             model="azure-speech", language=resolved_locale
         ),
-        "input_audio_noise_reduction": AudioNoiseReduction(type="azure_deep_noise_suppression"),
-        "input_audio_echo_cancellation": AudioEchoCancellation(type="server_echo_cancellation"),
         # Declares how Azure must interpret the raw PCM16 the browser uploads. Kept in lockstep
         # with the frontend's MIC_SAMPLE_RATE: a mismatch is not a quality regression but a total
         # failure (pitch/speed-shifted audio, garbage transcripts), so the value is echoed back
@@ -368,6 +392,25 @@ def build_avatar_session(
         # See Settings.voice_live_input_sampling_rate.
         "input_audio_sampling_rate": settings.voice_live_input_sampling_rate,
     }
+    # The persona's two input-audio toggles. Both default on, and on is exactly what every session
+    # sent before they were wired. Off omits the field: Voice Live treats both as opt-in, and an
+    # absent field comes back as ``null`` in the session.updated echo (measured 2026-10-06).
+    if bool(getattr(persona, "noise_suppression", True)):
+        session_kwargs["input_audio_noise_reduction"] = AudioNoiseReduction(
+            type="azure_deep_noise_suppression"
+        )
+    if bool(getattr(persona, "echo_cancellation", True)):
+        session_kwargs["input_audio_echo_cancellation"] = AudioEchoCancellation(
+            type="server_echo_cancellation"
+        )
+    # Azure fills in the bridging model itself (echo: model gpt-4.1-mini, max_completion_tokens 50).
+    if interim_response_applies(
+        persona, playground=playground, realtime_pipeline=realtime_pipeline
+    ):
+        session_kwargs["interim_response"] = LlmInterimResponseConfig(
+            triggers=[InterimResponseTrigger.TOOL, InterimResponseTrigger.LATENCY],
+            latency_threshold_ms=INTERIM_RESPONSE_LATENCY_MS,
+        )
     if has_avatar:
         # build_avatar_config owns the PHOTO-vs-VIDEO split (issue #103): a photo avatar (adrian,
         # amara, …) MUST carry `type: photo-avatar` + `model: vasa-1` and NO style, or Azure
