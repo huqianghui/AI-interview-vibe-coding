@@ -1,5 +1,20 @@
 # TODOS
 
+## Report PDF
+
+### Check the PDF download on iOS Safari and in the WeChat in-app browser
+
+The download starts only after pdfmake and the fonts load (`downloadReportPdf` awaits a dynamic
+import and an 8 MB font fetch), so the click's user activation has expired by the time
+`.download()` runs. iOS Safari and in-app webviews such as WeChat (a likely browser for candidates
+in mainland China) are known to ignore or redirect blob downloads started outside a gesture, and
+the promise may still resolve, so the button would show success while no file arrives. Not tested:
+only desktop Chromium is covered (the e2e spec downloads a real PDF). Try both on a real phone; if
+either fails, fall back to `getBlob()` and an open-in-new-tab link, or prefetch the library and
+fonts when the report mounts so less work sits between the click and the save.
+
+**Priority:** P2
+
 ## Interview (voice)
 
 ### `useInterviewVoice` is 1481 lines — the planned split is DONE; what remains is a judgement call

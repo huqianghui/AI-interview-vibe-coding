@@ -91,9 +91,11 @@ explicit **Submit & evaluate** click (with an optional SOP coverage check):
 
 The executive view leads with a classification rating (*Meets Expectations / Needs Improvement /
 Does Not Meet*) on a score gauge, and shows the **SOP source (document + page) beside the
-candidate's answer** — the traceability claim, on screen. A detailed per-question,
-per-checklist-item breakdown is one click away, and each SOP citation links to the original
-source document.
+candidate's answer** — the traceability claim, on screen. Every question gets the same
+per-checklist-item breakdown in a collapsible section (the first one open), and each SOP citation
+links to the original source document. **Download PDF** saves the whole report, every question
+expanded, as a PDF built in the browser from the report on screen (Chinese text included, with a
+self-hosted font).
 
 ![Executive report — rating badge, score gauge, SOP source beside the answer](docs/images/05-report-executive.png)
 
