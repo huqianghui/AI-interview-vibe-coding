@@ -237,11 +237,6 @@ class AzureAgentSyncAdapter:
         # Unreachable: the loop either returns or the final attempt hits the else branch above.
         raise AgentSyncError(f"Could not create agent {agent_name!r} after retries")
 
-    async def delete_persona_agent(self, persona: Any) -> None:
-        """Best-effort delete of the persona's Foundry agent (used when a persona is removed)."""
-        client = await asyncio.to_thread(self._project_client)
-        await asyncio.to_thread(client.agents.delete, agent_name=self._agent_name(persona))
-
     # -- internals ----------------------------------------------------------
 
     def _agent_name(self, persona: Any) -> str:

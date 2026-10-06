@@ -1,8 +1,8 @@
 """Admin SOP knowledge-base endpoints (SPEC F1). All routes require the admin bearer token.
 
-SOP upload, listing, and a citation-retrieval probe are admin-only (``require_admin``): the raw
-SOP corpus and its blob pointers are interviewer/business internals (SPEC P3/P4). Candidates only
-ever see server-mediated citation *text* surfaced during scoring/report, never these routes.
+SOP upload, listing, and a citation-retrieval probe are admin-only (``require_role("admin")``): the
+raw SOP corpus and its blob pointers are interviewer/business internals (SPEC P3/P4). Candidates
+only ever see server-mediated citation *text* surfaced during scoring/report, never these routes.
 
 Upload runs the ingestion pipeline inline (extract → chunk → persist with page/section labels).
 A corrupt or unsupported file is recorded as ``status="failed"`` and returned in the response, it

@@ -39,10 +39,6 @@ class Settings(BaseSettings):
     seed_admin_username: str = "admin"
     seed_admin_password: str = ""
     anon_session_ttl_minutes: int = 120
-    # Admin bearer token for persona/config admin routes (SPEC §67 role=admin). A single shared
-    # token is enough for the PoC (no admin user-management UI yet); empty in dev disables the
-    # guard's happy path so tests must set it explicitly. Never commit a real value (PUBLIC repo).
-    admin_api_token: str = ""
 
     # Provider selection — mock keeps local dev + CI free of live Azure calls.
     default_llm_provider: str = "mock"

@@ -41,14 +41,6 @@ _CUE_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
 )
 
 
-def detect_verbal_cue(text: str | None) -> bool:
-    """True if ``text`` ends with a recognised end-of-answer cue phrase."""
-    stripped = (text or "").strip()
-    if not stripped:
-        return False
-    return any(pattern.search(stripped) for pattern in _CUE_PATTERNS)
-
-
 def strip_verbal_cue(text: str | None) -> str:
     """Remove a trailing cue phrase from ``text`` (the substance the candidate actually gave).
 

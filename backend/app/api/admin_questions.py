@@ -3,7 +3,7 @@
 CRUD + reorder + set-default over question banks and their questions — the business-facing editor
 for the interview question set. Candidate-facing reads stay in the candidate API (F2), which never
 exposes ``expected_points``; these admin routes DO surface it (it's the interviewer-internal link
-to the rubric) and are gated by ``require_admin`` (SPEC P3).
+to the rubric) and are gated by ``require_role("admin")`` (SPEC P3).
 """
 
 import logging

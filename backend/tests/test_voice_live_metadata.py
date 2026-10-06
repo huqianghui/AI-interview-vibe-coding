@@ -13,7 +13,6 @@ from app.services.agents.voice_live_metadata import (
     PHOTO_AVATAR_SCENE_ZOOM,
     VOICE_LIVE_CONFIG_KEY,
     VOICE_LIVE_ENABLED_KEY,
-    build_cleared_voice_metadata,
     build_session,
     build_voice_live_metadata,
     chunk_metadata_value,
@@ -199,7 +198,8 @@ def test_metadata_roundtrips_through_decode_even_when_chunked():
 
 
 def test_decode_returns_empty_when_disabled_or_malformed():
-    assert decode_voice_live_metadata(build_cleared_voice_metadata()) == {}
+    disabled = {VOICE_LIVE_ENABLED_KEY: "false", VOICE_LIVE_CONFIG_KEY: "{}"}
+    assert decode_voice_live_metadata(disabled) == {}
     assert decode_voice_live_metadata({VOICE_LIVE_ENABLED_KEY: "true"}) == {}
     assert (
         decode_voice_live_metadata(
@@ -220,11 +220,6 @@ def test_decode_returns_empty_when_disabled_or_malformed():
         )
         == {}
     )
-
-
-def test_cleared_metadata_turns_voice_off():
-    cleared = build_cleared_voice_metadata()
-    assert cleared[VOICE_LIVE_ENABLED_KEY] == "false"
 
 
 def _all_keys(obj):

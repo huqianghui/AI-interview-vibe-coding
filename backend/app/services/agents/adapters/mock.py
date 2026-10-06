@@ -111,9 +111,6 @@ class MockAgentSyncAdapter:
         pid = getattr(persona, "id", "mock")
         return {"agent_id": f"mock-agent-{pid}", "agent_version": "1"}
 
-    async def delete_persona_agent(self, persona: object) -> None:
-        return None
-
     async def fetch_remote_state(self, persona: object) -> dict[str, str] | None:
         """No live Foundry agent in dev/CI → nothing to reconcile against."""
         return None

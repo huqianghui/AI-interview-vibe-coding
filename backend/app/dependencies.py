@@ -3,11 +3,9 @@
 Two independent auth systems live here:
 - **Candidate anonymous session** (`get_anonymous_session`) — the interview-facing path, unchanged.
 - **User/admin JWT** (`get_current_user` / `require_role`) — the admin + agent-editor + config UI,
-  ported from AI-avatar. `require_admin` (shared-token) is retired once routes move to
-  `require_role("admin")`.
+  ported from AI-avatar. (The shared-token `require_admin` it replaced was deleted in v0.46.0.0.)
 """
 
-import secrets
 from collections.abc import Callable
 
 from fastapi import Depends, Header, HTTPException, status
@@ -77,24 +75,3 @@ async def get_anonymous_session(
         return await verify_anonymous_token(db, x_anon_session)
     except AnonymousSessionError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
-
-
-async def require_admin(
-    authorization: str | None = Header(None, alias="Authorization"),
-) -> None:
-    """Guard admin-only routes with a shared bearer token (SPEC §67 role=admin, PoC scope).
-
-    A full admin user store is out of scope for the demo; this gates persona/config management
-    behind a single configured secret so candidate-facing anonymous sessions can never reach it.
-    The token is required to be configured — an unset ``admin_api_token`` denies all access
-    (fail closed), so a misconfigured deploy can't accidentally expose admin routes.
-    """
-    expected = get_settings().admin_api_token
-    provided = ""
-    if authorization and authorization.lower().startswith("bearer "):
-        provided = authorization[7:]
-    # Constant-time compare; also fail closed when no admin token is configured.
-    if not expected or not secrets.compare_digest(provided, expected):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Admin authorization required"
-        )
