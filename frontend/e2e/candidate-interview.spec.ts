@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { test, expect, request as pwRequest } from "@playwright/test";
 import { primeCandidateLogin } from "./helpers/candidateLogin";
 import { continueByTextIfAsked } from "./helpers/micDialog";
@@ -135,6 +136,18 @@ test("candidate completes a text interview and reaches a report", async ({ page 
   // two submits — Q1's follow-up slot never turned into an extra turn (a submit always advances).
   expect(sawFollowUpCitation).toBe(false);
   expect(submits).toBe(2);
+
+  // The report downloads as a real PDF, built in the browser with the self-hosted CJK font: this is
+  // the only check that pdfmake's browser build, the font URLs and the access policy work together.
+  const [download] = await Promise.all([
+    page.waitForEvent("download", { timeout: 60_000 }),
+    page.getByTestId("report-download-pdf").click(),
+  ]);
+  expect(download.suggestedFilename()).toMatch(/^interview-report-\d{4}-\d{2}-\d{2}\.pdf$/);
+  const pdf = readFileSync(await download.path());
+  expect(pdf.subarray(0, 5).toString("latin1")).toBe("%PDF-");
+  expect(pdf.toString("latin1")).toMatch(/\/BaseFont \/[A-Z]{6}\+NotoSansSC-Regular/);
+  await expect(page.getByTestId("report-download-pdf-error")).toHaveCount(0);
 });
 
 test("candidate never sees rubric/checklist content (P3)", async ({ page }) => {

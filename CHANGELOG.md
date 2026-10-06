@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.48.0.0 (2026-10-06)
+
+### Added
+- **The interview report downloads as a PDF.** A "Download PDF" button on the candidate's report
+  saves the whole report as an A4 PDF: the verdict, score and narrative, then every question with
+  each scored item, the SOP passage it was measured against and the candidate's own words, then
+  the SOP coverage findings when the candidate asked for them. Every question is expanded (paper has
+  no accordion), the labels follow the interface language, and the text is real text, selectable
+  and searchable.
+- It is built in the browser from the report already on screen. The backend keeps no report, so a
+  server-built PDF would have meant re-grading the interview on every download, and the result
+  could have disagreed with the page. No new route and no new access rule.
+- Chinese text uses Noto Sans SC, self-hosted like the page's fonts (a font CDN is unreachable from
+  mainland China). The body face is the complete font, so SOP symbols such as ≤, ≥, μ and α print.
+  A character even it lacks, such as an emoji, prints as a visible □ rather than disappearing. The
+  library and fonts load on the first click only, and the browser caches them after that.
+
+### Fixed (found while reviewing this feature, before release)
+- A long answer no longer vanishes from the PDF. Each scored item was marked unbreakable, and
+  pdfmake silently drops an unbreakable block taller than a page. A 10,000-character answer left no
+  trace in the document. Items now break across pages.
+- The page and the PDF share one rule for disclosures versus warnings and for counting unscored
+  questions (`reportModel.ts`), so the downloaded PDF cannot disagree with the screen on either.
+
 ## 0.47.6.0 (2026-10-06)
 
 ### Changed

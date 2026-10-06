@@ -18,6 +18,7 @@ import {
   AccordionItem,
   AccordionPanel,
   Badge,
+  Button,
   Body1,
   Card,
   CardHeader,
@@ -31,10 +32,29 @@ import {
 import type { Report, QuestionScore, ScoredItem } from "../api/client";
 import { fetchSopDocument } from "../api/client";
 import { ScoreGauge } from "./ScoreGauge";
+import { downloadReportPdf } from "./reportPdf";
+import { splitWarnings, unscoredCount } from "./reportModel";
 import { fonts, palette } from "../theme";
 
 const useStyles = makeStyles({
   root: { display: "flex", flexDirection: "column" },
+  // Kicker on the left, the PDF download on the right, on one line.
+  topRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: tokens.spacingHorizontalM,
+    flexWrap: "wrap",
+    margin: `0 0 ${tokens.spacingVerticalM}`,
+  },
+  // The download button with its failure message underneath, right-aligned with it.
+  pdfAction: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: tokens.spacingVerticalXS,
+  },
+  pdfError: { color: tokens.colorPaletteRedForeground1 },
   kicker: {
     fontFamily: fonts.display,
     fontSize: tokens.fontSizeBase300,
@@ -227,10 +247,6 @@ const JUDGMENT_COLOR: Record<string, "success" | "warning" | "danger" | "subtle"
   violated: "danger",
 };
 
-/** The backend tags an advisory (CONFLICT-001) disclosure with this stable English prefix so it can
- * be told apart from a hard critical-error warning regardless of the display locale. */
-const ADVISORY_PREFIX = "Advisory item disclosed";
-
 /**
  * The report's SOP-source label. When the cited item carries a ``source_document_id`` we render the
  * label as a clickable link that fetches the source file (with the anon-session header) and opens it
@@ -367,6 +383,48 @@ function ScoredItemCard({
   );
 }
 
+/** Download the report on screen as a PDF (see reportPdf.ts). The first click loads the PDF library
+ *  and the CJK font, so it shows its own busy state; a failure is said beside the button rather
+ *  than silently doing nothing. */
+function ReportPdfButton({ report }: { report: Report }) {
+  const styles = useStyles();
+  const { t, i18n } = useTranslation();
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const onClick = async () => {
+    setBusy(true);
+    setFailed(false);
+    try {
+      await downloadReportPdf(report, t, i18n.language);
+    } catch (e) {
+      // Said to the candidate beside the button; logged so a production failure (a font 404, a
+      // timeout) can be diagnosed without reproducing it.
+      console.error("Report PDF download failed", e);
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className={styles.pdfAction}>
+      <Button
+        appearance="secondary"
+        disabled={busy}
+        aria-busy={busy}
+        onClick={onClick}
+        data-testid="report-download-pdf"
+      >
+        {busy ? t("report.downloadingPdf") : t("report.downloadPdf")}
+      </Button>
+      {failed && (
+        <Text role="alert" size={200} className={styles.pdfError} data-testid="report-download-pdf-error">
+          {t("report.downloadPdfFailed")}
+        </Text>
+      )}
+    </div>
+  );
+}
+
 export function ReportView({ report }: { report: Report }) {
   const styles = useStyles();
   const { t } = useTranslation();
@@ -375,7 +433,10 @@ export function ReportView({ report }: { report: Report }) {
   if (report.is_stub) {
     return (
       <Card>
-        <CardHeader header={<Title3>{t("report.title")}</Title3>} />
+        <CardHeader
+          header={<Title3>{t("report.title")}</Title3>}
+          action={<ReportPdfButton report={report} />}
+        />
         <Body1 style={{ display: "block" }}>
           {t("coverage")}: {report.coverage_pct}%
         </Body1>
@@ -394,24 +455,22 @@ export function ReportView({ report }: { report: Report }) {
   // The first question's section opens by default: the report's whole claim is that a judgement is
   // traceable to an SOP sentence, and a reader should see one without hunting for the control.
   const firstQuestionId = report.per_question[0]?.question_id;
-  // Prefer the per-question flag over the id list: both come from the same decision, and the flag is
-  // what the rows are actually rendered from, so the banner's count can never disagree with them.
-  const unscoredCount =
-    report.per_question.filter((q) => q.scoring_failed).length ||
-    (report.unscored_question_ids?.length ?? 0);
+  const unscored = unscoredCount(report);
   const grade = report.grade ?? "F";
   const score = report.total_score ?? 0;
   const outcome = report.outcome ?? null;
 
-  // Separate the neutral CONFLICT-001 disclosure(s) from hard critical-error warnings so each gets
-  // its own styling: a disclosure is transparency (does not cap), a warning is a failure to flag.
-  const warnings = report.warnings ?? [];
-  const disclosures = warnings.filter((w) => w.startsWith(ADVISORY_PREFIX));
-  const criticalWarnings = warnings.filter((w) => !w.startsWith(ADVISORY_PREFIX));
+  // The neutral CONFLICT-001 disclosure(s) and the hard critical-error warnings get their own styling.
+  const { critical: criticalWarnings, disclosures } = splitWarnings(report);
 
   return (
     <div className={styles.root} data-testid="report">
-      <p className={styles.kicker}>{t("report.title")}</p>
+      <div className={styles.topRow}>
+        <p className={styles.kicker} style={{ margin: 0 }}>
+          {t("report.title")}
+        </p>
+        <ReportPdfButton report={report} />
+      </div>
 
       {/* Executive band: the one-glance verdict on its own raised surface. */}
       <section className={styles.execCard}>
@@ -463,9 +522,9 @@ export function ReportView({ report }: { report: Report }) {
               it learned to isolate a failed question, with a comment saying the report could now
               say this instead of quietly averaging fewer questions than the candidate answered —
               but no screen ever read the field, so the only trace was a silent "0/100" row. */}
-          {unscoredCount > 0 && (
+          {unscored > 0 && (
             <div className={styles.disclosure} data-testid="report-unscored">
-              {t("report.unscoredBanner", { count: unscoredCount })}
+              {t("report.unscoredBanner", { count: unscored })}
             </div>
           )}
           </div>

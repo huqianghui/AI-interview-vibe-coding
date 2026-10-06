@@ -117,6 +117,12 @@ export const resources = {
       },
       report: {
         title: "Interview report",
+        // Download the report as a PDF file (built in the browser from the report on screen).
+        downloadPdf: "Download PDF",
+        downloadingPdf: "Preparing PDF…",
+        downloadPdfFailed: "Could not create the PDF. Please try again.",
+        // The PDF's word for the page's ⚑ (the font embedded in the PDF has no such glyph).
+        cappedShort: "capped",
         sopSource: "SOP source",
         // Clickable citation: tooltip/aria on the source link, and the transient "opening…" and
         // failure states while the document is fetched.
@@ -391,6 +397,12 @@ export const resources = {
       },
       report: {
         title: "面试报告",
+        // 把报告下载为 PDF 文件（在浏览器里由屏幕上的报告生成）。
+        downloadPdf: "下载 PDF",
+        downloadingPdf: "正在生成 PDF…",
+        downloadPdfFailed: "PDF 生成失败，请重试。",
+        // PDF 里用文字代替页面上的 ⚑（PDF 嵌入的字体没有这个字形）。
+        cappedShort: "已封顶",
         sopSource: "SOP 出处",
         // 可点击引用：来源链接的提示/aria 文案，以及抓取文件期间的“打开中”与失败状态。
         openSource: "打开来源文件",
