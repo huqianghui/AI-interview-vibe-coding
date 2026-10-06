@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.47.5.0 (2026-10-06)
+
+### Changed
+- **The admin page is split by tab.** `AdminPage.tsx` was one 1,300-line component holding all
+  three tabs' state, 51 hooks in one function. Each tab now has a state hook and a view in
+  `frontend/src/pages/admin/` (Content, Connection, Users), and the page keeps sign-in, tab
+  switching and the error banner (162 lines). The hooks are still called by the page, not by the
+  tabs, so a tab keeps its state when you switch away and back: an open bank, an unsaved connection
+  edit. Nothing on the page looks or behaves differently.
+
+### Tests
+- The Content tab's bank and question actions (make default, add bank, move up, delete, add
+  question), the rubric's add/remove/regenerate, the weight warning and kind change, the whole
+  external interview API card (save, test, reveal and hide the key), the error banner, and the
+  promise that switching tabs keeps their state and refetches nothing. The admin page's code goes
+  from 90.6% to 99.5% of lines covered.
+
 ## 0.47.4.0 (2026-10-06)
 
 ### Changed
