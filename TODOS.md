@@ -278,6 +278,9 @@ separate PR.
 
 **Priority:** P2
 
+**Completed:** v0.47.1.0 (2026-10-06). Owner kept all three fields: noise and echo now drive the
+session, interim response applies in the editor Playground only, each with a hint in the editor.
+
 ## Release hygiene
 
 ### CHANGELOG is missing five shipped versions
