@@ -61,13 +61,6 @@ async def test_inactive_user_rejected(client, db_session):
     assert (await client.get("/auth/me", headers=_bearer(u))).status_code == 401
 
 
-async def test_refresh_returns_new_token(client, db_session):
-    u = await _make_user(db_session, username="carol")
-    resp = await client.post("/auth/refresh", headers=_bearer(u))
-    assert resp.status_code == 200
-    assert resp.json()["access_token"]
-
-
 # --- role gate on an admin-only route (using the migrated /admin/users) ---
 
 
@@ -83,32 +76,7 @@ async def test_admin_route_allows_admin(client, db_session):
     assert any(u["username"] == "rootadmin" for u in resp.json())
 
 
-# --- admin user CRUD ---
-
-
-async def test_admin_user_crud(client, db_session):
-    admin = await _make_user(db_session, username="crudadmin", role="admin")
-    target = await _make_user(db_session, username="target", role="user")
-    auth = _bearer(admin)
-
-    # get
-    got = await client.get(f"/admin/users/{target.id}", headers=auth)
-    assert got.status_code == 200 and got.json()["username"] == "target"
-
-    # patch role → admin
-    patched = await client.patch(f"/admin/users/{target.id}", headers=auth, json={"role": "admin"})
-    assert patched.status_code == 200 and patched.json()["role"] == "admin"
-
-    # soft-delete
-    assert (await client.delete(f"/admin/users/{target.id}", headers=auth)).status_code == 204
-    after = await client.get(f"/admin/users/{target.id}", headers=auth)
-    assert after.json()["is_active"] is False
-
-
-async def test_admin_cannot_delete_self(client, db_session):
-    admin = await _make_user(db_session, username="selfadmin", role="admin")
-    resp = await client.delete(f"/admin/users/{admin.id}", headers=_bearer(admin))
-    assert resp.status_code == 400
+# --- admin user listing ---
 
 
 async def test_admin_users_requires_auth(client):
@@ -122,3 +90,19 @@ async def test_password_is_hashed_not_plaintext(db_session, role):
     from app.services.auth_service import verify_password
 
     assert verify_password("plaintext", u.hashed_password)
+
+
+async def test_admin_users_list_filters(client, db_session):
+    admin = await _make_user(db_session, username="lister", role="admin")
+    await _make_user(db_session, username="zed-user", role="user")
+    await _make_user(db_session, username="zed-off", role="user", is_active=False)
+    auth = _bearer(admin)
+
+    async def names(**params):
+        resp = await client.get("/admin/users", headers=auth, params=params)
+        assert resp.status_code == 200
+        return {u["username"] for u in resp.json()}
+
+    assert await names(search="zed") == {"zed-user", "zed-off"}
+    assert await names(search="zed", is_active="true") == {"zed-user"}
+    assert await names(role="admin") == {"lister"}

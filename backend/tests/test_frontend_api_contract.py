@@ -33,16 +33,6 @@ NOT_CALLED_BY_THE_SPA: dict[str, str] = {
     "/admin/question-banks/import": "scripts/sync_bank_to_server.py",
     "/admin/question-banks/{}/export": "manual bank export for the client hand-off bundle",
     "/admin/sop/documents": "scripts/sync_bank_to_server.py uploads SOP sources",
-    # --- no caller found anywhere in the repo (2026-10-06); kept pending an owner decision ---
-    "/auth/refresh": "UNUSED: the SPA re-logs in on expiry; nothing refreshes a token",
-    "/candidate/interview/questions": "UNUSED: the SPA reads questions from the interview itself",
-    "/candidate/interview/{}/voice/session": (
-        "UNUSED by the SPA since the WS proxy; only e2e/native-webrtc-voice-live.spec.ts (a "
-        "diagnostic of the direct-to-Azure transport) still calls it"
-    ),
-    "/admin/personas/{}/voice/session": "UNUSED: the Playground moved to the WS proxy",
-    "/admin/sop/retrieve": "UNUSED: an admin citation-retrieval probe with no UI or script",
-    "/admin/users/{}": "UNUSED: the Users tab is read-only (list only)",
 }
 
 WS_ROUTES = {"/voice-live/ws"}  # not in OpenAPI

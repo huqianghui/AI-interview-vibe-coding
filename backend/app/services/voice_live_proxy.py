@@ -1,15 +1,14 @@
 """Voice Live WebSocket proxy: backend holds the Azure SDK connection so avatar VIDEO works.
 
-The candidate/editor browser opens a plain WebSocket to OUR backend (not directly to Azure). We
-hold the ``azure-ai-voicelive`` SDK connection server-side and relay both directions. This is
-DIFFERENT from :mod:`app.services.voice_broker` (SPEC F9's WebRTC broker, where the browser
-connects straight to Azure and audio never transits the backend) — this module exists because
-Azure only delivers ``avatar.ice_servers`` and the avatar SDP handshake (the browser's
-``session.avatar.connect`` -> Azure's ``session.avatar.connecting`` with ``server_sdp``) over the
-*same* connection that sent ``session.update``. A short-lived STS credential handed to the
-browser for a brand-new WebRTC connection cannot reuse that avatar SDP context, so avatar video
-needs the backend in the loop as a relay. Ported from the working reference implementation
-(AI-avatar-vibe-coding's ``voice_live_websocket.py``), trimmed to this project's persona model.
+The candidate/editor browser opens a plain WebSocket to OUR backend (not directly to Azure). We hold
+the ``azure-ai-voicelive`` SDK connection server-side and relay both directions. The browser cannot
+connect straight to Azure for this, because Azure only delivers ``avatar.ice_servers`` and the
+avatar SDP handshake (the browser's ``session.avatar.connect`` -> Azure's
+``session.avatar.connecting`` with ``server_sdp``) over the *same* connection that sent
+``session.update``. A short-lived STS credential handed to the browser for a brand-new WebRTC
+connection cannot reuse that avatar SDP context, so avatar video needs the backend in the loop as a
+relay. Ported from the working reference implementation (AI-avatar-vibe-coding's
+``voice_live_websocket.py``), trimmed to this project's persona model.
 
 Two pieces, split the same way as the rest of this codebase's Azure integrations:
 
@@ -167,8 +166,7 @@ def is_mouth_persona(persona: InterviewerPersona, *, playground: bool = False) -
 
 
 # Mouth-session VAD/EOU tuning (issue #114 PR-1). Constants, not admin knobs: the only per-persona
-# switch is ``eou_detection`` (already on the model, previously honoured only by the /calls metadata
-# builder). ``EOU_MODEL`` is shared with that builder so the two paths can't drift.
+# switch is ``eou_detection`` (already on the model).
 MOUTH_VAD_TYPE = "azure_semantic_vad_multilingual"
 MOUTH_VAD_SILENCE_MS = 800
 MOUTH_VAD_REMOVE_FILLER_WORDS = True
@@ -276,8 +274,7 @@ def build_avatar_session(
     a lint-only venv) — mirrors the reference's import-inside-try pattern.
 
     Modalities include AVATAR only when the persona has a ``character`` configured (an avatar-less
-    persona is TEXT+AUDIO only, matching :func:`app.services.voice_broker.create_voice_session`'s
-    ``avatar_enabled`` gate).
+    persona is TEXT+AUDIO only).
     """
     from azure.ai.voicelive.models import (
         AudioEchoCancellation,
@@ -532,7 +529,7 @@ async def run_proxy(
 
     Agent mode (``persona.agent_id`` set) connects with ``agent_name``/``agent_version``/
     ``project_name`` so the hosted Foundry agent drives the session; ``agent_id`` is stored as
-    ``"name:version"`` (see :mod:`app.services.voice_broker`) so any ``:version`` suffix is
+    ``"name:version"`` (see ``persona_service``) so any ``:version`` suffix is
     stripped for ``agent_name`` and passed separately as ``agent_version``. Model mode (no
     ``agent_id``) connects with ``model=default_model``, plus ``query={"profile": byom_profile}``
     when the operator pointed the voice session at their own deployment (BYOM, path ②) — see

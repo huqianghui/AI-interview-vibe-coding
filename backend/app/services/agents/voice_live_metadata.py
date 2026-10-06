@@ -27,15 +27,6 @@ from typing import Any
 VOICE_LIVE_ENABLED_KEY = "microsoft.voice-live.enabled"
 VOICE_LIVE_CONFIG_KEY = "microsoft.voice-live.configuration"
 
-# Fixed API vocabulary (constants, not per-persona config).
-EOU_MODEL = "semantic_detection_v1_multilingual"
-NOISE_SUPPRESSION_TYPE = "azure_deep_noise_suppression"
-ECHO_CANCELLATION_TYPE = "server_echo_cancellation"
-TRANSCRIPTION_MODEL = "azure-speech"
-INTERIM_RESPONSE_TYPE = "llm_interim_response"
-INTERIM_TRIGGERS = ("latency",)
-INTERIM_LATENCY_THRESHOLD_MS = 500
-
 # Persona avatar/voice fallbacks (only used when the persona leaves a field blank).
 DEFAULT_AVATAR_CHARACTER = "lisa"
 # Azure Voice Live expects the real style slug. A VIDEO persona's style is passed through verbatim;
@@ -222,8 +213,8 @@ def build_avatar_config(
     falls back to THAT character's default from ``VIDEO_AVATAR_DEFAULT_STYLES``, since Azure
     rejects both ``style: null`` and a slug the character doesn't have).
     ``video`` (codec/resolution) is appended verbatim when given. Single source of truth for the
-    WS-proxy session (:mod:`app.services.voice_live_proxy`), the ``/calls`` broker session and the
-    agent metadata below — the photo/video split must never drift between them.
+    WS-proxy session (:mod:`app.services.voice_live_proxy`) and the agent metadata below — the
+    photo/video split must never drift between them.
     """
     # Azure matches character ids and style slugs as exact lowercase strings ("Adrian" is NOT
     # "adrian"), and the admin API does not normalize these fields — so normalize the WIRE values
@@ -257,68 +248,21 @@ def build_avatar_config(
     return avatar
 
 
-def build_session(persona: Any, *, locale: str | None = None) -> dict[str, Any]:
-    """Build the snake_case Voice Live ``session`` object from a persona.
-
-    Keys that represent a disabled capability are emitted as explicit ``null`` (matching
-    Foundry's own convention), EXCEPT ``turn_detection.end_of_utterance_detection`` which is
-    omitted entirely when EOU is off (there is no meaningful "off" sub-object).
-    """
-    resolved_locale, voice_name = resolve_voice(persona.voice_map, locale)
-
-    session: dict[str, Any] = {
-        "voice": {
-            "name": voice_name,
-            "type": "azure-standard",
-            "temperature": persona.voice_temperature,
-            # Playback speed is stringified in the Voice Live schema.
-            "rate": str(persona.playback_speed),
-        },
-        "input_audio_transcription": {
-            "model": TRANSCRIPTION_MODEL,
-            "language": resolved_locale,
-        },
-        "turn_detection": {"type": persona.turn_detection},
-        "input_audio_noise_reduction": (
-            {"type": NOISE_SUPPRESSION_TYPE} if persona.noise_suppression else None
-        ),
-        "input_audio_echo_cancellation": (
-            {"type": ECHO_CANCELLATION_TYPE} if persona.echo_cancellation else None
-        ),
-        "avatar": build_avatar_config(persona.character, persona.style),
-        "proactive_engagement": bool(persona.proactive_engagement),
-        "interim_response": (
-            {
-                "type": INTERIM_RESPONSE_TYPE,
-                "triggers": list(INTERIM_TRIGGERS),
-                "latency_threshold_ms": INTERIM_LATENCY_THRESHOLD_MS,
-            }
-            if persona.interim_response
-            else None
-        ),
-    }
-
-    if persona.eou_detection:
-        session["turn_detection"]["end_of_utterance_detection"] = {"model": EOU_MODEL}
-
-    return session
-
-
 def build_agent_metadata_session(persona: Any, *, locale: str | None = None) -> dict[str, Any]:
     """A COMPACT ``session`` for the agent's ``microsoft.voice-live.configuration`` metadata.
 
-    Distinct from :func:`build_session` (the full runtime config sent over the WS at
-    ``session.update`` time). Azure caps a metadata value at ~512 chars; the full config (~690
-    chars) would be split across ``…configuration``/``…configuration.1``, and Voice Live does NOT
-    reassemble the split — it fails agent initialization ("agent_initialization_failed"), verified
-    live 2026-08-12 against a real Foundry project (a compact single-key config initializes fine;
-    the working portal agent Dr-Zhang-Wei likewise carries a single unsplit key).
+    Distinct from the full runtime config the WS proxy sends at ``session.update`` time
+    (:mod:`app.services.voice_live_proxy`). Azure caps a metadata value at ~512 chars; the full
+    config (~690 chars) would be split across ``…configuration``/``…configuration.1``, and Voice
+    Live does NOT reassemble the split — it fails agent initialization
+    ("agent_initialization_failed"), verified live 2026-08-12 against a real Foundry project (a
+    compact single-key config initializes fine; the working portal agent Dr-Zhang-Wei likewise
+    carries a single unsplit key).
 
     So the metadata only needs the fields that ENABLE voice mode on the agent: voice,
     turn_detection, avatar, proactive_engagement. The verbose runtime knobs (transcription model,
-    EOU sub-object, noise/echo suppression, interim-response triggers) apply at runtime via
-    ``session.update``
-    from :func:`build_session`, and are omitted here to keep the config in one metadata value.
+    EOU sub-object) apply at runtime via the proxy's ``session.update``, and are omitted here to
+    keep the config in one metadata value.
     """
     _, voice_name = resolve_voice(persona.voice_map, locale)
     session: dict[str, Any] = {

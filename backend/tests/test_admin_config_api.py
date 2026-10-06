@@ -40,7 +40,6 @@ def _restore_settings():
         "azure_search_api_key",
         "azure_search_index",
         "azure_search_knowledge_source",
-        "default_voice_provider",
         "default_agent_sync_provider",
         "default_llm_provider",
         "default_retrieval_provider",

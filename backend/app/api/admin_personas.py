@@ -273,23 +273,6 @@ class TestChatOut(BaseModel):
     response_id: str | None = None
 
 
-class PlaygroundVoiceSessionOut(BaseModel):
-    """WebRTC connection info for the editor Playground's voice/avatar test (mirrors the interview
-    ``VoiceSessionOut`` minus the interview id — the Playground tests a persona directly)."""
-
-    signaling_url: str
-    auth_token: str
-    auth_type: str
-    mode: str
-    model: str
-    session_config: dict
-    persona_id: str
-    character: str
-    style: str
-    greeting: str | None = None
-    avatar_enabled: bool = False
-
-
 class KbConnectionOut(BaseModel):
     """An Azure AI Search connection for the connect dialog. ``target`` (the Search endpoint URL)
     is carried so the client can persist it as ``connection_target`` without a second lookup."""
@@ -545,30 +528,3 @@ async def test_chat(
     except agent_chat_service.AgentChatError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     return TestChatOut(response_text=result["response_text"], response_id=result.get("response_id"))
-
-
-@router.post("/{persona_id}/voice/session", response_model=PlaygroundVoiceSessionOut)
-async def playground_voice_session(
-    persona_id: str, db: AsyncSession = Depends(get_db)
-) -> PlaygroundVoiceSessionOut:
-    """Broker a Voice Live session for THIS persona so the editor Playground can test voice+avatar
-    without a candidate interview. Same broker + P5 sync gate as the interview path."""
-    from dataclasses import asdict
-
-    from app.services import voice_broker
-
-    try:
-        persona = await svc.get_persona(db, persona_id)
-    except svc.PersonaNotFound as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Persona not found"
-        ) from exc
-    try:
-        vs = await voice_broker.create_voice_session(db, persona=persona)
-    except voice_broker.VoiceAgentNotSynced as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except voice_broker.VoiceUnavailable as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
-        ) from exc
-    return PlaygroundVoiceSessionOut(**asdict(vs))

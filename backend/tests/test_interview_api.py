@@ -18,39 +18,6 @@ async def _new_candidate_headers(client) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_questions_requires_anon_session(client):
-    assert (await client.get("/candidate/interview/questions")).status_code == 401
-
-
-@pytest.mark.asyncio
-async def test_questions_empty_when_no_bank(client):
-    headers = await _new_candidate_headers(client)
-    resp = await client.get("/candidate/interview/questions", headers=headers)
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["bank_id"] is None
-    assert body["questions"] == []
-
-
-@pytest.mark.asyncio
-async def test_questions_returns_ordered_bank_without_rubric(client, db_session):
-    # AC #1/#2: seeded bank, 10 ordered questions. P3: no expected_points/rubric in the payload.
-    from app.services import question_seed
-
-    await question_seed.seed_default_bank(db_session)
-    headers = await _new_candidate_headers(client)
-    resp = await client.get("/candidate/interview/questions", headers=headers)
-    assert resp.status_code == 200
-    body = resp.json()
-    assert len(body["questions"]) == 10
-    assert [q["order_index"] for q in body["questions"]] == list(range(10))
-    # P3: candidate payload must not carry rubric-linked fields.
-    flat = str(body).lower()
-    for leaked in ("expected_points", "checklist", "rubric", "weight"):
-        assert leaked not in flat
-
-
-@pytest.mark.asyncio
 async def test_start_requires_anon_session(client):
     resp = await client.post("/candidate/interview/start")
     assert resp.status_code == 401
@@ -328,98 +295,6 @@ async def _start_interview(client) -> tuple[dict, str]:
     return headers, interview_id
 
 
-@pytest.mark.asyncio
-async def test_voice_session_requires_anon_session(client):
-    resp = await client.post("/candidate/interview/whatever/voice/session")
-    assert resp.status_code == 401
-
-
-@pytest.mark.asyncio
-async def test_voice_session_404_for_unowned_interview(client):
-    _, interview_id = await _start_interview(client)
-    headers_b = await _new_candidate_headers(client)
-    resp = await client.post(
-        f"/candidate/interview/{interview_id}/voice/session", headers=headers_b
-    )
-    assert resp.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_voice_session_503_when_no_persona(client):
-    # No persona configured at all → Voice Live unavailable (503), candidate stays on text.
-    headers, interview_id = await _start_interview(client)
-    resp = await client.post(f"/candidate/interview/{interview_id}/voice/session", headers=headers)
-    assert resp.status_code == 503
-
-
-@pytest.mark.asyncio
-async def test_voice_session_409_when_persona_not_synced(client, db_session):
-    # P5: an unsynced interviewer agent must be rejected (409), not degraded to model mode.
-    from app.services import persona_service as psvc
-
-    await psvc.create_persona(db_session, name="Interviewer", is_default=True)
-    headers, interview_id = await _start_interview(client)
-    resp = await client.post(f"/candidate/interview/{interview_id}/voice/session", headers=headers)
-    assert resp.status_code == 409
-
-
-@pytest.mark.asyncio
-async def test_voice_session_succeeds_for_synced_persona(client, db_session):
-    from app.services import persona_service as psvc
-
-    persona = await psvc.create_persona(
-        db_session,
-        name="Interviewer",
-        character="lisa",
-        style="casual",
-        voice_map='{"zh-CN": "zh-CN-XiaoxiaoNeural"}',
-        is_default=True,
-    )
-    await psvc.mark_sync_succeeded(db_session, persona, agent_id="agent-9", agent_version="1")
-
-    headers, interview_id = await _start_interview(client)
-    resp = await client.post(
-        f"/candidate/interview/{interview_id}/voice/session",
-        headers=headers,
-        json={"locale": "zh-CN"},
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["interview_session_id"] == interview_id
-    assert body["mode"] == "agent"
-    assert body["auth_type"] == "bearer"
-    assert body["signaling_url"].startswith("wss://")
-    # P3/P12: no checklist/rubric/SOP content ever appears in a candidate voice payload.
-    flat = str(body).lower()
-    for leaked in ("checklist", "rubric", "weight", "source_quote"):
-        assert leaked not in flat
-
-
-@pytest.mark.asyncio
-async def test_voice_session_409_after_completion(client, db_session):
-    # Voice only makes sense while in_progress; a completed interview is a 409.
-    from app.services import persona_service as psvc
-
-    persona = await psvc.create_persona(db_session, name="I", is_default=True)
-    await psvc.mark_sync_succeeded(db_session, persona, agent_id="a", agent_version="1")
-
-    headers, interview_id = await _start_interview(client)
-    # Drive to completion.
-    status_body = {"status": "in_progress"}
-    for _ in range(20):
-        if status_body["status"] == "completed":
-            break
-        status_body = (
-            await client.post(
-                f"/candidate/interview/{interview_id}/answer",
-                headers=headers,
-                json={"text": "a sufficiently detailed answer", "source": "text"},
-            )
-        ).json()
-    resp = await client.post(f"/candidate/interview/{interview_id}/voice/session", headers=headers)
-    assert resp.status_code == 409
-
-
 # --- resume (F6 edge b) + non-text sources over HTTP -----------------------
 
 
@@ -483,23 +358,6 @@ async def test_answer_rejects_unknown_source_over_http(client):
         json={"text": "x", "source": "carrier-pigeon"},
     )
     assert resp.status_code == 422
-
-
-@pytest.mark.asyncio
-async def test_text_answer_works_after_failed_voice_session(client, db_session):
-    """Edge c/d: a failed voice/session (no persona → 503) never blocks the text path."""
-    headers, interview_id = await _start_interview(client)
-    # No persona configured → voice broker is unavailable (503).
-    voice = await client.post(f"/candidate/interview/{interview_id}/voice/session", headers=headers)
-    assert voice.status_code == 503
-    # Text still advances the same interview.
-    answer = await client.post(
-        f"/candidate/interview/{interview_id}/answer",
-        headers=headers,
-        json={"text": "a text answer after voice failed, long enough", "source": "text"},
-    )
-    assert answer.status_code == 200
-    assert answer.json()["current_question"]["index"] == 1
 
 
 # --- Clickable citation: candidate can open a cited SOP source document --------------------

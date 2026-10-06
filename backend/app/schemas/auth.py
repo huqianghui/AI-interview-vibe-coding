@@ -39,14 +39,3 @@ class AdminUserResponse(UserResponse):
     business_unit: str
     generated_password: str | None = None
     password_stale: bool = False
-
-
-class UserUpdate(BaseModel):
-    """Admin-editable user fields (partial)."""
-
-    full_name: str | None = None
-    email: str | None = None
-    role: str | None = None
-    is_active: bool | None = None
-    preferred_language: str | None = None
-    business_unit: str | None = None

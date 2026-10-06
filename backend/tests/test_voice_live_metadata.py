@@ -13,7 +13,6 @@ from app.services.agents.voice_live_metadata import (
     PHOTO_AVATAR_SCENE_ZOOM,
     VOICE_LIVE_CONFIG_KEY,
     VOICE_LIVE_ENABLED_KEY,
-    build_session,
     build_voice_live_metadata,
     chunk_metadata_value,
     decode_voice_live_metadata,
@@ -84,65 +83,6 @@ def test_has_configured_voice_false_for_empty_blank_or_malformed():
     assert has_configured_voice("not json") is False
     assert has_configured_voice(None) is False
     assert has_configured_voice('{"zh-CN": 3}') is False
-
-
-# --- build_session shape (the snake_case guard) ----------------------------
-
-
-def test_session_uses_snake_case_keys_only():
-    session = build_session(FakePersona(), locale="en-US")
-    expected_keys = {
-        "voice",
-        "input_audio_transcription",
-        "turn_detection",
-        "input_audio_noise_reduction",
-        "input_audio_echo_cancellation",
-        "avatar",
-        "proactive_engagement",
-        "interim_response",
-    }
-    assert set(session) == expected_keys
-    # No key anywhere in the tree carries an uppercase letter (camelCase trap).
-    blob = json.dumps(session)
-    for key in _all_keys(session):
-        assert key == key.lower(), f"non-snake_case key leaked: {key!r}"
-    assert "endOfUtterance" not in blob and "inputAudio" not in blob
-
-
-def test_eou_sub_object_present_and_snake_case_when_enabled():
-    session = build_session(FakePersona(eou_detection=True))
-    assert session["turn_detection"]["end_of_utterance_detection"] == {
-        "model": "semantic_detection_v1_multilingual"
-    }
-
-
-def test_eou_sub_object_omitted_when_disabled():
-    session = build_session(FakePersona(eou_detection=False))
-    assert "end_of_utterance_detection" not in session["turn_detection"]
-
-
-def test_disabled_capabilities_are_explicit_null_not_omitted():
-    session = build_session(
-        FakePersona(noise_suppression=False, echo_cancellation=False, interim_response=False)
-    )
-    assert session["input_audio_noise_reduction"] is None
-    assert session["input_audio_echo_cancellation"] is None
-    assert session["interim_response"] is None
-
-
-def test_voice_rate_is_stringified_and_temperature_passthrough():
-    session = build_session(FakePersona(playback_speed=1.25, voice_temperature=0.6))
-    assert session["voice"]["rate"] == "1.25"
-    assert session["voice"]["temperature"] == 0.6
-
-
-def test_avatar_falls_back_when_blank():
-    session = build_session(FakePersona(character="", style=""))
-    assert session["avatar"] == {
-        "character": "lisa",
-        "style": "casual-sitting",
-        "customized": False,
-    }
 
 
 # --- chunking + full metadata ----------------------------------------------
@@ -222,17 +162,6 @@ def test_decode_returns_empty_when_disabled_or_malformed():
     )
 
 
-def _all_keys(obj):
-    """Yield every dict key in a nested structure."""
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            yield k
-            yield from _all_keys(v)
-    elif isinstance(obj, list):
-        for item in obj:
-            yield from _all_keys(item)
-
-
 # --- photo vs video avatars (issue #103) --------------------------------------
 # Azure PHOTO avatars (VASA-1: adrian, amara, …) have no styles and MUST be sent as
 # `type: photo-avatar` + `model: vasa-1`; without them (or WITH a style) Voice Live rejects the
@@ -299,20 +228,6 @@ def test_build_avatar_config_appends_video_params():
     cfg = build_avatar_config("adrian", "", video={"codec": "h264"})
     assert cfg["video"] == {"codec": "h264"}
     assert cfg["type"] == "photo-avatar"
-
-
-def test_build_session_photo_avatar_wire_shape():
-    session = build_session(FakePersona(character="adrian", style=""))
-    assert session["avatar"] == {
-        "type": "photo-avatar",
-        "model": "vasa-1",
-        "character": "adrian",
-        "customized": False,
-        "scene": {
-            "zoom": PHOTO_AVATAR_SCENE_ZOOM,
-            "position_y": PHOTO_AVATAR_SCENE_POSITION_Y,
-        },
-    }
 
 
 def test_agent_metadata_photo_avatar_stays_single_key_without_style():
@@ -446,7 +361,7 @@ def test_agent_metadata_drops_scene_to_protect_the_single_512_char_key():
     avatar = decode_voice_live_metadata(md)["avatar"]
     assert "scene" not in avatar
     # ...while the runtime session that Azure actually renders from DOES carry it.
-    assert build_session(FakePersona(character="amira", style=""))["avatar"]["scene"] == {
+    assert build_avatar_config("amira", "")["scene"] == {
         "zoom": PHOTO_AVATAR_SCENE_ZOOM,
         "position_y": PHOTO_AVATAR_SCENE_POSITION_Y,
     }

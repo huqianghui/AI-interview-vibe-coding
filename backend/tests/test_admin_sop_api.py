@@ -21,7 +21,6 @@ def _admin_token(monkeypatch, tmp_path, admin_auth):
 
 async def test_sop_routes_require_a_token(client):
     assert (await client.get("/admin/sop/documents")).status_code == 401
-    assert (await client.post("/admin/sop/retrieve", json={"query": "x"})).status_code == 401
 
 
 async def test_upload_txt_ingests_and_lists(client):
@@ -47,19 +46,6 @@ async def test_upload_unsupported_file_is_recorded_failed_not_500(client):
     assert resp.status_code == 201
     assert resp.json()["status"] == "failed"
     assert resp.json()["chunk_count"] == 0
-
-
-async def test_retrieve_returns_gated_citations(client):
-    # AC #2/#3: mock adapter returns fully-attributed {title,url,page}; the gate drops partials.
-    resp = await client.post(
-        "/admin/sop/retrieve", headers=AUTH, json={"query": "safety procedure", "max_citations": 3}
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["query"] == "safety procedure"
-    for c in body["citations"]:
-        # Every surfaced citation has all three required fields (strict gate, AC #3).
-        assert c["title"] and c["url"] and c["page"]
 
 
 async def test_upload_rejects_oversize(client, monkeypatch):

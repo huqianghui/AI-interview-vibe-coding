@@ -1,4 +1,4 @@
-"""Authentication API: login, me, refresh (admin/user JWT system)."""
+"""Authentication API: login and me (admin/user JWT system)."""
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,9 +23,3 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> Token
 async def get_me(current_user: User = Depends(get_current_user)) -> User:
     """Return the currently authenticated user's profile."""
     return current_user
-
-
-@router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(current_user: User = Depends(get_current_user)) -> TokenResponse:
-    """Re-mint an access token for the currently-valid bearer (simple refresh, no rotation)."""
-    return TokenResponse(access_token=create_access_token(data={"sub": current_user.id}))

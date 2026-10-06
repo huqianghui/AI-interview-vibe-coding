@@ -1,13 +1,12 @@
 """Admin SOP knowledge-base endpoints (SPEC F1). All routes require the admin bearer token.
 
-SOP upload, listing, and a citation-retrieval probe are admin-only (``require_role("admin")``): the
-raw SOP corpus and its blob pointers are interviewer/business internals (SPEC P3/P4). Candidates
-only ever see server-mediated citation *text* surfaced during scoring/report, never these routes.
+SOP upload and listing are admin-only (``require_role("admin")``): the raw SOP corpus and its blob
+pointers are interviewer/business internals (SPEC P3/P4). Candidates only ever see server-mediated
+citation *text* surfaced during scoring/report, never these routes.
 
 Upload runs the ingestion pipeline inline (extract → chunk → persist with page/section labels).
 A corrupt or unsupported file is recorded as ``status="failed"`` and returned in the response, it
-never 500s the request (F1 AC #4). Retrieval runs through the configured adapter (mock in dev/CI,
-Azure with creds) and returns only fully-attributed ``{title, url, page}`` citations (AC #2/#3).
+never 500s the request (F1 AC #4).
 """
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -20,7 +19,6 @@ from app.db import get_db
 from app.dependencies import require_role
 from app.models.sop import SopChunk, SopDocument
 from app.services import sop_ingestion
-from app.services.agents.registry import get_retrieval_adapter
 
 router = APIRouter(
     prefix="/admin/sop", tags=["admin-sop"], dependencies=[Depends(require_role("admin"))]
@@ -33,22 +31,6 @@ class SopDocumentOut(BaseModel):
     status: str
     size: int
     chunk_count: int
-
-
-class CitationOut(BaseModel):
-    title: str
-    url: str
-    page: str | int
-
-
-class RetrieveIn(BaseModel):
-    query: str
-    max_citations: int = 3
-
-
-class RetrieveOut(BaseModel):
-    query: str
-    citations: list[CitationOut]
 
 
 @router.post("/documents", response_model=SopDocumentOut, status_code=status.HTTP_201_CREATED)
@@ -101,19 +83,3 @@ async def list_documents(db: AsyncSession = Depends(get_db)) -> list[SopDocument
         )
         for d in docs
     ]
-
-
-@router.post("/retrieve", response_model=RetrieveOut)
-async def retrieve(body: RetrieveIn) -> RetrieveOut:
-    """Probe SOP citation retrieval (AC #2/#3): returns only fully-attributed {title,url,page}.
-
-    Runs through the configured retrieval adapter (mock in dev/CI). The strict field gate lives in
-    the adapter/``shape_citations`` — a citation missing any required field is dropped here, never
-    surfaced. An empty list is the honest no-match signal, not an error.
-    """
-    adapter = get_retrieval_adapter()
-    citations = await adapter.retrieve_citations(body.query, max_citations=body.max_citations)
-    return RetrieveOut(
-        query=body.query,
-        citations=[CitationOut(**c) for c in citations],
-    )

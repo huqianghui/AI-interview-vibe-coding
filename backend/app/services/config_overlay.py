@@ -2,9 +2,9 @@
 
 This is what makes the precedence **DB > .env > code default** real. ``get_settings()`` is
 ``@lru_cache``d, so every module shares one ``Settings`` instance; overlaying the saved master row's
-values onto that instance means every existing reader (registry at import, voice broker at request)
-sees the DB values without any refactor. After overlaying, the Azure adapters are re-registered so a
-saved config takes effect immediately — no restart.
+values onto that instance means every existing reader (registry at import, the voice WS proxy at
+connect) sees the DB values without any refactor. After overlaying, the Azure adapters are
+re-registered so a saved config takes effect immediately — no restart.
 
 Runs (a) at startup after migrations and (b) after each admin save. Best-effort at startup: a
 missing table (first boot before migrate) or any error is swallowed so it never blocks boot.
@@ -48,7 +48,7 @@ async def apply_master_config_to_settings(db: AsyncSession) -> bool:
     settings.foundry_api_key = api_key
     settings.foundry_agent_model = master.model_or_deployment or settings.foundry_agent_model
 
-    # Voice Live path (voice_broker reads these at request time). NOTE: deliberately does NOT
+    # Voice Live path (the WS proxy reads these at connect time). NOTE: deliberately does NOT
     # overlay voice_live_default_model — ``model_or_deployment`` is the agent's CHAT deployment
     # (e.g. gpt-5.4-mini), while Voice Live MODEL mode takes a model Voice Live hosts natively in
     # the region (gpt-5-mini / gpt-4.1-mini / gpt-4o / realtime); overlaying broke every voice
@@ -70,7 +70,6 @@ async def apply_master_config_to_settings(db: AsyncSession) -> bool:
     # Flip the providers this row configures to their real adapters. The LLM provider drives scoring
     # + checklist drafting; Phase 5 backs it with the real Foundry Responses-API adapter (registered
     # as "azure" when the project endpoint is set), so a saved config scores against a real model.
-    settings.default_voice_provider = "azure"
     settings.default_agent_sync_provider = "azure"
     settings.default_llm_provider = "azure"
     if master.knowledge_base and master.knowledge_source:

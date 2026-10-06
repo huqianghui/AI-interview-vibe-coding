@@ -42,7 +42,6 @@ class Settings(BaseSettings):
 
     # Provider selection — mock keeps local dev + CI free of live Azure calls.
     default_llm_provider: str = "mock"
-    default_voice_provider: str = "mock"
     default_retrieval_provider: str = "mock"
 
     # Azure bootstrap/fallback (real values live in ServiceConfig DB table).
@@ -82,13 +81,8 @@ class Settings(BaseSettings):
     foundry_agent_model: str = "gpt-5-mini"
     foundry_api_key: str = ""
 
-    # Voice Live WebRTC broker (SPEC F9). The candidate's browser connects directly to Azure
-    # Voice Live over WebRTC; the backend only brokers a short-lived credential (STS bearer) +
-    # the signaling URL. Audio never transits the backend. `mock` keeps CI/dev free of Azure:
-    # the broker returns a placeholder signaling config so the frontend flow is exercisable
-    # without a live endpoint. `azure` does the real STS key→bearer exchange.
-    # Provider selection reuses `default_voice_provider` (declared above).
-    # Azure Foundry / Voice Live resource (same cognitive-services resource brokers voice).
+    # Azure Foundry / Voice Live resource. The browser never talks to it directly: the backend's
+    # /voice-live/ws proxy holds the Voice Live SDK connection.
     # Left empty in CI; the live values live only in the gitignored backend/.env.
     azure_foundry_endpoint: str = ""
     azure_foundry_api_key: str = ""
