@@ -1,6 +1,6 @@
 /** ReportView (SPEC F8): executive view, side-by-side SOP/answer evidence, detail toggle, stub. */
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import "../i18n";
@@ -15,6 +15,10 @@ vi.mock("../api/client", async (importOriginal) => {
   return { ...actual, fetchSopDocument: vi.fn() };
 });
 import { fetchSopDocument } from "../api/client";
+
+// The PDF itself is tested in reportPdf.test.ts; here only the button's behaviour.
+vi.mock("./reportPdf", () => ({ downloadReportPdf: vi.fn() }));
+import { downloadReportPdf } from "./reportPdf";
 
 function renderReport(report: Report) {
   return render(
@@ -426,5 +430,64 @@ describe("the report names the question it is judging", () => {
     // top of it. Two "Question 1"s in a row was a defect this change introduced and then fixed.
     expect(screen.getAllByText("Question 1")).toHaveLength(1);
     expect(screen.queryByText("Describe your deployment safety habit.")).not.toBeInTheDocument();
+  });
+});
+
+describe("ReportView PDF download", () => {
+  beforeEach(() => vi.mocked(downloadReportPdf).mockReset());
+
+  it("downloads the report on screen, showing a busy label while the PDF is prepared", async () => {
+    const user = userEvent.setup();
+    // Resolved by a timer rather than by hand: a test-held resolver left the NEXT test's setup
+    // hanging (reproduced, cause not established). Long enough that a slow runner still sees the busy
+    // state right after the click; the wait below allows for it.
+    vi.mocked(downloadReportPdf).mockImplementation(
+      () => new Promise<void>((resolve) => setTimeout(resolve, 500)),
+    );
+    renderReport(SCORED);
+    const button = screen.getByTestId("report-download-pdf");
+    expect(button).toHaveTextContent(i18n.t("report.downloadPdf"));
+
+    await user.click(button);
+    expect(downloadReportPdf).toHaveBeenCalledWith(SCORED, expect.any(Function), i18n.language);
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button).toHaveTextContent(i18n.t("report.downloadingPdf"));
+
+    await waitFor(() => expect(button).not.toBeDisabled(), { timeout: 3000 });
+    expect(button).toHaveTextContent(i18n.t("report.downloadPdf"));
+    expect(screen.queryByTestId("report-download-pdf-error")).not.toBeInTheDocument();
+  });
+
+  it("says so when the PDF cannot be made, and lets the candidate try again", async () => {
+    const user = userEvent.setup();
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.mocked(downloadReportPdf).mockRejectedValueOnce(new Error("font fetch failed"));
+    renderReport(SCORED);
+    await user.click(screen.getByTestId("report-download-pdf"));
+    expect(await screen.findByTestId("report-download-pdf-error")).toHaveTextContent(
+      i18n.t("report.downloadPdfFailed"),
+    );
+    // Logged, so a production failure can be diagnosed without reproducing it.
+    expect(logged).toHaveBeenCalledWith("Report PDF download failed", expect.any(Error));
+    logged.mockRestore();
+
+    vi.mocked(downloadReportPdf).mockResolvedValueOnce(undefined);
+    await user.click(screen.getByTestId("report-download-pdf"));
+    await waitFor(() =>
+      expect(screen.queryByTestId("report-download-pdf-error")).not.toBeInTheDocument(),
+    );
+    expect(downloadReportPdf).toHaveBeenCalledTimes(2);
+  });
+
+  it("offers the download on a stub report too", () => {
+    renderReport({
+      interview_session_id: "iv1",
+      status: "scored",
+      coverage_pct: 50,
+      is_stub: true,
+      per_question: [{ question_id: "q1", judgment: "partial", rationale: "short" }],
+    });
+    expect(screen.getByTestId("report-download-pdf")).toBeInTheDocument();
   });
 });
