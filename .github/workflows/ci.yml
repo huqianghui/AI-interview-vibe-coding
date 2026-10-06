@@ -70,7 +70,12 @@ jobs:
       run:
         working-directory: frontend
     steps:
+      # Full history: readme-screenshots-freshness.test.ts compares each screenshot's last commit
+      # with the last commit to the components it shows. On the default shallow clone every file's
+      # last commit is the same one, so that test passed vacuously and a stale image merged unseen.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
