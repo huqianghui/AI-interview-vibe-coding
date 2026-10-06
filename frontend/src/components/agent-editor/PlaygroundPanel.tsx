@@ -4,7 +4,7 @@
  * ONE conversation surface — text and voice+avatar are NOT separate tabs. A single message stream
  * carries both typed turns and live voice transcripts (user speech + agent replies), so everything
  * the agent says is shown as text whether you typed or spoke. The composer row holds a text input +
- * Send AND a voice toggle; starting voice brokers a persona-scoped Voice Live session and shows the
+ * Send AND a voice toggle; starting voice opens a persona-scoped Voice Live session and shows the
  * digital human / orb above the stream, while its transcript flows into the same message list.
  *
  * A not-yet-saved persona has nothing to test → a hint. Backend: /admin/personas/{id}/test-chat

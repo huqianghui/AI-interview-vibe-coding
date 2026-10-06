@@ -468,7 +468,7 @@ Voice Live 官方对 `gpt-5-mini` 的描述是 "audio input through Azure speech
 
 ### 5.2 原生 WebRTC（`/calls`）的实测矩阵
 
-照官方文档的 standalone 示例实现（`frontend/e2e/native-webrtc-voice-live.spec.ts`），我们自己的区域资源，
+照官方文档的 standalone 示例实现（`frontend/e2e/native-webrtc-voice-live.spec.ts`，已随后端 broker 接口一起删除，原文见 git 历史 `fa55fce`），我们自己的区域资源，
 无数字人，带假麦克风由服务端 VAD 驱动轮次：
 
 | 模型 | voice 类型 | 结果 |
@@ -531,7 +531,7 @@ Azure **接受**了 `sendrecv` 的 offer，连接正常，数字人照样说话�
 
 | 探针 | 测什么 |
 |---|---|
-| `frontend/e2e/native-webrtc-voice-live.spec.ts` | 通路 C，照官方示例；带模型/voice 矩阵开关 |
+| `frontend/e2e/native-webrtc-voice-live.spec.ts`（已删除，见 git 历史 `fa55fce`） | 通路 C，照官方示例；带模型/voice 矩阵开关 |
 | `frontend/e2e/audio-only-webrtc-live.spec.ts` | 通路 A 的纯音频形态，从第一次握手就不要画面 |
 | `frontend/e2e/avatar-speak-start-live.spec.ts` | 通路 A：Azure 确认读题 → 真正听见（amira 806 ms、lisa 988 ms） |
 | `frontend/e2e/turn-latency-live.spec.ts` + `scripts/turn-latency.sh` | 通路 A 的逐轮延迟，带画面 vs 关画面 |
