@@ -403,7 +403,7 @@ def build_avatar_session(
         session_kwargs["input_audio_echo_cancellation"] = AudioEchoCancellation(
             type="server_echo_cancellation"
         )
-    # Azure fills in the bridging model itself (echo: model gpt-4.1-mini, max_completion_tokens 50).
+    # What the interim line says is decided by Voice Live's own logic, not by this session's model.
     if interim_response_applies(
         persona, playground=playground, realtime_pipeline=realtime_pipeline
     ):
