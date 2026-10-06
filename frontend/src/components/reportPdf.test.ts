@@ -8,10 +8,27 @@ import { describe, expect, it } from "vitest";
 import type { Content } from "pdfmake/interfaces";
 import i18n from "../i18n";
 import type { Report } from "../api/client";
-import { REGULAR_FACE_RUNS } from "./pdfGlyphs";
-import { MISSING_GLYPH, buildReportPdf, formatGeneratedAt, printable, reportPdfFilename } from "./reportPdf";
+import { palette } from "../theme";
+import { LATIN_FACE_RUNS, REGULAR_FACE_RUNS } from "./pdfGlyphs";
+import {
+  MISSING_GLYPH,
+  buildReportPdf,
+  fontRuns,
+  formatGeneratedAt,
+  printableBlocks,
+  printable,
+  reportPdfFilename,
+} from "./reportPdf";
 
 const t = i18n.getFixedT("en-US");
+
+const MINIMAL_STUB: Report = {
+  interview_session_id: "iv1",
+  status: "scored",
+  coverage_pct: 0,
+  is_stub: true,
+  per_question: [],
+};
 const tZh = i18n.getFixedT("zh-CN");
 
 const REPORT: Report = {
@@ -70,14 +87,23 @@ const REPORT: Report = {
 };
 
 /** Every string a document definition will print, in order. */
+/** A node's inline text with its font runs joined back together, as the reader sees one line. */
+function inlineText(v: unknown): string {
+  if (typeof v === "string") return v;
+  if (Array.isArray(v)) return v.map(inlineText).join("");
+  if (v && typeof v === "object") return inlineText((v as { text?: unknown }).text ?? "");
+  return "";
+}
+
+/** Every line a document definition will print, in order (inline runs joined, blocks separate). */
 function texts(node: unknown): string[] {
   if (typeof node === "string") return [node];
   if (Array.isArray(node)) return node.flatMap(texts);
   if (node && typeof node === "object") {
     const n = node as Record<string, unknown>;
-    return [n.text, n.stack, n.ul, n.table && (n.table as { body: unknown }).body].flatMap((v) =>
-      v === undefined ? [] : texts(v),
-    );
+    const own = n.text === undefined ? [] : [inlineText(n.text)];
+    const blocks = [n.stack, n.ul, n.table && (n.table as { body: unknown }).body];
+    return [...own, ...blocks.flatMap((v) => (v === undefined ? [] : texts(v)))];
   }
   return [];
 }
@@ -110,6 +136,12 @@ async function renderPdf(def: ReturnType<typeof buildReportPdf>): Promise<Buffer
       bold: `${fonts}/noto-sans-sc-bold-gb2312.otf`,
       italics: `${fonts}/noto-sans-sc-regular.otf`,
       bolditalics: `${fonts}/noto-sans-sc-bold-gb2312.otf`,
+    },
+    NotoSans: {
+      normal: `${fonts}/noto-sans-regular.ttf`,
+      bold: `${fonts}/noto-sans-bold.ttf`,
+      italics: `${fonts}/noto-sans-regular.ttf`,
+      bolditalics: `${fonts}/noto-sans-bold.ttf`,
     },
   });
   return pdfmake.createPdf(def).getBuffer();
@@ -198,19 +230,67 @@ describe("buildReportPdf", () => {
     expect(allText(REPORT, tZh)).not.toContain("⚑");
   });
 
-  it("has a glyph for every character it prints, in both faces and both languages", () => {
-    // Bold is a GB2312 subset; a label character outside it would print as nothing.
+  it("has a glyph for every character it prints, in the exact face and weight that prints it", () => {
+    // Bold Noto Sans SC is a GB2312 subset; a label character outside it would print as nothing.
     const fontkit = createRequire(import.meta.url)("fontkit");
-    const fonts = resolve(__dirname, "../../public/fonts");
-    for (const file of ["noto-sans-sc-regular.otf", "noto-sans-sc-bold-gb2312.otf"]) {
-      const face = fontkit.openSync(`${fonts}/${file}`);
-      for (const tr of [t, tZh]) {
-        const missing = [...new Set(allText(REPORT, tr).replace(/\s/g, ""))].filter(
-          (ch) => !face.hasGlyphForCodePoint(ch.codePointAt(0)),
-        );
-        expect(missing, `${file} lacks glyphs`).toEqual([]);
+    const dir = resolve(__dirname, "../../public/fonts");
+    const files: Record<string, Record<"normal" | "bold", string>> = {
+      NotoSansSC: { normal: "noto-sans-sc-regular.otf", bold: "noto-sans-sc-bold-gb2312.otf" },
+      NotoSans: { normal: "noto-sans-regular.ttf", bold: "noto-sans-bold.ttf" },
+    };
+    const faces = new Map<string, { hasGlyphForCodePoint(cp: number): boolean }>();
+    const face = (font: string, bold: boolean) => {
+      const file = files[font][bold ? "bold" : "normal"];
+      if (!faces.has(file)) faces.set(file, fontkit.openSync(`${dir}/${file}`));
+      return faces.get(file)!;
+    };
+    const missing: string[] = [];
+    // Walk the definition carrying the inherited font and weight, the way pdfmake resolves them.
+    const walk = (node: unknown, font: string, bold: boolean, styleBold: Record<string, boolean>) => {
+      if (typeof node === "string") {
+        for (const ch of node.replace(/\s/g, "")) {
+          if (!face(font, bold).hasGlyphForCodePoint(ch.codePointAt(0) as number)) {
+            missing.push(`${ch} (${font} ${bold ? "bold" : "regular"})`);
+          }
+        }
+        return;
       }
+      if (Array.isArray(node)) return node.forEach((c) => walk(c, font, bold, styleBold));
+      if (!node || typeof node !== "object") return;
+      const n = node as Record<string, unknown>;
+      const f = typeof n.font === "string" ? n.font : font;
+      const fromStyle = typeof n.style === "string" ? styleBold[n.style] : undefined;
+      const b = typeof n.bold === "boolean" ? n.bold : (fromStyle ?? bold);
+      for (const key of ["text", "stack", "ul"]) if (n[key] !== undefined) walk(n[key], f, b, styleBold);
+      const table = n.table as { body?: unknown } | undefined;
+      if (table?.body) walk(table.body, f, b, styleBold);
+    };
+    // 龘 is in the regular SC face but NOT the GB2312 bold subset: bold client text would lose it.
+    const names = "Łukasz Dvořák, Erdoğan, București, Győr, Ελλάδα, Москва, ≤ 25 °C 😀 龘";
+    const withNames: Report = {
+      ...REPORT,
+      narrative: names,
+      per_question: [
+        { ...REPORT.per_question[0], prompt: `Q about ${names}` },
+        REPORT.per_question[1],
+      ],
+    };
+    const stub: Report = {
+      ...MINIMAL_STUB,
+      per_question: [{ question_id: `id ${names}`, judgment: names, rationale: names }],
+    };
+    for (const [tr, report] of [
+      [t, withNames],
+      [tZh, withNames],
+      [t, stub],
+    ] as const) {
+      const def = buildReportPdf(report, tr);
+      const styleBold = Object.fromEntries(
+        Object.entries(def.styles as Record<string, { bold?: boolean }>).map(([k, v]) => [k, !!v.bold]),
+      );
+      walk(def.content, "NotoSansSC", false, styleBold);
     }
+    expect(missing).toEqual([]);
   });
 
   it("never sets client-authored text (prompts, coverage questions) in the GB2312-subset bold face", () => {
@@ -332,4 +412,126 @@ describe("characters the font cannot draw", () => {
     expect(text).toContain(`“答 ${MISSING_GLYPH}”`);
     expect(text).toContain(`“5 μg/mL ${MISSING_GLYPH}”`);
   });
+});
+
+describe("European letters fall back to Noto Sans", () => {
+  const fonts = resolve(__dirname, "../../public/fonts");
+  const expand = (runs: ReadonlyArray<readonly [number, number]>) =>
+    runs.flatMap(([first, last]) => Array.from({ length: last - first + 1 }, (_, i) => first + i));
+
+  it("pdfGlyphs.ts lists exactly Noto Sans's characters, in both weights (regenerate if this fails)", () => {
+    const fontkit = createRequire(import.meta.url)("fontkit");
+    for (const file of ["noto-sans-regular.ttf", "noto-sans-bold.ttf"]) {
+      const set = [...(fontkit.openSync(`${fonts}/${file}`).characterSet as number[])].sort((a, b) => a - b);
+      expect(expand(LATIN_FACE_RUNS), file).toEqual(set);
+    }
+  });
+
+  it("sets only what Noto Sans SC lacks in Noto Sans, keeping words whole otherwise", () => {
+    expect(fontRuns("Müller, François, Kraków")).toEqual(["Müller, François, Kraków"]);
+    expect(fontRuns("Łukasz")).toEqual([{ text: "Ł", font: "NotoSans" }, "ukasz"]);
+    expect(fontRuns("Dvořák 说")).toEqual(["Dvo", { text: "ř", font: "NotoSans" }, "ák 说"]);
+    // A line break between two fallback characters stays inside their run.
+    expect(fontRuns("ő\nő")).toEqual([{ text: "ő\nő", font: "NotoSans" }]);
+  });
+
+  it("prints European names and Greek in full, and only what no face has as □", () => {
+    const names = "Łukasz Dvořák, Erdoğan, București, Győr, Ελλάδα";
+    expect(printable(names)).toBe(names);
+    expect(printable("Ł 😀")).toBe(`Ł ${MISSING_GLYPH}`);
+  });
+
+  it("keeps a styled part's bold and colour on every run it splits into (never a nested array)", () => {
+    // pdfmake drops a part's own bold/colour when its text is itself an array; flatten instead.
+    expect(
+      printableBlocks([{ text: ["A: ", { text: "bold Ł red", bold: true, color: "red" }] }]),
+    ).toEqual([
+      {
+        text: [
+          "A: ",
+          { text: "bold ", bold: true, color: "red" },
+          { text: "Ł", font: "NotoSans", bold: true, color: "red" },
+          { text: " red", bold: true, color: "red" },
+        ],
+      },
+    ]);
+  });
+
+  it("merges nested styles onto each run, and drops parts with nothing to print", () => {
+    expect(
+      printableBlocks([
+        { text: [null, { text: ["x", { text: "Ł", color: "red" }], bold: true }, { bold: true }] },
+      ]),
+    ).toEqual([
+      {
+        text: [
+          null,
+          { bold: true, text: "x" },
+          { bold: true, color: "red", text: "Ł", font: "NotoSans" },
+        ],
+      },
+    ]);
+  });
+
+  it("keeps the muted colour of an item's kind label when the kind needs Noto Sans", () => {
+    const item = { ...REPORT.per_question[0].items![0], kind: "Ł-kind" };
+    const def = buildReportPdf({ ...REPORT, per_question: [{ ...REPORT.per_question[0], items: [item] }] }, t);
+    const parts = nodes(def.content).filter(
+      (n) => typeof n.text === "string" && (n.text === "Ł" || (n.text as string).includes("-kind")),
+    );
+    expect(parts.length).toBe(2);
+    for (const p of parts) expect(p.color).toBe(palette.textMuted);
+  });
+
+  it("composes a letter and its combining accent so both land in one face", () => {
+    expect(fontRuns("Bucures\u0326ti")).toEqual(["Bucure", { text: "ș", font: "NotoSans" }, "ti"]);
+  });
+
+  it("prints one box per emoji, not one per invisible joiner or variation selector", () => {
+    expect(printable("love ❤️ end")).toBe(`love ${MISSING_GLYPH} end`);
+    // A ZWJ family is three people joined: three boxes, no stray joiner glyphs between them.
+    expect(printable("👨\u200D👩\u200D👧")).toBe(MISSING_GLYPH.repeat(3));
+  });
+
+  it("leaves an empty string empty, so a blank paragraph keeps its height", () => {
+    expect(printableBlocks([{ text: "" }, ""])).toEqual([{ text: "" }, ""]);
+  });
+
+  it("uses no pdfmake block the font-run walk does not visit", () => {
+    // fontRuns is applied to text, stack, ul and table bodies only; a node of another kind would
+    // print its strings in the default face without the fallback. Fail loudly if one appears.
+    const unwalked = ["ol", "columns", "toc", "canvas", "header", "qr", "image", "svg"];
+    for (const report of [REPORT, { ...REPORT, is_stub: true }]) {
+      const def = buildReportPdf(report, t) as unknown as Record<string, unknown>;
+      expect(def.header).toBeUndefined();
+      for (const n of nodes(def.content)) for (const k of unwalked) expect(n[k], k).toBeUndefined();
+    }
+  });
+
+  it("turns a bare-string paragraph that needs Noto Sans into a paragraph of runs", () => {
+    // No block is a bare string today; this keeps a future one from printing Ł as nothing.
+    expect(printableBlocks(["plain", "Łukasz", ["nested Ł"], null, 3])).toEqual([
+      "plain",
+      { text: [{ text: "Ł", font: "NotoSans" }, "ukasz"] },
+      [{ text: ["nested ", { text: "Ł", font: "NotoSans" }] }],
+      null, // anything that is not text or a node passes through untouched
+      3,
+    ]);
+  });
+
+  it("does not set the client's SOP document name in the bold subset", () => {
+    const label = nodes(buildReportPdf(REPORT, t).content).find(
+      (n) => Array.isArray(n.text) && (n.text as unknown[]).includes(" · CSM SOP.pdf · p.12"),
+    );
+    // Our word bold; the client's document name a plain (non-bold) run beside it.
+    expect(label?.bold).toBe(false);
+    expect(label?.text).toEqual([{ text: "SOP source", bold: true }, " · CSM SOP.pdf · p.12"]);
+  });
+
+  it("embeds Noto Sans in the real PDF only alongside Noto Sans SC", async () => {
+    const withName: Report = { ...REPORT, narrative: "Interviewed by Łukasz Dvořák" };
+    const raw = (await renderPdf(buildReportPdf(withName, t))).toString("latin1");
+    expect(raw).toMatch(/\/BaseFont \/[A-Z]{6}\+NotoSans-Regular/);
+    expect(raw).toMatch(/\/BaseFont \/[A-Z]{6}\+NotoSansSC-Regular/);
+  }, 30_000);
 });

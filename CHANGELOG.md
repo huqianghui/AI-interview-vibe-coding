@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.48.1.0 (2026-10-06)
+
+### Fixed
+- **European names print in full in the report PDF.** Noto Sans SC carries only part of Latin
+  Extended, so Ł ř ğ ș ő and accented Greek printed as boxes: "□ukasz Dvo□ák", "Bucure□ti",
+  "Ελλ□δα". An EMEA interview meets these in candidates' answers, SOP titles and question text.
+  The PDF now carries Noto Sans as well (Latin, Greek, Cyrillic, 1.2 MB more on the first
+  download) and sets each character in the face that has it. A character neither face has, such
+  as an emoji, still prints as a visible □.
+- The SOP document name next to "SOP source", and a stub report's question id, are no longer bold.
+  Both come from the client, and the bold face is a subset that covers only our own labels.
+- Found in review and fixed before release: a styled piece of text (a grey label, a bold id) lost
+  its colour and weight when it split across the two faces; a letter typed as base + combining
+  accent is now composed first so it lands in one face; one emoji prints one □, not one per
+  invisible joiner.
+
 ## 0.48.0.0 (2026-10-06)
 
 ### Added

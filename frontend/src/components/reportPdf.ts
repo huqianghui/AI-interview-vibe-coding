@@ -11,39 +11,48 @@
  * function from a report to a pdfmake document definition, and `downloadReportPdf` lazy-loads
  * pdfmake (about 1 MB) and the CJK font only when the candidate clicks.
  *
- * Fonts are Noto Sans SC, self-hosted (candidates may sit in mainland China, where a font CDN is
- * unreachable; see public/fonts/README.md). Everything that is not our own copy (answers, SOP
- * quotes, rationales, question prompts) is set in the complete Regular face, because a PDF cannot
- * fall back to another font and a missing glyph silently drops the character; a character even that
- * face lacks (an emoji, a rare CJK extension) prints as a visible □ instead. Bold is a GB2312 subset
- * used only for our own labels, which a test checks glyph by glyph.
+ * Fonts are self-hosted (candidates may sit in mainland China, where a font CDN is unreachable; see
+ * public/fonts/README.md). A PDF cannot fall back to another font the way a browser does: a glyph
+ * the font lacks silently drops the character. So every string is split into runs by face:
+ *
+ * - Noto Sans SC sets everything it has: all Chinese, plus Latin and punctuation. Everything that is
+ *   not our own copy (answers, SOP quotes, rationales, question prompts) uses its complete Regular
+ *   face. Bold is a GB2312 subset used only for our own labels, which a test checks glyph by glyph.
+ * - Noto Sans (Latin, Greek, Cyrillic) sets what Noto Sans SC lacks: the Ł ř ğ ș ő of European
+ *   names, Greek with accents. The EMEA interviews meet these in candidates' answers.
+ * - A character neither face has (an emoji, Hangul, a rare CJK extension) prints as a visible □.
  */
 import type { TFunction } from "i18next";
 import type { Content, TDocumentDefinitions } from "pdfmake/interfaces";
 import type { QuestionScore, Report, ScoredItem } from "../api/client";
 import { palette } from "../theme";
-import { REGULAR_FACE_RUNS } from "./pdfGlyphs";
+import { LATIN_FACE_RUNS, REGULAR_FACE_RUNS } from "./pdfGlyphs";
 import { splitWarnings, unscoredCount } from "./reportModel";
 
 const FONT = "NotoSansSC";
+const LATIN_FONT = "NotoSans";
 const FONT_FILES = {
   normal: "/fonts/noto-sans-sc-regular.otf",
   bold: "/fonts/noto-sans-sc-bold-gb2312.otf",
+};
+const LATIN_FONT_FILES = {
+  normal: "/fonts/noto-sans-regular.ttf",
+  bold: "/fonts/noto-sans-bold.ttf",
 };
 
 /** How long the first download may take (library + fonts over a slow network) before the button
  *  says it failed, instead of staying on "Preparing PDF…" for ever. */
 export const PDF_DOWNLOAD_TIMEOUT_MS = 60_000;
 
-/** Printed in place of a character the regular face cannot draw. The face has this glyph. */
+/** Printed in place of a character neither face can draw. Noto Sans SC has this glyph. */
 export const MISSING_GLYPH = "\u25A1";
 
-function regularFaceHas(codePoint: number): boolean {
+function covers(runs: ReadonlyArray<readonly [number, number]>, codePoint: number): boolean {
   let lo = 0;
-  let hi = REGULAR_FACE_RUNS.length - 1;
+  let hi = runs.length - 1;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
-    const [first, last] = REGULAR_FACE_RUNS[mid];
+    const [first, last] = runs[mid];
     if (codePoint < first) hi = mid - 1;
     else if (codePoint > last) lo = mid + 1;
     else return true;
@@ -51,30 +60,101 @@ function regularFaceHas(codePoint: number): boolean {
   return false;
 }
 
-/** `text` with every character the regular face cannot draw replaced by □ (line breaks and tabs are
- *  layout, not glyphs, and pass through). A visible box is wrong; a silently missing character in a
- *  candidate's record is worse. */
-export function printable(text: string): string {
-  let out = "";
-  for (const ch of text) {
+/** A piece of text in one face: a bare string is the default face (Noto Sans SC). */
+export type FontRun = string | { text: string; font: string };
+
+/** Invisible characters that only shape an emoji (variation selectors, zero-width joiner). Neither
+ *  face draws emoji, so they would each print a box of their own: "❤️" as two, a family as five. */
+const EMOJI_JOINERS = /[\uFE0E\uFE0F\u200D]/g;
+
+/**
+ * `text` split into runs by the face that can draw each character: Noto Sans SC first, Noto Sans for
+ * what only it has, □ for what neither has. Line breaks and tabs are layout, not glyphs, and stay
+ * with the surrounding run. A run inherits everything else (bold, colour, size) from its node.
+ *
+ * Composed first (NFC), so a letter typed as base + combining accent ("s" + U+0326) becomes the one
+ * character ("ș") a face draws whole, rather than a base in one face and a stray mark in another.
+ */
+export function fontRuns(text: string): FontRun[] {
+  const runs: FontRun[] = [];
+  let latin = false;
+  let buf = "";
+  const flush = () => {
+    if (buf) runs.push(latin ? { text: buf, font: LATIN_FONT } : buf);
+    buf = "";
+  };
+  for (const ch of text.normalize("NFC").replace(EMOJI_JOINERS, "")) {
     const cp = ch.codePointAt(0) as number;
-    out += cp === 0x0a || cp === 0x09 || cp === 0x0d || regularFaceHas(cp) ? ch : MISSING_GLYPH;
+    let isLatin = false;
+    let out = ch;
+    if (cp === 0x0a || cp === 0x09 || cp === 0x0d) isLatin = latin;
+    else if (covers(REGULAR_FACE_RUNS, cp)) isLatin = false;
+    else if (covers(LATIN_FACE_RUNS, cp)) isLatin = true;
+    else out = MISSING_GLYPH;
+    if (isLatin !== latin) {
+      flush();
+      latin = isLatin;
+    }
+    buf += out;
   }
-  return out;
+  flush();
+  return runs;
 }
 
-/** Apply `printable` to every string a document definition will print, in place. */
-function makePrintable(node: unknown): unknown {
-  if (typeof node === "string") return printable(node);
-  if (Array.isArray(node)) return node.map(makePrintable);
-  if (node && typeof node === "object") {
-    const n = node as Record<string, unknown>;
-    for (const key of ["text", "stack", "ul", "body"]) {
-      if (key in n) n[key] = makePrintable(n[key]);
+/** What the reader sees of `text`: every character either face can draw, □ for the rest. */
+export function printable(text: string): string {
+  return fontRuns(text)
+    .map((r) => (typeof r === "string" ? r : r.text))
+    .join("");
+}
+
+/** A string as inline text: itself when it needs only the default face (an empty string stays
+ *  empty, so a blank paragraph keeps its height), else its runs. */
+function inline(text: string): string | FontRun[] {
+  const runs = fontRuns(text);
+  if (runs.length === 0) return "";
+  return runs.length === 1 && typeof runs[0] === "string" ? runs[0] : runs;
+}
+
+/**
+ * One part of an inline text array, as flat styled pieces. A styled part (`{text, bold, color}`)
+ * that needs two faces becomes one copy of its style PER RUN — never a nested array: pdfmake drops
+ * a part's own bold and colour when its text is itself an array (reproduced: a bold red part with a
+ * "Ł" in it printed plain black).
+ */
+function inlineParts(part: unknown): unknown[] {
+  if (typeof part === "string") return fontRuns(part);
+  if (!part || typeof part !== "object" || Array.isArray(part)) return [part];
+  const { text, ...style } = part as Record<string, unknown>;
+  const inner = typeof text === "string" ? fontRuns(text) : Array.isArray(text) ? text.flatMap(inlineParts) : [];
+  return inner.map((run) =>
+    typeof run === "string" ? { ...style, text: run } : { ...style, ...(run as object) },
+  );
+}
+
+/** A node's own text, and every node below it, split into font runs (in place). */
+function printableNode(node: unknown): unknown {
+  if (!node || typeof node !== "object" || Array.isArray(node)) return node;
+  const n = node as Record<string, unknown>;
+  if (typeof n.text === "string") n.text = inline(n.text);
+  else if (Array.isArray(n.text)) n.text = n.text.flatMap(inlineParts);
+  if (Array.isArray(n.stack)) n.stack = printableBlocks(n.stack);
+  if (Array.isArray(n.ul)) n.ul = printableBlocks(n.ul);
+  const table = n.table as { body?: unknown[] } | undefined;
+  if (table && Array.isArray(table.body)) table.body = printableBlocks(table.body);
+  return n;
+}
+
+/** A list of blocks (content, a stack, list items, table rows and cells). A bare string here is a
+ *  paragraph, so a string that needs more than one face becomes a paragraph of runs. */
+export function printableBlocks(blocks: unknown[]): unknown[] {
+  return blocks.map((b) => {
+    if (typeof b === "string") {
+      const runs = inline(b);
+      return typeof runs === "string" ? runs : { text: runs };
     }
-    if (n.table && typeof n.table === "object") makePrintable(n.table);
-  }
-  return node;
+    return Array.isArray(b) ? printableBlocks(b) : printableNode(b);
+  });
 }
 
 // The page's own colours (theme.ts), so a capped or critical result reads the same on paper.
@@ -91,14 +171,21 @@ function questionVerdict(q: QuestionScore, t: TFunction): string {
   return `${verdict ? `${verdict} · ` : ""}${Math.round(q.score)}/100${capped}`;
 }
 
-function sourceLabel(item: ScoredItem, t: TFunction): string {
+/** "SOP source · <document> · <page>". Only our own word is bold: the document name and page come
+ *  from the client's SOP library and may hold characters outside the bold face's GB2312 subset. */
+function sourceLabel(item: ScoredItem, t: TFunction): Content[] {
   const doc = item.source_document_name ? ` · ${item.source_document_name}` : "";
   const page = item.source_page ? ` · ${item.source_page}` : "";
-  return `${t("report.sopSource")}${doc}${page}`;
+  return [{ text: t("report.sopSource"), bold: true }, ...(doc || page ? [`${doc}${page}`] : [])];
 }
 
 /** A tinted panel with a small label over a quoted passage: the SOP source, or the candidate's words. */
-function quoteBox(label: string, labelColor: string, fill: string, quote: string): Content {
+function quoteBox(
+  label: string | Content[],
+  labelColor: string,
+  fill: string,
+  quote: string,
+): Content {
   return {
     table: {
       widths: ["*"],
@@ -106,7 +193,8 @@ function quoteBox(label: string, labelColor: string, fill: string, quote: string
         [
           {
             stack: [
-              { text: label, fontSize: 8, color: labelColor, bold: true },
+              // A plain-string label is all ours and bold; a composed one marks its own bold parts.
+              { text: label, fontSize: 8, color: labelColor, bold: typeof label === "string" },
               { text: `“${quote}”`, margin: [0, 2, 0, 0] },
             ],
             fillColor: fill,
@@ -170,7 +258,8 @@ function stubContent(report: Report, t: TFunction): Content[] {
     { text: `${t("coverage")}: ${report.coverage_pct}%`, margin: [0, 0, 0, 8] },
     {
       ul: report.per_question.map((q) => ({
-        text: [{ text: q.question_id, bold: true }, `: ${q.judgment ?? ""} — ${q.rationale ?? ""}`],
+        // Ink, not bold: the id is not our copy, and bold is a subset that covers only our labels.
+        text: [{ text: q.question_id, color: palette.ink }, `: ${q.judgment ?? ""} — ${q.rationale ?? ""}`],
       })),
     },
     { text: t("stubNote"), color: MUTED, margin: [0, 8, 0, 0] },
@@ -272,7 +361,7 @@ export function buildReportPdf(
       section: { fontSize: 14, bold: true, color: palette.ink, margin: [0, 0, 0, 4] },
       question: { fontSize: 12, color: palette.ink },
     },
-    content: makePrintable([
+    content: printableBlocks([
       { text: t("report.title"), style: "kicker" },
       { text: formatGeneratedAt(generatedAt, locale), fontSize: 8, color: MUTED, margin: [0, 0, 0, 10] },
       ...body,
@@ -300,14 +389,13 @@ export async function downloadReportPdf(report: Report, t: TFunction, locale: st
   // from the origin root (vite.config.ts sets no `base`), so /fonts/ is where nginx serves them.
   const origin = window.location.origin;
   pdfMake.setUrlAccessPolicy((u) => u.startsWith(`${origin}/fonts/`));
-  pdfMake.setFonts({
-    [FONT]: {
-      normal: `${origin}${FONT_FILES.normal}`,
-      bold: `${origin}${FONT_FILES.bold}`,
-      italics: `${origin}${FONT_FILES.normal}`,
-      bolditalics: `${origin}${FONT_FILES.bold}`,
-    },
+  const face = (files: { normal: string; bold: string }) => ({
+    normal: `${origin}${files.normal}`,
+    bold: `${origin}${files.bold}`,
+    italics: `${origin}${files.normal}`,
+    bolditalics: `${origin}${files.bold}`,
   });
+  pdfMake.setFonts({ [FONT]: face(FONT_FILES), [LATIN_FONT]: face(LATIN_FONT_FILES) });
   const now = new Date();
   const download = pdfMake
     .createPdf(buildReportPdf(report, t, { generatedAt: now, locale }))
