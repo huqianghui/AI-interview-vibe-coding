@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.46.0.0 (2026-10-06)
+
+### Fixed
+- **The backend coverage number was wrong by about seven points, and the real gaps were hidden
+  under it.** SQLAlchemy's async engine runs every awaited query through greenlet, and coverage was
+  not told so: it lost the trace after the first `await db...` in a route and counted the rest as
+  never run. `api/interview.py` read 54% while its API tests exercised nearly all of it, and the
+  suite sat at 85.58%, a hair over the 85% gate. With `concurrency = ["greenlet", "thread"]` the
+  same tests measure 92.45%, and the files still low were the ones genuinely untested.
+- **A boot seed that fails is now logged instead of vanishing.** Eight of the nine startup seeds
+  (banks, client banks, admin, default persona, both config rows) ended in `except: pass`, so a bad
+  bundle or an unmigrated table produced a healthy-looking server with something quietly missing.
+  Each step now runs behind one helper that logs the failure with its name and carries on, in the
+  same order and with the same commits as before.
+
+### Added
+- **Tests for the paths nobody had tested**, taking backend coverage from 92.45% to 95.81% (931
+  passing tests) and frontend to 661 tests:
+  - the `/voice-live/ws` route body (auth by admin JWT or candidate session, persona resolution,
+    the agent-sync gate, the `avatar_bg` filter, which voice model and BYOM profile reach the proxy,
+    and how a proxy error or a client disconnect is reported): 30% → 98%;
+  - app boot against a real in-memory database (every seed runs, re-boot is idempotent, no admin
+    without a configured password, a failing seed is logged and the rest still run, the step order,
+    background warm-ups cancelled on shutdown): `main.py` 24% → 100%;
+  - every rejection branch of the auth guards, the anonymous-session token checks, revocation, and
+    the two-logins-at-once seat race;
+  - a walk of the live route table proving every `/admin/*` route answers 401 without a login and
+    403 to a candidate, so a new admin router that forgets its role guard fails on its first commit;
+  - the admin request wrapper (bearer header, error mapping, 204) and the BYOM deployment filter.
+- **A frontend ↔ backend contract test.** It reads the API calls straight out of `frontend/src`
+  and fails if the SPA calls a path the backend does not serve (404) or with a method the route
+  does not accept (405). In the other direction, every route the SPA never calls must be listed
+  with who does call it, so a dead endpoint has to be written down or deleted.
+
+### Removed
+- **Code nothing called any more**, with the tests that only existed to exercise it:
+  - the template follow-up machinery retired in v0.39.2.0 and v0.39.3.0: `interview/memory.py`
+    (`build_follow_up_prompt`), the `FollowUpProvider` hook in `answer_finalized`, and
+    `record_follow_up`. Sessions recorded before then still read back their follow-ups correctly;
+  - the shared-token `require_admin` guard and its `ADMIN_API_TOKEN` setting, replaced by real admin
+    logins long ago;
+  - the frontend's direct-to-Azure voice broker client (`fetchVoiceSession`, `VoiceSessionError`,
+    `brokerPlaygroundVoice`, the `sessionFetcher` option), unused since voice moved to the WS proxy;
+  - `score_interview`, `detect_verbal_cue`, `touch_session`, `get_azure_openai_client`,
+    `get_auth_headers`, `build_cleared_voice_metadata`, `delete_persona_agent` and a few unused
+    exports.
+
 ## 0.45.0.0 (2026-10-05)
 
 ### Fixed

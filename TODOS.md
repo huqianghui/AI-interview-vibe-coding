@@ -231,6 +231,37 @@ own asserting every entry still points at real code, so a stale entry cannot she
 **Effort:** CC: ~5 min, once admin/agent is in scope.
 **Priority:** P3 — operator-facing, and the guard stops the list growing.
 
+## Dead code (follow-up to v0.46.0.0)
+
+### Delete the six backend routes nothing calls
+
+`tests/test_frontend_api_contract.py` lists them in `NOT_CALLED_BY_THE_SPA` as `UNUSED`, found with
+no caller anywhere in the repo on 2026-10-06: `POST /candidate/interview/{id}/voice/session` and
+`POST /admin/personas/{id}/voice/session` (both still mint a client-usable Azure voice token, so they
+are live attack surface for a transport the SPA abandoned when voice moved to the WS proxy),
+`POST /auth/refresh`, `GET /candidate/interview/questions`, `POST /admin/sop/retrieve`, and
+`GET/PATCH/DELETE /admin/users/{id}` (the Users tab is read-only). Delete them with their schemas,
+whatever of `services/voice_broker.py` only they use, and `frontend/e2e/native-webrtc-voice-live.spec.ts`
+(the one remaining caller of the candidate broker route, a diagnostic of the direct-to-Azure path).
+Then drop their allowlist entries; the contract test fails on a stale entry, so it will say so.
+Owner decision 2026-10-06: separate PR, straight after v0.46.0.0.
+
+**Priority:** P2
+
+### Stop provisioning ADMIN_API_TOKEN
+
+The backend stopped reading it in v0.46.0.0 (`Settings` has `extra="ignore"`, so the env var is
+harmless but meaningless), yet `infra/azure/main.bicep`, `infra/azure/modules/container-apps.bicep`,
+`infra/azure/main.parameters.json` and `main.parameters.example.json` still create the
+`admin-api-token` secret and inject it. The param and the parameter files have to change in one
+commit or the ARM deploy rejects the unknown parameter. The local `delivery/` package (gitignored)
+needs the same: `gen-secrets.sh` still generates the token and `export-banks.sh` tells clients to
+call `/admin/question-banks` with `Bearer $ADMIN_API_TOKEN`, which has answered 401 since the routes
+moved to `require_role("admin")`, so that hand-off instruction is already broken.
+Owner decision 2026-10-06: same follow-up PR as the routes above.
+
+**Priority:** P2
+
 ## Release hygiene
 
 ### CHANGELOG is missing five shipped versions
@@ -512,7 +543,7 @@ existed on `InterviewSession`; this only extends its use to the bank engine.
 writing "an orphaned interviewer `follow_up` turn" for a stale question. That write path no longer
 exists in current code — the nudge-only judged-turn refactor (`98f835e`, v0.39.3.0, 2026-09-28)
 retired the `follow_up`/`redirect` verdicts, and `state_machine.record_follow_up` (the function that
-would perform such a write) has zero callers anywhere in `app/` or `tests/` today. `judge_apply` now
+would have performed such a write) had zero callers and was deleted in v0.46.0.0. `judge_apply` now
 only flips `JudgeEvent.applied` and returns text — it never touches `InterviewSession` or writes an
 `InterviewTurn`. The underlying TOCTOU class the TODO is naming is still real, though: a stale
 `judge`/`judge/apply` call can still consume a `judge_events` row and a budget slot for a question

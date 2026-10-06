@@ -236,11 +236,13 @@ detection.
   judge runs at all.
 - **Two follow-up generators (by channel), one scoring rule.** Follow-ups are produced differently
   on the two transports, but the scoring semantics are identical:
-  - **Text channel — deterministic, non-LLM (RETIRED from the submit path in v0.39.2.0).**
-    `build_follow_up_prompt` (F7, `interview/memory.py`) quotes a snippet (≤80 chars) of the
-    candidate's just-given answer and appends the question's fixed `follow_up_prompt` probe. It
-    remains a pure helper behind the retained `FollowUpProvider` hook (exercised in unit tests) but
-    is no longer wired to `answer_finalized` by any route: a submit always advances.
+  - **Text channel — deterministic, non-LLM (RETIRED in v0.39.2.0, DELETED in v0.46.0.0).**
+    `build_follow_up_prompt` (F7, `interview/memory.py`) quoted a snippet (≤80 chars) of the
+    candidate's just-given answer and appended the question's fixed `follow_up_prompt` probe. Once
+    no route passed a provider it was dead code; v0.46.0.0 removed it together with the
+    `FollowUpProvider` hook and `record_follow_up`. Nothing writes a follow-up turn any more; the
+    read side (`is_follow_up`, grouping a follow-up answer with its question) stays because
+    sessions recorded before v0.39.3.0 still carry them.
   - **Voice channel — LLM, Foundry persona.** The digital-human agent probes on its own per the
     persona contract (`persona.default_instructions`). These follow-ups are free-form model output;
     left unbounded they can wander and self-correct ("you're right, I changed topics — let's stay
@@ -277,9 +279,9 @@ Foundry agent built-in session memory + an explicit demo moment.
   same session (e.g., "你第二题提到X,这里为什么…"). Implemented as a follow-up-turn prompt that
   passes prior-turn context to the agent.
 - **Voice gets this "for free"** from the Foundry prompt-agent's built-in conversation memory (F5);
-  `build_follow_up_prompt` is the deterministic, transport-agnostic version that also drives the
-  text channel and CI. See F6 "Two follow-up generators" for how each channel synthesizes the
-  follow-up and why only grouped candidate answers (not the follow-up prompts) are scored.
+  the deterministic text-channel version (`build_follow_up_prompt`) was retired in v0.39.2.0 and
+  deleted in v0.46.0.0. See F6 "Two follow-up generators" for the history and why only grouped
+  candidate answers (not the follow-up prompts) are scored.
 - **AC:** (1) within one interview, a follow-up visibly cites content from an earlier question's
   answer; (2) the citation is accurate to what the candidate actually said (from interview_turn).
 
