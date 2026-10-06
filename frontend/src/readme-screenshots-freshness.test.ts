@@ -26,9 +26,16 @@ const DEPICTS: Record<string, string[]> = {
   "00-signin.png": ["frontend/src/components/CandidateSignIn.tsx"],
   "01-landing.png": ["frontend/src/components/CandidateIdle.tsx"],
   "01b-orientation.png": ["frontend/src/components/CandidateOrientation.tsx"],
-  // The interviewing screen itself: the question card, the progress rail and the answer controls all
-  // live in the page rather than in a component of their own.
-  "02-interview-question.png": ["frontend/src/pages/InterviewPage.tsx", "frontend/src/components/Transcript.tsx"],
+  // The interviewing screen: the page lays out the stage; the question card + answer controls, the
+  // status legend, the channel switch and their styles live in pages/interview/.
+  "02-interview-question.png": [
+    "frontend/src/pages/InterviewPage.tsx",
+    "frontend/src/pages/interview/AnswerCard.tsx",
+    "frontend/src/pages/interview/StatusLegend.tsx",
+    "frontend/src/pages/interview/ChannelSwitch.tsx",
+    "frontend/src/pages/interview/styles.ts",
+    "frontend/src/components/Transcript.tsx",
+  ],
   "04-review-before-scoring.png": ["frontend/src/components/ReviewView.tsx"],
   "05-report-executive.png": ["frontend/src/components/ReportView.tsx"],
   "06-report-detail.png": ["frontend/src/components/ReportView.tsx"],
