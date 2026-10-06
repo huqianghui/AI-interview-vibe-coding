@@ -169,10 +169,17 @@ async def one_read(
     if voice_override:
         # Send a voice DIFFERENT from the one configured on the agent, so the echo says whose
         # setting wins in agent mode — "both were en-US-AvaNeural" cannot answer that.
-        from azure.ai.voicelive.models import AzureStandardVoice
-
+        # ``openai:NAME`` asks for one of the realtime model's OWN voices explicitly, which is the
+        # only way to choose among them: omitting `voice` just lands on the model's default (marin),
+        # and the voice configured on the agent in the portal has no effect on this path at all
+        # (measured: an agent with `voice: "alloy"` in its metadata still came up as Ava).
         session = dict(session)
-        session["voice"] = AzureStandardVoice(name=voice_override, type="azure-standard")
+        if voice_override.startswith("openai:"):
+            session["voice"] = {"type": "openai", "name": voice_override.split(":", 1)[1]}
+        else:
+            from azure.ai.voicelive.models import AzureStandardVoice
+
+            session["voice"] = AzureStandardVoice(name=voice_override, type="azure-standard")
     if drop_voice:
         # Ask "can the MODEL's own voice drive this session?" — with no session.voice a realtime
         # model answers in its own voice (measured: openai/marin) instead of Azure TTS. The product
@@ -438,7 +445,7 @@ async def main() -> None:
     ap.add_argument(
         "--voice",
         default="",
-        help="send this Azure voice name instead of the persona's (agent-mode precedence test)",
+        help='voice to send: an Azure name, or "openai:alloy" for a model-native voice',
     )
     ap.add_argument(
         "--auto-response",
