@@ -47,19 +47,12 @@ digital-human avatar that **speaks each question aloud**, the candidate answers 
 conversation transcript builds on the right. A status legend shows the live voice state
 (ready / listening / speaking / muted).
 
-The question is read **verbatim** — `response.create` with `pre_generated_assistant_message`, which
-is server-side TTS of the exact pinned text with no model inference in the path. That detail is
-load-bearing rather than incidental: a read that goes through the model drifts, far enough that the
-card can show one question while the avatar asks another. What the candidate hears and what they
-read are the same string by construction.
+The avatar reads each question **exactly as it appears on the card**: the text is spoken by
+server-side TTS, with no model in between to reword it.
 
-Two avatar families are supported, and they are not interchangeable. **Video** avatars (shown here —
-Lisa, `casual-sitting`) stream 1080p 16:9. **Photo** avatars (`type: photo-avatar` + `model: vasa-1`,
-e.g. Amira, Adrian) are photoreal head-and-shoulders and stream **512×512 square**, which is why the
-avatar stage hugs the stream instead of imposing a frame (any `object-fit: cover` on a non-square
-stage would crop the person's chin and shoulders). Video style slugs are per character, so a
-style valid for one is not valid for another. The persona editor picks both from the live Azure
-roster.
+Two avatar families are available: **video** avatars (shown here, Lisa) in 1080p 16:9, and
+photoreal **photo** avatars (e.g. Amira, Adrian) in a 512×512 square, shown uncropped. The persona
+editor picks either from the live Azure roster.
 
 ![Voice mode — live digital-human avatar speaking the question, transcript streaming](docs/images/09-live-avatar-voice.png)
 
@@ -138,19 +131,14 @@ configures it — it is derived from the voice model you pick in `/admin`
 
 | Voice model | Pipeline | EoU detector | `timeout_ms` |
 | --- | --- | --- | --- |
-| A chat deployment (`gpt-5-mini`, today's default) | cascaded | `semantic_detection_v1_multilingual` | 1500 |
+| A chat deployment (`gpt-5-mini`, the default) | cascaded | `semantic_detection_v1_multilingual` | 1500 |
 | A realtime model (`gpt-realtime-*`, `azure-realtime`) | speech-to-speech | `smart_end_of_turn_detection` | 1000 |
 | BYOM `byom-azure-openai-realtime` | speech-to-speech | `smart_end_of_turn_detection` | 1000 |
 | BYOM, any other profile | cascaded | `semantic_detection_v1_multilingual` | 1500 |
 
-The text detector reads the recognised transcript, so it exists only on a cascaded pipeline and a
-speech-to-speech model refuses the whole session over it. The audio one works on both — but the A/B
-found the two merely *equivalent* (English last-stop 7.57 s vs 7.68 s, Chinese 8.98 s vs 8.96 s), so
-the path already running in production was left exactly as it was. Either way the **mouth is Azure
-Speech TTS**, which is what keeps lip-sync TTS-driven and the voice independent of the model. Full
-evidence, including which models are realtime (measured by probing, not by name — `phi4-mm-realtime`
-is cascaded despite its name): [`docs/voice-live-model-support.md`](docs/voice-live-model-support.md)
-§4.7-§4.10.
+Either way the voice is **Azure Speech TTS**, so lip-sync and the voice do not depend on the
+model. Which models are realtime, and the measurements behind this table:
+[`docs/voice-live-model-support.md`](docs/voice-live-model-support.md) §4.7-§4.10.
 
 - **Provider abstraction** — LLM / retrieval / voice each have a `mock` and an `azure`
   implementation; local dev and the whole CI suite run entirely on mocks.
