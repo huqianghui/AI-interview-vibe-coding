@@ -14,7 +14,6 @@
     "secretKey": { "value": "<generate: openssl rand -hex 32>" },
     "encryptionKey": { "value": "<generate: python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\">" },
     "seedAdminPassword": { "value": "<choose a strong admin password>" },
-    "adminApiToken": { "value": "<generate: openssl rand -hex 32>" },
     "azureFoundryEndpoint": { "value": "https://<existing-foundry-account>.cognitiveservices.azure.com/" },
     "foundryProjectEndpoint": { "value": "https://<existing-foundry-account>.services.ai.azure.com/api/projects/<project>" },
     "azureFoundryDefaultProject": { "value": "<existing-project-name>" },

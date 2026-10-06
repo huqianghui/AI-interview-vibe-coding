@@ -47,8 +47,6 @@ param secretKey string
 param encryptionKey string
 @secure()
 param seedAdminPassword string
-@secure()
-param adminApiToken string
 
 param storageAccountBlobEndpoint string
 param clientBundleContainerName string = 'client-bundle'
@@ -170,10 +168,6 @@ resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
           name: 'seed-admin-password'
           value: seedAdminPassword
         }
-        {
-          name: 'admin-api-token'
-          value: adminApiToken
-        }
       ]
     }
     template: {
@@ -206,18 +200,10 @@ resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
               name: 'SEED_ADMIN_PASSWORD'
               secretRef: 'seed-admin-password'
             }
-            {
-              name: 'ADMIN_API_TOKEN'
-              secretRef: 'admin-api-token'
-            }
             // Fresh boot has no saved DB master config, so pin providers to azure here; the app
             // reaches Foundry / Voice Live via the MI (DefaultAzureCredential + AZURE_CLIENT_ID).
             {
               name: 'DEFAULT_LLM_PROVIDER'
-              value: 'azure'
-            }
-            {
-              name: 'DEFAULT_VOICE_PROVIDER'
               value: 'azure'
             }
             {

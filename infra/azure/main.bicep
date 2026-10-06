@@ -54,10 +54,6 @@ param encryptionKey string
 @description('Seeded admin password (backend SEED_ADMIN_PASSWORD). Empty disables admin seeding. Do not commit real values.')
 param seedAdminPassword string = ''
 
-@secure()
-@description('Admin bearer token for admin routes (backend ADMIN_API_TOKEN). Do not commit real values.')
-param adminApiToken string = ''
-
 // Images are owned by the app-deploy pipeline (deploy-app.yml `az containerapp update --image`),
 // NOT by infra. Default EMPTY = "preserve the currently-running image" so a steady-state infra
 // re-apply is idempotent and never clobbers the pipeline-deployed image back to a placeholder
@@ -241,7 +237,6 @@ module containerApps './modules/container-apps.bicep' = {
     secretKey: secretKey
     encryptionKey: encryptionKey
     seedAdminPassword: seedAdminPassword
-    adminApiToken: adminApiToken
     storageAccountBlobEndpoint: storage.outputs.blobEndpoint
     clientBundleContainerName: storage.outputs.clientBundleContainerName
     clientBundleBlob: clientBundleBlob

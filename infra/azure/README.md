@@ -18,8 +18,8 @@ A deliberately small footprint (subscription-scope `main.bicep` creates the reso
 | GitHub OIDC identity | keyless deploy from GitHub Actions |
 | Role assignments | AcrPull / Storage Blob Data Reader (backend MI); Contributor / AcrPush (deploy MI) |
 
-> **Runtime secrets.** The four secrets (`secret-key`, `encryption-key`, `seed-admin-password`,
-> `admin-api-token`) are delivered as Container App **native secrets** (encrypted at rest by the
+> **Runtime secrets.** The three secrets (`secret-key`, `encryption-key`, `seed-admin-password`)
+> are delivered as Container App **native secrets** (encrypted at rest by the
 > platform), passed as `@secure()` Bicep params from the gitignored `main.parameters.json`. They
 > never enter the repo.
 
@@ -74,7 +74,7 @@ az deployment sub create \
 
 Secret generation helpers:
 ```bash
-openssl rand -hex 32                                   # secret-key / admin-api-token
+openssl rand -hex 32                                   # secret-key
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"  # encryption-key
 ```
 

@@ -193,8 +193,8 @@ one-time setup + IaC: [`../infra/azure/README.md`](../infra/azure/README.md).
 - **Client-content security preserved** — the gitignored importer + source docs never enter the
   public repo or the CI image (enforced by `backend/.dockerignore`); they are designed to arrive only
   through the private `client-bundle` blob uploaded once out-of-band. `CLIENT_BUNDLE_BLOB` unset →
-  public-demo mode (generic bank only). Secrets (`SECRET_KEY`/`ENCRYPTION_KEY`/`SEED_ADMIN_PASSWORD`/
-  `ADMIN_API_TOKEN`) are **Container App native secrets** (encrypted at rest by the platform),
+  public-demo mode (generic bank only). Secrets (`SECRET_KEY`/`ENCRYPTION_KEY`/`SEED_ADMIN_PASSWORD`)
+  are **Container App native secrets** (encrypted at rest by the platform),
   passed as `@secure()` Bicep params from the gitignored `main.parameters.json`, never in the repo.
 - **IaC** — subscription-scope `infra/azure/main.bicep` creates the RG + Log Analytics/App Insights,
   MI, Basic ACR, keyless Storage (private `client-bundle` + `materials`), Container
