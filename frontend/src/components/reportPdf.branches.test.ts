@@ -21,14 +21,23 @@ import { PDF_DOWNLOAD_TIMEOUT_MS, buildReportPdf, downloadReportPdf } from "./re
 
 const t = i18n.getFixedT("en-US");
 
+/** A node's inline text with its font runs joined back together, as the reader sees one line. */
+function inlineText(v: unknown): string {
+  if (typeof v === "string") return v;
+  if (Array.isArray(v)) return v.map(inlineText).join("");
+  if (v && typeof v === "object") return inlineText((v as { text?: unknown }).text ?? "");
+  return "";
+}
+
+/** Every line a document definition will print, in order (inline runs joined, blocks separate). */
 function texts(node: unknown): string[] {
   if (typeof node === "string") return [node];
   if (Array.isArray(node)) return node.flatMap(texts);
   if (node && typeof node === "object") {
     const n = node as Record<string, unknown>;
-    return [n.text, n.stack, n.ul, n.table && (n.table as { body: unknown }).body].flatMap((v) =>
-      v === undefined ? [] : texts(v),
-    );
+    const own = n.text === undefined ? [] : [inlineText(n.text)];
+    const blocks = [n.stack, n.ul, n.table && (n.table as { body: unknown }).body];
+    return [...own, ...blocks.flatMap((v) => (v === undefined ? [] : texts(v)))];
   }
   return [];
 }
@@ -74,8 +83,7 @@ describe("buildReportPdf, minimal and partial shapes", () => {
   });
 
   it("shows the same fallback grade as the page's gauge when the report has none", () => {
-    // The summary line is styled runs (the score is bold), which the helper joins with newlines.
-    expect(allText(MINIMAL)).toContain("0/100\n  ·  F\n");
+    expect(allText(MINIMAL)).toContain("0/100  ·  F  ·");
   });
 
   it("notes a stub question inside a scored report", () => {
@@ -152,6 +160,9 @@ describe("downloadReportPdf", () => {
     expect(fonts.bold).toBe(`${origin}/fonts/noto-sans-sc-bold-gb2312.otf`);
     expect(fonts.italics).toBe(fonts.normal);
     expect(fonts.bolditalics).toBe(fonts.bold);
+    const latin = pdf.setFonts.mock.calls[0][0].NotoSans;
+    expect(latin.normal).toBe(`${origin}/fonts/noto-sans-regular.ttf`);
+    expect(latin.bold).toBe(`${origin}/fonts/noto-sans-bold.ttf`);
     expect(pdf.createPdf).toHaveBeenCalledWith(expect.objectContaining({ pageSize: "A4" }));
     expect(pdf.download.mock.calls[0][0]).toMatch(/^interview-report-\d{4}-\d{2}-\d{2}\.pdf$/);
   });
