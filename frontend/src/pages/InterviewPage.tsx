@@ -16,29 +16,9 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Body1,
-  Button,
-  Card,
-  CardHeader,
-  Dialog,
-  DialogActions,
-  DialogBody,
-  DialogContent,
-  DialogSurface,
-  DialogTitle,
-  ProgressBar,
-  Spinner,
-  Text,
-  Textarea,
-  makeStyles,
-  mergeClasses,
-  tokens,
-} from "@fluentui/react-components";
+import { Body1, Button, Card, CardHeader, Text, mergeClasses } from "@fluentui/react-components";
 import {
   CandidateAuthError,
-  getReport,
-  getReportStream,
   applyJudge,
   getReview,
   judgeInterview,
@@ -69,6 +49,14 @@ import { MicPermissionDialog } from "../components/MicPermissionDialog";
 import { Transcript } from "../components/Transcript";
 import { ReportView } from "../components/ReportView";
 import { ReviewView } from "../components/ReviewView";
+import { AnswerCard } from "./interview/AnswerCard";
+import { ChannelSwitch, type Channel } from "./interview/ChannelSwitch";
+import { ExternalRecovery } from "./interview/ExternalRecovery";
+import { RestartDialog } from "./interview/RestartDialog";
+import { ScoringProgressCard } from "./interview/ScoringProgressCard";
+import { StatusLegend } from "./interview/StatusLegend";
+import { useInterviewStyles } from "./interview/styles";
+import { useScoringFlow } from "./interview/useScoringFlow";
 
 // "review" (requirement 4): once all questions are answered the interview is `completed` but NOT
 // scored — the candidate reviews every answer and must explicitly submit before scoring starts.
@@ -82,319 +70,9 @@ type Phase =
   | "scoring"
   | "scored"
   | "external_complete";
-type Channel = "text" | "voice";
-
-const useStyles = makeStyles({
-  // Stack for the non-live phases (idle / orientation / scoring / report). WIDTH AND PADDING ARE
-  // NOT SET HERE any more: this used to be `maxWidth: 760px; margin: 0 auto; padding: 24px`, and
-  // because LoginCard centred its own 420px box inside it, the page title and the card ended up on
-  // two different left edges. AppShell decides the measure for every route now.
-  page: {
-    display: "flex",
-    flexDirection: "column",
-    gap: tokens.spacingVerticalL,
-  },
-  // An action row inside a Card. Fluent's Card stretches its children, so every in-card button
-  // needs a row wrapper or it renders full-width by accident.
-  cardActions: {
-    display: "flex",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalS,
-    flexWrap: "wrap",
-  },
-  // Status legend under the header: the four voice states side by side, with the LIVE one lifted out of
-  // the dimmed row and explaining itself. Only the active state carries its sentence — see the comment
-  // at the render site for the measurement that decided it.
-  statusLegend: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: tokens.spacingHorizontalS,
-    // No width/margin here: AppShell owns the measure. This strip used to centre itself at 1400px
-    // while the same route's other phases centred at 760px.
-    marginBottom: tokens.spacingVerticalL,
-    flexShrink: 0,
-  },
-  statusItem: {
-    display: "flex",
-    alignItems: "flex-start",
-    gap: tokens.spacingHorizontalS,
-    flex: "1 1 200px",
-    minWidth: "180px",
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-    borderRadius: tokens.borderRadiusLarge,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    background: tokens.colorNeutralBackground2,
-    // Inactive states recede; the active one is restored to full presence below.
-    opacity: 0.55,
-    // On a phone the four cards stack, so the three inactive ones cost about 150px of the first screen
-    // and push the question the candidate was just asked into the bottom third (measured at 390px
-    // wide). A narrow screen cannot usefully show a four-state reference strip anyway, so it shows the
-    // live state only. The strip keeps its educational job where there is room for it.
-    "@media (max-width: 900px)": {
-      display: "none",
-    },
-    transition:
-      "opacity 200ms ease, border-color 200ms ease, box-shadow 200ms ease",
-  },
-  statusItemActive: {
-    // Overrides the narrow-screen hide above: whatever the width, the live state is shown.
-    "@media (max-width: 900px)": {
-      display: "flex",
-    },
-    opacity: 1,
-    border: `1px solid ${tokens.colorBrandStroke1}`,
-    boxShadow: tokens.shadow4,
-    background: tokens.colorNeutralBackground1,
-  },
-  statusDot: {
-    flexShrink: 0,
-    width: "10px",
-    height: "10px",
-    borderRadius: tokens.borderRadiusCircular,
-    marginTop: "5px",
-  },
-  statusTextCol: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "2px",
-    minWidth: 0,
-  },
-  statusItemLabel: {
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground1,
-  },
-  statusItemTip: {
-    color: tokens.colorNeutralForeground3,
-    lineHeight: tokens.lineHeightBase200,
-  },
-  // Live Q&A body: status strip, global top bar, then the two-column stage.
-  stageWrap: {
-    // Padding, width and the `calc(100vh - 56px)` height all moved to AppShell's `fill` measure —
-    // the one-viewport rule belongs to the shell, not to this page, so the admin and agent-editor
-    // routes cannot drift to a different answer. This is now purely the vertical stack.
-    display: "flex",
-    flexDirection: "column",
-    minHeight: 0,
-    flex: 1,
-  },
-  // Global top bar (P11 rule #3): progress + live voice state + channel switch, spanning the full
-  // width above both columns. Frosted-glass surface so it reads as a control strip, not content.
-  topBar: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: tokens.spacingHorizontalL,
-    flexWrap: "wrap",
-    marginBottom: tokens.spacingVerticalL,
-    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalXL}`,
-    boxSizing: "border-box",
-    borderRadius: tokens.borderRadiusXLarge,
-    // Re-tinted onto the approved purple ramp (the old literal rgba(124,58,237) was a one-off
-    // violet that belonged to no palette). Kept as a gradient so the bar still reads as a control
-    // strip rather than content.
-    background: `linear-gradient(135deg, ${palette.violet}1A 0%, ${palette.magenta}0D 100%)`,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    backdropFilter: "blur(10px)",
-    boxShadow: tokens.shadow4,
-    flexShrink: 0,
-  },
-  topBarSlot: {
-    display: "flex",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalM,
-    minWidth: 0,
-  },
-  // The progress slot grows to fill the bar so the rail spreads across the whole row; the channel
-  // switch on the right keeps its natural width.
-  topBarGrow: { flex: 1, minWidth: "240px" },
-  topBarRight: { justifyContent: "flex-end", flexShrink: 0 },
-  // Segmented text/voice switch — one pill, two halves.
-  segmented: {
-    display: "inline-flex",
-    padding: "3px",
-    gap: "2px",
-    borderRadius: tokens.borderRadiusCircular,
-    background: tokens.colorNeutralBackground3,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-  },
-  segBtn: { borderRadius: tokens.borderRadiusCircular, minWidth: "84px" },
-  grid: {
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 3fr) minmax(380px, 2fr)",
-    // minmax(0, 1fr), NOT the default `auto` row: an auto row is sized from its content FIRST, so
-    // a long transcript pushed the row past the available height and both columns overflowed the
-    // viewport (measured at 23px while building the mockup, with the bottom gutter down to 1px).
-    // Capping the row makes the transcript's own scroller absorb the overflow instead.
-    gridTemplateRows: "minmax(0, 1fr)",
-    gap: tokens.spacingHorizontalXXL,
-    alignItems: "stretch",
-    // Width comes from AppShell; this used to centre itself at 1400px independently.
-    flex: 1,
-    minHeight: 0,
-    "@media (max-width: 900px)": {
-      gridTemplateColumns: "1fr",
-      gridTemplateRows: "auto",
-    },
-    // Matches AppShell's height escape (max-height: 560px): once the page is allowed to scroll,
-    // capping the row would still squeeze the question card against a height the page no longer
-    // has to respect. Let it size from content instead.
-    "@media (max-height: 560px)": { gridTemplateRows: "auto" },
-  },
-  // Below the breakpoint the two columns stack, and the stage comes first in DOM order — which put the
-  // question's TEXT entirely off screen on a phone (measured: 144px off a 390x844 iPhone, 76px off a
-  // 899px-wide desktop window, so this is a narrow-viewport problem and not a phone one). The question
-  // a candidate was just asked is the one thing they must be able to read without scrolling, and the
-  // digital human does not need watching while they answer. Order only; the desktop two-column layout,
-  // where both fit comfortably, is untouched.
-  stageOrderNarrow: {
-    "@media (max-width: 900px)": { order: 2 },
-  },
-  controlsOrderNarrow: {
-    "@media (max-width: 900px)": { order: 1 },
-  },
-  // Left: the dark "stage" the digital human / orb sits on.
-  stage: {
-    position: "relative",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    // Adapt to the grid's height (bounded by the viewport-height stageWrap) instead of a fixed
-    // 560px that forced the stage taller than the screen. minHeight:0 lets flex shrink it.
-    minHeight: 0,
-    height: "100%",
-    // border-box so the vertical padding is INCLUDED in height:100% — otherwise the stage renders
-    // (row height + 40px padding), overflowing the viewport (cropping the figure's legs) and
-    // standing 40px taller than the right column. With border-box it matches the column exactly.
-    boxSizing: "border-box",
-    // NO frame (owner rule 2026-09-24: "inner and outer frame one colour, or no outer frame"): the
-    // stage is a transparent layout box; AvatarView sizes ITSELF to the stream's exact aspect and
-    // carries the rounded corners + shadow, so the digital human is the only surface on screen.
-    background: "transparent",
-    overflow: "hidden",
-    padding: 0,
-    "@media (max-width: 900px)": { minHeight: "360px" },
-  },
-  stageAvatar: {
-    width: "100%",
-    flex: 1,
-    display: "flex",
-    // TOP-aligned, not centred (owner, 2026-10-02: "it needs to line up with the question"). The
-    // avatar box is sized to the stream's exact aspect by `AvatarView`, so centring it left a gap
-    // above the figure and the stage started ~96px BELOW the question card on the right — the two
-    // columns visibly disagreed about where the content began. Flex-start puts the top edge of the
-    // media on the same line as the card's top. Horizontal centring is kept.
-    alignItems: "flex-start",
-    justifyContent: "center",
-  },
-  // Right: the control column — a flex column so the transcript can grow to fill leftover height.
-  controls: {
-    display: "flex",
-    flexDirection: "column",
-    gap: tokens.spacingVerticalL,
-    minWidth: 0,
-    minHeight: 0,
-    // SAFETY NET, and it is load-bearing. Capping the grid row at minmax(0, 1fr) stops a long
-    // transcript from pushing the columns past the viewport, but a capped row plus the shell's
-    // `overflow: hidden` means anything that still does not fit is not cramped, it is CLIPPED AND
-    // UNREACHABLE. CI caught exactly that: at Playwright's 1280x720 the resumed interview (whose
-    // transcript already holds the first answer) pushed the answer textarea out of the row, and
-    // `candidate-interview.spec.ts:171` could not see it. The transcript shrinking is the intended
-    // relief valve (see transcriptFill), but it cannot cover the case where the question card and
-    // the answer controls alone exceed the row. Letting this column scroll means the question and
-    // the answer box are always reachable, whatever the viewport.
-    overflowY: "auto",
-  },
-  questionCard: {
-    display: "flex",
-    flexDirection: "column",
-    gap: tokens.spacingVerticalM,
-  },
-  questionEyebrow: {
-    color: tokens.colorBrandForeground1,
-    textTransform: "uppercase",
-    letterSpacing: "0.06em",
-  },
-  questionText: {
-    fontSize: tokens.fontSizeBase600,
-    lineHeight: tokens.lineHeightBase600,
-    fontWeight: tokens.fontWeightSemibold,
-  },
-  // Wrapper that lets the transcript flex-grow and scroll internally (auto-fit, no fixed height).
-  transcriptFill: {
-    flex: 1,
-    // Was a hard `minHeight: 120px`, which fought the whole point of capping the grid row: the
-    // transcript is the column's relief valve (P11 rule #4 — transcript is SECONDARY to the
-    // question and the controls), and a floor stops it relieving anything. It keeps a comfortable
-    // 120px wherever there is room via flex-basis, but it is now allowed to collapse rather than
-    // squeeze the answer box out of a short viewport.
-    flexBasis: "120px",
-    minHeight: 0,
-    display: "flex",
-    flexDirection: "column",
-  },
-  fallbackNote: {
-    display: "block",
-    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}`,
-    borderRadius: tokens.borderRadiusMedium,
-    background: tokens.colorNeutralBackground3,
-    color: tokens.colorNeutralForeground2,
-  },
-  voiceControls: {
-    display: "flex",
-    flexDirection: "column",
-    gap: tokens.spacingVerticalS,
-  },
-  // BUTTONS ONLY — nothing else goes in this row. The video cooldown reason used to render as a
-  // sibling BETWEEN the buttons, and on a weak network that text stole enough horizontal space to
-  // force "Turn on video" and "I'm done answering" to wrap onto two lines: the controls visibly
-  // changed shape at the exact moment the candidate needed them to be familiar (owner, 2026-10-02 —
-  // the buttons must not change at all). The reason now renders BELOW the row. `wrap` plus the
-  // per-button `flexShrink: 0` / `nowrap` below make the old failure structurally impossible rather
-  // than merely absent: anything added here moves to a new line instead of squeezing a button.
-  voiceButtons: { display: "flex", flexWrap: "wrap", gap: tokens.spacingHorizontalS },
-  voiceButton: { flexShrink: 0, whiteSpace: "nowrap" },
-  // The cooldown reason, on its own line under the buttons. Deliberately NOT red: this is a wait,
-  // not a fault — the automation is working as designed and the picture comes back on its own, so
-  // the error colour would claim something is broken. Same reasoning as AvatarView refusing to reuse
-  // the `voiceUnavailable` path for a media downgrade.
-  voiceHint: { color: tokens.colorNeutralForeground3 },
-  // External-brain (Phase 2) awaiting overlay: a quiet "interviewer is thinking" row shown in place
-  // of the answer inputs while the next turn is produced, so the candidate waits instead of typing.
-  externalThinking: {
-    display: "flex",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalM,
-    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
-    borderRadius: tokens.borderRadiusMedium,
-    background: tokens.colorNeutralBackground3,
-    color: tokens.colorNeutralForeground2,
-  },
-  // Recovery block: a stalled external turn the candidate clears with an explicit 恢复.
-  recoveryBlock: {
-    display: "flex",
-    flexDirection: "column",
-    gap: tokens.spacingVerticalS,
-    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
-    borderRadius: tokens.borderRadiusMedium,
-    border: `1px solid ${tokens.colorPaletteYellowBorderActive}`,
-    background: tokens.colorNeutralBackground2,
-  },
-});
-
-/** Dot color per state for the status legend, matching each state's semantic hue. */
-const STATUS_DOT_COLOR: Record<AudioState, string> = {
-  idle: tokens.colorBrandForeground1,
-  listening: tokens.colorPaletteBlueForeground2,
-  speaking: tokens.colorPaletteGreenForeground1,
-  muted: tokens.colorNeutralForeground3,
-};
-
-/** Order the four states read left-to-right in the legend. */
-const STATUS_ORDER: AudioState[] = ["idle", "listening", "speaking", "muted"];
 
 export function InterviewPage() {
-  const styles = useStyles();
+  const styles = useInterviewStyles();
   const { t, i18n } = useTranslation();
   // Candidate login gate (#102): the page shows the login card whenever no candidate JWT is
   // present — checked once at mount from sessionStorage; loginCandidate()/signOutCandidate() are
@@ -429,20 +107,6 @@ export function InterviewPage() {
   // verbatim instead of the generic "voice unavailable" note. Owner directive: this page must not
   // silently degrade — when voice fails, show the actual message so a human can judge the cause.
   const [voiceErrorDetail, setVoiceErrorDetail] = useState<string | null>(null);
-  // Real scoring progress streamed from /report/stream (null until the first progress line, and
-  // when the stream fell back to the batch endpoint — the copy then shows the latched fallback).
-  const [scoringProgress, setScoringProgress] = useState<{
-    done: number;
-    total: number;
-  } | null>(null);
-  // The opt-in SOP coverage audit's OWN progress (null unless the candidate ticked the box). It runs
-  // after every answer is graded, so without a second line the screen froze on "N of N scored" for
-  // the length of the audit. Its total is the number of model calls the audit needs, which is
-  // usually fewer than the question count — see `CoverageProgress`.
-  const [coverageProgress, setCoverageProgress] = useState<{
-    done: number;
-    total: number;
-  } | null>(null);
 
   const interviewRef = useRef<Interview | null>(null);
   interviewRef.current = interview;
@@ -642,15 +306,6 @@ export function InterviewPage() {
     },
     [channel, voice, showNudge],
   );
-  // Turning the picture back on waits out an Azure rate-limit cooldown. Compute the copy at render
-  // time from a fixed deadline — no ticking timer, so this costs nothing when nothing else changes.
-  const videoToggleBlocked = voice.mediaMode === "audio-only" && !voice.canEnableVideo;
-  const videoCooldownSeconds = voice.videoEnableAtMs
-    ? Math.max(1, Math.ceil((voice.videoEnableAtMs - Date.now()) / 1000))
-    : null;
-  const videoCooldownReason = videoCooldownSeconds
-    ? t("voice.showAvatarCooldownSeconds", { seconds: videoCooldownSeconds })
-    : t("voice.showAvatarCooldown");
 
   // Speculative prefetch (D17): the moment an utterance ends, ask the judge with `dry_run` so the
   // LLM round-trip (2–3 s) overlaps the silence window (2 s) instead of following it. The result
@@ -835,33 +490,17 @@ export function InterviewPage() {
       const iv = interviewRef.current;
       if (!iv) return;
       setPhase("scoring");
-      setScoringProgress(null);
-      setCoverageProgress(null);
       let r: Report;
       try {
-        try {
-          // Streaming first: one progress event per question as the backend grades it.
-          r = await getReportStream(
-            iv.interview_session_id,
-            sopCoverageCheck,
-            (p) => setScoringProgress({ done: p.done, total: p.total }),
-            (p) => setCoverageProgress({ done: p.done, total: p.total }),
-          );
-        } catch {
-          // Stream unavailable (older backend, proxy hiccup) — the batch endpoint returns the same
-          // report; a scored interview re-scores idempotently so retrying after a mid-stream failure
-          // is safe. The screen shows the latched fallback numerator meanwhile.
-          r = await getReport(iv.interview_session_id, sopCoverageCheck);
-        }
+        r = await scoring.scoreInterview(iv.interview_session_id, sopCoverageCheck);
       } catch (e) {
-        // Both paths failed. Go BACK to review instead of leaving the candidate on the scoring
-        // screen: `guard` only sets the error banner, so the phase stayed "scoring" forever and the
-        // screen had no retry and no way back — a dead end with a spinner on it. Review still has
-        // their answers and the submit button, and re-scoring is idempotent, so the natural next
-        // action is to press it again. Rethrow so `guard` still surfaces what went wrong.
+        // Both the stream and the batch endpoint failed. Go BACK to review instead of leaving the
+        // candidate on the scoring screen: `guard` only sets the error banner, so the phase stayed
+        // "scoring" forever and the screen had no retry and no way back — a dead end with a spinner
+        // on it. Review still has their answers and the submit button, and re-scoring is
+        // idempotent, so the natural next action is to press it again. Rethrow so `guard` still
+        // surfaces what went wrong.
         setPhase("review");
-        setScoringProgress(null);
-        setCoverageProgress(null);
         throw e;
       }
       setReport(r);
@@ -1090,32 +729,11 @@ export function InterviewPage() {
   });
 
   const q = interview?.current_question ?? null;
-  // REAL streamed progress when /report/stream delivered any. `done` is the number of answers
-  // FINISHED (v0.42.2.0: the backend grades them concurrently, so there is no single "currently
-  // analyzing" question to name — it is shown as-is, not done+1, which would claim one more answer
-  // is finished than actually is). Fallback (stream unavailable): the report's per-question count
-  // once it's back, else the total latched during the interview (current_question is null in the
-  // scoring phase, so q.total is gone).
-  const scoringTotal =
-    scoringProgress?.total ||
-    report?.per_question.length ||
-    questionTotalRef.current ||
-    1;
-  const scoringNarr = t("transition.scoring", {
-    n: scoringProgress
-      ? Math.min(scoringProgress.done, scoringTotal)
-      : Math.min(q?.index ?? 0, scoringTotal),
-    total: scoringTotal,
+  const scoring = useScoringFlow({
+    report,
+    questionIndex: q?.index ?? 0,
+    questionTotal: questionTotalRef.current,
   });
-  // Second line, only while the opt-in audit is running. Separate from the line above rather than
-  // replacing it: the scored count is the thing the candidate was watching, and swapping the copy
-  // out from under them would read as the first phase having been undone.
-  const coverageNarr = coverageProgress
-    ? t("transition.coverage", {
-        n: Math.min(coverageProgress.done, coverageProgress.total),
-        total: coverageProgress.total,
-      })
-    : null;
 
   const errorBanner = error && (
     <Body1
@@ -1157,29 +775,12 @@ export function InterviewPage() {
     </>
   );
   const restartDialog = (
-    <Dialog open={restartDialogOpen} onOpenChange={(_, d) => setRestartDialogOpen(d.open)}>
-      <DialogSurface>
-        <DialogBody>
-          <DialogTitle>{t("candidate.restartTitle")}</DialogTitle>
-          <DialogContent>
-            <Text as="p">{t("candidate.restartBody")}</Text>
-          </DialogContent>
-          <DialogActions>
-            <Button appearance="secondary" onClick={() => setRestartDialogOpen(false)}>
-              {t("candidate.restartCancel")}
-            </Button>
-            <Button
-              appearance="primary"
-              disabled={busy}
-              onClick={onRestartConfirmed}
-              data-testid="candidate-restart-confirm"
-            >
-              {t("candidate.restartConfirm")}
-            </Button>
-          </DialogActions>
-        </DialogBody>
-      </DialogSurface>
-    </Dialog>
+    <RestartDialog
+      open={restartDialogOpen}
+      onOpenChange={setRestartDialogOpen}
+      busy={busy}
+      onConfirm={onRestartConfirmed}
+    />
   );
 
   const micDialog = (
@@ -1197,175 +798,28 @@ export function InterviewPage() {
 
   // The channel switch (text/voice) — a segmented pill that lives in the global top bar.
   const channelSwitch = (
-    <div
-      className={styles.segmented}
-      role="tablist"
-      aria-label={t("voice.useVoice")}
-    >
-      <Button
-        className={styles.segBtn}
-        size="small"
-        appearance={channel === "text" ? "primary" : "subtle"}
-        onClick={() => setChannel("text")}
-      >
-        {t("voice.useText")}
-      </Button>
-      {/* Never permanently disabled: a transient failure (proxy hiccup, network blip) must stay
-          retryable — startVoice clears voiceUnavailable on a successful reconnect. */}
-      <Button
-        className={styles.segBtn}
-        size="small"
-        appearance={channel === "voice" ? "primary" : "subtle"}
-        onClick={startVoice}
-      >
-        {t("voice.useVoice")}
-      </Button>
-    </div>
+    <ChannelSwitch channel={channel} onText={() => setChannel("text")} onVoice={startVoice} />
   );
 
   // The answer controls (question card + text/voice answer). The question card fills its own space;
-  // the transcript below it flex-grows. Progress + status + channel switch now live in the top bar.
-  // External turns carry no question count (total = 0), so show the prompt without an "of N"
-  // denominator; bank questions keep the "Question X of N" progress eyebrow.
+  // the transcript below it flex-grows. Progress + status + channel switch live in the top bar.
   const answerControls = q && (
-    <Card className={styles.questionCard}>
-      <CardHeader
-        header={
-          <Text size={200} weight="semibold" className={styles.questionEyebrow}>
-            {isExternal
-              ? t("voice.roleInterviewer")
-              : t("questionProgress", { index: q.index + 1, total: q.total })}
-          </Text>
-        }
-      />
-      <Body1 as="p" className={styles.questionText}>
-        {q.prompt}
-      </Body1>
-
-      {voiceUnavailable && (
-        <Text size={200} className={styles.fallbackNote}>
-          {voiceErrorDetail
-            ? t("voice.errorDetail", { detail: voiceErrorDetail })
-            : t("voice.endedFallback")}
-        </Text>
-      )}
-
-      {/* Phase 2: while the external interviewer produces the next turn, replace the answer inputs
-          with a quiet "thinking" row so the candidate waits instead of answering a closed turn. */}
-      {isExternal && busy && (
-        <div
-          className={styles.externalThinking}
-          data-testid="external-thinking"
-        >
-          <Spinner size="tiny" />
-          <Text>{t("external.thinking")}</Text>
-        </div>
-      )}
-
-      {/* Phase 2: a stalled external turn (recovery_required / awaiting on resume) — the candidate
-          clears it with an explicit 恢复, which re-drives the same committed state (idempotent). */}
-      {externalStalled && !busy && (
-        <div className={styles.recoveryBlock} data-testid="external-recovery">
-          <Text weight="semibold">{t("external.recoveryTitle")}</Text>
-          <Text size={200}>{t("external.recoveryBody")}</Text>
-          <div>
-            <Button appearance="primary" disabled={busy} onClick={onRecover}>
-              {busy ? t("external.recovering") : t("external.recover")}
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Answer inputs — hidden while an external turn is thinking or stalled (nothing to answer). */}
-      {!(isExternal && (busy || externalStalled)) && channel === "text" && (
-        <>
-          {nudgeText ? (
-            <Text data-testid="judge-nudge" style={{ opacity: 0.85 }}>
-              {t("voice.roleInterviewer")}: {nudgeText}
-            </Text>
-          ) : null}
-          <Textarea
-            value={answer}
-            placeholder={t("answerPlaceholder")}
-            onChange={(_, d) => setAnswer(d.value)}
-            resize="vertical"
-          />
-          <div>
-            <Button
-              appearance="primary"
-              disabled={busy || !answer.trim()}
-              onClick={onSubmitText}
-            >
-              {busy ? t("submitting") : t("submit")}
-            </Button>
-          </div>
-        </>
-      )}
-
-      {!(isExternal && (busy || externalStalled)) && channel === "voice" && (
-        <div className={styles.voiceControls}>
-          {voice.connectionState === "connecting" && (
-            <Text>{t("voice.connecting")}</Text>
-          )}
-          {voice.connectionState === "reconnecting" && (
-            <Text style={{ opacity: 0.7 }}>{t("voice.reconnecting")}</Text>
-          )}
-          {voice.audioState === "listening" && (
-            <Text size={200} style={{ opacity: 0.7 }}>
-              {t("voice.stillListening")}
-            </Text>
-          )}
-          <div className={styles.voiceButtons} data-testid="voice-buttons">
-            <Button className={styles.voiceButton} onClick={voice.toggleMute}>
-              {voice.isMuted ? t("voice.unmute") : t("voice.mute")}
-            </Button>
-            {/* Manual override of the automatic weak-network degrade. Our thresholds cannot be right
-                for every network, so the candidate can force the picture off (saves ~1 Mbps and, more
-                importantly, stops the video starving the interviewer's voice) or force it back on.
-                Pinning also stops the automation from moving the mode on its own. */}
-            {/* Azure rate-limits avatar session creation and every switch makes a new one, so turning
-                the picture back ON has a cooldown. Disable the control instead of letting the click do
-                nothing — but SAY WHY: a dimmed button with no reason is indistinguishable from a bug,
-                and a screen-reader user would hear only "dimmed". Turning it OFF is never blocked;
-                that is the move that rescues the audio. */}
-            <Button
-              onClick={() =>
-                voice.setVideoPreference(voice.mediaMode === "audio-only" ? "on" : "off")
-              }
-              className={styles.voiceButton}
-              disabled={videoToggleBlocked}
-              title={videoToggleBlocked ? videoCooldownReason : undefined}
-              aria-describedby={videoToggleBlocked ? "voice-video-cooldown" : undefined}
-              data-testid="voice-video-toggle"
-            >
-              {voice.mediaMode === "audio-only" ? t("voice.showAvatar") : t("voice.hideAvatar")}
-            </Button>
-            {/* Manual end-of-answer control (P13) */}
-            <Button
-              appearance="primary"
-              className={styles.voiceButton}
-              disabled={busy || voice.connectionState !== "connected"}
-              onClick={onVoiceDone}
-            >
-              {t("voice.imDone")}
-            </Button>
-          </div>
-          {/* BELOW the row, never inside it. `aria-describedby` on the disabled button still points
-              here — association does not need DOM adjacency — so the screen-reader behaviour the
-              comment above demands is unchanged while the buttons keep their shape. */}
-          {videoToggleBlocked && (
-            <Text
-              id="voice-video-cooldown"
-              size={200}
-              className={styles.voiceHint}
-              data-testid="voice-video-cooldown"
-            >
-              {videoCooldownReason}
-            </Text>
-          )}
-        </div>
-      )}
-    </Card>
+    <AnswerCard
+      q={q}
+      isExternal={isExternal}
+      externalStalled={Boolean(externalStalled)}
+      busy={busy}
+      channel={channel}
+      voice={voice}
+      voiceUnavailable={voiceUnavailable}
+      voiceErrorDetail={voiceErrorDetail}
+      nudgeText={nudgeText}
+      answer={answer}
+      onAnswerChange={setAnswer}
+      onSubmitText={onSubmitText}
+      onVoiceDone={onVoiceDone}
+      onRecover={onRecover}
+    />
   );
 
   // Candidate login gate (#102): whenever no candidate JWT is present, the page shows ONLY the
@@ -1430,50 +884,7 @@ export function InterviewPage() {
               both channels — in voice mode it tracks the live audio state (listening/speaking/muted);
               in text mode there is no live audio, so the "idle/ready" card stays highlighted as a
               steady reference of what the states mean. */}
-          <div
-            className={styles.statusLegend}
-            role="group"
-            aria-label={t("voice.statusLegendLabel")}
-            data-testid="voice-status-legend"
-          >
-            {STATUS_ORDER.map((state) => {
-              const active = badgeState === state;
-              return (
-                <div
-                  key={state}
-                  className={mergeClasses(
-                    styles.statusItem,
-                    active && styles.statusItemActive,
-                  )}
-                  data-state={state}
-                  data-active={active}
-                  aria-current={active ? "true" : undefined}
-                >
-                  <span
-                    className={styles.statusDot}
-                    style={{ background: STATUS_DOT_COLOR[state] }}
-                    aria-hidden
-                  />
-                  <span className={styles.statusTextCol}>
-                    <Text size={200} className={styles.statusItemLabel}>
-                      {t(`voice.${state}`)}
-                    </Text>
-                    {/* The explanation belongs to the state you are IN. Rendering all four cost 248 of
-                        the first 486 pixels on a 390px phone (measured), pushing the question itself
-                        into the bottom third of the screen — the candidate scrolled past three
-                        sentences about things that were not happening to read what they were asked.
-                        Inactive states keep their dot and name, which is what carries the colour
-                        vocabulary; only the live one explains itself. */}
-                    {active && (
-                      <Text size={100} className={styles.statusItemTip}>
-                        {t(`voice.statusTips.${state}`)}
-                      </Text>
-                    )}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
+          <StatusLegend badgeState={badgeState} />
 
           {/* Global top bar: progress (left) · channel switch (right). The live voice state used to
               sit in the center here, but the status legend above already names AND highlights the
@@ -1544,29 +955,11 @@ export function InterviewPage() {
     <>
       <AppShell measure="reading" actions={candidateActions}>
         <div className={styles.page}>
-
-
-
         {/* Phase 2: an external turn that stalled before any question is on screen (e.g. a `start`
             that never posed one) — offer 恢复 rather than the dead-end "no questions" card. */}
         {phase === "interviewing" && !q && isExternal && externalStalled && (
           <Card>
-            <div
-              className={styles.recoveryBlock}
-              data-testid="external-recovery"
-            >
-              <Text weight="semibold">{t("external.recoveryTitle")}</Text>
-              <Text size={200}>{t("external.recoveryBody")}</Text>
-              <div>
-                <Button
-                  appearance="primary"
-                  disabled={busy}
-                  onClick={onRecover}
-                >
-                  {busy ? t("external.recovering") : t("external.recover")}
-                </Button>
-              </div>
-            </div>
+            <ExternalRecovery busy={busy} onRecover={onRecover} />
           </Card>
         )}
 
@@ -1609,45 +1002,14 @@ export function InterviewPage() {
           />
         )}
 
-        {/* Scoring-in-progress beat (P10). With streamed progress the bar is determinate (real
-            per-question grading progress off /report/stream); without it, spinner-only. */}
+        {/* Scoring-in-progress beat (P10). */}
         {phase === "scoring" && (
-          <Card>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                padding: 12,
-              }}
-            >
-              <Spinner size="small" />
-              <div>
-                <Text block>{scoringNarr}</Text>
-                {coverageNarr && (
-                  <Text block size={200} data-testid="coverage-progress">
-                    {coverageNarr}
-                  </Text>
-                )}
-              </div>
-            </div>
-            {scoringProgress && (
-              <div style={{ padding: "0 12px 12px" }}>
-                <ProgressBar
-                  value={scoringProgress.done}
-                  max={scoringProgress.total}
-                />
-              </div>
-            )}
-            {coverageProgress && (
-              <div style={{ padding: "0 12px 12px" }}>
-                <ProgressBar
-                  value={coverageProgress.done}
-                  max={coverageProgress.total}
-                />
-              </div>
-            )}
-          </Card>
+          <ScoringProgressCard
+            narration={scoring.narration}
+            coverageNarration={scoring.coverageNarration}
+            scoringProgress={scoring.scoringProgress}
+            coverageProgress={scoring.coverageProgress}
+          />
         )}
 
         {phase === "scored" && report && <ReportView report={report} />}

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.47.6.0 (2026-10-06)
+
+### Changed
+- **The interview page is split into its parts.** `InterviewPage.tsx` was 1,662 lines; it is now
+  1,000, with the pieces that have clean edges moved to `frontend/src/pages/interview/`: the
+  question-and-answer card, the voice status legend, the text/voice switch, the restart dialog,
+  the scoring progress card, the styles, and the scoring flow (stream first, batch fallback, two
+  progress counters) as its own hook. The external-turn recovery block was written out twice; it is
+  now one component used in both places. The judge's pause timing stays in the page on purpose:
+  it and the voice hook hand each other callbacks, and pulling them apart would trade a long file
+  for a fragile one. The interview screen looks the same (its README screenshot was recaptured and
+  is visually identical).
+
+### Tests
+- The question card's states the page tests never reached: an external turn that is thinking or
+  stalled (the recovery path had no test at all), voice that fell back to text with and without
+  Azure's message, the picture toggle's cooldown with and without a deadline, and the voice hints.
+  The scoring flow's batch fallback, its cleanup when both endpoints fail, and its fallback counts.
+  The interview page and its parts go from 91.7% to 96% of lines covered; every new module is at
+  100%.
+
 ## 0.47.5.0 (2026-10-06)
 
 ### Changed
