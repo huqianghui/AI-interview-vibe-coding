@@ -15,7 +15,7 @@ by call order.
 Covers the three route pairs the TODO named:
   - ``/answer`` vs ``/answer`` (a double-submit race) — bank engine's ``answer_finalized``.
   - ``/answer`` vs ``/restart`` — ``answer_finalized`` vs ``abandon_interview``.
-  - ``/judge`` (and ``/judge/apply``) vs ``/answer`` — the shared ``_turn_version_changed``
+  - ``/judge`` (and ``/judge/apply``) vs ``/answer`` — the shared ``turn_version_changed``
     freshness check that now guards both judge routes, exercised directly since it has no
     write-side race of its own to synchronize (it is a read-after-a-slow-step check, not a CAS).
 """
@@ -29,9 +29,9 @@ from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import app.models  # noqa: F401 — registers ORM classes on Base.metadata
-from app.api.interview import _turn_version_changed
 from app.db import Base
 from app.interview import state_machine
+from app.interview.judge_flow import turn_version_changed
 from app.interview.state_machine import InterviewStateError
 from app.models.anonymous_session import AnonymousCandidateSession
 from app.models.interview import InterviewSession
@@ -148,10 +148,10 @@ async def test_concurrent_answer_and_restart_never_corrupt_each_other(tmp_path):
 async def test_judge_freshness_check_detects_an_answer_committed_during_its_slow_step(tmp_path):
     """``/judge`` (and ``/judge/apply``) hold no lock while their slow step runs — ``/judge``'s LLM
     call, or the gap between ``/judge/apply``'s own staleness re-queries and its write. This proves
-    ``_turn_version_changed`` (app/api/interview.py) correctly observes, from a SEPARATE connection
-    that has been sitting on a now-stale snapshot, a commit made by a genuinely concurrent
-    ``answer_finalized`` on ANOTHER connection while the first connection's "slow step" was in
-    flight — the exact shape of the judge-vs-submit race named in the TODO.
+    ``turn_version_changed`` (app/interview/judge_flow.py) correctly observes, from a SEPARATE
+    connection that has been sitting on a now-stale snapshot, a commit made by a genuinely
+    concurrent ``answer_finalized`` on ANOTHER connection while the first connection's "slow step"
+    was in flight — the exact shape of the judge-vs-submit race named in the TODO.
 
     The judge side's ``asyncio.sleep`` stands in for the real slow step (an outbound LLM call /
     ``run_judge``); it does not fix the ordering artificially — it is what makes the two coroutines
@@ -173,7 +173,7 @@ async def test_judge_freshness_check_detects_an_answer_committed_during_its_slow
 
             async def judge_side() -> bool:
                 await asyncio.sleep(0.05)  # stands in for the real outbound LLM call
-                return await _turn_version_changed(db_judge, judge_session)
+                return await turn_version_changed(db_judge, judge_session)
 
             async def answer_side() -> InterviewSession:
                 return await state_machine.answer_finalized(db_answer, answer_session, "answer")

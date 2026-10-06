@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.47.4.0 (2026-10-06)
+
+### Changed
+- **The interview routes no longer hold interview logic.** The pre-submit judge's whole decision
+  (staleness checks, the per-question budget, one call in flight, the `judge_events` row, and the
+  deferred delivery of a dry-run verdict) moved out of `api/interview.py` into
+  `interview/judge_flow.py`, next to the judge itself. Finding a candidate's own interview moved
+  into the state machine, and opening a cited SOP document into a new `sop_document_service`.
+  The admin SOP listing, the admin users list and the voice socket's account check now go through
+  services too, so no route queries the database directly any more. Behaviour is unchanged: the
+  same answers, the same 404s and 409s with the same messages.
+
+### Tests
+- The races the routes could not be driven into over HTTP now have tests: a submit landing while
+  the judge's model call is in flight, a restart landing between a dry run's checks and its
+  delivery, a delivery with a moved follow-up count, and the raw model-call bound. So do a cited
+  SOP document with no stored file and one whose bytes are gone. Both new modules are at 100%.
+
 ## 0.47.3.0 (2026-10-06)
 
 ### Added

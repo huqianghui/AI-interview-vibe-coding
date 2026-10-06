@@ -3,13 +3,13 @@
 import asyncio
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.dependencies import require_role
 from app.models.user import User
 from app.schemas.auth import AdminUserResponse
+from app.services import user_service
 from app.services.auth_service import derive_candidate_password, verify_password
 
 router = APIRouter(
@@ -25,22 +25,7 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
 ) -> list[AdminUserResponse]:
     """List users with optional search (name/username/email), role, and active filters."""
-    query = select(User)
-    if search:
-        pattern = f"%{search}%"
-        query = query.where(
-            or_(
-                User.full_name.ilike(pattern),
-                User.username.ilike(pattern),
-                User.email.ilike(pattern),
-            )
-        )
-    if role:
-        query = query.where(User.role == role)
-    if is_active is not None:
-        query = query.where(User.is_active == is_active)
-    query = query.order_by(User.created_at.desc())
-    rows = (await db.execute(query)).scalars().all()
+    rows = await user_service.list_users(db, search=search, role=role, is_active=is_active)
     return [await _with_derived_password(u) for u in rows]
 
 

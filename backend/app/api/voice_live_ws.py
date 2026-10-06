@@ -21,12 +21,10 @@ import re
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from jose import JWTError, jwt
-from sqlalchemy import select
 
 from app.config import get_settings
 from app.db import async_session_factory
-from app.models.user import User
-from app.services import config_service, persona_service
+from app.services import config_service, persona_service, user_service
 from app.services.agents.voice_live_metadata import FALLBACK_LOCALE
 from app.services.anonymous_session_service import AnonymousSessionError, verify_anonymous_token
 from app.services.voice_live_probe import uses_realtime_pipeline
@@ -111,9 +109,7 @@ async def _authenticate(ws: WebSocket, token: str) -> str | None:
         user_id = payload.get("sub")
         if user_id:
             async with async_session_factory() as db:
-                user = (
-                    await db.execute(select(User).where(User.id == user_id))
-                ).scalar_one_or_none()
+                user = await user_service.get_user(db, user_id)
             if user is not None and user.is_active:
                 return "admin" if user.role == "admin" else "user"
 
