@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.47.3.0 (2026-10-06)
+
+### Added
+- **The frontend's API types are now checked against the backend's own schema.** They were written
+  by hand to match the Pydantic models, and nothing noticed when the two drifted: the contract test
+  added in v0.46.0.0 checks that each route exists, not what it sends. The backend's OpenAPI schema
+  is now committed as `frontend/src/api/openapi.json`, TypeScript types are generated from it, and
+  `npm run typecheck` fails when a hand-written type declares a field the backend does not have, or
+  a type the backend's does not allow, naming the field. The hand-written types stay the ones the
+  app uses, because they are often narrower than the backend (a status union where the backend says
+  `string`). 25 types are covered, and none had drifted.
+- After changing a route or a model: `python scripts/export_openapi.py` in `backend/`, then
+  `npm run gen:api` in `frontend/`. A test on each side fails if either step was skipped.
+
+### Changed
+- The two response models both named `QuestionOut` are now `AdminQuestionOut` and
+  `CurrentQuestionOut`, so each has its own name in the schema. The JSON they return is unchanged.
+
 ## 0.47.2.0 (2026-10-06)
 
 ### Changed

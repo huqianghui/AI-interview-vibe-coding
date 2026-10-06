@@ -64,7 +64,7 @@ class QuestionPatch(BaseModel):
     follow_up_prompt: str | None = None
 
 
-class QuestionOut(BaseModel):
+class AdminQuestionOut(BaseModel):
     question_id: str
     text: str
     language: str
@@ -103,7 +103,7 @@ def _bank_out(bank) -> BankOut:
     )
 
 
-def _question_out(q, checklist_item_count: int = 0) -> QuestionOut:
+def _question_out(q, checklist_item_count: int = 0) -> AdminQuestionOut:
     import json
 
     try:
@@ -111,7 +111,7 @@ def _question_out(q, checklist_item_count: int = 0) -> QuestionOut:
         points = [str(p) for p in points] if isinstance(points, list) else []
     except (ValueError, TypeError):
         points = []
-    return QuestionOut(
+    return AdminQuestionOut(
         question_id=q.id,
         text=q.text,
         language=q.language,
@@ -189,8 +189,10 @@ async def set_default(bank_id: str, db: AsyncSession = Depends(get_db)) -> BankO
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bank not found") from exc
 
 
-@router.get("/{bank_id}/questions", response_model=list[QuestionOut])
-async def list_questions(bank_id: str, db: AsyncSession = Depends(get_db)) -> list[QuestionOut]:
+@router.get("/{bank_id}/questions", response_model=list[AdminQuestionOut])
+async def list_questions(
+    bank_id: str, db: AsyncSession = Depends(get_db)
+) -> list[AdminQuestionOut]:
     try:
         await svc.get_bank(db, bank_id)
     except QuestionBankNotFound as exc:
@@ -201,11 +203,11 @@ async def list_questions(bank_id: str, db: AsyncSession = Depends(get_db)) -> li
 
 
 @router.post(
-    "/{bank_id}/questions", response_model=QuestionOut, status_code=status.HTTP_201_CREATED
+    "/{bank_id}/questions", response_model=AdminQuestionOut, status_code=status.HTTP_201_CREATED
 )
 async def add_question(
     bank_id: str, body: QuestionIn, db: AsyncSession = Depends(get_db)
-) -> QuestionOut:
+) -> AdminQuestionOut:
     import json
 
     try:
@@ -236,10 +238,10 @@ async def add_question(
     return _question_out(q, counts.get(q.id, 0))
 
 
-@router.patch("/questions/{question_id}", response_model=QuestionOut)
+@router.patch("/questions/{question_id}", response_model=AdminQuestionOut)
 async def edit_question(
     question_id: str, body: QuestionPatch, db: AsyncSession = Depends(get_db)
-) -> QuestionOut:
+) -> AdminQuestionOut:
     import json
 
     changes: dict = {}

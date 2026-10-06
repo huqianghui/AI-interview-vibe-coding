@@ -61,3 +61,18 @@ Making an utterance file from macOS: `say -v Samantha -o u1.aiff "…"` then
 `afconvert -f WAVE -d LEI16@16000 -c 1 u1.aiff u1.wav`. (16 kHz, not 24: the session now
 declares `input_audio_sampling_rate: 16000` to match the browser — see
 `docs/voice-live-control-notes.md` §4. A 24 kHz file trips the frame-rate assert.)
+
+## `export_openapi.py` — the frontend's API contract snapshot
+
+Not a probe: it needs no backend running and no Azure. After changing a route or a request/response
+model, re-export the schema and regenerate the frontend types:
+
+```bash
+cd backend && python scripts/export_openapi.py   # writes frontend/src/api/openapi.json
+cd ../frontend && npm run gen:api                # regenerates frontend/src/api/schema.d.ts
+npm run typecheck                                # contract.check.ts names any drifted field
+```
+
+CI enforces each step: `tests/test_openapi_snapshot.py` fails on a stale snapshot,
+`schema.sync.test.ts` on a stale `schema.d.ts`, and `npm run typecheck` on a hand-written API type
+that is no longer a refinement of its backend schema.
