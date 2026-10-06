@@ -1,9 +1,9 @@
 """Admin persona management (SPEC F5). All routes require the admin bearer token.
 
 These endpoints configure the interviewer digital human — identity, voice knobs, and the Foundry
-agent binding. They are strictly admin-only (``require_admin``): a candidate's anonymous session
-must never reach persona config (SPEC P3/P4 boundary — persona prompt fragments are interviewer
-internals).
+agent binding. They are strictly admin-only (``require_role("admin")``): a candidate's anonymous
+session must never reach persona config (SPEC P3/P4 boundary — persona prompt fragments are
+interviewer internals).
 
 Agent sync runs inline through the configured agent-sync adapter (mock in dev/CI, Azure with a
 Foundry endpoint). A sync failure is captured as ``agent_sync_status=failed`` + error and returned

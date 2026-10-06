@@ -152,9 +152,3 @@ async def verify_anonymous_token(db: AsyncSession, token: str) -> AnonymousCandi
     if session.expires_at < _now():
         raise AnonymousSessionError("Session expired")
     return session
-
-
-async def touch_session(db: AsyncSession, session: AnonymousCandidateSession) -> None:
-    session.last_activity_at = _now()
-    session.request_count += 1
-    await db.commit()

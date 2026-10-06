@@ -8,7 +8,6 @@ import pytest
 from sqlalchemy import select
 
 from app.interview import state_machine
-from app.interview.memory import build_follow_up_prompt
 from app.interview.questions import FALLBACK_QUESTIONS, Question, question_at
 from app.interview.state_machine import InterviewStateError
 from app.models.interview import InterviewTurn
@@ -38,11 +37,25 @@ async def _turns(db, interview_id):
 _FOLLOW_UP_Q_INDEX = next(i for i, q in enumerate(QUESTIONS) if q.max_follow_ups > 0)
 
 
-async def _template_provider(question: Question, answer_text: str, follow_ups_asked: int) -> str:
-    """A FollowUpProvider for the hook tests below: the F7 memory-moment template (cite what the
-    candidate just said + the question's authored probe). No route wires a provider since v0.39.2.0
-    (a submit always advances); these tests exercise the retained hook's mechanics."""
-    return build_follow_up_prompt(question.follow_up_prompt, answer_text, locale=question.language)
+async def _seed_legacy_follow_up(db, interview, question_id: str, main: str, probe: str) -> None:
+    """Write a main answer then an interviewer ``follow_up`` turn, the way pre-v0.39.3.0 sessions
+    recorded them. Nothing writes these any more, but stored sessions still carry them."""
+    first = await state_machine._next_turn_index(db, interview.id)
+    for offset, (role, kind, content) in enumerate(
+        [("candidate", "main", main), ("interviewer", "follow_up", probe)]
+    ):
+        db.add(
+            InterviewTurn(
+                interview_session_id=interview.id,
+                question_id=question_id,
+                turn_index=first + offset,
+                role=role,
+                turn_kind=kind,
+                source="text",
+                content=content,
+            )
+        )
+    await db.commit()
 
 
 async def _candidate(db):
@@ -150,7 +163,7 @@ async def test_score_completed_produces_report_and_flips_status(db_session):
 
 
 @pytest.mark.asyncio
-async def test_follow_up_stays_on_question_then_advances(db_session):
+async def test_legacy_follow_up_reads_back_and_its_answer_advances(db_session):
     cand = await _candidate(db_session)
     interview = await state_machine.start_interview(db_session, cand.id)
 
@@ -166,34 +179,20 @@ async def test_follow_up_stays_on_question_then_advances(db_session):
     base_cq = await state_machine.get_current_question(db_session, interview)
     assert base_cq is not None and base_cq["is_follow_up"] is False
 
-    # First (main) answer to it must NOT advance — a follow-up is owed (a provider is wired in).
-    interview = await state_machine.answer_finalized(
+    # A legacy session answered this question and was then asked a follow-up on it.
+    await _seed_legacy_follow_up(
         db_session,
         interview,
+        fu_question.id,
         "my main answer, sufficiently long",
-        follow_up_provider=_template_provider,
+        f"About your answer: {fu_question.follow_up_prompt}",
     )
-    assert interview.current_question_index == _FOLLOW_UP_Q_INDEX
 
     # With a follow-up pending, the current question flips is_follow_up True so voice suppresses its
-    # verbatim read (the agent's own auto-response voices the clarification — see InterviewPage).
+    # verbatim read.
     fu_cq = await state_machine.get_current_question(db_session, interview)
     assert fu_cq is not None and fu_cq["is_follow_up"] is True
     assert fu_question.follow_up_prompt in fu_cq["prompt"]
-
-    # A follow-up interviewer turn was recorded for this question. F7: the follow-up references
-    # the candidate's prior answer AND still carries the base probe.
-    turns = await _turns(db_session, interview.id)
-    fu_prompts = [
-        t
-        for t in turns
-        if t.question_id == fu_question.id
-        and t.role == "interviewer"
-        and t.turn_kind == "follow_up"
-    ]
-    assert len(fu_prompts) == 1
-    assert fu_question.follow_up_prompt in fu_prompts[0].content
-    assert "my main answer" in fu_prompts[0].content  # cites what the candidate actually said
 
     # The follow-up answer is recorded as a follow_up candidate turn and now advances.
     prev_index = interview.current_question_index
@@ -201,7 +200,6 @@ async def test_follow_up_stays_on_question_then_advances(db_session):
         db_session,
         interview,
         "my follow-up elaboration, also long enough",
-        follow_up_provider=_template_provider,
     )
     assert interview.current_question_index == prev_index + 1
 
@@ -212,6 +210,14 @@ async def test_follow_up_stays_on_question_then_advances(db_session):
         if t.question_id == fu_question.id and t.role == "candidate" and t.turn_kind == "follow_up"
     ]
     assert len(fu_answers) == 1
+    # Both the main answer and the follow-up answer belong to this question's scoring group.
+    answers = [
+        t.content for t in turns if t.question_id == fu_question.id and t.role == "candidate"
+    ]
+    assert answers == [
+        "my main answer, sufficiently long",
+        "my follow-up elaboration, also long enough",
+    ]
 
 
 @pytest.mark.asyncio
@@ -338,58 +344,11 @@ async def test_find_resumable_returns_none_after_completion(db_session):
 
 
 @pytest.mark.asyncio
-async def test_two_follow_ups_asked_in_order_then_advances(db_session, monkeypatch):
-    """A question with max_follow_ups=2 owes exactly two follow-ups before advancing."""
-    from app.interview.questions import Question
-
-    two = (
-        Question(
-            id="mfq", prompt="Main question?", max_follow_ups=2, follow_up_prompt="Tell me more"
-        ),
-        Question(id="tail", prompt="Last question?"),
-    )
-
-    async def _fake_resolve(_db):
-        return two
-
-    monkeypatch.setattr(state_machine, "resolve_questions", _fake_resolve)
-
-    cand = await _candidate(db_session)
-    interview = await state_machine.start_interview(db_session, cand.id)
-    assert interview.current_question_index == 0
-
-    # main answer → follow-up #1 owed, stay
-    interview = await state_machine.answer_finalized(
-        db_session, interview, "main answer, long", follow_up_provider=_template_provider
-    )
-    assert interview.current_question_index == 0
-    # follow-up #1 answer → follow-up #2 owed, stay
-    interview = await state_machine.answer_finalized(
-        db_session, interview, "fu1 answer, long", follow_up_provider=_template_provider
-    )
-    assert interview.current_question_index == 0
-    # follow-up #2 answer → both owed follow-ups done, advance
-    interview = await state_machine.answer_finalized(
-        db_session, interview, "fu2 answer, long", follow_up_provider=_template_provider
-    )
-    assert interview.current_question_index == 1
-
-    turns = await _turns(db_session, interview.id)
-    fu_asked = [
-        t
-        for t in turns
-        if t.question_id == "mfq" and t.role == "interviewer" and t.turn_kind == "follow_up"
-    ]
-    assert len(fu_asked) == 2  # exactly two follow-ups were asked, no more
-
-
-@pytest.mark.asyncio
 async def test_submit_without_provider_advances_even_when_follow_ups_allowed(
     db_session, monkeypatch
 ):
     """Owner rule (v0.39.2.0): with no provider wired — the production path for EVERY turn mode —
     a submit advances even on a question with ``max_follow_ups > 0``; no follow-up turn written."""
-    from app.interview.questions import Question
 
     two = (
         Question(

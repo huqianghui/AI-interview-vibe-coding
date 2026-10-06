@@ -54,7 +54,7 @@ npm run e2e                        # boots backend + frontend, runs 6 tests acro
 ```
 
 Expected: `5 passed, 1 skipped`. Playwright boots a fresh migrated SQLite DB + the API (mock
-providers, known admin token) on :8100 and the vite dev server on :5273, then drives:
+providers) on :8100 and the vite dev server on :5273, then drives:
 
 | Spec | SPEC coverage | What it proves |
 |---|---|---|
@@ -81,9 +81,9 @@ its acceptance criteria on mocks.** See the SPEC↔feature map in `IMPLEMENTATIO
 Run the two servers yourself and walk the winning-demo path in a browser.
 
 ```bash
-# Terminal 1 — backend on :8000 (mock providers, admin token for the /admin page)
+# Terminal 1 — backend on :8000 (mock providers; seeds an `admin` login for the /admin page)
 cd backend && source .venv/bin/activate
-ADMIN_API_TOKEN=dev-admin \
+SEED_ADMIN_PASSWORD=dev-admin \
 DEFAULT_LLM_PROVIDER=mock DEFAULT_RETRIEVAL_PROVIDER=mock DEFAULT_VOICE_PROVIDER=mock \
 uvicorn app.main:app --reload --port 8000
 
@@ -95,7 +95,7 @@ Open **http://localhost:5173**. Routes: `/interview` (candidate) and `/admin` (e
 
 ### Winning-demo path (SPEC §1)
 
-1. **Admin** (`/admin`): sign in with `dev-admin` → create a question bank, set it default → add a
+1. **Admin** (`/admin`): sign in as `admin` / `dev-admin` → create a question bank, set it default → add a
    question → **Draft from SOP** and confirm the checklist weights total **100**.
 2. **Candidate** (`/interview`): Start → orientation → answer the question in text.
 3. **Submit advances (F6/F7):** answer and submit — the interview advances straight to the next

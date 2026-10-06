@@ -160,7 +160,7 @@ export const TOOL_CATALOG: readonly ToolCatalogEntry[] = [
   },
 ];
 
-export const TOOL_CATALOG_BY_ID: ReadonlyMap<string, ToolCatalogEntry> = new Map(
+const TOOL_CATALOG_BY_ID: ReadonlyMap<string, ToolCatalogEntry> = new Map(
   TOOL_CATALOG.map((t) => [t.id, t]),
 );
 

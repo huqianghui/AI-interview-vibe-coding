@@ -377,11 +377,6 @@ def build_voice_live_metadata(
     return metadata
 
 
-def build_cleared_voice_metadata() -> dict[str, str]:
-    """Metadata that turns Voice mode OFF (used when disabling a persona's agent)."""
-    return {VOICE_LIVE_ENABLED_KEY: "false", VOICE_LIVE_CONFIG_KEY: "{}"}
-
-
 def decode_voice_live_metadata(metadata: dict[str, str]) -> dict[str, Any]:
     """Inverse of the builder: reassemble the chunked config JSON → the ``session`` dict.
 

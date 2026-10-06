@@ -62,6 +62,9 @@ addopts = "--cov=app --cov-report=term-missing --cov-fail-under=85"
 testpaths = ["tests"]
 
 [tool.coverage.run]
+# SQLAlchemy's async engine runs every awaited DB call through greenlet; without this, coverage
+# loses the trace after the first `await db...` in a route and reports those lines as unrun.
+concurrency = ["greenlet", "thread"]
 omit = [
     "app/services/agents/adapters/azure_*.py",
     "app/sop/binary_extractors.py",

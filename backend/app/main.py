@@ -23,14 +23,16 @@ from app.api import (
 from app.config import get_settings
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Seed the demo default question bank on boot (idempotent, best-effort).
+    """Run the idempotent boot seeds, then start the background warm-ups.
 
-    A no-op when a default bank already exists, so it's safe on every start. Wrapped so a seed
-    failure (e.g. tables not yet migrated in an unusual boot order) never blocks app startup.
+    Every seed is a no-op when its row already exists, so this is safe on every start. Each runs
+    behind :func:`_best_effort`, so a failure (e.g. tables not yet migrated in an unusual boot
+    order) is logged and never blocks app startup.
 
     Also overlays the saved DB master AI Foundry config onto settings (DB > .env > code default)
     so a previously-saved config is live on boot — also best-effort, never blocks startup.
@@ -48,6 +50,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from app.db import async_session_factory
     from app.services.config_overlay import apply_master_config_to_settings
     from app.services.config_service import seed_master_config_from_env
+    from app.services.external_config_service import seed_external_config_from_env
     from app.services.persona_seed import seed_default_persona
     from app.services.question_seed import (
         seed_bundled_banks,
@@ -56,77 +59,42 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     )
     from app.services.user_seed import seed_default_admin, seed_default_candidates
 
-    try:
-        async with async_session_factory() as session:
-            await seed_default_bank(session)
-    except Exception:  # noqa: BLE001 — seeding is best-effort; never block startup
-        pass
-    try:
-        # Import the committed generic bank bundles (Demo / Deployment SOP / test) alongside the
-        # default, so the ephemeral server presents the same multi-bank catalogue as a local
-        # checkout. Idempotent-by-name; each bundle is non-default so it never fights the boot
-        # importer's rf-CSM default. Separate try: a bad bundle must not block the rest of startup.
-        async with async_session_factory() as session:
-            await seed_bundled_banks(session)
-    except Exception:  # noqa: BLE001 — bundle seed is best-effort; never block startup
-        pass
-    try:
-        # Import client-derived bank bundles delivered via the private-blob channel (e.g. the rf-CSM
-        # demo01 bank), from CLIENT_BANKS_DIR (default /app/_client_bundle/extra_banks). No-op when
-        # absent (public-demo mode / CI). These carry client SOP source_quotes and are NEVER
-        # committed here. Separate try: a bad client bundle must not block the rest of startup.
-        async with async_session_factory() as session:
-            await seed_client_banks(session)
-    except Exception:  # noqa: BLE001 — client bank seed is best-effort; never block startup
-        pass
-    try:
-        async with async_session_factory() as session:
-            await seed_default_admin(session)
-    except Exception:  # noqa: BLE001 — admin seed is best-effort; never block startup
-        pass
-    try:
-        # #102: the three candidate accounts (derived passwords; idempotent). Independent of the
-        # admin seed on purpose — see user_seed's module docstring for why the gates differ.
-        async with async_session_factory() as session:
-            await seed_default_candidates(session)
-    except Exception:  # noqa: BLE001 — best-effort; never block startup, but never silent either:
-        # under the read-only Users tab this seed is the ONLY way candidate accounts come to exist,
-        # so a failure here means nobody can take an interview — make it findable in the logs.
-        logging.getLogger(__name__).exception(
-            "Candidate account seed failed — /interview has no accounts until the next restart"
-        )
-    try:
-        async with async_session_factory() as session:
-            await seed_default_persona(session)
-    except Exception:  # noqa: BLE001 — persona seed is best-effort; never block startup
-        pass
-    try:
-        async with async_session_factory() as session:
-            # Seed the master AI Foundry row from env when absent (ephemeral SQLite wiped it), so
-            # the /admin/config panel reflects the live runtime config after a restart. No-op when
-            # a row already exists (operator's saved config) or when env has no Foundry endpoint.
-            await seed_master_config_from_env(session)
-            await session.commit()
-    except Exception:  # noqa: BLE001 — config seed is best-effort; never block startup
-        pass
-    try:
-        async with async_session_factory() as session:
-            await apply_master_config_to_settings(session)
-    except Exception:  # noqa: BLE001 — config overlay is best-effort; never block startup
-        pass
-    try:
-        async with async_session_factory() as session:
-            # Seed the external-interview-brain row from env when absent (Phase 2). Mirrors the
-            # master-config seed: ephemeral SQLite loses it each boot, so re-seeding from env keeps
-            # the /admin/external-interviewer panel reflecting the live runtime config after a
-            # restart. No-op when a row already exists (operator's saved config) or env has no
-            # external endpoint. Unlike Foundry, this DOES seed the bearer key from env.
-            from app.services.external_config_service import seed_external_config_from_env
+    async def _seed_master_config(session) -> None:
+        # Seed the master AI Foundry row from env when absent (ephemeral SQLite wiped it), so the
+        # /admin/config panel reflects the live runtime config after a restart. No-op when a row
+        # already exists (operator's saved config) or when env has no Foundry endpoint.
+        await seed_master_config_from_env(session)
+        await session.commit()
 
-            await seed_external_config_from_env(session)
-            await session.commit()
-    except Exception:  # noqa: BLE001 — external config seed is best-effort; never block startup
-        pass
+    async def _seed_external_config(session) -> None:
+        # Same for the external-interview-brain row (Phase 2). Unlike Foundry, this DOES seed the
+        # bearer key from env.
+        await seed_external_config_from_env(session)
+        await session.commit()
+
+    # Each step gets its own session and its own failure boundary: a bad bundle or an unmigrated
+    # table must not block the rest of startup, but it must not vanish either — a silently skipped
+    # seed is how the server once came up with only the rubric-less demo bank.
+    boot_steps = (
+        ("default bank", seed_default_bank),
+        # The committed generic bank bundles (Demo / Deployment SOP / test), so the ephemeral
+        # server presents the same catalogue as a local checkout. Each is non-default, so it never
+        # fights the boot importer's rf-CSM default.
+        ("bundled banks", seed_bundled_banks),
+        # Client-derived bundles from the private-blob channel (CLIENT_BANKS_DIR). No-op when
+        # absent (public-demo mode / CI). These carry client SOP quotes and are NEVER committed.
+        ("client banks", seed_client_banks),
+        ("default admin", seed_default_admin),
+        # #102: under the read-only Users tab this is the ONLY way candidate accounts come to exist,
+        # so a failure here means nobody can take an interview until the next restart.
+        ("candidate accounts", seed_default_candidates),
+        ("default persona", seed_default_persona),
+        ("master AI Foundry config", _seed_master_config),
+        ("master config overlay", apply_master_config_to_settings),
+        ("external interviewer config", _seed_external_config),
+    )
+    for label, step in boot_steps:
+        await _best_effort(label, step, async_session_factory)
 
     prewarm_task = asyncio.create_task(_prewarm_azure_credential())
     persona_sync_task = asyncio.create_task(_sync_default_persona())
@@ -142,6 +110,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         for task in (prewarm_task, persona_sync_task, judge_warm_task):
             if not task.done():
                 task.cancel()
+
+
+async def _best_effort(label: str, step, session_factory) -> None:
+    """Run one boot step in its own session; log and carry on if it fails."""
+    try:
+        async with session_factory() as session:
+            await step(session)
+    except Exception:  # noqa: BLE001 — boot steps are best-effort; never block startup
+        logger.exception("Boot step failed: %s — continuing startup without it", label)
 
 
 async def _prewarm_azure_credential() -> None:

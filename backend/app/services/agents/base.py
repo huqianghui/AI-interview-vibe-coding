@@ -40,8 +40,8 @@ class RetrievalAdapter(Protocol):
 class AgentSyncAdapter(Protocol):
     """Syncs an interviewer persona to a Foundry prompt agent (SPEC F5).
 
-    ``sync_persona`` returns ``{agent_id, agent_version}``; ``delete_persona_agent`` is a
-    best-effort teardown. The mock provider fakes both so the CRUD flow runs without Azure.
+    ``sync_persona`` returns ``{agent_id, agent_version}``. The mock provider fakes it so the CRUD
+    flow runs without Azure.
     """
 
     name: str
@@ -53,8 +53,6 @@ class AgentSyncAdapter(Protocol):
         locale: str | None = None,
         knowledge_configs: list[dict] | None = None,
     ) -> dict[str, str]: ...
-
-    async def delete_persona_agent(self, persona: object) -> None: ...
 
     async def fetch_remote_state(self, persona: object) -> dict[str, str] | None:
         """Read the live agent's ``{agent_version, model, instructions}`` (pull direction).

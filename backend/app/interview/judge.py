@@ -124,10 +124,6 @@ class JudgeInput:
     max_follow_ups: int = 0
 
     @property
-    def has_rubric(self) -> bool:
-        return bool(self.expected_points) or any(i.kind != "forbidden" for i in self.checklist)
-
-    @property
     def rubric_strings(self) -> tuple[str, ...]:
         return tuple(self.expected_points) + tuple(i.text for i in self.checklist)
 

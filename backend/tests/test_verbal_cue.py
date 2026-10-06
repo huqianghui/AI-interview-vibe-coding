@@ -6,7 +6,7 @@ answer content, and that cue-like words mid-answer are left alone.
 
 import pytest
 
-from app.interview.verbal_cue import detect_verbal_cue, strip_verbal_cue
+from app.interview.verbal_cue import strip_verbal_cue
 
 
 @pytest.mark.parametrize(
@@ -20,8 +20,8 @@ from app.interview.verbal_cue import detect_verbal_cue, strip_verbal_cue
         "结束",
     ],
 )
-def test_detects_trailing_cue(text):
-    assert detect_verbal_cue(text) is True
+def test_strips_trailing_cue(text):
+    assert strip_verbal_cue(text) != text.strip()
 
 
 @pytest.mark.parametrize(
@@ -30,12 +30,15 @@ def test_detects_trailing_cue(text):
         "I'm done explaining the first step, then we verify the seal",  # cue-like, but mid-answer
         "The procedure is finished when the light turns green",
         "我需要先说完准备工作",
-        "",
-        None,
     ],
 )
-def test_no_cue_when_absent_or_midsentence(text):
-    assert detect_verbal_cue(text) is False
+def test_leaves_text_without_a_trailing_cue_alone(text):
+    assert strip_verbal_cue(text) == text
+
+
+@pytest.mark.parametrize("text", ["", "   ", None])
+def test_blank_input_strips_to_empty(text):
+    assert strip_verbal_cue(text) == ""
 
 
 def test_strip_removes_only_trailing_cue():
