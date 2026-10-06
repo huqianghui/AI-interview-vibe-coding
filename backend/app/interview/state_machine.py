@@ -94,6 +94,22 @@ class InterviewStateError(Exception):
     """Raised on an illegal state transition (e.g. answering a completed interview)."""
 
 
+async def get_owned_interview(
+    db: AsyncSession, interview_id: str, candidate_session_id: str
+) -> InterviewSession | None:
+    """The interview, or None when it does not exist OR belongs to another candidate session.
+
+    Callers must treat both the same way (one 404), so a decoded token for session A can never
+    learn whether session B's interview exists (IDOR).
+    """
+    session = (
+        await db.execute(select(InterviewSession).where(InterviewSession.id == interview_id))
+    ).scalar_one_or_none()
+    if session is None or session.candidate_session_id != candidate_session_id:
+        return None
+    return session
+
+
 async def find_resumable_interview(
     db: AsyncSession, candidate_session_id: str
 ) -> InterviewSession | None:

@@ -11,14 +11,12 @@ never 500s the request (F1 AC #4).
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db import get_db
 from app.dependencies import require_role
-from app.models.sop import SopChunk, SopDocument
-from app.services import sop_ingestion
+from app.services import sop_document_service, sop_ingestion
 
 router = APIRouter(
     prefix="/admin/sop", tags=["admin-sop"], dependencies=[Depends(require_role("admin"))]
@@ -66,20 +64,14 @@ async def upload_document(
 @router.get("/documents", response_model=list[SopDocumentOut])
 async def list_documents(db: AsyncSession = Depends(get_db)) -> list[SopDocumentOut]:
     """List ingested SOP documents with their chunk counts (admin knowledge-base view)."""
-    docs = (await db.execute(select(SopDocument).order_by(SopDocument.created_at))).scalars().all()
-    count_rows = (
-        await db.execute(
-            select(SopChunk.document_id, func.count(SopChunk.id)).group_by(SopChunk.document_id)
-        )
-    ).all()
-    counts: dict[str, int] = {doc_id: int(n) for doc_id, n in count_rows}
+    rows = await sop_document_service.list_documents_with_chunk_counts(db)
     return [
         SopDocumentOut(
             document_id=d.id,
             name=d.name,
             status=d.status,
             size=d.size,
-            chunk_count=counts.get(d.id, 0),
+            chunk_count=chunk_count,
         )
-        for d in docs
+        for d, chunk_count in rows
     ]

@@ -4325,7 +4325,7 @@
     },
     "/candidate/interview/{interview_id}/judge": {
       "post": {
-        "description": "Ask the judge whether the interviewer should say something DURING the candidate's pause\n(issue #114). Never blocks or submits anything; \"I'm done\" is a separate, always-advancing\nroute.\n\nCheap exits (no LLM call, no ``judge_events`` row): the session is not ``judged`` (snapshot),\nnot a live bank session, the ids are stale (question advanced / follow-up count moved), the\ndraft is blank, or the per-question call budget is spent — all ⇒ ``wait``. A concurrent judge\nfor the same session is a 409. Otherwise one LLM call; the only speaking verdict is ``nudge``\n(\"please go on\"), returned as text — the judge never writes an interviewer turn (the\n``follow_up`` / ``redirect`` verdicts were retired 2026-09-28: the judge paces, it never\nprobes). Every LLM call writes one ``judge_events`` row.",
+        "description": "Ask the judge whether the interviewer should say something DURING the candidate's pause\n(issue #114). Never blocks or submits anything; \"I'm done\" is a separate, always-advancing\nroute. Stale or over-budget requests are a silent ``wait``; an interview that is not live, or a\njudge already in flight for it, is a 409 (see :func:`judge_flow.judge`).",
         "operationId": "judge_candidate_interview__interview_id__judge_post",
         "parameters": [
           {
@@ -4394,7 +4394,7 @@
     },
     "/candidate/interview/{interview_id}/judge/apply": {
       "post": {
-        "description": "Deliver a dry-run verdict now that the pause has lasted (D17). Idempotent and stale-safe:\nan unknown / already-applied event, a non-``nudge`` event, a question that advanced or a moved\nfollow-up count all come back as ``wait`` and write nothing. ``nudge`` is marked delivered and\nreturned as text — the judge never writes an interviewer turn (``follow_up`` / ``redirect``\nretired 2026-09-28).",
+        "description": "Deliver a dry-run verdict now that the pause has lasted (D17); stale-safe and idempotent\n(see :func:`judge_flow.apply`). An interview that is not live is a 409.",
         "operationId": "judge_apply_candidate_interview__interview_id__judge_apply_post",
         "parameters": [
           {
