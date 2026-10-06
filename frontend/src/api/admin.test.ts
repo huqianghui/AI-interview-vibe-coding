@@ -1,12 +1,7 @@
 /** Admin API client — the request wrapper's auth/error contract and the BYOM deployment filter. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  AdminApiError,
-  adminRequest,
-  deploymentKindForProfile,
-  getAdminToken,
-  setAdminToken,
-} from "./admin";
+import { AdminApiError, adminRequest, deploymentKindForProfile } from "./admin";
+import { ADMIN_TOKEN_KEY, getAdminToken, setAdminToken } from "./auth";
 
 function respond(status: number, body: unknown = {}) {
   return vi.fn().mockResolvedValue({
@@ -61,6 +56,30 @@ describe("adminRequest", () => {
     expect(getAdminToken()).toBe("");
     setAdminToken("t");
     expect(getAdminToken()).toBe("t");
+  });
+
+  it("reads the token the login stored, under the admin key only", async () => {
+    sessionStorage.setItem(ADMIN_TOKEN_KEY, "from-login");
+    sessionStorage.setItem("candidate_access_token", "cand");
+    const fetchSpy = respond(200);
+    vi.stubGlobal("fetch", fetchSpy);
+    await adminRequest("/admin/x");
+    const headers = fetchSpy.mock.calls[0][1].headers as Headers;
+    expect(headers.get("Authorization")).toBe("Bearer from-login");
+  });
+
+  it("sends no Authorization header when signed out", async () => {
+    const fetchSpy = respond(200);
+    vi.stubGlobal("fetch", fetchSpy);
+    await adminRequest("/admin/x");
+    expect((fetchSpy.mock.calls[0][1].headers as Headers).has("Authorization")).toBe(false);
+  });
+
+  it("does not wrap a network failure as an HTTP error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("offline")));
+    const err = await adminRequest("/admin/x").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(TypeError);
+    expect(err).not.toBeInstanceOf(AdminApiError);
   });
 });
 

@@ -1,7 +1,7 @@
 /** personas API client: each fn hits the right path/method; local-map helpers round-trip. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as personas from "./personas";
-import * as admin from "./admin";
+import * as auth from "./auth";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -57,7 +57,7 @@ function mockFetch(body: unknown) {
 
 describe("personas client", () => {
   it("listPersonas GETs /admin/personas with the admin bearer", async () => {
-    admin.setAdminToken("jwt-1");
+    auth.setAdminToken("jwt-1");
     const f = mockFetch([SAMPLE]);
     const result = await personas.listPersonas();
     expect(result).toEqual([SAMPLE]);

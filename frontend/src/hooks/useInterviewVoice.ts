@@ -25,7 +25,7 @@
  *
  * Auth: browsers can't set WS headers, so the token rides as a `?token=` query param. The
  * candidate interview path defaults to the anon session token (`api/client.ts`); the admin editor
- * Playground passes its own `tokenProvider` (`getAdminToken` from `api/admin.ts`) + `personaId` so
+ * Playground passes its own `tokenProvider` (`getAdminToken` from `api/auth.ts`) + `personaId` so
  * the WS pins the persona under test instead of resolving the default enabled one.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -70,7 +70,7 @@ export interface UseInterviewVoiceOptions {
   videoRef?: RefObject<HTMLVideoElement | null>;
   /** Returns the bearer token for the `/voice-live/ws?token=` query param. Defaults to the
    * candidate anon session token (`api/client.ts`). The admin editor Playground should pass
-   * `getAdminToken` (`api/admin.ts`) here instead. */
+   * `getAdminToken` (`api/auth.ts`) here instead. */
   tokenProvider?: () => string | null;
   /** Pins the WS to a specific persona (editor Playground). Omitted for the candidate interview
    * path, which lets the backend resolve the default enabled persona. */

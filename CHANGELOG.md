@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.47.2.0 (2026-10-06)
+
+### Changed
+- **Every frontend API call now goes through one fetch path** (`frontend/src/api/http.ts`). There
+  were three: the admin wrapper, the candidate wrapper, and hand-written `fetch` calls for login,
+  the report stream and SOP documents, each building its own headers and its own error. Now each
+  call names the credential it carries (admin or candidate JWT, or the interview's anonymous
+  session) and every failure is the same error with the status and the server's message. The
+  report stream and SOP document downloads also get the stale-session retry the other candidate
+  calls already had.
+- **The admin sign-in token has one home and an accurate name.** It lived in two modules under the
+  key `admin_api_token`, left over from the shared admin token removed in v0.46.0.0; it is now kept
+  only by the sign-in module, as `admin_access_token`. An admin signed in before this release signs
+  in once more.
+
+### Tests
+- The fetch core, every admin and candidate route wrapper (method, path, body, credential), the
+  resume rules and the stale-session retry are covered; the four API modules are at 100% of lines.
+- The frontend ↔ backend contract test recognises the new call shapes and now asserts one call of
+  each, so a future refactor cannot make it pass by finding nothing.
+
 ## 0.47.1.0 (2026-10-06)
 
 ### Fixed

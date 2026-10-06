@@ -1,5 +1,5 @@
 /** auth API client: login stores token, me() reads it, 401 clears it. */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as auth from "./auth";
 
 afterEach(() => {
@@ -14,20 +14,20 @@ describe("auth client", () => {
     );
     const token = await auth.login("admin", "pw");
     expect(token).toBe("jwt-1");
-    expect(auth.getToken()).toBe("jwt-1");
+    expect(auth.getAdminToken()).toBe("jwt-1");
   });
 
   it("login throws AuthError on 401", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 401 }));
     await expect(auth.login("admin", "bad")).rejects.toBeInstanceOf(auth.AuthError);
-    expect(auth.getToken()).toBe("");
+    expect(auth.getAdminToken()).toBe("");
   });
 
   it("me returns null and clears token on 401", async () => {
-    auth.setToken("stale");
+    auth.setAdminToken("stale");
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 401 }));
     expect(await auth.me()).toBeNull();
-    expect(auth.getToken()).toBe(""); // cleared
+    expect(auth.getAdminToken()).toBe(""); // cleared
   });
 
   it("me returns null without a token (no fetch)", async () => {
@@ -37,7 +37,7 @@ describe("auth client", () => {
   });
 
   it("me returns the current user on 200", async () => {
-    auth.setToken("jwt-1");
+    auth.setAdminToken("jwt-1");
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -69,7 +69,7 @@ describe("candidate auth (#102)", () => {
     expect(token).toBe("candidate-jwt-1");
     expect(auth.getCandidateToken()).toBe("candidate-jwt-1");
     // Admin token is untouched by a candidate login.
-    expect(auth.getToken()).toBe("");
+    expect(auth.getAdminToken()).toBe("");
   });
 
   it("loginCandidate throws AuthError on 401 and stores nothing", async () => {
@@ -84,13 +84,40 @@ describe("candidate auth (#102)", () => {
   });
 
   it("setCandidateToken/clearCandidateToken round-trip independently of the admin token", () => {
-    auth.setToken("admin-jwt");
+    auth.setAdminToken("admin-jwt");
     auth.setCandidateToken("candidate-jwt");
-    expect(auth.getToken()).toBe("admin-jwt");
+    expect(auth.getAdminToken()).toBe("admin-jwt");
     expect(auth.getCandidateToken()).toBe("candidate-jwt");
 
     auth.clearCandidateToken();
     expect(auth.getCandidateToken()).toBe("");
-    expect(auth.getToken()).toBe("admin-jwt"); // unaffected
+    expect(auth.getAdminToken()).toBe("admin-jwt"); // unaffected
+  });
+});
+
+describe("admin token storage", () => {
+  beforeEach(() => sessionStorage.clear());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("keeps the admin JWT under the admin key, not the retired shared-token key", async () => {
+    const body = JSON.stringify({ access_token: "jwt-9" });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(body, { status: 200 })));
+    await auth.login("admin", "pw");
+    expect(sessionStorage.getItem(auth.ADMIN_TOKEN_KEY)).toBe("jwt-9");
+    expect(sessionStorage.getItem("admin_api_token")).toBeNull();
+  });
+
+  it("me rethrows a network failure instead of reporting signed-out", async () => {
+    auth.setAdminToken("jwt-1");
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("offline")));
+    await expect(auth.me()).rejects.toBeInstanceOf(TypeError);
+    expect(auth.getAdminToken()).toBe("jwt-1");
+  });
+
+  it("me keeps the token on a non-401 failure", async () => {
+    auth.setAdminToken("jwt-1");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 500 })));
+    await expect(auth.me()).resolves.toBeNull();
+    expect(auth.getAdminToken()).toBe("jwt-1");
   });
 });

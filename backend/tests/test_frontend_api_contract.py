@@ -22,7 +22,8 @@ FRONTEND_SRC = Path(__file__).resolve().parents[2] / "frontend" / "src"
 
 # Files that build API URLs. The voice WS is built in a hook, not the API layer.
 API_FILES = [
-    *sorted((FRONTEND_SRC / "api").glob("*.ts")),
+    # Source only: the unit tests call the wrappers with placeholder paths like "/admin/x".
+    *sorted(f for f in (FRONTEND_SRC / "api").glob("*.ts") if not f.name.endswith(".test.ts")),
     FRONTEND_SRC / "hooks" / "useInterviewVoice.ts",
 ]
 
@@ -52,12 +53,13 @@ def _normalize(path: str) -> str:
     return path.rstrip("/") or "/"
 
 
+# Every SPA call goes through one of these (frontend/src/api/http.ts and its thin wrappers), so a
+# call is the wrapper name, an optional generic, then a first argument starting with "/":
+# request<T>("/x"), adminRequest<T>(`/x/${id}`), apiFetch("/auth/me", ...), anonFetch(`/x/${id}`).
+_CALL_FUNCS = r"\b(?:adminRequest|request|requestJson|apiFetch|anonFetch)(?:<[^>]*>)?\(\s*"
 _CALL_PATTERNS = (
-    # request<T>("/x") / adminRequest<T>(`/x/${id}`) — first argument starting with "/".
-    r"(?:adminRequest|request)<[^>]*>\(\s*\"(/[^\"]*)\"",
-    r"(?:adminRequest|request)<[^>]*>\(\s*`(/[^`]*)`",
-    # fetch(`${BASE}/x`, {...})
-    r"`\$\{BASE\}(/[^`]*)`",
+    _CALL_FUNCS + r"\"(/[^\"]*)\"",
+    _CALL_FUNCS + r"`(/[^`]*)`",
 )
 
 
@@ -113,6 +115,11 @@ def test_the_scanner_actually_finds_the_frontend_calls():
     calls = _frontend_calls()
     assert ("POST", "/candidate/interview/{}/answer") in calls
     assert ("GET", "/admin/users") in calls  # no method: → GET
+    # One per wrapper shape: requestJson (login), apiFetch (me), anonFetch (stream, SOP bytes).
+    assert ("POST", "/auth/login") in calls
+    assert ("GET", "/auth/me") in calls
+    assert ("POST", "/candidate/interview/{}/report/stream") in calls
+    assert ("GET", "/candidate/interview/{}/sop/{}") in calls
     assert "/candidate/interview/{}/answer" in paths
     assert "/admin/config/ai-foundry/voice-live-models" in paths
     assert "/voice-live/ws" in paths

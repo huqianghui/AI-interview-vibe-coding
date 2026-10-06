@@ -12,9 +12,9 @@
  * {@link CandidateAuthError} is thrown for the page to react to (back to the login card).
  */
 import { clearCandidateToken, getCandidateToken } from "./auth";
+import { apiFetch, HttpError, readJson } from "./http";
 import { tokenStore } from "./tokenStore";
 
-const BASE = "/api";
 const TOKEN_KEY = "anon_session_token";
 const anonTokenStore = tokenStore("local", TOKEN_KEY);
 
@@ -230,45 +230,27 @@ function clearToken(): void {
   anonTokenStore.clear();
 }
 
-/** Extract a human-readable error detail from a non-ok response: the `detail` field of a JSON
- * body when present, otherwise the raw response text. */
-async function extractErrorDetail(resp: Response): Promise<string> {
-  const text = await resp.text().catch(() => "");
+/** A candidate call carrying the anon session. A 401 on a cached token self-heals: a token that no
+ * longer decodes (backend secret rotated, or its session row is gone) would 401 forever otherwise,
+ * so drop it, mint a fresh session and retry ONCE. Never retried without a token. */
+async function anonFetch(
+  path: string,
+  init: RequestInit = {},
+  opts: { json?: boolean } = {},
+): Promise<Response> {
+  const token = getToken();
   try {
-    const parsed = JSON.parse(text) as { detail?: unknown };
-    if (parsed && typeof parsed.detail === "string") return parsed.detail;
-  } catch {
-    /* not JSON — fall through to the raw text */
+    return await apiFetch(path, init, { anonSession: token }, opts);
+  } catch (e) {
+    if (!(e instanceof HttpError) || e.status !== 401 || !token) throw e;
+    clearToken();
+    await ensureSession();
+    return apiFetch(path, init, { anonSession: getToken() }, opts);
   }
-  return text;
 }
 
-async function request<T>(path: string, init: RequestInit = {}, _retried = false): Promise<T> {
-  const headers = new Headers(init.headers);
-  headers.set("Content-Type", "application/json");
-  const token = getToken();
-  if (token) headers.set("X-Anon-Session", token);
-
-  const resp = await fetch(`${BASE}${path}`, { ...init, headers });
-  if (!resp.ok) {
-    // Self-heal a stale/invalid anon token: a cached token that no longer decodes (backend secret
-    // rotated, or its session row is gone) 401s forever otherwise. Drop it, mint a fresh session,
-    // and retry the call ONCE. Guard against loops (only retry when we actually had a token, and
-    // never on the session-mint endpoint itself).
-    if (
-      resp.status === 401 &&
-      !_retried &&
-      token &&
-      !path.includes("/public/candidate/session")
-    ) {
-      clearToken();
-      await ensureSession();
-      return request<T>(path, init, true);
-    }
-    const detail = await resp.text().catch(() => "");
-    throw new Error(`${resp.status} ${resp.statusText}: ${detail}`);
-  }
-  return (await resp.json()) as T;
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return readJson<T>(await anonFetch(path, init));
 }
 
 /**
@@ -283,23 +265,20 @@ export async function ensureSession(): Promise<string> {
   const existing = getToken();
   if (existing) return existing;
 
-  const headers = new Headers({ "Content-Type": "application/json" });
-  const candidateToken = getCandidateToken();
-  if (candidateToken) headers.set("Authorization", `Bearer ${candidateToken}`);
-
-  const resp = await fetch(`${BASE}/public/candidate/session`, {
-    method: "POST",
-    headers,
-  });
-  if (!resp.ok) {
-    if (resp.status === 401 || resp.status === 403) {
-      const detail = await extractErrorDetail(resp);
+  let resp: Response;
+  try {
+    resp = await apiFetch(
+      "/public/candidate/session",
+      { method: "POST" },
+      { bearer: getCandidateToken() },
+    );
+  } catch (e) {
+    if (e instanceof HttpError && (e.status === 401 || e.status === 403)) {
       clearCandidateToken();
       clearToken();
-      throw new CandidateAuthError(detail, resp.status);
+      throw new CandidateAuthError(e.detail, e.status);
     }
-    const detail = await resp.text().catch(() => "");
-    throw new Error(`${resp.status} ${resp.statusText}: ${detail}`);
+    throw e;
   }
   const body = (await resp.json()) as { session_id: string; token: string; expires_at: string };
   setToken(body.token);
@@ -502,19 +481,11 @@ export async function getReportStream(
   onProgress?: (p: ScoringProgress) => void,
   onCoverage?: (p: CoverageProgress) => void,
 ): Promise<Report> {
-  const headers = new Headers({ "Content-Type": "application/json" });
-  const token = getToken();
-  if (token) headers.set("X-Anon-Session", token);
-
-  const resp = await fetch(`${BASE}/candidate/interview/${interviewId}/report/stream`, {
+  const resp = await anonFetch(`/candidate/interview/${interviewId}/report/stream`, {
     method: "POST",
-    headers,
     body: JSON.stringify({ sop_coverage_check: sopCoverageCheck }),
   });
-  if (!resp.ok || !resp.body) {
-    const detail = await resp.text().catch(() => "");
-    throw new Error(`${resp.status} ${resp.statusText}: ${detail}`);
-  }
+  if (!resp.body) throw new Error("scoring stream has no body");
 
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
@@ -570,17 +541,11 @@ export async function fetchSopDocument(
   interviewId: string,
   documentId: string,
 ): Promise<string> {
-  const token = getToken();
-  const headers = new Headers();
-  if (token) headers.set("X-Anon-Session", token);
-  const resp = await fetch(
-    `${BASE}/candidate/interview/${interviewId}/sop/${encodeURIComponent(documentId)}`,
-    { headers },
+  const resp = await anonFetch(
+    `/candidate/interview/${interviewId}/sop/${encodeURIComponent(documentId)}`,
+    {},
+    { json: false },
   );
-  if (!resp.ok) {
-    const detail = await resp.text().catch(() => "");
-    throw new Error(`${resp.status} ${resp.statusText}: ${detail}`);
-  }
   const blob = await resp.blob();
   return URL.createObjectURL(blob);
 }
