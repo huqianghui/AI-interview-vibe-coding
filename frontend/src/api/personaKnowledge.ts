@@ -7,7 +7,6 @@
  * Reuses `admin.ts`'s `adminRequest` so these authenticate like every other admin surface.
  */
 import { adminRequest } from "./admin";
-import type { VoiceSession } from "./client";
 
 /** A dropdown option from the knowledge-bases discovery endpoint ({value,label}, backend Option). */
 export interface KbOption {
@@ -81,6 +80,3 @@ export const testChat = (personaId: string, message: string, previousResponseId?
     body: JSON.stringify({ message, previous_response_id: previousResponseId ?? null }),
   });
 
-/** Broker a persona-scoped Voice Live session for the Playground voice+avatar test. */
-export const brokerPlaygroundVoice = (personaId: string) =>
-  adminRequest<VoiceSession>(`/admin/personas/${personaId}/voice/session`, { method: "POST" });

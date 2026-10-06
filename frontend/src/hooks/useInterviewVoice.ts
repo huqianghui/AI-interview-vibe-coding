@@ -36,7 +36,7 @@ import { useQuestionReadWatch } from "./useQuestionReadWatch";
 import { useConnectionPolicy } from "./useConnectionPolicy";
 import { useSpeakQueue } from "./useSpeakQueue";
 import type { RefObject } from "react";
-import { _internal as clientInternal, type VoiceSession } from "../api/client";
+import { _internal as clientInternal } from "../api/client";
 import {
   AZURE_DEFAULT_INPUT_SAMPLE_RATE,
   MIC_SAMPLE_RATE,
@@ -68,13 +68,6 @@ export interface UseInterviewVoiceOptions {
   /** Attached to the avatar's video track via `ontrack` once Voice Live's avatar handshake
    * completes and real frames arrive (see `useAvatarStream`). */
   videoRef?: RefObject<HTMLVideoElement | null>;
-  /**
-   * Kept for compile-compatibility with the old broker-based `VoiceSession` fetch pattern (the
-   * admin editor Playground still passes one). UNUSED by the WS-proxy transport — there is no
-   * separately-brokered session to fetch anymore, the WS itself IS the session. Retained only so
-   * existing callers keep type-checking until they're migrated to `tokenProvider`/`personaId`.
-   */
-  sessionFetcher?: (locale: string) => Promise<VoiceSession>;
   /** Returns the bearer token for the `/voice-live/ws?token=` query param. Defaults to the
    * candidate anon session token (`api/client.ts`). The admin editor Playground should pass
    * `getAdminToken` (`api/admin.ts`) here instead. */

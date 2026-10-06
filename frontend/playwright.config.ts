@@ -4,8 +4,8 @@ import { defineConfig, devices } from "@playwright/test";
  * Playwright E2E config (SPEC — real-browser end-to-end).
  *
  * Two web servers are started for the run:
- * 1. Backend (uvicorn) on :8100 — a fresh in-file SQLite DB migrated to head, admin token set, and
- *    mock providers so no Azure is touched. `ADMIN_API_TOKEN` matches what the admin E2E logs in with.
+ * 1. Backend (uvicorn) on :8100 — a fresh in-file SQLite DB migrated to head, and mock
+ *    providers so no Azure is touched.
  * 2. Frontend (vite dev) on :5273 — proxies `/api` to the backend on :8100 (via E2E_API_TARGET).
  *
  * Everything runs on mocks: the whole candidate + admin flow is exercisable with zero Azure.

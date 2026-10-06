@@ -881,7 +881,7 @@ export function InterviewPage() {
         setMicDialogOpen(true);
       } else {
         // P5/P6b: any non-mic failure (agent not synced, voice off, WS proxy unreachable — the
-        // WS transport rejects with a plain Error, not only VoiceSessionError) → stay on text.
+        // WS transport rejects with a plain Error) → stay on text.
         // Surface the real message verbatim (invalid_model / quota / region) — no silent fallback.
         setVoiceErrorDetail(err instanceof Error ? err.message : String(err));
         setVoiceUnavailable(true);
@@ -1040,7 +1040,7 @@ export function InterviewPage() {
   //
   // Follow-ups are NOT verbatim-read when the model has its own turn: server-VAD
   // (`create_response=True`) has the agent voice its own clarification the moment the candidate
-  // stops speaking, so reading the backend `build_follow_up_prompt` text on top of it spoke the
+  // stops speaking, so reading the backend's follow-up text on top of it spoke the
   // follow-up twice AND rendered two identical Interviewer bubbles (each a distinct Azure
   // response_id). The backend follow-up text stays authoritative for the text channel + CI; in
   // voice the agent owns follow-ups THERE. Under LINEAR TURNS the agent never speaks on its own, so
