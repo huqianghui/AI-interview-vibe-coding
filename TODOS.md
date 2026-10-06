@@ -248,6 +248,8 @@ Owner decision 2026-10-06: separate PR, straight after v0.46.0.0.
 
 **Priority:** P2
 
+**Completed:** v0.47.0.0 (2026-10-06)
+
 ### Stop provisioning ADMIN_API_TOKEN
 
 The backend stopped reading it in v0.46.0.0 (`Settings` has `extra="ignore"`, so the env var is
@@ -259,6 +261,20 @@ needs the same: `gen-secrets.sh` still generates the token and `export-banks.sh`
 call `/admin/question-banks` with `Bearer $ADMIN_API_TOKEN`, which has answered 401 since the routes
 moved to `require_role("admin")`, so that hand-off instruction is already broken.
 Owner decision 2026-10-06: same follow-up PR as the routes above.
+
+**Priority:** P2
+
+**Completed:** v0.47.0.0 (2026-10-06). The running Container App still holds the old secret and env
+until the next infra re-apply (image deploys do not touch them); both are harmless.
+
+### Three persona voice toggles do nothing
+
+The agent editor offers noise suppression, echo cancellation and interim response, and saves them on
+the persona, but nothing reads them: the only consumer was the `/calls` session builder deleted in
+v0.47.0.0, which itself had no live caller since voice moved to the WS proxy. Either send them in the
+proxy's `session.update` (changes live voice behaviour, so verify against real Azure) or remove the
+fields from the editor, the API and the model (needs a migration). Owner decision 2026-10-06:
+separate PR.
 
 **Priority:** P2
 

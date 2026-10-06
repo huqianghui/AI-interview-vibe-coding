@@ -146,8 +146,9 @@ Either way the voice is **Azure Speech TTS**, so lip-sync and the voice do not d
 model. Which models are realtime, and the measurements behind this table:
 [`docs/voice-live-model-support.md`](docs/voice-live-model-support.md) §4.7-§4.10.
 
-- **Provider abstraction** — LLM / retrieval / voice each have a `mock` and an `azure`
-  implementation; local dev and the whole CI suite run entirely on mocks.
+- **Provider abstraction** — the LLM, SOP retrieval and agent sync each have a `mock` and an
+  `azure` implementation, so the CI suite runs without credentials. Voice has no mock: it always
+  goes through the Voice Live proxy.
 - **Voice transport** — the browser talks to `/api/voice-live/ws`; the backend proxy holds the
   Azure Voice Live SDK connection, so avatar ICE/SDP, transcripts, and audio relay over one socket.
 - **Config precedence** — DB-backed `ServiceConfig` (set in `/admin`, keys encrypted) > `.env` >
