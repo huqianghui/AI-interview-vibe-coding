@@ -38,7 +38,7 @@ const ADMIN_USER = {
 /** Mock a successful admin login (login stores a token; me() returns an admin). */
 function mockAdminLogin() {
   vi.spyOn(auth, "login").mockImplementation(async () => {
-    auth.setToken("jwt-token");
+    auth.setAdminToken("jwt-token");
     return "jwt-token";
   });
   vi.spyOn(auth, "me").mockResolvedValue(ADMIN_USER);
@@ -91,7 +91,7 @@ describe("AdminPage", () => {
     // After sign-in the bank list renders.
     await waitFor(() => expect(screen.getByText("Demo Bank")).toBeInTheDocument());
     expect(listBanks).toHaveBeenCalled();
-    expect(auth.getToken()).toBe("jwt-token");
+    expect(auth.getAdminToken()).toBe("jwt-token");
   });
 
   it("shows an error when login credentials are rejected", async () => {
@@ -111,7 +111,7 @@ describe("AdminPage", () => {
   it("rejects a non-admin user (role gate on the client)", async () => {
     const user = userEvent.setup();
     vi.spyOn(auth, "login").mockImplementation(async () => {
-      auth.setToken("jwt-token");
+      auth.setAdminToken("jwt-token");
       return "jwt-token";
     });
     vi.spyOn(auth, "me").mockResolvedValue({ ...ADMIN_USER, role: "user" });
@@ -121,14 +121,14 @@ describe("AdminPage", () => {
 
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/Administrator/));
     expect(screen.getByTestId("admin-username-input")).toBeInTheDocument();
-    expect(auth.getToken()).toBe(""); // token cleared on role rejection
+    expect(auth.getAdminToken()).toBe(""); // token cleared on role rejection
   });
 
   it("falls back to the login gate when a residual token is invalid (no 401 storm)", async () => {
     // Regression: a leftover token in sessionStorage used to flip the page straight to authed, which
     // then fired protected requests with a dead bearer → a wall of 401s. Now we validate via me()
     // first, and an invalid token drops us to the login form without ever calling the admin API.
-    sessionStorage.setItem("admin_api_token", "stale-token");
+    sessionStorage.setItem(auth.ADMIN_TOKEN_KEY, "stale-token");
     vi.spyOn(auth, "me").mockResolvedValue(null); // me() clears the token and returns null on 401
     const listBanks = vi.spyOn(admin, "listBanks").mockResolvedValue([]);
 
@@ -794,11 +794,11 @@ describe("AdminPage", () => {
 
     it("shows an error state when the request fails", async () => {
       const user = userEvent.setup();
-      vi.spyOn(admin, "listUsers").mockRejectedValue(new admin.AdminApiError("500 boom", 500));
+      vi.spyOn(admin, "listUsers").mockRejectedValue(new admin.AdminApiError(500, "Internal Server Error", "boom", "boom"));
 
       await openUsersTab(user);
 
-      await waitFor(() => expect(screen.getByTestId("users-error")).toHaveTextContent(/500 boom/));
+      await waitFor(() => expect(screen.getByTestId("users-error")).toHaveTextContent(/500 Internal Server Error: boom/));
       expect(screen.queryByTestId("users-table")).not.toBeInTheDocument();
     });
   });

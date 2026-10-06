@@ -60,7 +60,7 @@ export function AgentEditorPage() {
   // with a rotated secret_key). Start in a "checking" state whenever a token exists so we validate
   // it via me() before rendering the editor — otherwise we'd fire protected requests with a stale
   // token and get a wall of 401s while the page pretends we're logged in.
-  const [authChecking, setAuthChecking] = useState(Boolean(auth.getToken()));
+  const [authChecking, setAuthChecking] = useState(Boolean(auth.getAdminToken()));
   const [error, setError] = useState<string | null>(null);
 
   const [list, setList] = useState<personas.PersonaOut[]>([]);
@@ -105,7 +105,7 @@ export function AgentEditorPage() {
       const user = await auth.me();
       if (cancelled) return;
       if (user && user.role === "admin") setAuthed(true);
-      else auth.clearToken();
+      else auth.clearAdminToken();
       setAuthChecking(false);
     })();
     return () => {
@@ -122,7 +122,7 @@ export function AgentEditorPage() {
       await auth.login(username.trim(), password);
       const user = await auth.me();
       if (!user || user.role !== "admin") {
-        auth.clearToken();
+        auth.clearAdminToken();
         throw new Error(t("admin.errAdminRequired"));
       }
       setAuthed(true);

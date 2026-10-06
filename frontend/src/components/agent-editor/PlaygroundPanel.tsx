@@ -26,7 +26,7 @@ import { AvatarPreview } from "./AvatarPreview";
 import { AVATAR_CHARACTER_MAP } from "../../data/avatarCharacters";
 import { useInterviewVoice, MicAccessError } from "../../hooks/useInterviewVoice";
 import { testChat } from "../../api/personaKnowledge";
-import { getAdminToken } from "../../api/admin";
+import { getAdminToken } from "../../api/auth";
 import type { TranscriptSegment } from "../../types/voice";
 
 const useStyles = makeStyles({

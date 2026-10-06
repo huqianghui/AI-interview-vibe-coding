@@ -1,41 +1,16 @@
 /**
- * Admin API client (SPEC F2b/F3b). Separate from the candidate `client.ts`: admin routes
- * authenticate with a shared bearer token (entered in the admin page, held in memory +
- * sessionStorage), NOT the anonymous candidate session. Keeping this a dedicated fetch client
- * makes the "admin token never leaks onto a candidate call" boundary structural.
+ * Admin API client (SPEC F2b/F3b). Admin routes authenticate with the admin's login JWT
+ * (`api/auth.ts`), never the anonymous candidate session, so this module attaches only that bearer.
  */
+import { getAdminToken } from "./auth";
+import { HttpError, requestJson } from "./http";
 
-const BASE = "/api";
-const ADMIN_TOKEN_KEY = "admin_api_token";
+/** A failed admin call: the shared {@link HttpError} (status + the server's detail). */
+export const AdminApiError = HttpError;
+export type AdminApiError = HttpError;
 
-export function getAdminToken(): string {
-  return typeof sessionStorage !== "undefined" ? sessionStorage.getItem(ADMIN_TOKEN_KEY) ?? "" : "";
-}
-
-export function setAdminToken(token: string): void {
-  if (typeof sessionStorage !== "undefined") sessionStorage.setItem(ADMIN_TOKEN_KEY, token);
-}
-
-export class AdminApiError extends Error {
-  status: number;
-  constructor(message: string, status: number) {
-    super(message);
-    this.name = "AdminApiError";
-    this.status = status;
-  }
-}
-
-export async function adminRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const headers = new Headers(init.headers);
-  headers.set("Content-Type", "application/json");
-  headers.set("Authorization", `Bearer ${getAdminToken()}`);
-  const resp = await fetch(`${BASE}${path}`, { ...init, headers });
-  if (!resp.ok) {
-    const detail = await resp.text().catch(() => "");
-    throw new AdminApiError(`${resp.status} ${resp.statusText}: ${detail}`, resp.status);
-  }
-  if (resp.status === 204) return undefined as T;
-  return (await resp.json()) as T;
+export function adminRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return requestJson<T>(path, init, { bearer: getAdminToken() });
 }
 
 // ── Question banks (F2b) ───────────────────────────────────────────────

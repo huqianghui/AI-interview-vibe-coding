@@ -1,7 +1,7 @@
 /**
  * Interviewer-persona admin API client (SPEC F5, Phase 3). Backs the Foundry-style Agent editor.
  *
- * Reuses `admin.ts`'s `adminRequest` (shared admin bearer + error handling) so the persona routes
+ * Reuses `admin.ts`'s `adminRequest` (admin bearer + error handling) so the persona routes
  * authenticate exactly like the other admin surfaces. The backend stores `voice_map`/`greeting_map`
  * as JSON **strings** (per-locale maps); this module keeps them as strings on the wire — the editor
  * parses/stringifies at its own edges (a persona has one string per map, parsed into a

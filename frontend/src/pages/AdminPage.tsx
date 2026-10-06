@@ -179,7 +179,7 @@ export function AdminPage() {
   // with a rotated secret_key). Start in a "checking" state whenever a token exists so we validate
   // it via me() before rendering the admin UI — otherwise we'd fire protected requests with a stale
   // token and get a wall of 401s while the page pretends we're logged in.
-  const [authChecking, setAuthChecking] = useState(Boolean(auth.getToken()));
+  const [authChecking, setAuthChecking] = useState(Boolean(auth.getAdminToken()));
   // LoginCard's `busy` prop — this page's guard() has no busy concept of its own (unlike
   // InterviewPage's), so the login flow tracks it separately just for the card's disabled state.
   const [loginBusy, setLoginBusy] = useState(false);
@@ -382,7 +382,7 @@ export function AdminPage() {
       const user = await auth.me();
       if (cancelled) return;
       if (user && user.role === "admin") setAuthed(true);
-      else auth.clearToken();
+      else auth.clearAdminToken();
       setAuthChecking(false);
     })();
     return () => {
@@ -428,7 +428,7 @@ export function AdminPage() {
       await auth.login(username, password);
       const user = await auth.me();
       if (!user || user.role !== "admin") {
-        auth.clearToken();
+        auth.clearAdminToken();
         throw new Error(t("admin.errAdminRequired"));
       }
       setAuthed(true);

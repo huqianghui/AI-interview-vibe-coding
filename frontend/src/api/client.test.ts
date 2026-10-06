@@ -4,6 +4,7 @@ import {
   CandidateAuthError,
   _internal,
   ensureSession,
+  fetchSopDocument,
   getReportStream,
   resetCandidateSession,
   signOutCandidate,
@@ -294,5 +295,92 @@ describe("getReportStream", () => {
   it("rejects on a non-ok response", async () => {
     vi.stubGlobal("fetch", mockStreamFetch(["conflict"], false, 409));
     await expect(getReportStream("iv1")).rejects.toThrow(/409/);
+  });
+});
+
+describe("anon-session self-heal", () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => vi.restoreAllMocks());
+
+  const unauthorized = {
+    ok: false,
+    status: 401,
+    statusText: "Unauthorized",
+    text: async () => "",
+  };
+  const freshSession = {
+    ok: true,
+    status: 200,
+    json: async () => ({ session_id: "s2", token: "fresh", expires_at: "later" }),
+  };
+  const interview = { interview_session_id: "iv1", status: "in_progress", current_question: null };
+
+  it("drops a stale token on 401, mints a fresh session and retries once with it", async () => {
+    localStorage.setItem(_internal.TOKEN_KEY, "stale");
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(unauthorized)
+      .mockResolvedValueOnce(freshSession)
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => interview });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await expect(startInterview()).resolves.toMatchObject({ interview_session_id: "iv1" });
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(fetchSpy.mock.calls[1][0]).toBe("/api/public/candidate/session");
+    const retried = fetchSpy.mock.calls[2][1].headers as Headers;
+    expect(retried.get("X-Anon-Session")).toBe("fresh");
+  });
+
+  it("does not retry a 401 a second time", async () => {
+    localStorage.setItem(_internal.TOKEN_KEY, "stale");
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(unauthorized)
+      .mockResolvedValueOnce(freshSession)
+      .mockResolvedValueOnce(unauthorized);
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await expect(startInterview()).rejects.toThrow(/401/);
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not retry a non-401 failure", async () => {
+    localStorage.setItem(_internal.TOKEN_KEY, "tok");
+    const fetchSpy = mockFetchOnce({ detail: "gone" }, false, 404);
+    vi.stubGlobal("fetch", fetchSpy);
+    await expect(startInterview()).rejects.toThrow(/404/);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("fetchSopDocument", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem(_internal.TOKEN_KEY, "tok-sop");
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("GETs the encoded document path with the anon session and returns a blob URL", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response("pdf-bytes", { status: 200 }));
+    vi.stubGlobal("fetch", fetchSpy);
+    // jsdom has no createObjectURL, so define one rather than spy on it.
+    const createObjectURL = vi.fn().mockReturnValue("blob:doc");
+    Object.defineProperty(URL, "createObjectURL", { value: createObjectURL, configurable: true });
+
+    await expect(fetchSopDocument("iv1", "doc/1")).resolves.toBe("blob:doc");
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe("/api/candidate/interview/iv1/sop/doc%2F1");
+    const headers = init.headers as Headers;
+    expect(headers.get("X-Anon-Session")).toBe("tok-sop");
+    expect(headers.has("Content-Type")).toBe(false);
+    expect(createObjectURL).toHaveBeenCalledOnce();
+  });
+
+  it("rejects on a non-ok response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("nope", { status: 404 })));
+    await expect(fetchSopDocument("iv1", "x")).rejects.toThrow(/404/);
   });
 });

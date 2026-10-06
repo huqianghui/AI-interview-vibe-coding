@@ -69,7 +69,7 @@ const PERSONA: personas.PersonaOut = {
 
 function mockAdminLogin() {
   vi.spyOn(auth, "login").mockImplementation(async () => {
-    auth.setToken("jwt-token");
+    auth.setAdminToken("jwt-token");
     return "jwt-token";
   });
   vi.spyOn(auth, "me").mockResolvedValue(ADMIN_USER);
@@ -195,7 +195,7 @@ describe("AgentEditorPage", () => {
   it("rejects a non-admin user", async () => {
     const user = userEvent.setup();
     vi.spyOn(auth, "login").mockImplementation(async () => {
-      auth.setToken("jwt-token");
+      auth.setAdminToken("jwt-token");
       return "jwt-token";
     });
     vi.spyOn(auth, "me").mockResolvedValue({ ...ADMIN_USER, role: "user" });
@@ -203,14 +203,14 @@ describe("AgentEditorPage", () => {
     renderPage();
     await signIn(user);
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/Administrator/));
-    expect(auth.getToken()).toBe("");
+    expect(auth.getAdminToken()).toBe("");
   });
 
   it("falls back to the login gate when a residual token is invalid (no 401 storm)", async () => {
     // Regression: a leftover token in sessionStorage used to flip the page straight to authed, which
     // then fired listPersonas() with a dead bearer → 401s. Now we validate via me() first, and an
     // invalid token drops us to the login form without ever calling the personas API.
-    sessionStorage.setItem("admin_api_token", "stale-token");
+    sessionStorage.setItem(auth.ADMIN_TOKEN_KEY, "stale-token");
     vi.spyOn(auth, "me").mockResolvedValue(null); // me() clears the token and returns null on 401
     const listSpy = vi.spyOn(personas, "listPersonas").mockResolvedValue([PERSONA]);
 
