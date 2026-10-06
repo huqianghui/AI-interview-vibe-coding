@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/candidate/interview", tags=["interview"])
 
 
-class QuestionOut(BaseModel):
+class CurrentQuestionOut(BaseModel):
     question_id: str
     prompt: str
     index: int
@@ -55,7 +55,7 @@ class QuestionOut(BaseModel):
 class InterviewOut(BaseModel):
     interview_session_id: str
     status: str
-    current_question: QuestionOut | None
+    current_question: CurrentQuestionOut | None
     # --- Phase 2 external-brain fields (None for bank sessions) --------------------------------
     # The external sub-state ("idle" | "awaiting" | "recovery_required"), so the UI can show the
     # "面试官思考中…" (awaiting) or "恢复" (recovery_required) affordance. None ⇒ bank session.
@@ -218,7 +218,7 @@ def _to_interview_out(
     return InterviewOut(
         interview_session_id=session.id,
         status=session.status,
-        current_question=QuestionOut(**question) if question else None,
+        current_question=CurrentQuestionOut(**question) if question else None,
         external_phase=session.external_phase if is_external else None,
         speech_text=external_runner.speech_text_for(session) if is_external else None,
         voice_default=voice_default,

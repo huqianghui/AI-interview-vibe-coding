@@ -1,0 +1,4909 @@
+{
+  "components": {
+    "schemas": {
+      "AdminQuestionOut": {
+        "properties": {
+          "checklist_item_count": {
+            "default": 0,
+            "title": "Checklist Item Count",
+            "type": "integer"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "expected_points": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Expected Points",
+            "type": "array"
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "max_follow_ups": {
+            "title": "Max Follow Ups",
+            "type": "integer"
+          },
+          "order_index": {
+            "title": "Order Index",
+            "type": "integer"
+          },
+          "question_id": {
+            "title": "Question Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question_id",
+          "text",
+          "language",
+          "order_index",
+          "enabled",
+          "expected_points",
+          "max_follow_ups"
+        ],
+        "title": "AdminQuestionOut",
+        "type": "object"
+      },
+      "AdminUserResponse": {
+        "description": "Admin view of a user (adds business_unit + the #102 derived-password view).\n\n``generated_password`` is the derived password when the account has a system-derived one\n(``password_generation`` set) AND it still matches the stored hash; ``password_stale`` is True\nwhen it no longer matches (SECRET_KEY was rotated after seeding) — the UI shows \"Reset\nrequired\" instead of a wrong password. Both are null/False for self-set (admin) passwords.",
+        "properties": {
+          "business_unit": {
+            "title": "Business Unit",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "full_name": {
+            "title": "Full Name",
+            "type": "string"
+          },
+          "generated_password": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generated Password"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "password_stale": {
+            "default": false,
+            "title": "Password Stale",
+            "type": "boolean"
+          },
+          "preferred_language": {
+            "title": "Preferred Language",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "email",
+          "full_name",
+          "role",
+          "is_active",
+          "preferred_language",
+          "business_unit"
+        ],
+        "title": "AdminUserResponse",
+        "type": "object"
+      },
+      "AiFoundryConfigIn": {
+        "properties": {
+          "api_key": {
+            "default": "",
+            "title": "Api Key",
+            "type": "string"
+          },
+          "clear_api_key": {
+            "default": false,
+            "title": "Clear Api Key",
+            "type": "boolean"
+          },
+          "default_project": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Default Project",
+            "type": "string"
+          },
+          "endpoint": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Endpoint",
+            "type": "string"
+          },
+          "knowledge_base": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Knowledge Base",
+            "type": "string"
+          },
+          "knowledge_source": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Knowledge Source",
+            "type": "string"
+          },
+          "model_or_deployment": {
+            "default": "",
+            "maxLength": 100,
+            "title": "Model Or Deployment",
+            "type": "string"
+          },
+          "voice_byom_profile": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Voice Byom Profile",
+            "type": "string"
+          },
+          "voice_model": {
+            "default": "",
+            "maxLength": 100,
+            "title": "Voice Model",
+            "type": "string"
+          },
+          "voice_model_mode": {
+            "default": "native",
+            "maxLength": 16,
+            "title": "Voice Model Mode",
+            "type": "string"
+          }
+        },
+        "title": "AiFoundryConfigIn",
+        "type": "object"
+      },
+      "AiFoundryConfigOut": {
+        "properties": {
+          "default_project": {
+            "title": "Default Project",
+            "type": "string"
+          },
+          "endpoint": {
+            "title": "Endpoint",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "knowledge_base": {
+            "title": "Knowledge Base",
+            "type": "string"
+          },
+          "knowledge_source": {
+            "title": "Knowledge Source",
+            "type": "string"
+          },
+          "masked_key": {
+            "title": "Masked Key",
+            "type": "string"
+          },
+          "model_or_deployment": {
+            "title": "Model Or Deployment",
+            "type": "string"
+          },
+          "voice_byom_profile": {
+            "title": "Voice Byom Profile",
+            "type": "string"
+          },
+          "voice_model": {
+            "title": "Voice Model",
+            "type": "string"
+          },
+          "voice_model_check": {
+            "default": "",
+            "title": "Voice Model Check",
+            "type": "string"
+          },
+          "voice_model_mode": {
+            "title": "Voice Model Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "endpoint",
+          "masked_key",
+          "default_project",
+          "model_or_deployment",
+          "voice_model",
+          "voice_model_mode",
+          "voice_byom_profile",
+          "knowledge_base",
+          "knowledge_source",
+          "is_active"
+        ],
+        "title": "AiFoundryConfigOut",
+        "type": "object"
+      },
+      "AnswerIn": {
+        "properties": {
+          "source": {
+            "default": "text",
+            "title": "Source",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "AnswerIn",
+        "type": "object"
+      },
+      "AnsweredQuestionOut": {
+        "description": "One question + the candidate's finalized answer, for the pre-scoring review screen.\n\nCandidate-safe (P3): prompt + the answer the candidate gave, in bank order. Deliberately\ncarries NO checklist / score / rubric — review happens before scoring, and scoring stays\ninterviewer-internal until the report.",
+        "properties": {
+          "answer_text": {
+            "title": "Answer Text",
+            "type": "string"
+          },
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          },
+          "question_id": {
+            "title": "Question Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question_id",
+          "prompt",
+          "index",
+          "answer_text"
+        ],
+        "title": "AnsweredQuestionOut",
+        "type": "object"
+      },
+      "BankIn": {
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "is_default": {
+            "default": false,
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "language": {
+            "default": "en-US",
+            "title": "Language",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "BankIn",
+        "type": "object"
+      },
+      "BankOut": {
+        "properties": {
+          "bank_id": {
+            "title": "Bank Id",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "is_default": {
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bank_id",
+          "name",
+          "description",
+          "language",
+          "enabled",
+          "is_default"
+        ],
+        "title": "BankOut",
+        "type": "object"
+      },
+      "Body_upload_document_admin_sop_documents_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_document_admin_sop_documents_post",
+        "type": "object"
+      },
+      "BundleImportOut": {
+        "description": "Result of a bank-bundle import — an auditable summary of what the sync wrote.",
+        "properties": {
+          "bank_id": {
+            "title": "Bank Id",
+            "type": "string"
+          },
+          "bank_name": {
+            "title": "Bank Name",
+            "type": "string"
+          },
+          "checklist_item_count": {
+            "title": "Checklist Item Count",
+            "type": "integer"
+          },
+          "question_count": {
+            "title": "Question Count",
+            "type": "integer"
+          },
+          "replaced": {
+            "title": "Replaced",
+            "type": "boolean"
+          },
+          "unresolved_sop_names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unresolved Sop Names",
+            "type": "array"
+          }
+        },
+        "required": [
+          "bank_id",
+          "bank_name",
+          "replaced",
+          "question_count",
+          "checklist_item_count",
+          "unresolved_sop_names"
+        ],
+        "title": "BundleImportOut",
+        "type": "object"
+      },
+      "ChecklistEditIn": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ChecklistItemIn"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ChecklistEditIn",
+        "type": "object"
+      },
+      "ChecklistItemIn": {
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "source_page": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Page"
+          },
+          "source_quote": {
+            "default": "",
+            "title": "Source Quote",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "weight": {
+            "default": 0,
+            "title": "Weight",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "text"
+        ],
+        "title": "ChecklistItemIn",
+        "type": "object"
+      },
+      "ChecklistItemOut": {
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "order_index": {
+            "title": "Order Index",
+            "type": "integer"
+          },
+          "source_page": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Page"
+          },
+          "source_quote": {
+            "title": "Source Quote",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "weight": {
+            "title": "Weight",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "text",
+          "weight",
+          "source_quote",
+          "source_page",
+          "order_index"
+        ],
+        "title": "ChecklistItemOut",
+        "type": "object"
+      },
+      "ChecklistOut": {
+        "properties": {
+          "checklist_id": {
+            "title": "Checklist Id",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ChecklistItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "prompt_version": {
+            "title": "Prompt Version",
+            "type": "string"
+          },
+          "question_id": {
+            "title": "Question Id",
+            "type": "string"
+          },
+          "weights_sum": {
+            "title": "Weights Sum",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "checklist_id",
+          "question_id",
+          "prompt_version",
+          "weights_sum",
+          "items"
+        ],
+        "title": "ChecklistOut",
+        "type": "object"
+      },
+      "ConnectionTestResult": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "message"
+        ],
+        "title": "ConnectionTestResult",
+        "type": "object"
+      },
+      "CurrentQuestionOut": {
+        "properties": {
+          "follow_ups_asked": {
+            "default": 0,
+            "title": "Follow Ups Asked",
+            "type": "integer"
+          },
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "is_follow_up": {
+            "default": false,
+            "title": "Is Follow Up",
+            "type": "boolean"
+          },
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          },
+          "question_id": {
+            "title": "Question Id",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "question_id",
+          "prompt",
+          "index",
+          "total"
+        ],
+        "title": "CurrentQuestionOut",
+        "type": "object"
+      },
+      "ExternalConfigIn": {
+        "properties": {
+          "api_key": {
+            "default": "",
+            "title": "Api Key",
+            "type": "string"
+          },
+          "endpoint": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Endpoint",
+            "type": "string"
+          },
+          "user_tag": {
+            "default": "",
+            "maxLength": 100,
+            "title": "User Tag",
+            "type": "string"
+          }
+        },
+        "title": "ExternalConfigIn",
+        "type": "object"
+      },
+      "ExternalConfigOut": {
+        "properties": {
+          "endpoint": {
+            "title": "Endpoint",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "masked_key": {
+            "title": "Masked Key",
+            "type": "string"
+          },
+          "user_tag": {
+            "title": "User Tag",
+            "type": "string"
+          }
+        },
+        "required": [
+          "endpoint",
+          "masked_key",
+          "user_tag",
+          "is_active"
+        ],
+        "title": "ExternalConfigOut",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "InterviewOut": {
+        "properties": {
+          "current_question": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CurrentQuestionOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "external_phase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Phase"
+          },
+          "interview_session_id": {
+            "title": "Interview Session Id",
+            "type": "string"
+          },
+          "speech_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speech Text"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "voice_auto_submit_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voice Auto Submit Seconds"
+          },
+          "voice_avatar_character": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voice Avatar Character"
+          },
+          "voice_default": {
+            "default": false,
+            "title": "Voice Default",
+            "type": "boolean"
+          },
+          "voice_judge_silence_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voice Judge Silence Seconds"
+          },
+          "voice_linear_turns": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voice Linear Turns"
+          }
+        },
+        "required": [
+          "interview_session_id",
+          "status",
+          "current_question"
+        ],
+        "title": "InterviewOut",
+        "type": "object"
+      },
+      "JudgeApplyIn": {
+        "properties": {
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "follow_ups_asked": {
+            "default": 0,
+            "title": "Follow Ups Asked",
+            "type": "integer"
+          },
+          "question_id": {
+            "title": "Question Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "question_id"
+        ],
+        "title": "JudgeApplyIn",
+        "type": "object"
+      },
+      "JudgeIn": {
+        "description": "Pre-submit judge request (issue #114). The ids let the server drop STALE requests (a timer\nthat fired after the question advanced) without spending an LLM call.",
+        "properties": {
+          "draft_text": {
+            "default": "",
+            "title": "Draft Text",
+            "type": "string"
+          },
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "follow_ups_asked": {
+            "default": 0,
+            "title": "Follow Ups Asked",
+            "type": "integer"
+          },
+          "question_id": {
+            "title": "Question Id",
+            "type": "string"
+          },
+          "trigger": {
+            "default": "voice_silence",
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question_id"
+        ],
+        "title": "JudgeIn",
+        "type": "object"
+      },
+      "JudgeOut": {
+        "properties": {
+          "event_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
+          "interview": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InterviewOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "speech_text": {
+            "default": "",
+            "title": "Speech Text",
+            "type": "string"
+          },
+          "verdict": {
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "verdict"
+        ],
+        "title": "JudgeOut",
+        "type": "object"
+      },
+      "KbConnectionOut": {
+        "description": "An Azure AI Search connection for the connect dialog. ``target`` (the Search endpoint URL)\nis carried so the client can persist it as ``connection_target`` without a second lookup.",
+        "properties": {
+          "is_default": {
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "target",
+          "is_default"
+        ],
+        "title": "KbConnectionOut",
+        "type": "object"
+      },
+      "LoginRequest": {
+        "properties": {
+          "password": {
+            "title": "Password",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "LoginRequest",
+        "type": "object"
+      },
+      "Option": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label"
+        ],
+        "title": "Option",
+        "type": "object"
+      },
+      "PersonaCreate": {
+        "properties": {
+          "bank_auto_submit_enabled": {
+            "default": false,
+            "title": "Bank Auto Submit Enabled",
+            "type": "boolean"
+          },
+          "bank_auto_submit_silence_seconds": {
+            "default": 3,
+            "maximum": 60.0,
+            "minimum": 1.0,
+            "title": "Bank Auto Submit Silence Seconds",
+            "type": "integer"
+          },
+          "bank_turn_mode": {
+            "default": "linear",
+            "title": "Bank Turn Mode",
+            "type": "string"
+          },
+          "character": {
+            "default": "",
+            "title": "Character",
+            "type": "string"
+          },
+          "default_locale": {
+            "default": "en-US",
+            "title": "Default Locale",
+            "type": "string"
+          },
+          "echo_cancellation": {
+            "default": true,
+            "title": "Echo Cancellation",
+            "type": "boolean"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "eou_detection": {
+            "default": true,
+            "title": "Eou Detection",
+            "type": "boolean"
+          },
+          "external_auto_submit_enabled": {
+            "default": true,
+            "title": "External Auto Submit Enabled",
+            "type": "boolean"
+          },
+          "external_auto_submit_silence_seconds": {
+            "default": 3,
+            "maximum": 60.0,
+            "minimum": 1.0,
+            "title": "External Auto Submit Silence Seconds",
+            "type": "integer"
+          },
+          "external_reader_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Reader Prompt"
+          },
+          "greeting_map": {
+            "default": "{}",
+            "title": "Greeting Map",
+            "type": "string"
+          },
+          "interim_response": {
+            "default": true,
+            "title": "Interim Response",
+            "type": "boolean"
+          },
+          "interview_brain": {
+            "default": "bank",
+            "title": "Interview Brain",
+            "type": "string"
+          },
+          "is_default": {
+            "default": false,
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "judge_max_calls_per_question": {
+            "default": 2,
+            "maximum": 5.0,
+            "minimum": 0.0,
+            "title": "Judge Max Calls Per Question",
+            "type": "integer"
+          },
+          "judge_silence_seconds": {
+            "default": 2,
+            "maximum": 30.0,
+            "minimum": 1.0,
+            "title": "Judge Silence Seconds",
+            "type": "integer"
+          },
+          "model": {
+            "default": "",
+            "title": "Model",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "noise_suppression": {
+            "default": true,
+            "title": "Noise Suppression",
+            "type": "boolean"
+          },
+          "playback_speed": {
+            "default": 1.0,
+            "maximum": 1.5,
+            "minimum": 0.5,
+            "title": "Playback Speed",
+            "type": "number"
+          },
+          "proactive_engagement": {
+            "default": false,
+            "title": "Proactive Engagement",
+            "type": "boolean"
+          },
+          "prompt_fragment": {
+            "default": "",
+            "title": "Prompt Fragment",
+            "type": "string"
+          },
+          "style": {
+            "default": "",
+            "title": "Style",
+            "type": "string"
+          },
+          "tools_config": {
+            "default": "[]",
+            "title": "Tools Config",
+            "type": "string"
+          },
+          "turn_detection": {
+            "default": "azure_semantic_vad",
+            "title": "Turn Detection",
+            "type": "string"
+          },
+          "voice_map": {
+            "default": "{}",
+            "title": "Voice Map",
+            "type": "string"
+          },
+          "voice_temperature": {
+            "default": 0.8,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Voice Temperature",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "PersonaCreate",
+        "type": "object"
+      },
+      "PersonaKnowledgeCreate": {
+        "properties": {
+          "connection_name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Connection Name",
+            "type": "string"
+          },
+          "connection_target": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Connection Target",
+            "type": "string"
+          },
+          "index_name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Index Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "connection_name",
+          "index_name"
+        ],
+        "title": "PersonaKnowledgeCreate",
+        "type": "object"
+      },
+      "PersonaKnowledgeOut": {
+        "properties": {
+          "connection_name": {
+            "title": "Connection Name",
+            "type": "string"
+          },
+          "connection_target": {
+            "title": "Connection Target",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "index_name": {
+            "title": "Index Name",
+            "type": "string"
+          },
+          "is_enabled": {
+            "title": "Is Enabled",
+            "type": "boolean"
+          },
+          "persona_id": {
+            "title": "Persona Id",
+            "type": "string"
+          },
+          "server_label": {
+            "title": "Server Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "persona_id",
+          "connection_name",
+          "connection_target",
+          "index_name",
+          "server_label",
+          "is_enabled"
+        ],
+        "title": "PersonaKnowledgeOut",
+        "type": "object"
+      },
+      "PersonaOut": {
+        "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "agent_sync_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Sync Error"
+          },
+          "agent_sync_status": {
+            "title": "Agent Sync Status",
+            "type": "string"
+          },
+          "agent_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Version"
+          },
+          "bank_auto_submit_enabled": {
+            "title": "Bank Auto Submit Enabled",
+            "type": "boolean"
+          },
+          "bank_auto_submit_silence_seconds": {
+            "title": "Bank Auto Submit Silence Seconds",
+            "type": "integer"
+          },
+          "bank_turn_mode": {
+            "title": "Bank Turn Mode",
+            "type": "string"
+          },
+          "character": {
+            "title": "Character",
+            "type": "string"
+          },
+          "default_external_reader_prompt": {
+            "title": "Default External Reader Prompt",
+            "type": "string"
+          },
+          "default_instructions": {
+            "title": "Default Instructions",
+            "type": "string"
+          },
+          "default_locale": {
+            "title": "Default Locale",
+            "type": "string"
+          },
+          "echo_cancellation": {
+            "title": "Echo Cancellation",
+            "type": "boolean"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "eou_detection": {
+            "title": "Eou Detection",
+            "type": "boolean"
+          },
+          "external_auto_submit_enabled": {
+            "title": "External Auto Submit Enabled",
+            "type": "boolean"
+          },
+          "external_auto_submit_silence_seconds": {
+            "title": "External Auto Submit Silence Seconds",
+            "type": "integer"
+          },
+          "external_reader_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Reader Prompt"
+          },
+          "greeting_map": {
+            "title": "Greeting Map",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "interim_response": {
+            "title": "Interim Response",
+            "type": "boolean"
+          },
+          "interview_brain": {
+            "title": "Interview Brain",
+            "type": "string"
+          },
+          "is_default": {
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "judge_contract": {
+            "title": "Judge Contract",
+            "type": "string"
+          },
+          "judge_max_calls_per_question": {
+            "title": "Judge Max Calls Per Question",
+            "type": "integer"
+          },
+          "judge_silence_seconds": {
+            "title": "Judge Silence Seconds",
+            "type": "integer"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "noise_suppression": {
+            "title": "Noise Suppression",
+            "type": "boolean"
+          },
+          "playback_speed": {
+            "title": "Playback Speed",
+            "type": "number"
+          },
+          "proactive_engagement": {
+            "title": "Proactive Engagement",
+            "type": "boolean"
+          },
+          "prompt_fragment": {
+            "title": "Prompt Fragment",
+            "type": "string"
+          },
+          "style": {
+            "title": "Style",
+            "type": "string"
+          },
+          "tools_config": {
+            "title": "Tools Config",
+            "type": "string"
+          },
+          "turn_detection": {
+            "title": "Turn Detection",
+            "type": "string"
+          },
+          "voice_map": {
+            "title": "Voice Map",
+            "type": "string"
+          },
+          "voice_temperature": {
+            "title": "Voice Temperature",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "character",
+          "style",
+          "prompt_fragment",
+          "external_reader_prompt",
+          "voice_map",
+          "greeting_map",
+          "default_locale",
+          "enabled",
+          "is_default",
+          "tools_config",
+          "turn_detection",
+          "eou_detection",
+          "noise_suppression",
+          "echo_cancellation",
+          "interim_response",
+          "proactive_engagement",
+          "voice_temperature",
+          "playback_speed",
+          "bank_auto_submit_enabled",
+          "bank_auto_submit_silence_seconds",
+          "external_auto_submit_enabled",
+          "external_auto_submit_silence_seconds",
+          "bank_turn_mode",
+          "judge_silence_seconds",
+          "judge_max_calls_per_question",
+          "judge_contract",
+          "model",
+          "interview_brain",
+          "agent_id",
+          "agent_version",
+          "agent_sync_status",
+          "agent_sync_error",
+          "default_instructions",
+          "default_external_reader_prompt"
+        ],
+        "title": "PersonaOut",
+        "type": "object"
+      },
+      "PersonaUpdate": {
+        "properties": {
+          "bank_auto_submit_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bank Auto Submit Enabled"
+          },
+          "bank_auto_submit_silence_seconds": {
+            "anyOf": [
+              {
+                "maximum": 60.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bank Auto Submit Silence Seconds"
+          },
+          "bank_turn_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bank Turn Mode"
+          },
+          "character": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Character"
+          },
+          "default_locale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Locale"
+          },
+          "echo_cancellation": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Echo Cancellation"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "eou_detection": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eou Detection"
+          },
+          "external_auto_submit_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Auto Submit Enabled"
+          },
+          "external_auto_submit_silence_seconds": {
+            "anyOf": [
+              {
+                "maximum": 60.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Auto Submit Silence Seconds"
+          },
+          "external_reader_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Reader Prompt"
+          },
+          "greeting_map": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Greeting Map"
+          },
+          "interim_response": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interim Response"
+          },
+          "interview_brain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interview Brain"
+          },
+          "is_default": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Default"
+          },
+          "judge_max_calls_per_question": {
+            "anyOf": [
+              {
+                "maximum": 5.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Judge Max Calls Per Question"
+          },
+          "judge_silence_seconds": {
+            "anyOf": [
+              {
+                "maximum": 30.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Judge Silence Seconds"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "noise_suppression": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Noise Suppression"
+          },
+          "playback_speed": {
+            "anyOf": [
+              {
+                "maximum": 1.5,
+                "minimum": 0.5,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Playback Speed"
+          },
+          "proactive_engagement": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proactive Engagement"
+          },
+          "prompt_fragment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Fragment"
+          },
+          "style": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Style"
+          },
+          "tools_config": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tools Config"
+          },
+          "turn_detection": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Turn Detection"
+          },
+          "voice_map": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voice Map"
+          },
+          "voice_temperature": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voice Temperature"
+          }
+        },
+        "title": "PersonaUpdate",
+        "type": "object"
+      },
+      "QuestionIn": {
+        "properties": {
+          "expected_points": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Expected Points",
+            "type": "array"
+          },
+          "follow_up_prompt": {
+            "default": "Can you walk me through that in a bit more detail?",
+            "title": "Follow Up Prompt",
+            "type": "string"
+          },
+          "language": {
+            "default": "en-US",
+            "title": "Language",
+            "type": "string"
+          },
+          "max_follow_ups": {
+            "default": 0,
+            "title": "Max Follow Ups",
+            "type": "integer"
+          },
+          "text": {
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "QuestionIn",
+        "type": "object"
+      },
+      "QuestionPatch": {
+        "properties": {
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "expected_points": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Points"
+          },
+          "follow_up_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Follow Up Prompt"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "max_follow_ups": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Follow Ups"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          }
+        },
+        "title": "QuestionPatch",
+        "type": "object"
+      },
+      "ReorderIn": {
+        "properties": {
+          "ordered_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ordered Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ordered_ids"
+        ],
+        "title": "ReorderIn",
+        "type": "object"
+      },
+      "ReportOptionsIn": {
+        "description": "Optional scoring options for the report route. Body is optional; defaults preserve today's\nbehaviour (no coverage check, no extra LLM calls).",
+        "properties": {
+          "sop_coverage_check": {
+            "default": false,
+            "title": "Sop Coverage Check",
+            "type": "boolean"
+          }
+        },
+        "title": "ReportOptionsIn",
+        "type": "object"
+      },
+      "ReportOut": {
+        "properties": {
+          "capped": {
+            "default": false,
+            "title": "Capped",
+            "type": "boolean"
+          },
+          "coverage_pct": {
+            "title": "Coverage Pct",
+            "type": "number"
+          },
+          "grade": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grade"
+          },
+          "interview_session_id": {
+            "title": "Interview Session Id",
+            "type": "string"
+          },
+          "is_stub": {
+            "title": "Is Stub",
+            "type": "boolean"
+          },
+          "narrative": {
+            "default": "",
+            "title": "Narrative",
+            "type": "string"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          },
+          "per_question": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Per Question",
+            "type": "array"
+          },
+          "sop_coverage": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sop Coverage"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "total_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Score"
+          },
+          "unscored_question_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unscored Question Ids"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "interview_session_id",
+          "status",
+          "coverage_pct",
+          "per_question",
+          "is_stub"
+        ],
+        "title": "ReportOut",
+        "type": "object"
+      },
+      "RevealedKeyOut": {
+        "description": "The plaintext external API key, for a deliberate admin click-to-reveal. Never logged.",
+        "properties": {
+          "api_key": {
+            "title": "Api Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "api_key"
+        ],
+        "title": "RevealedKeyOut",
+        "type": "object"
+      },
+      "ReviewOut": {
+        "properties": {
+          "answers": {
+            "items": {
+              "$ref": "#/components/schemas/AnsweredQuestionOut"
+            },
+            "title": "Answers",
+            "type": "array"
+          },
+          "interview_session_id": {
+            "title": "Interview Session Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "interview_session_id",
+          "status",
+          "answers"
+        ],
+        "title": "ReviewOut",
+        "type": "object"
+      },
+      "SessionCreateResponse": {
+        "properties": {
+          "expires_at": {
+            "title": "Expires At",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "token",
+          "expires_at"
+        ],
+        "title": "SessionCreateResponse",
+        "type": "object"
+      },
+      "SopDocumentOut": {
+        "properties": {
+          "chunk_count": {
+            "title": "Chunk Count",
+            "type": "integer"
+          },
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id",
+          "name",
+          "status",
+          "size",
+          "chunk_count"
+        ],
+        "title": "SopDocumentOut",
+        "type": "object"
+      },
+      "TestChatIn": {
+        "properties": {
+          "message": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "previous_response_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Response Id"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "TestChatIn",
+        "type": "object"
+      },
+      "TestChatOut": {
+        "properties": {
+          "response_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Id"
+          },
+          "response_text": {
+            "title": "Response Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "response_text"
+        ],
+        "title": "TestChatOut",
+        "type": "object"
+      },
+      "TokenResponse": {
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "token_type": {
+            "default": "bearer",
+            "title": "Token Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token"
+        ],
+        "title": "TokenResponse",
+        "type": "object"
+      },
+      "UserResponse": {
+        "description": "Public profile of the current user (`GET /auth/me`).",
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "full_name": {
+            "title": "Full Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "preferred_language": {
+            "title": "Preferred Language",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "email",
+          "full_name",
+          "role",
+          "is_active",
+          "preferred_language"
+        ],
+        "title": "UserResponse",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "OAuth2PasswordBearer": {
+        "flows": {
+          "password": {
+            "scopes": {},
+            "tokenUrl": "/auth/login"
+          }
+        },
+        "type": "oauth2"
+      }
+    }
+  },
+  "info": {
+    "title": "AI Interview API",
+    "version": "snapshot"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/admin/checklists/questions/{question_id}": {
+      "get": {
+        "description": "Read the current default checklist for a question (404 if none drafted yet).",
+        "operationId": "get_checklist_admin_checklists_questions__question_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "question_id",
+            "required": true,
+            "schema": {
+              "title": "Question Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChecklistOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Checklist",
+        "tags": [
+          "admin-checklists"
+        ]
+      }
+    },
+    "/admin/checklists/questions/{question_id}/draft": {
+      "post": {
+        "description": "AI-draft a checklist for a question from the SOP (F3 AC #1). Creates a new default.",
+        "operationId": "draft_admin_checklists_questions__question_id__draft_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "question_id",
+            "required": true,
+            "schema": {
+              "title": "Question Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChecklistOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Draft",
+        "tags": [
+          "admin-checklists"
+        ]
+      }
+    },
+    "/admin/checklists/{checklist_id}/items": {
+      "put": {
+        "description": "Replace a checklist's items with an edited set (F3b / F3 AC #4).\n\nWeights are re-normalized to sum 100 (forbidden items → 0); invalid-kind rows are dropped. The\nsaved checklist is returned so the editor round-trips (save → reload).",
+        "operationId": "edit_items_admin_checklists__checklist_id__items_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "checklist_id",
+            "required": true,
+            "schema": {
+              "title": "Checklist Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChecklistEditIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChecklistOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Edit Items",
+        "tags": [
+          "admin-checklists"
+        ]
+      }
+    },
+    "/admin/config/ai-foundry": {
+      "get": {
+        "description": "Return the saved master AI Foundry config with a masked key (empty if never configured).",
+        "operationId": "get_ai_foundry_config_admin_config_ai_foundry_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiFoundryConfigOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Ai Foundry Config",
+        "tags": [
+          "admin-config"
+        ]
+      },
+      "put": {
+        "description": "Save the master config, commit, then overlay it onto settings so it takes effect now.\n\nA changed VOICE model is live-checked before the commit, so a region-rejected choice is a 422\nand never lands in the row (the whole point of the split: whatever an operator can save must be\nconnectable). The inference model is not probed here — it has nothing to do with Voice Live.",
+        "operationId": "update_ai_foundry_config_admin_config_ai_foundry_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiFoundryConfigIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiFoundryConfigOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Update Ai Foundry Config",
+        "tags": [
+          "admin-config"
+        ]
+      }
+    },
+    "/admin/config/ai-foundry/knowledge-bases": {
+      "get": {
+        "description": "List the resource's Foundry IQ knowledge bases for the config-page dropdown.\n\nDelegates to :func:`foundry_connections.list_knowledge_bases` (Phase 2.2) — the shared\ndiscovery path (resolve the AI Search connection via the project client, then call the Search\ndata-plane API with Entra-first / api-key-fallback auth). Fail-soft: any error → []; never 500.",
+        "operationId": "list_knowledge_bases_admin_config_ai_foundry_knowledge_bases_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Option"
+                  },
+                  "title": "Response List Knowledge Bases Admin Config Ai Foundry Knowledge Bases Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Knowledge Bases",
+        "tags": [
+          "admin-config"
+        ]
+      }
+    },
+    "/admin/config/ai-foundry/model-deployments": {
+      "get": {
+        "description": "List the resource's real model deployments for the config-page dropdown.\n\n``kind`` selects the filter (see :func:`_deployment_options`). It defaults to ``chat`` so the\ninference-model dropdown and the per-persona editor keep their behaviour; the BYOM voice\ndropdown passes the kind its profile needs. An unknown value falls back to ``chat`` rather\nthan erroring — a dropdown that 422s is worse than one showing the safe default.\n\nTries the AI Foundry project-scoped deployments API (Entra bearer first — key auth is disabled\non this resource class and 403s; api-key as fallback), then the legacy Azure OpenAI deployments\nAPI, then falls back to the saved model. Fail-soft: any error → saved model or []; never 500.",
+        "operationId": "list_model_deployments_admin_config_ai_foundry_model_deployments_get",
+        "parameters": [
+          {
+            "description": "which deployments are legal for the consumer asking: chat | realtime | all",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "chat",
+              "description": "which deployments are legal for the consumer asking: chat | realtime | all",
+              "title": "Kind",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Option"
+                  },
+                  "title": "Response List Model Deployments Admin Config Ai Foundry Model Deployments Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Model Deployments",
+        "tags": [
+          "admin-config"
+        ]
+      }
+    },
+    "/admin/config/ai-foundry/test": {
+      "post": {
+        "description": "Lightweight connectivity probe against the effective Foundry connection (DB row, .env fill).\n\nAuth mirrors the runtime strategy (``azure_auth``): Entra bearer first (az login / Managed\nIdentity), saved API key as fallback — so a blank key passes on key-disabled resources. Probes\nthe project deployments API when a project is set (the legacy ``/openai/deployments`` path\n404s on ``services.ai.azure.com`` resources regardless of auth), else the legacy path. Never\nraises: returns a structured pass/fail either way, naming the auth that succeeded.",
+        "operationId": "test_ai_foundry_config_admin_config_ai_foundry_test_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTestResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Test Ai Foundry Config",
+        "tags": [
+          "admin-config"
+        ]
+      }
+    },
+    "/admin/config/ai-foundry/voice-live-models": {
+      "get": {
+        "description": "List the NATIVE Voice Live models this resource's REGION actually accepts.\n\nThese are Azure-hosted (path ①): Voice Live pre-deploys them on its own side, which is why\nthey need no deployment of yours — and equally why they are NOT usable by judge / scoring /\nthe agent, who address models by deployment name. That asymmetry is the reason the voice model\nis a separate setting from the inference model.\n\nThe list is measured, not looked up: there is no \"native models in region X\" API and the Learn\ntable runs ahead of rollout (``gpt-5.6-luna`` was rejected on 2026-09-23 and accepted on\n2026-10-05 on this very resource). Results are cached ~6h per endpoint; ``refresh=1`` re-probes\n(23 candidates in ~10s measured, concurrency 6).\n\nFail-soft like the sibling dropdown routes: any error logs and returns [] rather than 500, and\nthe page then shows guidance instead of a free-text box — a free-text box is exactly how an\nunsupported model got saved in the first place.",
+        "operationId": "list_voice_live_models_admin_config_ai_foundry_voice_live_models_get",
+        "parameters": [
+          {
+            "description": "re-probe instead of using the cached result",
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "re-probe instead of using the cached result",
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Option"
+                  },
+                  "title": "Response List Voice Live Models Admin Config Ai Foundry Voice Live Models Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Voice Live Models",
+        "tags": [
+          "admin-config"
+        ]
+      }
+    },
+    "/admin/external-interviewer": {
+      "get": {
+        "description": "Return the saved external interview config with a MASKED key (empty if never configured).",
+        "operationId": "get_external_config_admin_external_interviewer_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalConfigOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get External Config",
+        "tags": [
+          "admin-external-config"
+        ]
+      },
+      "put": {
+        "description": "Save the external interview config and commit. Takes effect on the next interview turn.",
+        "operationId": "update_external_config_admin_external_interviewer_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalConfigIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalConfigOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Update External Config",
+        "tags": [
+          "admin-external-config"
+        ]
+      }
+    },
+    "/admin/external-interviewer/reveal": {
+      "get": {
+        "description": "Return the PLAINTEXT external API key for a deliberate admin click-to-reveal.\n\nSeparate from the masked GET so the plaintext is only ever sent on an explicit request. The key\nis never logged here (no logger call touches it); it travels only in this response body over the\nadmin-JWT-guarded, HTTPS transport. Empty string when unconfigured.",
+        "operationId": "reveal_external_key_admin_external_interviewer_reveal_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevealedKeyOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Reveal External Key",
+        "tags": [
+          "admin-external-config"
+        ]
+      }
+    },
+    "/admin/external-interviewer/test": {
+      "post": {
+        "description": "Health-probe the saved external endpoint/key WITHOUT creating any interview rows.\n\nDelegates to :func:`external_runner.probe_connection`, which sends a single ``start`` turn with\na ``{user_tag}-healthcheck`` user id and creates no ``InterviewSession``/``InterviewTurn``. It\nnever raises: returns a structured pass/fail either way.",
+        "operationId": "test_external_config_admin_external_interviewer_test_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTestResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Test External Config",
+        "tags": [
+          "admin-external-config"
+        ]
+      }
+    },
+    "/admin/personas": {
+      "get": {
+        "operationId": "list_all_admin_personas_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PersonaOut"
+                  },
+                  "title": "Response List All Admin Personas Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List All",
+        "tags": [
+          "admin-personas"
+        ]
+      },
+      "post": {
+        "operationId": "create_admin_personas_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PersonaCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonaOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Create",
+        "tags": [
+          "admin-personas"
+        ]
+      }
+    },
+    "/admin/personas/knowledge/connections": {
+      "get": {
+        "description": "List the project's Azure AI Search connections for the connect dialog (fail-soft → []).",
+        "operationId": "list_kb_connections_admin_personas_knowledge_connections_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/KbConnectionOut"
+                  },
+                  "title": "Response List Kb Connections Admin Personas Knowledge Connections Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Kb Connections",
+        "tags": [
+          "admin-personas"
+        ]
+      }
+    },
+    "/admin/personas/knowledge/knowledge-bases": {
+      "get": {
+        "description": "List the Foundry IQ knowledge bases behind a Search connection (fail-soft → []).",
+        "operationId": "list_kb_knowledge_bases_admin_personas_knowledge_knowledge_bases_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "connection_name",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Connection Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Option"
+                  },
+                  "title": "Response List Kb Knowledge Bases Admin Personas Knowledge Knowledge Bases Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Kb Knowledge Bases",
+        "tags": [
+          "admin-personas"
+        ]
+      }
+    },
+    "/admin/personas/knowledge/{config_id}": {
+      "delete": {
+        "description": "Detach a KB from its persona, then re-sync that persona's agent.",
+        "operationId": "remove_knowledge_admin_personas_knowledge__config_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "config_id",
+            "required": true,
+            "schema": {
+              "title": "Config Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonaOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Remove Knowledge",
+        "tags": [
+          "admin-personas"
+        ]
+      }
+    },
+    "/admin/personas/{persona_id}": {
+      "get": {
+        "operationId": "get_one_admin_personas__persona_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "persona_id",
+            "required": true,
+            "schema": {
+              "title": "Persona Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonaOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get One",
+        "tags": [
+          "admin-personas"
+        ]
+      },
+      "put": {
+        "operationId": "update_admin_personas__persona_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "persona_id",
+            "required": true,
+            "schema": {
+              "title": "Persona Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PersonaUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonaOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Update",
+        "tags": [
+          "admin-personas"
+        ]
+      }
+    },
+    "/admin/personas/{persona_id}/knowledge": {
+      "get": {
+        "description": "List the knowledge bases attached to a persona.",
+        "operationId": "list_knowledge_admin_personas__persona_id__knowledge_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "persona_id",
+            "required": true,
+            "schema": {
+              "title": "Persona Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PersonaKnowledgeOut"
+                  },
+                  "title": "Response List Knowledge Admin Personas  Persona Id  Knowledge Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Knowledge",
+        "tags": [
+          "admin-personas"
+        ]
+      },
+      "post": {
+        "description": "Attach a KB to a persona, re-sync its agent, and return the updated KB list.",
+        "operationId": "add_knowledge_admin_personas__persona_id__knowledge_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "persona_id",
+            "required": true,
+            "schema": {
+              "title": "Persona Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PersonaKnowledgeCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PersonaKnowledgeOut"
+                  },
+                  "title": "Response Add Knowledge Admin Personas  Persona Id  Knowledge Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Add Knowledge",
+        "tags": [
+          "admin-personas"
+        ]
+      }
+    },
+    "/admin/personas/{persona_id}/reconcile": {
+      "post": {
+        "description": "Pull the live Foundry agent's version + model into the persona when it has drifted.\n\nCalled by the editor on open (auto-reconcile). Fail-soft: an unavailable agent or a read error\nleaves the persona untouched (``reconcile_persona`` never raises), so the page still loads.",
+        "operationId": "reconcile_admin_personas__persona_id__reconcile_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "persona_id",
+            "required": true,
+            "schema": {
+              "title": "Persona Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonaOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Reconcile",
+        "tags": [
+          "admin-personas"
+        ]
+      }
+    },
+    "/admin/personas/{persona_id}/retry-sync": {
+      "post": {
+        "operationId": "retry_sync_admin_personas__persona_id__retry_sync_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "persona_id",
+            "required": true,
+            "schema": {
+              "title": "Persona Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonaOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Retry Sync",
+        "tags": [
+          "admin-personas"
+        ]
+      }
+    },
+    "/admin/personas/{persona_id}/set-default": {
+      "post": {
+        "operationId": "set_default_admin_personas__persona_id__set_default_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "persona_id",
+            "required": true,
+            "schema": {
+              "title": "Persona Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonaOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Set Default",
+        "tags": [
+          "admin-personas"
+        ]
+      }
+    },
+    "/admin/personas/{persona_id}/test-chat": {
+      "post": {
+        "description": "Send one message to the persona's hosted Foundry agent and return its reply (text test).\n\nRequires the persona to have a synced agent (agent_id/version); returns 409 otherwise so the\neditor can tell the admin to sync first. Threads multi-turn via ``previous_response_id``.",
+        "operationId": "test_chat_admin_personas__persona_id__test_chat_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "persona_id",
+            "required": true,
+            "schema": {
+              "title": "Persona Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestChatIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestChatOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Test Chat",
+        "tags": [
+          "admin-personas"
+        ]
+      }
+    },
+    "/admin/question-banks": {
+      "get": {
+        "operationId": "list_banks_admin_question_banks_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BankOut"
+                  },
+                  "title": "Response List Banks Admin Question Banks Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Banks",
+        "tags": [
+          "admin-questions"
+        ]
+      },
+      "post": {
+        "operationId": "create_bank_admin_question_banks_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BankIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BankOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Create Bank",
+        "tags": [
+          "admin-questions"
+        ]
+      }
+    },
+    "/admin/question-banks/import": {
+      "post": {
+        "description": "Create (or replace by name) a bank + questions + checklists from a bundle (deploy-time sync).\n\nThe server runs on ephemeral SQLite reseeded on every boot, and the private-blob seeding channel\nis unavailable (storage public network access is disabled by policy), so this is how a deployed\nbank is made to match a local one: export locally, POST the bundle here. Idempotent by bank name\n(a same-named bank is replaced, not duplicated). Rubric items are written verbatim — including\n``advisory`` gates and SOP citations resolved by document name — so scoring behaves identically.",
+        "operationId": "import_bundle_admin_question_banks_import_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Bundle",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BundleImportOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Import Bundle",
+        "tags": [
+          "admin-questions"
+        ]
+      }
+    },
+    "/admin/question-banks/questions/{question_id}": {
+      "delete": {
+        "operationId": "delete_question_admin_question_banks_questions__question_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "question_id",
+            "required": true,
+            "schema": {
+              "title": "Question Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Delete Question",
+        "tags": [
+          "admin-questions"
+        ]
+      },
+      "patch": {
+        "operationId": "edit_question_admin_question_banks_questions__question_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "question_id",
+            "required": true,
+            "schema": {
+              "title": "Question Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuestionPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminQuestionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Edit Question",
+        "tags": [
+          "admin-questions"
+        ]
+      }
+    },
+    "/admin/question-banks/{bank_id}/default": {
+      "post": {
+        "operationId": "set_default_admin_question_banks__bank_id__default_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bank_id",
+            "required": true,
+            "schema": {
+              "title": "Bank Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BankOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Set Default",
+        "tags": [
+          "admin-questions"
+        ]
+      }
+    },
+    "/admin/question-banks/{bank_id}/export": {
+      "get": {
+        "description": "Serialize a bank + its questions + full checklists to a portable bundle (deploy-time sync).\n\nThe dual of :func:`import_bundle`: the returned JSON is exactly what that endpoint consumes, so\na bank can be exported from one deployment (e.g. local) and imported into another (the ephemeral\nserver) to make the two identical. Rubric SOP links travel as document *names*, not ids.",
+        "operationId": "export_bundle_admin_question_banks__bank_id__export_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bank_id",
+            "required": true,
+            "schema": {
+              "title": "Bank Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Export Bundle Admin Question Banks  Bank Id  Export Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Export Bundle",
+        "tags": [
+          "admin-questions"
+        ]
+      }
+    },
+    "/admin/question-banks/{bank_id}/questions": {
+      "get": {
+        "operationId": "list_questions_admin_question_banks__bank_id__questions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bank_id",
+            "required": true,
+            "schema": {
+              "title": "Bank Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AdminQuestionOut"
+                  },
+                  "title": "Response List Questions Admin Question Banks  Bank Id  Questions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Questions",
+        "tags": [
+          "admin-questions"
+        ]
+      },
+      "post": {
+        "operationId": "add_question_admin_question_banks__bank_id__questions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bank_id",
+            "required": true,
+            "schema": {
+              "title": "Bank Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuestionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminQuestionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Add Question",
+        "tags": [
+          "admin-questions"
+        ]
+      }
+    },
+    "/admin/question-banks/{bank_id}/reorder": {
+      "post": {
+        "operationId": "reorder_admin_question_banks__bank_id__reorder_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bank_id",
+            "required": true,
+            "schema": {
+              "title": "Bank Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReorderIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Reorder",
+        "tags": [
+          "admin-questions"
+        ]
+      }
+    },
+    "/admin/sop/documents": {
+      "get": {
+        "description": "List ingested SOP documents with their chunk counts (admin knowledge-base view).",
+        "operationId": "list_documents_admin_sop_documents_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SopDocumentOut"
+                  },
+                  "title": "Response List Documents Admin Sop Documents Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Documents",
+        "tags": [
+          "admin-sop"
+        ]
+      },
+      "post": {
+        "description": "Upload one SOP file and ingest it. A corrupt/unsupported file → status=failed, not 500.",
+        "operationId": "upload_document_admin_sop_documents_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_document_admin_sop_documents_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SopDocumentOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Upload Document",
+        "tags": [
+          "admin-sop"
+        ]
+      }
+    },
+    "/admin/users": {
+      "get": {
+        "description": "List users with optional search (name/username/email), role, and active filters.",
+        "operationId": "list_users_admin_users_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "in": "query",
+            "name": "role",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Role"
+            }
+          },
+          {
+            "in": "query",
+            "name": "is_active",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Is Active"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AdminUserResponse"
+                  },
+                  "title": "Response List Users Admin Users Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Users",
+        "tags": [
+          "admin-users"
+        ]
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "description": "Authenticate and return a JWT access token.",
+        "operationId": "login_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Login",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "description": "Return the currently authenticated user's profile.",
+        "operationId": "get_me_auth_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Me",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/candidate/interview/start": {
+      "post": {
+        "operationId": "start_candidate_interview_start_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Anon-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Anon-Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start",
+        "tags": [
+          "interview"
+        ]
+      }
+    },
+    "/candidate/interview/{interview_id}": {
+      "get": {
+        "description": "Read an interview's status + current question without mutating it (SPEC F6 edge b: resume).\n\nOwnership-guarded like every candidate route. Lets a reloaded browser replay the pending\nquestion (``get_current_question`` returns the pending follow-up when one is owed) instead of\nstarting a brand-new session. ``current_question`` is None once completed/scored.",
+        "operationId": "get_interview_candidate_interview__interview_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "title": "Interview Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Anon-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Anon-Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Interview",
+        "tags": [
+          "interview"
+        ]
+      }
+    },
+    "/candidate/interview/{interview_id}/answer": {
+      "post": {
+        "operationId": "answer_candidate_interview__interview_id__answer_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "title": "Interview Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Anon-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Anon-Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Answer",
+        "tags": [
+          "interview"
+        ]
+      }
+    },
+    "/candidate/interview/{interview_id}/end": {
+      "post": {
+        "description": "Signal an external-brain interview to finalize early and mark it completed (SPEC Phase 2).\n\nBank sessions complete implicitly when their questions run out, so this is a no-op that simply\nreturns the current state for them. External sessions send the brain an ``end`` turn; a\ntransport failure still completes the session locally (the candidate asked to stop).",
+        "operationId": "end_candidate_interview__interview_id__end_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "title": "Interview Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Anon-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Anon-Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "End",
+        "tags": [
+          "interview"
+        ]
+      }
+    },
+    "/candidate/interview/{interview_id}/judge": {
+      "post": {
+        "description": "Ask the judge whether the interviewer should say something DURING the candidate's pause\n(issue #114). Never blocks or submits anything; \"I'm done\" is a separate, always-advancing\nroute.\n\nCheap exits (no LLM call, no ``judge_events`` row): the session is not ``judged`` (snapshot),\nnot a live bank session, the ids are stale (question advanced / follow-up count moved), the\ndraft is blank, or the per-question call budget is spent — all ⇒ ``wait``. A concurrent judge\nfor the same session is a 409. Otherwise one LLM call; the only speaking verdict is ``nudge``\n(\"please go on\"), returned as text — the judge never writes an interviewer turn (the\n``follow_up`` / ``redirect`` verdicts were retired 2026-09-28: the judge paces, it never\nprobes). Every LLM call writes one ``judge_events`` row.",
+        "operationId": "judge_candidate_interview__interview_id__judge_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "title": "Interview Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Anon-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Anon-Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JudgeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JudgeOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Judge",
+        "tags": [
+          "interview"
+        ]
+      }
+    },
+    "/candidate/interview/{interview_id}/judge/apply": {
+      "post": {
+        "description": "Deliver a dry-run verdict now that the pause has lasted (D17). Idempotent and stale-safe:\nan unknown / already-applied event, a non-``nudge`` event, a question that advanced or a moved\nfollow-up count all come back as ``wait`` and write nothing. ``nudge`` is marked delivered and\nreturned as text — the judge never writes an interviewer turn (``follow_up`` / ``redirect``\nretired 2026-09-28).",
+        "operationId": "judge_apply_candidate_interview__interview_id__judge_apply_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "title": "Interview Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Anon-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Anon-Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JudgeApplyIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JudgeOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Judge Apply",
+        "tags": [
+          "interview"
+        ]
+      }
+    },
+    "/candidate/interview/{interview_id}/recover": {
+      "post": {
+        "description": "Clear a stalled external-brain turn (the candidate's 恢复 action) by re-driving it.\n\nOnly meaningful for an external session whose ``external_phase`` is ``recovery_required`` (or an\n``awaiting`` one stranded by a crash mid-turn); re-sends the same committed state + pending\nanswer, so it can never double-advance (see external_runner.recover). A bank session, or an\nexternal session with nothing to recover, is a 409. Retry exhaustion again returns\nrecovery_required (the candidate may 恢复 again) rather than erroring.",
+        "operationId": "recover_candidate_interview__interview_id__recover_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "title": "Interview Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Anon-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Anon-Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Recover",
+        "tags": [
+          "interview"
+        ]
+      }
+    },
+    "/candidate/interview/{interview_id}/report": {
+      "post": {
+        "operationId": "report_candidate_interview__interview_id__report_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "title": "Interview Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Anon-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Anon-Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ReportOptionsIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Options"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Report",
+        "tags": [
+          "interview"
+        ]
+      }
+    },
+    "/candidate/interview/{interview_id}/report/stream": {
+      "post": {
+        "description": "Streaming variant of ``/report``: NDJSON progress lines, then the full report.\n\nEach LLM grading call takes seconds, so a 10-question interview sat behind one long batch\nrequest while the scoring screen FAKED its progress numerator. This endpoint emits one\n``{\"type\":\"progress\",\"done\":i,\"total\":n,...}`` line per question as grading proceeds and ends\nwith ``{\"type\":\"report\",\"report\":{...}}`` — the same dict the batch endpoint returns.\n\nNDJSON over a POST fetch (not SSE): EventSource can't POST or send the X-Anon-Session header,\nand the frontend already talks fetch — the reader just splits on newlines. A scoring failure\nmid-stream surfaces as a final ``{\"type\":\"error\",\"detail\":...}`` line (the 200 status is\nalready on the wire; in-band error is the streaming contract, mirroring the WS proxy).\nPre-stream state errors (wrong status) still 409 like the batch endpoint.",
+        "operationId": "report_stream_candidate_interview__interview_id__report_stream_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "title": "Interview Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Anon-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Anon-Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ReportOptionsIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Options"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Report Stream",
+        "tags": [
+          "interview"
+        ]
+      }
+    },
+    "/candidate/interview/{interview_id}/restart": {
+      "post": {
+        "description": "Abandon the candidate's LIVE interview and start a fresh one — the \"重新开始\" button.\n\nWhy this exists: an in-progress session persists in the DB and ``/start`` (plus the page's\nresume-on-mount) always hands it back, so without this a candidate who wants to start over is\nstuck on the old session until every question is answered. The old session is marked\n``abandoned`` (kept for the record, never resumed/scored — see\n:func:`state_machine.abandon_interview`); the new one is created exactly like a fresh ``/start``\n(default persona's current engine) and returned with the same entry-point voice flags.\n\nOnly an ``in_progress`` interview can be restarted (409 otherwise — a completed/scored one is\nsimply followed by a normal ``/start``). External sessions first send the brain its ``end``\nsignal (best-effort: a transport failure still abandons locally; a turn in flight is a 409 like\n``/end``) so the vendor conversation is closed rather than orphaned.",
+        "operationId": "restart_candidate_interview__interview_id__restart_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "title": "Interview Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Anon-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Anon-Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restart",
+        "tags": [
+          "interview"
+        ]
+      }
+    },
+    "/candidate/interview/{interview_id}/review": {
+      "get": {
+        "description": "Every question + the candidate's finalized answer, in bank order, for the pre-scoring\nreview screen (requirement 4: the candidate reviews holistically, then explicitly submits).\n\nOwnership-guarded like every candidate route. Only meaningful once all questions are answered,\nso a still-``in_progress`` interview is a 409 — the same \"not before completion\" contract as\n``/report``. Backend-sourced (not client-accumulated) so it survives a reload and can never\ndisagree with what gets scored: it reuses the SAME question_id join that scoring uses.",
+        "operationId": "review_candidate_interview__interview_id__review_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "title": "Interview Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Anon-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Anon-Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review",
+        "tags": [
+          "interview"
+        ]
+      }
+    },
+    "/candidate/interview/{interview_id}/sop/{document_id}": {
+      "get": {
+        "description": "Serve one SOP source document so a candidate can open a report citation in the browser.\n\nThis is a deliberate, tightly-scoped relaxation of the SOP-privacy boundary (SPEC P4/P12): a\ncandidate may open ONLY the specific source documents cited by their OWN scored report, and only\nserver-mediated — the raw ``blob_path`` is never exposed, and the frontend fetches these bytes\nwith the ``X-Anon-Session`` header (not a naked URL), so the file previews inline without the\ntoken ever landing in a link. Two independent guards, both 404 (never leak existence):\n\n- **Ownership** — the interview must belong to this candidate's session (``_owned_interview``).\n- **Citation scope (IDOR guard)** — ``document_id`` must be cited by a default-checklist item of\n  a question this interview actually answered (``cited_document_ids``). An arbitrary or uncited\n  id is indistinguishable from a missing one.",
+        "operationId": "sop_document_candidate_interview__interview_id__sop__document_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "title": "Interview Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Anon-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Anon-Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sop Document",
+        "tags": [
+          "interview"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Health Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/public/candidate/session": {
+      "post": {
+        "description": "Despite the `/public` path segment (kept for URL stability), this route REQUIRES `Authorization: Bearer <candidate JWT>` from `/auth/login` with a `user`-role account: 401 when missing/invalid/inactive, 403 for admin accounts. Idempotent per account — an unexpired, unrevoked session is returned again (fresh token, same session).",
+        "operationId": "create_session_public_candidate_session_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionCreateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Mint the candidate session token (requires a candidate login)",
+        "tags": [
+          "candidate-session"
+        ]
+      }
+    }
+  }
+}
