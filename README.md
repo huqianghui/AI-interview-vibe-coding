@@ -16,8 +16,8 @@ answers comply with the client's *own* SOP, and every judgment points back to it
 
 ## Key scenarios
 
-> Screenshots are current as of **v0.42.2.0**, captured on the zero-Azure mock stack (the one
-> exception is the live digital-human shot below, which needs real Azure). The appearance is the
+> Screenshots are captured on the zero-Azure mock stack (the one exception is the live
+> digital-human shot below, which needs real Azure). The appearance is the
 > project's own design language, **Warm Editorial / Foundry Purple** — a warm sand ground,
 > Bricolage Grotesque + Literata, a purple action colour, and one shared content width — not
 > Fluent's factory defaults.
@@ -48,17 +48,16 @@ conversation transcript builds on the right. A status legend shows the live voic
 (ready / listening / speaking / muted).
 
 The question is read **verbatim** — `response.create` with `pre_generated_assistant_message`, which
-is server-side TTS of the exact pinned text with no model inference in the path (v0.39.2.3). That
-detail is load-bearing rather than incidental: when the read went through the model instead, it
-drifted, and on 2026-09-28 it drifted far enough that the card showed one bank question while the
-avatar asked a different one. What the candidate hears and what they read are now the same string
-by construction.
+is server-side TTS of the exact pinned text with no model inference in the path. That detail is
+load-bearing rather than incidental: a read that goes through the model drifts, far enough that the
+card can show one question while the avatar asks another. What the candidate hears and what they
+read are the same string by construction.
 
 Two avatar families are supported, and they are not interchangeable. **Video** avatars (shown here —
 Lisa, `casual-sitting`) stream 1080p 16:9. **Photo** avatars (`type: photo-avatar` + `model: vasa-1`,
 e.g. Amira, Adrian) are photoreal head-and-shoulders and stream **512×512 square**, which is why the
-avatar stage hugs the stream instead of imposing a frame (v0.39.2.2 — any `object-fit: cover` on a
-non-square stage cropped the person's chin and shoulders). Video style slugs are per character, so a
+avatar stage hugs the stream instead of imposing a frame (any `object-fit: cover` on a non-square
+stage would crop the person's chin and shoulders). Video style slugs are per character, so a
 style valid for one is not valid for another. The persona editor picks both from the live Azure
 roster.
 
@@ -76,17 +75,11 @@ audio orb, so the whole flow runs with zero Azure:
 In **Judged** turn mode a backend LLM judge listens during the candidate's pauses and, if the
 answer trails off mid-thought, speaks or shows one short nudge ("please go on" class) — live,
 before the candidate submits, never by quoting the candidate's own words or naming a rubric item.
-(v0.39.3.0, owner directive 2026-09-28: the judge is **nudge-only** — the earlier "genuine
-follow-up" and "redirect" verdicts are retired, and the judge never writes an interviewer turn.
-Also retired, in v0.39.2.0: the linear-mode template follow-up that quoted the candidate at
-submit — a submit now always advances to the next question, in every turn mode; per-question
-**Max follow-ups** is kept for compatibility but is now inert.)
+The judge is **nudge-only**: it never asks a follow-up question and never writes an interviewer
+turn. A submit always advances to the next question, in every turn mode.
 
 > No screenshot: a nudge needs a real judge verdict, which the mock stack does not produce. The
-> screenshot that used to sit here showed the **linear-mode template follow-up retired in
-> v0.39.2.0** — the capture was gated on the page quoting the candidate back ("You mentioned …"),
-> which can no longer happen, so it silently kept shipping a picture of a feature that no longer
-> exists. The behaviour is covered end to end by `e2e/bank-judged-live.spec.ts` against real Azure.
+> behaviour is covered end to end by `e2e/bank-judged-live.spec.ts` against real Azure.
 
 ### 5. Review before scoring — explicit submit
 
@@ -167,12 +160,10 @@ is cascaded despite its name): [`docs/voice-live-model-support.md`](docs/voice-l
   code default.
 - **Candidate privacy boundary (P3)** — the candidate API never exposes rubric/checklist content;
   enforced by tests.
-- **Scoring is concurrent and survives failure** (v0.42.1.0 / v0.42.2.0) — each question is graded
-  against its own checklist by its own LLM call, three at a time, streamed to the browser as NDJSON
-  with a heartbeat so a long grade never looks like a dead connection. Measured on the live app:
-  **35.3 s for a nine-question report**, down from 170-190 s sequential — concurrency equals the
-  question count, so the whole report is one generation and the wall clock is one question long. A
-  question that fails is
+- **Scoring is concurrent and survives failure** — each question is graded against its own
+  checklist by its own LLM call, all at once, streamed to the browser as NDJSON with a heartbeat so
+  a long grade never looks like a dead connection. Measured on the live app: **35.3 s for a
+  nine-question report**, so the wall clock is about one question long. A question that fails is
   marked *not scored* and excluded from the score rather than given a zero — nobody judged that
   answer — and the rest of the report still renders.
 
@@ -207,8 +198,8 @@ that exists on your resource.
 ## Testing
 
 ```bash
-cd backend && pytest                     # 723 tests, 85% coverage gate
-cd frontend && npm test                  # 623 vitest unit/component tests
+cd backend && pytest                     # unit + API tests, 85% coverage gate
+cd frontend && npm test                  # vitest unit/component tests
 cd frontend && npm run e2e               # Playwright E2E — boots both servers, real Chromium, zero Azure
 ```
 
@@ -221,8 +212,7 @@ The README screenshots regenerate with:
 ```bash
 # Mock-stack scenarios (zero Azure; boots its own servers).
 # Kill any stale stack FIRST: playwright reuses an already-running server, and that process serves
-# the code it booted with — a four-hour-old backend once produced a screenshot of a bug fixed
-# hours earlier.
+# the code it booted with, not the code on disk.
 pkill -f "uvicorn app.main:app.*8100"; pkill -f "vite.*5273"
 cd frontend && SCREENSHOTS=1 npx playwright test e2e/readme-screenshots.spec.ts
 
@@ -242,9 +232,9 @@ stored cloud credentials, managed identity everywhere, keyless. See
 | Doc | What it covers |
 |---|---|
 | [`SPEC.md`](SPEC.md) | The authoritative living technical spec (9 features, quality bar, privacy rules) |
-| [`docs/IMPLEMENTATION-STATUS.md`](docs/IMPLEMENTATION-STATUS.md) | Feature-by-feature status, shipped versions, live-Azure validation state |
+| [`docs/IMPLEMENTATION-STATUS.md`](docs/IMPLEMENTATION-STATUS.md) | Feature-by-feature status and live-Azure validation state |
 | [`docs/VERIFICATION.md`](docs/VERIFICATION.md) | How to verify the requirements and run the system |
 | [`docs/planning/`](docs/planning/) | Spec lineage: design docs, plans, and reviews |
 | [`docs/avatar-weaknet-probe.md`](docs/avatar-weaknet-probe.md) | Weak-network digital-human media adaptation: measurement method, findings, and the shipped auto-downgrade implementation |
-| [`docs/sop-coverage-audit.md`](docs/sop-coverage-audit.md) | The opt-in SOP coverage audit: why binding the SOP to a rubric does not answer "did the rubric miss anything", what it costs, and the source-selection bugs fixed in v0.45.0.0 (中文) |
-| [`CHANGELOG.md`](CHANGELOG.md) | Per-release detail |
+| [`docs/sop-coverage-audit.md`](docs/sop-coverage-audit.md) | The opt-in SOP coverage audit: why binding the SOP to a rubric does not answer "did the rubric miss anything", what it costs, and how the cited SOP sources are chosen (中文) |
+| [`CHANGELOG.md`](CHANGELOG.md) | Release history: every version and what changed in it |
