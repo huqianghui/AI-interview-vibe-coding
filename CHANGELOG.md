@@ -14,7 +14,7 @@
   line Azure speaks while the model is slow or calling a tool. It applies in the editor Playground,
   where the persona has a turn of its own to bridge; a real interview reads every question word
   for word, so it never uses it, and the switch now says so. Verified against Azure: the setting is
-  accepted, and Azure generates the line with its own small model. Proactive engagement gets the
+  accepted; what the line says is decided by Voice Live's own logic. Proactive engagement gets the
   same kind of hint: it is part of the Foundry agent, which a real interview does not use.
 - **Only an admin can open the editor Playground's voice session.** Choosing a persona on the voice
   connection turns it into the Playground (a free conversation with the agent), and the server did
