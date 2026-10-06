@@ -69,16 +69,38 @@ async def test_get_before_draft_404(client, db_session):
 
 
 async def test_checklist_never_exposed_to_candidate(client, db_session):
-    # SPEC P3: the candidate question list must never carry checklist/rubric content, even after a
-    # checklist is drafted for the question.
+    # SPEC P3: nothing a candidate receives while interviewing may carry checklist/rubric content,
+    # even after a checklist is drafted for the question being asked.
     question_id = await _seed_question(db_session, points=["mentions PPE"])
-    await client.post(f"/admin/checklists/questions/{question_id}/draft", headers=AUTH)
+    draft = await client.post(f"/admin/checklists/questions/{question_id}/draft", headers=AUTH)
+    item_texts = [i["text"].lower() for i in draft.json()["items"]]
+    assert item_texts, "the draft must produce items, or the leak check below proves nothing"
 
     cand_headers = await mint_candidate_headers(client, db_session)  # #102: login-gated
-    listing = await client.get("/candidate/interview/questions", headers=cand_headers)
-    flat = str(listing.json()).lower()
-    for leaked in ("checklist", "rubric", "weight", "source_quote", "forbidden", "expected_points"):
-        assert leaked not in flat
+    started = await client.post("/candidate/interview/start", headers=cand_headers)
+    assert started.status_code == 200
+    assert started.json()["current_question"]["question_id"] == question_id
+    interview_id = started.json()["interview_session_id"]
+    fetched = await client.get(f"/candidate/interview/{interview_id}", headers=cand_headers)
+    answered = await client.post(
+        f"/candidate/interview/{interview_id}/answer",
+        headers=cand_headers,
+        json={"text": "I would follow the documented steps.", "source": "text"},
+    )
+    for resp in (started, fetched, answered):
+        assert resp.status_code == 200
+        flat = str(resp.json()).lower()
+        for leaked in (
+            "checklist",
+            "rubric",
+            "weight",
+            "source_quote",
+            "forbidden",
+            "expected_points",
+        ):
+            assert leaked not in flat
+        for text in item_texts:
+            assert text not in flat
 
 
 # --- F3b editing (AC F3 #4) ------------------------------------------------

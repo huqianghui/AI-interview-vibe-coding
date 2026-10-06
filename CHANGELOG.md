@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.47.0.0 (2026-10-06)
+
+### Removed
+- **Six backend routes nothing called**, found by the frontend ↔ backend contract test added in
+  v0.46.0.0 and confirmed with no caller anywhere in the repo: `POST /candidate/interview/{id}/voice/session`
+  and `POST /admin/personas/{id}/voice/session` (both minted a browser-usable Azure voice token for a
+  direct-to-Azure transport the app stopped using when voice moved to the WS proxy, so they were
+  live attack surface), `POST /auth/refresh` (the admin page logs in again when its 24-hour token
+  expires), `GET /candidate/interview/questions` (the interview reads its questions from the session
+  itself), `POST /admin/sop/retrieve` (an admin probe with no screen or script), and
+  `GET/PATCH/DELETE /admin/users/{id}` (the Users tab is read-only; accounts come from the boot seed).
+- **Everything only those routes used:** the voice broker and voice-provider modules, the endpoint
+  helpers, the `/calls` session builder and its six constants, the `DEFAULT_VOICE_PROVIDER` setting,
+  their schemas and tests, and the direct-to-Azure WebRTC diagnostic spec.
+- **The `ADMIN_API_TOKEN` secret and the `DEFAULT_VOICE_PROVIDER` env from the Azure templates.** The
+  backend stopped reading both; the secret and its only reference leave the template together, so a
+  re-apply produces a consistent revision.
+
+### Fixed
+- **The README screenshot freshness check now runs in CI.** The frontend job checked out a shallow
+  clone, where every file's last commit is the same one, so the check could never fail and a stale
+  screenshot had already merged. The job now fetches full history, and that screenshot is recaptured.
+- **The rubric non-leak test checks what a candidate actually receives.** It used to read a question
+  list the interview never used; it now starts an interview, reads it and answers it, and checks all
+  three responses for both rubric field names and the drafted rubric's own text.
+
 ## 0.46.0.0 (2026-10-06)
 
 ### Fixed

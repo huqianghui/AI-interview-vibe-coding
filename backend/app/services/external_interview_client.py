@@ -21,7 +21,7 @@ and a real-boolean ``session_complete``. Every other frame (``text_chunk``, keep
 unknown events) is tolerated and ignored. Parsing is defensive: chunk-split tolerant, content-type
 checked, response size capped, and bounded by connect/read/total deadlines.
 
-Registry + ``mock`` implementation for CI/dev, imitating :mod:`app.services.voice_providers`. The
+Registry + ``mock`` implementation for CI/dev, like the agent adapters in ``services/agents``. The
 mock runs a small deterministic interview so the whole flow is exercisable with no live gateway.
 
 Vendor-neutral by owner directive: nothing here names a product — only "external interview server".

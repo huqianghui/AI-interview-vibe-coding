@@ -19,7 +19,6 @@ os.environ.update(
         "DEFAULT_LLM_PROVIDER": "mock",
         "DEFAULT_RETRIEVAL_PROVIDER": "mock",
         "DEFAULT_AGENT_SYNC_PROVIDER": "mock",
-        "DEFAULT_VOICE_PROVIDER": "mock",
         "AZURE_SEARCH_ENDPOINT": "",
         "AZURE_FOUNDRY_ENDPOINT": "",
         "AZURE_FOUNDRY_API_KEY": "",

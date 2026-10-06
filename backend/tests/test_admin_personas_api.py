@@ -379,15 +379,6 @@ async def test_test_chat_requires_admin(client):
     assert resp.status_code == 401
 
 
-async def test_playground_voice_session_requires_admin(client):
-    assert (await client.post("/admin/personas/x/voice/session")).status_code == 401
-
-
-async def test_playground_voice_session_404_missing_persona(client):
-    resp = await client.post("/admin/personas/nope/voice/session", headers=AUTH)
-    assert resp.status_code == 404
-
-
 async def test_knowledge_discovery_empty_when_unconfigured(client):
     # No AI Foundry master config in the test DB → discovery degrades to [] (never 500).
     assert (await client.get("/admin/personas/knowledge/connections", headers=AUTH)).json() == []

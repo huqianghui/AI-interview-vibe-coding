@@ -11,10 +11,8 @@ Playground). Whichever validates first wins; if neither does, the socket is acce
 enough to deliver a JSON error frame and then closed with 1008 (matches the reference's
 ``_authenticate_websocket`` contract).
 
-Persona resolution + the P5 sync gate mirror :func:`app.services.voice_broker.create_voice_session`
-(kept here, not delegated to the broker, because the broker's ``VoiceSession`` shape is for the
-WebRTC direct-to-Azure path — this route needs the persona ORM object itself to build/relay the
-proxied SDK session).
+Persona resolution and the P5 sync gate live here: this route needs the persona ORM object itself
+to build and relay the proxied SDK session.
 """
 
 import json
@@ -29,14 +27,17 @@ from app.config import get_settings
 from app.db import async_session_factory
 from app.models.user import User
 from app.services import config_service, persona_service
+from app.services.agents.voice_live_metadata import FALLBACK_LOCALE
 from app.services.anonymous_session_service import AnonymousSessionError, verify_anonymous_token
-from app.services.voice_broker import DEFAULT_LOCALE
 from app.services.voice_live_probe import uses_realtime_pipeline
 from app.services.voice_live_proxy import is_mouth_persona, run_proxy
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["voice-live-ws"])
+
+# Locale used when the page does not pin one: the same fallback the voice metadata uses.
+DEFAULT_LOCALE = FALLBACK_LOCALE
 
 
 def resolve_voice_model(master_voice_model: str | None, env_model: str) -> str:
@@ -127,7 +128,7 @@ async def voice_live_websocket(ws: WebSocket) -> None:
       - ``token`` (required): candidate anonymous-session token OR admin JWT.
       - ``persona_id`` (optional): editor Playground pins a specific persona; omitted for the
         candidate interview path, which resolves the enabled default persona instead.
-      - ``locale`` (optional): defaults to :data:`app.services.voice_broker.DEFAULT_LOCALE`.
+      - ``locale`` (optional): defaults to :data:`DEFAULT_LOCALE`.
       - ``avatar_bg`` (optional): 6-hex RGB (no ``#``) the page wants Azure to paint BEHIND the
         digital human — the photo avatar's own thumbnail backdrop from the frontend roster, so the
         live video matches the editor preview to the pixel. Anything else is ignored.
@@ -167,7 +168,7 @@ async def voice_live_websocket(ws: WebSocket) -> None:
                 )
                 return
 
-        # P5 gate: reject, never silently degrade (same invariant as voice_broker).
+        # P5 gate: reject, never silently degrade to an ungrounded session.
         # EXCEPTION: MOUTH personas (external, or linear-turns bank — see is_mouth_persona) ignore
         # the hosted agent (run_proxy forces MODEL mode for them), so requiring the agent to be
         # synced is nonsensical — skip the gate. Playground pins keep the agent, so they stay gated.

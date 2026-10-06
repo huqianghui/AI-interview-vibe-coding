@@ -10,7 +10,6 @@ Voice sources (voice / verbal_cue) share the same answer_finalized event and are
 
 import json
 import logging
-from dataclasses import asdict
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -29,10 +28,9 @@ from app.models.anonymous_session import AnonymousCandidateSession
 from app.models.interview import InterviewSession
 from app.models.judge_event import JUDGE_TRIGGERS, JudgeEvent
 from app.models.sop import SopDocument
-from app.services import checklist_service, persona_service, question_service, voice_broker
+from app.services import checklist_service, persona_service
 from app.services.agents.voice_live_metadata import has_configured_voice
 from app.services.storage import get_storage
-from app.services.voice_broker import DEFAULT_LOCALE, VoiceAgentNotSynced, VoiceUnavailable
 
 logger = logging.getLogger(__name__)
 
@@ -52,21 +50,6 @@ class QuestionOut(BaseModel):
     # How many follow-ups have been asked on this question so far (judged mode sends it back with
     # each ``/judge`` request so the server can drop stale requests — issue #114).
     follow_ups_asked: int = 0
-
-
-class BankQuestionOut(BaseModel):
-    """Candidate-safe question projection (SPEC F2 AC #2). NO expected_points/rubric (P3)."""
-
-    question_id: str
-    text: str
-    order_index: int
-    language: str
-
-
-class QuestionListOut(BaseModel):
-    bank_id: str | None
-    language: str | None
-    questions: list[BankQuestionOut]
 
 
 class InterviewOut(BaseModel):
@@ -221,28 +204,6 @@ class ReviewOut(BaseModel):
     answers: list[AnsweredQuestionOut]
 
 
-class VoiceSessionOut(BaseModel):
-    """WebRTC connection info the candidate's browser needs to reach Azure Voice Live directly.
-
-    Deliberately excludes any checklist/rubric/SOP content (P3/P12): a voice session is transport
-    setup, not scoring data. ``session_config`` is the snake_case Voice Live config (voice, VAD,
-    avatar) — never candidate-facing citations.
-    """
-
-    interview_session_id: str
-    signaling_url: str
-    auth_token: str
-    auth_type: str
-    mode: str
-    model: str
-    session_config: dict
-    persona_id: str
-    character: str
-    style: str
-    greeting: str | None = None
-    avatar_enabled: bool = False
-
-
 def _to_interview_out(
     session: InterviewSession,
     question: dict | None,
@@ -372,35 +333,6 @@ async def _turn_version_changed(db: AsyncSession, session: InterviewSession) -> 
         )
     ).scalar_one()
     return current != session.turn_version
-
-
-@router.get("/questions", response_model=QuestionListOut)
-async def list_questions(
-    candidate: AnonymousCandidateSession = Depends(get_anonymous_session),
-    db: AsyncSession = Depends(get_db),
-) -> QuestionListOut:
-    """Candidate-facing ordered question list from the default bank (SPEC F2 AC #2).
-
-    Projects each question to a candidate-safe shape — ``expected_points`` (which links to the
-    scoring rubric) is never included (SPEC P3). An empty list when no bank is seeded.
-    """
-    bank = await question_service.get_default_bank(db)
-    if bank is None:
-        return QuestionListOut(bank_id=None, language=None, questions=[])
-    rows = await question_service.list_questions_for_bank(db, bank.id, enabled_only=True)
-    return QuestionListOut(
-        bank_id=bank.id,
-        language=bank.language,
-        questions=[
-            BankQuestionOut(
-                question_id=q.id,
-                text=q.text,
-                order_index=q.order_index,
-                language=q.language,
-            )
-            for q in rows
-        ],
-    )
 
 
 @router.post("/start", response_model=InterviewOut)
@@ -881,44 +813,6 @@ async def review(
         status=session.status,
         answers=[AnsweredQuestionOut(**a) for a in answers],
     )
-
-
-class VoiceSessionIn(BaseModel):
-    locale: str = DEFAULT_LOCALE
-
-
-@router.post("/{interview_id}/voice/session", response_model=VoiceSessionOut)
-async def voice_session(
-    interview_id: str,
-    body: VoiceSessionIn | None = None,
-    candidate: AnonymousCandidateSession = Depends(get_anonymous_session),
-    db: AsyncSession = Depends(get_db),
-) -> VoiceSessionOut:
-    """Broker a direct-to-Azure WebRTC voice session for an in-progress interview (SPEC F9).
-
-    Ownership-guarded like every other candidate route. Voice is only meaningful while the
-    interview is live, so a non-``in_progress`` interview is a 409 (the candidate should be on the
-    report screen, not connecting a mic). P5: a persona whose Foundry agent is not synced yields a
-    409 (``VOICE_AGENT_NOT_SYNCED``) so the frontend falls back to text-only continuation (P6b)
-    instead of connecting to an ungrounded model-mode session.
-    """
-    session = await _owned_interview(db, interview_id, candidate)
-    if session.status != "in_progress":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Cannot start voice in status {session.status!r}",
-        )
-    locale = (body.locale if body else None) or DEFAULT_LOCALE
-    try:
-        vs = await voice_broker.create_voice_session(db, locale=locale)
-    except VoiceAgentNotSynced as exc:
-        # 409 (not 5xx): a recorded not-ready state, surfaced so the UI can offer text fallback.
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except VoiceUnavailable as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
-        ) from exc
-    return VoiceSessionOut(interview_session_id=session.id, **asdict(vs))
 
 
 @router.get("/{interview_id}/sop/{document_id}")

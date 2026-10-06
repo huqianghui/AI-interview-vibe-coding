@@ -1,8 +1,8 @@
 """Seed the default interviewer persona on boot so the digital human works out of the box.
 
-The public deployment runs on **ephemeral SQLite reseeded on every boot** (no DB PaaS), so a
-persona created online in the editor vanishes on the next restart — and with no enabled default
-persona the voice broker raises ``VoiceUnavailable`` (there is nothing to resolve) and the agent
+The public deployment runs on **ephemeral SQLite reseeded on every boot** (no DB PaaS), so a persona
+created online in the editor vanishes on the next restart — and with no enabled default persona the
+voice WS refuses every interview (``VOICE_UNAVAILABLE``: there is nothing to resolve) and the agent
 editor opens with nothing selected. This module reproduces the operator's local default interviewer
 as the enabled default on every boot.
 
@@ -180,8 +180,8 @@ async def seed_default_persona(db: AsyncSession) -> InterviewerPersona | None:
 async def sync_default_persona(db: AsyncSession) -> None:
     """Best-effort Foundry sync of the seeded default persona (so voice is usable out of the box).
 
-    The voice broker's P5 gate rejects any persona whose ``agent_sync_status != "synced"``, so
-    seeding the definition alone leaves voice unavailable — the boot sync must run and succeed.
+    The voice WS's P5 gate rejects an unsynced persona in the editor Playground, so seeding the
+    definition alone leaves the Playground's voice test unavailable — the boot sync must succeed.
     Delegates to the shared ``admin_personas._sync`` (mark pending → adapter → mark
     succeeded/failed, never raises). A failure leaves the persona ``failed`` (text-only degrade).
     """

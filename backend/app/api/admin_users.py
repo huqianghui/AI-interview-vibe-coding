@@ -1,15 +1,15 @@
-"""Admin user management (admin-only). Plain-list + HTTPException style (adapted from AI-avatar)."""
+"""Admin user listing (admin-only, read-only: accounts come from the boot seed, see user_seed)."""
 
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.dependencies import require_role
 from app.models.user import User
-from app.schemas.auth import AdminUserResponse, UserUpdate
+from app.schemas.auth import AdminUserResponse
 from app.services.auth_service import derive_candidate_password, verify_password
 
 router = APIRouter(
@@ -59,44 +59,3 @@ async def _with_derived_password(user: User) -> AdminUserResponse:
     if await asyncio.to_thread(verify_password, derived, user.hashed_password):
         return out.model_copy(update={"generated_password": derived})
     return out.model_copy(update={"password_stale": True})
-
-
-async def _get_or_404(db: AsyncSession, user_id: str) -> User:
-    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    return user
-
-
-@router.get("/{user_id}", response_model=AdminUserResponse)
-async def get_user(user_id: str, db: AsyncSession = Depends(get_db)) -> AdminUserResponse:
-    return await _with_derived_password(await _get_or_404(db, user_id))
-
-
-@router.patch("/{user_id}", response_model=AdminUserResponse)
-async def update_user(
-    user_id: str, data: UserUpdate, db: AsyncSession = Depends(get_db)
-) -> AdminUserResponse:
-    """Update user fields (partial). Only fields present in the body are changed."""
-    user = await _get_or_404(db, user_id)
-    for field, value in data.model_dump(exclude_unset=True).items():
-        setattr(user, field, value)
-    await db.commit()
-    await db.refresh(user)
-    return await _with_derived_password(user)
-
-
-@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_user(
-    user_id: str,
-    db: AsyncSession = Depends(get_db),
-    admin: User = Depends(require_role("admin")),
-) -> None:
-    """Soft-delete (deactivate) a user. Cannot delete your own account."""
-    if user_id == admin.id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete your own account"
-        )
-    user = await _get_or_404(db, user_id)
-    user.is_active = False
-    await db.commit()

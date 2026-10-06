@@ -128,10 +128,17 @@ async def test_session_records_user_and_is_reused_while_active(client, candidate
         await db_session.execute(select(User).where(User.username == "test-candidate"))
     ).scalar_one()
     assert row.user_id == user.id
-    # both tokens are valid pointers to the same row
-    for tok in (first.json()["token"], second.json()["token"]):
-        r = await client.get("/candidate/interview/questions", headers={"X-Anon-Session": tok})
-        assert r.status_code == 200
+    # both tokens are valid pointers to the same row: an interview started with one is readable
+    # with the other.
+    started = await client.post(
+        "/candidate/interview/start", headers={"X-Anon-Session": first.json()["token"]}
+    )
+    assert started.status_code == 200
+    iv = started.json()["interview_session_id"]
+    r = await client.get(
+        f"/candidate/interview/{iv}", headers={"X-Anon-Session": second.json()["token"]}
+    )
+    assert r.status_code == 200
 
 
 async def test_session_not_reused_when_expired_or_revoked(client, candidate_auth, db_session):
