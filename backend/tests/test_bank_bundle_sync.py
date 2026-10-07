@@ -137,6 +137,40 @@ async def test_import_is_idempotent_by_name(db_session):
         b for b in await question_service.list_banks(db_session) if b.name == bundle["bank"]["name"]
     ]
     assert len(banks) == 1
+    assert banks[0].id == bank_id  # replaced in place: the bank keeps its id
+
+
+async def test_a_sync_keeps_users_and_interviews_on_the_bank(db_session):
+    """Re-importing a bank must not clear what points at it (SET NULL foreign keys): a sync once
+    deleted the bank row, silently unassigning every candidate and un-pinning every interview."""
+    from app.models.anonymous_session import AnonymousCandidateSession
+    from app.models.interview import InterviewSession
+    from app.models.user import User
+
+    bank_id = await _seed_bank_with_rubric(db_session, None)
+    bundle = await bank_bundle_service.export_bank_bundle(db_session, bank_id)
+    user = User(username="u", email="u@local", hashed_password="x", role="user")
+    user.assigned_bank_id = bank_id
+    db_session.add(user)
+    await db_session.flush()
+    from datetime import datetime, timedelta
+
+    cand = AnonymousCandidateSession(
+        expires_at=datetime.now() + timedelta(hours=1),
+        last_activity_at=datetime.now(),
+    )
+    db_session.add(cand)
+    await db_session.flush()
+    interview = InterviewSession(candidate_session_id=cand.id, status="completed", bank_id=bank_id)
+    db_session.add(interview)
+    await db_session.commit()
+
+    await bank_bundle_service.import_bank_bundle(db_session, bundle)
+
+    await db_session.refresh(user)
+    await db_session.refresh(interview)
+    assert user.assigned_bank_id == bank_id
+    assert interview.bank_id == bank_id
 
 
 async def test_import_reports_unresolved_sop_names(db_session):

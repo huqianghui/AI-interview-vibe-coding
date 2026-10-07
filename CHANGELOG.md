@@ -9,6 +9,9 @@
   bank it was recorded with (an interview in progress then continued on the default bank's
   questions), and admin edits to those banks' rubrics were lost. Banks that already exist are now
   left alone on start; only missing ones are created.
+- **Syncing a question bank keeps it assigned.** Re-importing a bank (the admin bank sync) replaced
+  it by deleting and re-creating it, which silently unassigned every candidate on it. It now
+  replaces the bank's questions and rubric in place, keeping the bank itself.
 
 ## 0.50.0.0 (2026-10-07)
 
