@@ -258,3 +258,10 @@ and `CHANGELOG.md`.
 - **[spec-voice-live-eou-unification.md](spec-voice-live-eou-unification.md)** — 统一 Voice Live 的
   end-of-utterance 检测（文本型 → 音频型）以打开 realtime 管线：需求、设计、实测依据、测试计划，以及
   一条尚未解决的阻塞项（中文 A/B 不可结论）。实现前文档，不是完成报告。
+- **[spec-user-assignment-and-history.md](spec-user-assignment-and-history.md)** — per-user
+  interviewer + question-bank assignment and interview history (issue #187, 2026-10-07). Pins
+  `persona_id`/`bank_id` on each interview first (fixes architecture-review deferred item 1), then
+  one assigned persona + bank per logged-in user (unassigned / anonymous fall back to the default),
+  then history: the candidate sees their own on the start page, the admin sees every user's
+  (all statuses incl. in-progress and abandoned) inside the Users tab, with report, PDF and
+  transcript download.
