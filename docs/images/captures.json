@@ -1,0 +1,30 @@
+{
+  "00-signin.png": {
+    "sha256": "a81d038445967aa8aa76cd54d9c90cdd939bed934972577788e68a65ed60c138",
+    "capturedAt": "2026-10-07T00:35:09.955Z"
+  },
+  "01-landing.png": {
+    "sha256": "3385340d976877aa73d1d5b8d7a156c7b77d38a508c9658f164d8a0e8efe0298",
+    "capturedAt": "2026-10-07T00:35:12.910Z"
+  },
+  "01b-orientation.png": {
+    "sha256": "75b529d4f3d3bbaa68dcff061b05f05100cf165516a97bc48f4ac9fb072fe07c",
+    "capturedAt": "2026-10-07T00:35:13.325Z"
+  },
+  "02-interview-question.png": {
+    "sha256": "2b551fb9c608b71ba0e8471e8c9a12903b04ce4d342bc9571b80bd7fe264faae",
+    "capturedAt": "2026-10-07T00:35:17.641Z"
+  },
+  "04-review-before-scoring.png": {
+    "sha256": "ca7864a27abdbb41795c5e7914e3f2e32789cfc363df47e9265ebd7650c2717d",
+    "capturedAt": "2026-10-07T00:35:18.618Z"
+  },
+  "05-report-executive.png": {
+    "sha256": "05de98c8cf2a2d4c67f8ce1d4328fbe3f44258ef963a4a9dbff24ce8e6ac3f92",
+    "capturedAt": "2026-10-07T00:35:34.173Z"
+  },
+  "06-report-detail.png": {
+    "sha256": "5bc00bce827f3b5079d69e4f85fc328215090378329eeccb6e734eb7b8fc6110",
+    "capturedAt": "2026-10-07T00:35:34.617Z"
+  }
+}
