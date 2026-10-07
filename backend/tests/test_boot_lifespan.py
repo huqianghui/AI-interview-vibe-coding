@@ -183,10 +183,12 @@ async def test_boot_steps_run_in_dependency_order(db_session, boot, monkeypatch)
     async with main.lifespan(main.app):
         pass
 
+    # Bundles before the default bank: seeding is create-only now, so the rubric-carrying "Demo
+    # interview bank" bundle must exist for seed_default_bank to promote instead of shadowing it.
     assert order == [
-        "default bank",
         "bundled banks",
         "client banks",
+        "default bank",
         "default admin",
         "candidate accounts",
         "default persona",

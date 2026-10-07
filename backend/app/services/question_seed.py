@@ -64,13 +64,26 @@ DEFAULT_BANK_NAME = "Demo interview bank"
 
 
 async def seed_default_bank(db: AsyncSession, *, language: str = "en-US") -> str | None:
-    """Create the demo default bank + questions if none is set. Returns the bank id, or None.
+    """Make sure an enabled default bank exists. Returns the bank id it set, or None.
 
-    Idempotent: returns None (and writes nothing) when an enabled default bank already exists.
+    Idempotent: returns None (and writes nothing) when an enabled default bank already exists. With
+    no default, an existing enabled bank named ``DEFAULT_BANK_NAME`` (the committed bundle, which
+    carries a rubric) is promoted; only when there is none is the programmatic demo bank created.
     """
     existing = await question_service.get_default_bank(db)
     if existing is not None:
         return None
+    named = next(
+        (
+            b
+            for b in await question_service.list_banks(db)
+            if b.name == DEFAULT_BANK_NAME and b.enabled
+        ),
+        None,
+    )
+    if named is not None:
+        await question_service.set_default_bank(db, named.id)
+        return named.id
 
     bank = await question_service.create_bank(
         db,
@@ -94,12 +107,19 @@ async def seed_default_bank(db: AsyncSession, *, language: str = "en-US") -> str
 
 
 async def _import_bank_bundles(db: AsyncSession, directory: Path) -> list[str]:
-    """Import every ``*.json`` bank bundle under ``directory`` as non-default, idempotently.
+    """Import each ``*.json`` bank bundle under ``directory`` not seeded yet, as non-default.
 
     Shared by :func:`seed_bundled_banks` (committed generic bundles) and :func:`seed_client_banks`
-    (private client bundles). :func:`bank_bundle_service.import_bank_bundle` is idempotent by name
-    (it replaces an existing same-named bank), so re-running on every boot converges rather than
-    duplicating. Every bundle is forced non-default so this never fights the boot importer for the
+    (private client bundles). CREATE-ONLY: a bundle whose bank name already exists is skipped.
+
+    It used to REPLACE the same-named bank on every boot, which was harmless while the database
+    started empty each time but destructive once it persisted (v0.50.0.0): the replace deletes the
+    bank and re-creates it under a new id, so every restart cleared each user's bank assignment and
+    every interview's pinned ``bank_id`` (FKs are ``SET NULL``) — a live interview then resumed on
+    the default bank's questions — and threw away admin edits to those banks' rubrics. Seen live on
+    2026-10-07. Replacing a bank on purpose is the admin bank-bundle sync API's job, not a boot's.
+
+    Every bundle is forced non-default so this never fights the boot importer for the
     single enabled-default slot; the previously-default bank is preserved across the import (a
     same-name replace drops the flag, and we restore it by name afterward).
 
@@ -119,9 +139,12 @@ async def _import_bank_bundles(db: AsyncSession, directory: Path) -> list[str]:
     prior_default = await question_service.get_default_bank(db)
     prior_default_name = prior_default.name if prior_default is not None else None
 
+    existing_names = {b.name for b in await question_service.list_banks(db)}
     imported: list[str] = []
     for path in sorted(directory.glob("*.json")):  # noqa: ASYNC240 — boot-time local IO, see above
         bundle = json.loads(path.read_text(encoding="utf-8"))
+        if bundle.get("bank", {}).get("name") in existing_names:
+            continue  # already seeded (or admin-owned now): never replace it on a boot
         # Defensive: a seeded/imported bundle must never claim the default slot.
         bundle.setdefault("bank", {})["is_default"] = False
         result = await bank_bundle_service.import_bank_bundle(db, bundle)

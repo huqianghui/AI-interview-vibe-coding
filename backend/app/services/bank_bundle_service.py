@@ -151,14 +151,17 @@ async def import_bank_bundle(db: AsyncSession, bundle: dict) -> ImportResult:
     }
     unresolved: set[str] = set()
 
-    # Idempotent-by-name: drop any existing bank of the same name (with its questions/checklists)
-    # so a re-import replaces rather than duplicates.
+    # Idempotent-by-name: a re-import REPLACES the same-named bank's questions and checklists
+    # rather than duplicating it, but keeps the bank row and so its id. Deleting the row (as this
+    # once did) cleared every reference to it — users.assigned_bank_id and each interview's pinned
+    # interview_sessions.bank_id are SET NULL foreign keys — so a sync silently unassigned every
+    # candidate on that bank. That only went unnoticed while the database was wiped every boot.
     existing = (
         await db.execute(select(QuestionBank).where(QuestionBank.name == name))
     ).scalar_one_or_none()
     replaced = existing is not None
     if existing is not None:
-        await _delete_bank_cascade(db, existing.id)
+        await _delete_bank_questions(db, existing.id)
 
     # If this bank will be the enabled default, demote any current default first (single-default
     # invariant is DB-enforced; clear the slot before claiming it).
@@ -166,15 +169,13 @@ async def import_bank_bundle(db: AsyncSession, bundle: dict) -> ImportResult:
         await question_service._clear_enabled_default_banks(db, exclude_id=None)
         await db.flush()
 
-    bank = QuestionBank(
-        name=name,
-        description=str(bank_spec.get("description", "")),
-        language=str(bank_spec.get("language", "en-US")),
-        enabled=True,
-        is_default=is_default,
-    )
+    bank = existing or QuestionBank(name=name)
+    bank.description = str(bank_spec.get("description", ""))
+    bank.language = str(bank_spec.get("language", "en-US"))
+    bank.enabled = True
+    bank.is_default = is_default
     db.add(bank)
-    await db.flush()  # assign bank.id
+    await db.flush()  # assign bank.id (new bank)
 
     total_items = 0
     for order_index, q in enumerate(questions):
@@ -265,8 +266,8 @@ def _draft_items_from_bundle(
     return items, unresolved
 
 
-async def _delete_bank_cascade(db: AsyncSession, bank_id: str) -> None:
-    """Delete a bank + all its questions + their checklists/items (SQLite has no cascade here)."""
+async def _delete_bank_questions(db: AsyncSession, bank_id: str) -> None:
+    """Delete a bank's questions + their checklists/items, keeping the bank row (and its id)."""
     q_ids = (
         (await db.execute(select(Question.id).where(Question.bank_id == bank_id))).scalars().all()
     )
@@ -280,6 +281,12 @@ async def _delete_bank_cascade(db: AsyncSession, bank_id: str) -> None:
             await db.execute(delete(ChecklistItem).where(ChecklistItem.checklist_id == cid))
         await db.execute(delete(Checklist).where(Checklist.question_id == qid))
     await db.execute(delete(Question).where(Question.bank_id == bank_id))
+    await db.flush()
+
+
+async def _delete_bank_cascade(db: AsyncSession, bank_id: str) -> None:
+    """Delete a bank entirely: its questions, their checklists/items, and the bank row."""
+    await _delete_bank_questions(db, bank_id)
     await db.execute(delete(QuestionBank).where(QuestionBank.id == bank_id))
     await db.flush()
 
