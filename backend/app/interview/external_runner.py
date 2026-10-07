@@ -280,7 +280,9 @@ async def _mark_recovery_required(db: AsyncSession, session: InterviewSession) -
 # --------------------------------------------------------------------------- public API
 
 
-async def start_interview(db: AsyncSession, candidate_session_id: str) -> InterviewSession:
+async def start_interview(
+    db: AsyncSession, candidate_session_id: str, *, persona_id: str | None = None
+) -> InterviewSession:
     """Start (or resume) an external-brain interview for a candidate.
 
     Resume mirrors the bank machine: a still-``in_progress`` session for this candidate is returned
@@ -302,6 +304,7 @@ async def start_interview(db: AsyncSession, candidate_session_id: str) -> Interv
         brain_mode="external",
         external_phase="idle",
         turn_version=0,
+        persona_id=persona_id,
     )
     session.started_at = _now()
     db.add(session)

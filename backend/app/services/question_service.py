@@ -125,6 +125,13 @@ async def list_questions_for_bank(
 # --- F2b admin editing -----------------------------------------------------
 
 
+async def find_bank(db: AsyncSession, bank_id: str) -> QuestionBank | None:
+    """The bank with this id, enabled or not, or None."""
+    return (
+        await db.execute(select(QuestionBank).where(QuestionBank.id == bank_id))
+    ).scalar_one_or_none()
+
+
 async def get_bank(db: AsyncSession, bank_id: str) -> QuestionBank:
     bank = (
         await db.execute(select(QuestionBank).where(QuestionBank.id == bank_id))

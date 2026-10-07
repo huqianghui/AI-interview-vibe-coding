@@ -113,7 +113,7 @@ async def judge(
     if not draft_text.strip():
         return WAIT
 
-    questions = await state_machine.resolve_questions(db)
+    questions = await state_machine.resolve_questions(db, session.bank_id)
     current = state_machine.question_at(questions, session.current_question_index)
     if current is None or current.id != question_id:
         return WAIT  # stale: the question advanced
@@ -121,7 +121,7 @@ async def judge(
     if asked != follow_ups_asked:
         return WAIT  # stale: a follow-up landed since the page last synced
 
-    persona = await persona_service.get_default_persona(db)
+    persona = await persona_service.get_session_persona(db, session)
     max_calls = persona.judge_max_calls_per_question if persona else 0
     applied_used, llm_used = await _judge_usage(db, session.id, current.id)
     if applied_used >= max_calls:
@@ -205,13 +205,13 @@ async def apply(
     if event is None or event.applied or event.verdict != "nudge":
         return JudgeOutcome(verdict="wait", event_id=event_id)
     waited = JudgeOutcome(verdict="wait", event_id=event.id)
-    questions = await state_machine.resolve_questions(db)
+    questions = await state_machine.resolve_questions(db, session.bank_id)
     current = state_machine.question_at(questions, session.current_question_index)
     if current is None or current.id != question_id or event.question_id != current.id:
         return waited
     if await state_machine.follow_ups_asked(db, session.id, current.id) != follow_ups_asked:
         return waited
-    persona = await persona_service.get_default_persona(db)
+    persona = await persona_service.get_session_persona(db, session)
     max_calls = persona.judge_max_calls_per_question if persona else 0
     applied_used, _llm = await _judge_usage(db, session.id, current.id)
     if applied_used >= max_calls:

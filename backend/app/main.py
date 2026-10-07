@@ -10,11 +10,13 @@ from app.api import (
     admin_checklist,
     admin_config,
     admin_external_config,
+    admin_interviews,
     admin_personas,
     admin_questions,
     admin_sop,
     admin_users,
     auth,
+    candidate_history,
     candidate_session,
     health,
     interview,
@@ -169,6 +171,8 @@ app.include_router(admin_checklist.router)
 app.include_router(admin_questions.router)
 app.include_router(auth.router)
 app.include_router(admin_users.router)
+app.include_router(admin_interviews.router)
+app.include_router(candidate_history.router)
 app.include_router(admin_config.router)
 app.include_router(admin_external_config.router)
 app.include_router(voice_live_ws.router)

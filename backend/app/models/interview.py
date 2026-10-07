@@ -11,7 +11,7 @@ F6. ``turn_kind`` distinguishes them so follow-up content is scorable without a 
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -76,6 +76,23 @@ class InterviewSession(TimestampMixin, Base):
     # Optimistic-lock / CAS turn counter. A submit atomically reserves the turn by bumping this in a
     # single guarded UPDATE, so two distinct answers can never both drive the same turn.
     turn_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # --- #187: the interviewer and question bank this interview was started with ------------
+    # Pinned at start like ``brain_mode``: every later read uses these, not the current default, so
+    # switching the default (or a user's assignment) mid-interview cannot repoint
+    # ``current_question_index`` into another bank. NULL on pre-#187 rows and after the persona/
+    # bank is deleted; NULL means "the current default", which is the pre-#187 behaviour.
+    persona_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("interviewer_personas.id", ondelete="SET NULL"), nullable=True
+    )
+    bank_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("question_banks.id", ondelete="SET NULL"), nullable=True
+    )
+    # The last scoring run's report (the ``ReportOut`` dict as JSON), and its headline numbers for
+    # the history list. NULL until the interview is scored, and on rows scored before #187.
+    report_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    total_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    outcome: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
 
 class InterviewTurn(TimestampMixin, Base):

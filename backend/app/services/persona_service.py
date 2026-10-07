@@ -22,6 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.interview import InterviewSession
 from app.models.persona import AGENT_SYNC_STATUSES, InterviewerPersona, default_instructions
 
 
@@ -81,6 +82,25 @@ async def create_persona(
     await _commit_translating_conflict(db)
     await db.refresh(persona)
     return persona
+
+
+async def get_session_persona(
+    db: AsyncSession, session: InterviewSession
+) -> InterviewerPersona | None:
+    """The persona an interview was started with (#187), else the current default.
+
+    Falls back when the session predates the pin or its persona has since been deleted (the FK is
+    ``SET NULL``). A pinned persona that was disabled later still drives its own interview.
+    """
+    if session.persona_id:
+        persona = (
+            await db.execute(
+                select(InterviewerPersona).where(InterviewerPersona.id == session.persona_id)
+            )
+        ).scalar_one_or_none()
+        if persona is not None:
+            return persona
+    return await get_default_persona(db)
 
 
 async def get_persona(db: AsyncSession, persona_id: str) -> InterviewerPersona:

@@ -39,3 +39,6 @@ class AdminUserResponse(UserResponse):
     business_unit: str
     generated_password: str | None = None
     password_stale: bool = False
+    # #187: the interviewer + bank this user's interviews start with; null = the global default.
+    assigned_persona_id: str | None = None
+    assigned_bank_id: str | None = None

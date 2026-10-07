@@ -24,6 +24,7 @@ from jose import JWTError, jwt
 
 from app.config import get_settings
 from app.db import async_session_factory
+from app.interview.state_machine import find_resumable_interview
 from app.services import config_service, persona_service, user_service
 from app.services.agents.voice_live_metadata import FALLBACK_LOCALE
 from app.services.anonymous_session_service import AnonymousSessionError, verify_anonymous_token
@@ -121,6 +122,24 @@ async def _authenticate(ws: WebSocket, token: str) -> str | None:
             return None
 
 
+async def _interview_persona(db, token: str, caller: str):
+    """The persona of the candidate's live interview (#187), else the current default.
+
+    An interview pins the persona it started with (a user's assigned one, or the default then);
+    the voice session must speak with that persona even if the default has changed since.
+    """
+    if caller == "anon":
+        try:
+            candidate = await verify_anonymous_token(db, token)
+        except AnonymousSessionError:
+            candidate = None
+        if candidate is not None:
+            live = await find_resumable_interview(db, candidate.id)
+            if live is not None:
+                return await persona_service.get_session_persona(db, live)
+    return await persona_service.get_default_persona(db)
+
+
 @router.websocket("/voice-live/ws")
 async def voice_live_websocket(ws: WebSocket) -> None:
     """Proxy WebSocket: browser <-> backend <-> Azure Voice Live (avatar video path).
@@ -169,7 +188,7 @@ async def voice_live_websocket(ws: WebSocket) -> None:
                 await _send_error_and_close(ws, "Persona not found", "PERSONA_NOT_FOUND")
                 return
         else:
-            persona = await persona_service.get_default_persona(db)
+            persona = await _interview_persona(db, token, caller)
             if persona is None:
                 await _send_error_and_close(
                     ws,

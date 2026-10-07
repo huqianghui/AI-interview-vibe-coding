@@ -27,6 +27,7 @@ became stale between load and write — the exact TOCTOU the TODO names.
 """
 
 import asyncio
+import json
 import logging
 import math
 import os
@@ -188,7 +189,12 @@ async def abandon_interview(db: AsyncSession, session: InterviewSession) -> Inte
 
 
 async def start_interview(
-    db: AsyncSession, candidate_session_id: str, *, turn_mode: str = "linear"
+    db: AsyncSession,
+    candidate_session_id: str,
+    *,
+    turn_mode: str = "linear",
+    persona_id: str | None = None,
+    bank_id: str | None = None,
 ) -> InterviewSession:
     """Start a new interview — or resume the candidate's existing in-progress one.
 
@@ -208,12 +214,14 @@ async def start_interview(
         status="in_progress",
         current_question_index=0,
         turn_mode=turn_mode if turn_mode in TURN_MODES else "linear",
+        persona_id=persona_id,
+        bank_id=bank_id,
     )
     session.started_at = _now()
     db.add(session)
     await db.flush()  # assign session.id before writing the turn (avoids a second round-trip)
 
-    questions = await resolve_questions(db)
+    questions = await resolve_questions(db, session.bank_id)
     first = question_at(questions, 0)
     if first is not None:
         db.add(
@@ -284,7 +292,7 @@ async def answer_finalized(
     if session.status != "in_progress":
         raise InterviewStateError(f"Cannot answer in status {session.status!r}")
 
-    questions = await resolve_questions(db)
+    questions = await resolve_questions(db, session.bank_id)
     current = question_at(questions, session.current_question_index)
     if current is None:
         raise InterviewStateError("No current question to answer")
@@ -412,7 +420,7 @@ async def score_and_finalize_events(
         raise InterviewStateError(f"Cannot score in status {session.status!r}")
 
     # question_id → prompt text, so the scorer can build a cross-language judging prompt.
-    questions = await resolve_questions(db)
+    questions = await resolve_questions(db, session.bank_id)
     prompt_by_id = {q.id: q.prompt for q in questions}
     # question_id → aggregate weight (default 1). A question weighted 0 or missing still scores per
     # question but contributes nothing to the interview-level mean.
@@ -699,36 +707,39 @@ async def score_and_finalize_events(
     # Improvement" if ANY graded question was capped by a confirmed critical error.
     outcome, outcome_capped = cap_outcome(outcome_for_score(total_score), critical_fired=any_capped)
 
+    report = {
+        "interview_session_id": session.id,
+        "status": "scored",
+        "coverage_pct": total_score,
+        "total_score": total_score,
+        "grade": grade_for_score(total_score) if any_graded else None,
+        "outcome": outcome if any_graded else None,
+        "capped": outcome_capped,
+        "narrative": build_narrative(graded_results) if any_graded else "",
+        "per_question": per_question,
+        "warnings": all_warnings,
+        "is_stub": not any_graded,
+        # Questions whose grading failed outright. Present only when there are any, so the
+        # report can say "N questions could not be scored" instead of quietly averaging fewer
+        # questions than the candidate answered. They are excluded from the score above, NOT
+        # scored zero: an unjudged question is not a badly answered one (P7).
+        "unscored_question_ids": unscored or None,
+        # Feature D: present only when the opt-in check ran and found something; None otherwise
+        # so the report renders the panel only when there are findings. Never affects scores.
+        "sop_coverage": coverage_findings if (sop_coverage_check and coverage_findings) else None,
+    }
     session.status = "scored"
+    # #187: keep the report, so the interview history (candidate + admin) can show it without
+    # re-scoring. Each scoring run overwrites it, EXCEPT a run that graded nothing (e.g. the model
+    # was down for every question) never replaces a report that did: a failed re-score must not
+    # turn a real score back into a stub. The score/outcome columns feed the history list.
+    if any_graded or session.report_json is None:
+        session.report_json = json.dumps(report, ensure_ascii=False)
+        session.total_score = total_score if any_graded else None
+        session.outcome = outcome if any_graded else None
     await db.commit()
     await db.refresh(session)
-
-    yield {
-        "type": "report",
-        "report": {
-            "interview_session_id": session.id,
-            "status": session.status,
-            "coverage_pct": total_score,
-            "total_score": total_score,
-            "grade": grade_for_score(total_score) if any_graded else None,
-            "outcome": outcome if any_graded else None,
-            "capped": outcome_capped,
-            "narrative": build_narrative(graded_results) if any_graded else "",
-            "per_question": per_question,
-            "warnings": all_warnings,
-            "is_stub": not any_graded,
-            # Questions whose grading failed outright. Present only when there are any, so the
-            # report can say "N questions could not be scored" instead of quietly averaging fewer
-            # questions than the candidate answered. They are excluded from the score above, NOT
-            # scored zero: an unjudged question is not a badly answered one (P7).
-            "unscored_question_ids": unscored or None,
-            # Feature D: present only when the opt-in check ran and found something; None otherwise
-            # so the report renders the panel only when there are findings. Never affects scores.
-            "sop_coverage": coverage_findings
-            if (sop_coverage_check and coverage_findings)
-            else None,
-        },
-    }
+    yield {"type": "report", "report": report}
 
 
 async def get_current_question(db: AsyncSession, session: InterviewSession) -> dict | None:
@@ -737,7 +748,7 @@ async def get_current_question(db: AsyncSession, session: InterviewSession) -> d
     Candidate-safe projection (SPEC P3): only ``question_id`` / ``prompt`` / position — never the
     question's ``expected_points`` (those link to the rubric and stay interviewer-internal).
     """
-    questions = await resolve_questions(db)
+    questions = await resolve_questions(db, session.bank_id)
     q = question_at(questions, session.current_question_index)
     if q is None:
         return None
@@ -874,7 +885,7 @@ async def review_answers(db: AsyncSession, session: InterviewSession) -> list[di
     can never disagree with what gets scored, and the order matches the question bank exactly
     (requirement 2). Candidate-safe: only prompt + the grouped answer text, no rubric (P3).
     """
-    questions = await resolve_questions(db)
+    questions = await resolve_questions(db, session.bank_id)
     answers_by_id = dict(await _candidate_answers(db, session.id))
     out: list[dict] = []
     for index, q in enumerate(questions):
