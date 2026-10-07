@@ -23,10 +23,11 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     with op.batch_alter_table("judge_events") as batch:
         batch.add_column(
-            sa.Column("applied", sa.Boolean(), nullable=False, server_default=sa.text("0"))
+            sa.Column("applied", sa.Boolean(), nullable=False, server_default=sa.false())
         )
     # Every pre-existing row was a one-step call whose verdict was delivered.
-    op.execute("UPDATE judge_events SET applied = 1")
+    # TRUE, not 1: PostgreSQL has no boolean = integer (SQLite accepts both).
+    op.execute("UPDATE judge_events SET applied = TRUE")
 
 
 def downgrade() -> None:

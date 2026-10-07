@@ -34,6 +34,9 @@ param storageAccountName string
 var vnetName = 'vnet-${namePrefix}-${environmentName}'
 var infraSubnetName = 'snet-${namePrefix}-${environmentName}-infra'
 var peSubnetName = 'snet-${namePrefix}-${environmentName}-pe'
+var pgSubnetName = 'snet-${namePrefix}-${environmentName}-pg'
+// VNet-integrated PostgreSQL flexible server needs a private zone ending in this suffix.
+var pgDnsZoneName = '${namePrefix}-${environmentName}.private.postgres.database.azure.com'
 var blobDnsZoneName = 'privatelink.blob.${environment().suffixes.storage}'
 var blobPeName = 'pe-${namePrefix}-${environmentName}-blob'
 var natGatewayName = 'nat-${namePrefix}-${environmentName}'
@@ -74,6 +77,11 @@ resource natGateway 'Microsoft.Network/natGateways@2024-05-01' = {
   }
 }
 
+// RE-APPLY HAZARD (checked with what-if, 2026-10-07): on the live MCAPS subscription a policy
+// attaches an NSG to every subnet after creation. Those NSGs are not declared here, so re-deploying
+// this VNet resource DETACHES them from the existing subnets. On an existing environment add a
+// subnet with `az network vnet subnet create` instead of re-applying this module; a fresh
+// environment can deploy it as is.
 resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' = {
   name: vnetName
   location: location
@@ -112,6 +120,22 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' = {
           privateEndpointNetworkPolicies: 'Disabled'
         }
       }
+      {
+        // PostgreSQL flexible server (VNet-integrated, private only). Delegated to the server; a /28
+        // is the smallest the service accepts and one Burstable server needs only one address.
+        name: pgSubnetName
+        properties: {
+          addressPrefix: '10.10.3.0/28'
+          delegations: [
+            {
+              name: 'Microsoft.DBforPostgreSQL.flexibleServers'
+              properties: {
+                serviceName: 'Microsoft.DBforPostgreSQL/flexibleServers'
+              }
+            }
+          ]
+        }
+      }
     ]
   }
 }
@@ -124,6 +148,29 @@ resource infraSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-05-01' exis
 resource peSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-05-01' existing = {
   parent: vnet
   name: peSubnetName
+}
+
+resource pgSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-05-01' existing = {
+  parent: vnet
+  name: pgSubnetName
+}
+
+resource pgDnsZone 'Microsoft.Network/privateDnsZones@2024-06-01' = {
+  name: pgDnsZoneName
+  location: 'global'
+  tags: tags
+}
+
+resource pgDnsZoneLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
+  parent: pgDnsZone
+  name: 'link-${vnetName}'
+  location: 'global'
+  properties: {
+    registrationEnabled: false
+    virtualNetwork: {
+      id: vnet.id
+    }
+  }
 }
 
 resource blobDnsZone 'Microsoft.Network/privateDnsZones@2024-06-01' = {
@@ -185,4 +232,6 @@ resource blobPeDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGr
 output vnetId string = vnet.id
 output infrastructureSubnetId string = infraSubnet.id
 output peSubnetId string = peSubnet.id
+output pgSubnetId string = pgSubnet.id
+output pgDnsZoneId string = pgDnsZone.id
 output natEgressIp string = natPublicIp.properties.ipAddress

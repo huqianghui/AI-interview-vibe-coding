@@ -3,13 +3,12 @@
 import asyncio
 from logging.config import fileConfig
 
-from sqlalchemy.ext.asyncio import async_engine_from_config
 from sqlalchemy.pool import NullPool
 
 import app.models  # noqa: F401 — register all ORM classes on Base.metadata
 from alembic import context
 from app.config import get_settings
-from app.db import Base
+from app.db import Base, make_engine
 
 config = context.config
 config.set_main_option("sqlalchemy.url", get_settings().database_url)
@@ -27,11 +26,8 @@ def do_run_migrations(connection) -> None:
 
 
 async def run_async_migrations() -> None:
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=NullPool,
-    )
+    # Same engine factory as the app, so an Entra-authenticated Postgres works for migrations too.
+    connectable = make_engine(config.get_main_option("sqlalchemy.url"), poolclass=NullPool)
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
     await connectable.dispose()

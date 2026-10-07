@@ -13,8 +13,9 @@ A deliberately small footprint (subscription-scope `main.bicep` creates the reso
 | User-assigned managed identity | backend auth to Foundry / Storage (keyless) |
 | Container Registry (Basic) | holds backend + frontend images |
 | Storage account | private `client-bundle` container (client interview material) + `materials`; reached only via a blob **private endpoint** (no public access) |
-| VNet + private endpoint | `vnet-…` with a subnet delegated to the ACA env + a PE subnet; `privatelink.blob.core.windows.net` private DNS zone; blob private endpoint (`modules/network.bicep`) |
-| Container Apps (backend + frontend) | **single replica each** (ephemeral SQLite; WS affinity); **VNet-integrated** env (external ingress, private egress to storage); the four runtime secrets are Container App **native secrets** (see note below) |
+| VNet + private endpoint | `vnet-…` with a subnet delegated to the ACA env, a PE subnet, and a `/28` subnet delegated to PostgreSQL; `privatelink.blob.core.windows.net` and `<prefix>-<env>.private.postgres.database.azure.com` private DNS zones; blob private endpoint (`modules/network.bicep`) |
+| PostgreSQL flexible server (Burstable B1ms, v16) | the app's **persistent** database: personas, assignments, every interview and its report survive deploys and restarts. Private only (VNet-integrated, public access disabled), **Entra-only login** (password auth disabled); the backend managed identity is the Entra admin and logs in with a token (`DATABASE_AUTH=entra`, `backend/app/db.py`) (`modules/postgres.bicep`) |
+| Container Apps (backend + frontend) | **single replica each** (WS affinity; process-local judge/scoring guards); **VNet-integrated** env (external ingress, private egress to storage + PostgreSQL); the four runtime secrets are Container App **native secrets** (see note below) |
 | GitHub OIDC identity | keyless deploy from GitHub Actions |
 | Role assignments | AcrPull / Storage Blob Data Reader (backend MI); Contributor / AcrPush (deploy MI) |
 
@@ -26,8 +27,9 @@ A deliberately small footprint (subscription-scope `main.bicep` creates the reso
 **Not created here (by design):**
 - **Azure AI Foundry / Voice Live** — an *existing* resource is reused. The backend MI is granted
   access separately by [`scripts/grant-foundry-rbac.sh`](scripts/grant-foundry-rbac.sh).
-- **No database PaaS** — the app runs on **ephemeral SQLite** on the replica's own disk, reseeded on
-  every boot (see the backend `entrypoint.sh`). No Postgres.
+- **No in-container database in production.** SQLite remains the dev/test default only. On a
+  deployment without the PostgreSQL server the backend falls back to SQLite inside the container,
+  which starts EMPTY after every deploy or restart (all interviews and admin edits lost).
 - AI Search / Content Understanding / Speech-Avatar, prompt-optimizer sidecar.
 
 > **A VNet IS created** (`modules/network.bicep`). The storage account is policy-locked private (the
@@ -37,14 +39,43 @@ A deliberately small footprint (subscription-scope `main.bicep` creates the reso
 
 ## The boot-time data story (why there's no bootstrap Job)
 
-Because SQLite is ephemeral and per-replica, the reference project's separate "bootstrap Job" can't
-seed it (its disk isn't the app's). Instead the backend container seeds itself on every start
-(`backend/entrypoint.sh`):
+The backend container migrates and seeds itself on every start (`backend/entrypoint.sh`). Every
+step is idempotent, so it is the same on a fresh database and on the persistent PostgreSQL one
+(verified: a restart on the same database changed no row counts):
 
-1. `alembic upgrade head` — create the schema on the fresh empty SQLite.
+1. `alembic upgrade head` — create or upgrade the schema (on PostgreSQL, through the same Entra
+   token login as the app).
 2. If `CLIENT_BUNDLE_BLOB` is set — download the private client bundle from the `client-bundle` blob
    container (managed identity, no keys), then run the client-bank importer against the local DB.
 3. `uvicorn` starts — the FastAPI lifespan idempotently seeds the generic demo bank + admin.
+
+> **With a persistent database, env-seeded config is first-boot only.** Rows seeded from
+> environment variables (the Foundry connection, the external interviewer, the admin) are written
+> when they do not exist yet. Changing such an env var later does NOT overwrite the saved row; change
+> it in the admin page instead.
+
+### Adding PostgreSQL to an existing environment
+
+Do NOT re-apply `network.bicep` on a live environment: a subscription policy attaches NSGs that the
+template does not declare, and re-deploying the VNet detaches them (checked with `what-if`). Add the
+pieces instead, then deploy the server module on its own:
+
+```bash
+RG=rg-aiinterview-public-swedencentral
+az network vnet subnet create -g $RG --vnet-name vnet-aiinterview-public -n snet-aiinterview-public-pg \
+  --address-prefixes 10.10.3.0/28 --delegations Microsoft.DBforPostgreSQL/flexibleServers
+az network private-dns zone create -g $RG -n aiinterview-public.private.postgres.database.azure.com
+az network private-dns link vnet create -g $RG -z aiinterview-public.private.postgres.database.azure.com \
+  -n link-vnet-aiinterview-public -v "$(az network vnet show -g $RG -n vnet-aiinterview-public --query id -o tsv)" -e false
+az deployment group create -g $RG -f modules/postgres.bicep -p namePrefix=aiinterview environmentName=public \
+  location=swedencentral tags='{}' backendIdentityName=id-aiinterview-public-backend \
+  backendIdentityPrincipalId="$(az identity show -g $RG -n id-aiinterview-public-backend --query principalId -o tsv)" \
+  delegatedSubnetId="$(az network vnet subnet show -g $RG --vnet-name vnet-aiinterview-public -n snet-aiinterview-public-pg --query id -o tsv)" \
+  privateDnsZoneId="$(az network private-dns zone show -g $RG -n aiinterview-public.private.postgres.database.azure.com --query id -o tsv)"
+# then point the backend at it (the deployment output databaseUrl):
+az containerapp update -g $RG -n ca-aiinterview-public-backend \
+  --set-env-vars DATABASE_URL=<databaseUrl output> DATABASE_AUTH=entra
+```
 
 The client importer + its source docs are **gitignored** (absent from the public repo and the CI
 image). They reach the container only through the private blob you upload in step 4 below. With

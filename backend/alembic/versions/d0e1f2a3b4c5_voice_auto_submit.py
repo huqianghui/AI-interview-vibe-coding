@@ -30,9 +30,10 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 _COLUMNS = (
-    ("bank_auto_submit_enabled", sa.Boolean(), "0"),
+    # Booleans default to "false"/"true", not 0/1: PostgreSQL rejects an integer boolean default.
+    ("bank_auto_submit_enabled", sa.Boolean(), "false"),
     ("bank_auto_submit_silence_seconds", sa.Integer(), "3"),
-    ("external_auto_submit_enabled", sa.Boolean(), "1"),
+    ("external_auto_submit_enabled", sa.Boolean(), "true"),
     ("external_auto_submit_silence_seconds", sa.Integer(), "3"),
 )
 

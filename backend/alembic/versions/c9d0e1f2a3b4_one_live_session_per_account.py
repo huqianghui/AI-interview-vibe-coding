@@ -36,7 +36,7 @@ def upgrade() -> None:
         UPDATE anonymous_candidate_sessions
            SET active_user_id = user_id
          WHERE user_id IS NOT NULL
-           AND is_revoked = 0
+           AND is_revoked = FALSE
            AND expires_at > CURRENT_TIMESTAMP
            AND id IN (
                SELECT id FROM (
@@ -44,7 +44,7 @@ def upgrade() -> None:
                        PARTITION BY user_id ORDER BY expires_at DESC
                    ) AS rn
                      FROM anonymous_candidate_sessions
-                    WHERE user_id IS NOT NULL AND is_revoked = 0
+                    WHERE user_id IS NOT NULL AND is_revoked = FALSE
                       AND expires_at > CURRENT_TIMESTAMP
                ) ranked
                 WHERE rn = 1

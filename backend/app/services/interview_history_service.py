@@ -18,7 +18,12 @@ from app.models.question import QuestionBank
 from app.schemas.history import InterviewDetail, InterviewHistoryItem, TranscriptTurn
 
 # ``started_at`` carries microseconds, ``created_at`` may not (two interviews in one second tie).
-_NEWEST_FIRST = (InterviewSession.started_at.desc(), InterviewSession.created_at.desc())
+# NULLS LAST spelled out: PostgreSQL puts NULLs FIRST on DESC (SQLite last), which would float a
+# never-started session to the top of the list.
+_NEWEST_FIRST = (
+    InterviewSession.started_at.desc().nulls_last(),
+    InterviewSession.created_at.desc(),
+)
 
 
 def _rows_query():

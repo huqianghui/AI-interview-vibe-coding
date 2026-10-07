@@ -65,6 +65,7 @@ Planning trail: [`planning/spec-candidate-login.md`](planning/spec-candidate-log
 | Saved reports | ✅ Done | v0.49.0.0 | Scoring writes `report_json` / `total_score` / `outcome`; history reads them. Admin `POST /admin/interviews/{id}/report` scores a completed-but-unsubmitted interview. |
 | Interview history | ✅ Done | v0.49.0.0 | Candidate `GET /candidate/interviews[/{id}]` (user-scoped: earlier logins' sessions included) → "My interviews" on the start screen. Admin `GET /admin/users/{id}/interviews`, `GET /admin/interviews/{id}` → Users tab per-user history with report, PDF, transcript + `.txt` download. All statuses incl. `in_progress` / `abandoned`. SOP citations open via `.../sop/{doc}` on both (cited-only rule). |
 | Live-Azure validation | ⏳ Pending | — | Verified on the mock stack (e2e `user-assignment-history.spec.ts`) + 2000px screenshots; not yet exercised on the Sweden Central deployment. |
+| Persistent database | ✅ Done | v0.50.0.0 | The live backend ran SQLite inside the container with no volume, so every deploy wiped all of the above. Now Azure Database for PostgreSQL (B1ms, v16), private + Entra-only (`modules/postgres.bicep`, `DATABASE_AUTH=entra`). Migration chain + E2E suite verified on PostgreSQL 16; restart on the same DB keeps all rows with no duplicate seeds. |
 
 Planning trail: [`planning/spec-user-assignment-and-history.md`](planning/spec-user-assignment-and-history.md) (GitHub #187).
 
