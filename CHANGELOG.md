@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.50.0.0 (2026-10-07)
+
+### Changed
+- **The server keeps its data.** The Azure deployment now stores everything in a PostgreSQL
+  database instead of a SQLite file inside the container. Before, every deploy or restart started
+  from an empty database: interviewers and assignments made in the admin pages, and every interview
+  record and report, were lost. They now survive deploys and restarts.
+  - The database is private (reachable only from the app's own network) and has no password: the
+    backend signs in with its managed identity.
+  - Settings that come from environment variables (the Foundry connection, the external
+    interviewer, the admin account) are now written on the first start only; change them later in
+    the admin page.
+
+### For contributors
+- `DATABASE_AUTH=entra` makes the backend (and Alembic) log in to PostgreSQL with a fresh Microsoft
+  Entra token per connection, over TLS. SQLite stays the dev and test default.
+- Three old migrations used SQLite-only SQL (a boolean compared with `0`/`1`, and two boolean
+  defaults written as `0`/`1`); they now run on PostgreSQL too. The whole chain plus the E2E suite
+  were run against PostgreSQL 16.
+- Interviewer fields with a column width (`turn_detection`, `default_locale`, `model`) now reject an
+  over-long value with a 422; PostgreSQL enforces the width that SQLite ignored.
+- `infra/azure/modules/postgres.bicep` (new) and a PostgreSQL subnet + private DNS zone in
+  `network.bicep`. Do not re-apply `network.bicep` on a live environment (it detaches policy-added
+  NSGs); see `infra/azure/README.md`.
+
 ## 0.49.0.1 (2026-10-07)
 
 ### Fixed
