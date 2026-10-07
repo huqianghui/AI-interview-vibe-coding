@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     app_name: str = "AI Interview"
     debug: bool = False
     database_url: str = "sqlite+aiosqlite:///./ai_interview.db"
+    # How a PostgreSQL connection authenticates. "password" = whatever DATABASE_URL carries (local
+    # dev). "entra" = Azure Database for PostgreSQL with password login disabled: every new
+    # connection gets a fresh Microsoft Entra token for the managed identity (AZURE_CLIENT_ID) as
+    # its password, over TLS. DATABASE_URL then names only the host, database and Entra user.
+    database_auth: str = "password"
 
     # Auth. REQUIRED — no code default on purpose: SECRET_KEY signs every JWT AND (since #102) is
     # the key the seeded candidate passwords are derived from, so a well-known default would make

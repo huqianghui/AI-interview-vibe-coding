@@ -1139,6 +1139,7 @@
           },
           "default_locale": {
             "default": "en-US",
+            "maxLength": 16,
             "title": "Default Locale",
             "type": "string"
           },
@@ -1216,6 +1217,7 @@
           },
           "model": {
             "default": "",
+            "maxLength": 100,
             "title": "Model",
             "type": "string"
           },
@@ -1259,6 +1261,7 @@
           },
           "turn_detection": {
             "default": "azure_semantic_vad",
+            "maxLength": 64,
             "title": "Turn Detection",
             "type": "string"
           },
@@ -1626,6 +1629,7 @@
           "default_locale": {
             "anyOf": [
               {
+                "maxLength": 16,
                 "type": "string"
               },
               {
@@ -1775,6 +1779,7 @@
           "model": {
             "anyOf": [
               {
+                "maxLength": 100,
                 "type": "string"
               },
               {
@@ -1867,6 +1872,7 @@
           "turn_detection": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {

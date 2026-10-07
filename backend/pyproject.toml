@@ -8,6 +8,8 @@ dependencies = [
     "uvicorn[standard]>=0.32",
     "sqlalchemy[asyncio]>=2.0.36",
     "aiosqlite>=0.20",
+    # PostgreSQL (the persistent database on Azure; SQLite stays the dev/test default).
+    "asyncpg>=0.29",
     "alembic>=1.14",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",

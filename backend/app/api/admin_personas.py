@@ -49,8 +49,10 @@ JUDGE_MAX_CALLS_MIN = 0
 JUDGE_MAX_CALLS_MAX = 5
 
 
+# max_length mirrors the column width: SQLite never enforced it, PostgreSQL does, so an over-long
+# value must be a 422 here rather than a database error (500).
 class VoiceKnobs(BaseModel):
-    turn_detection: str = "azure_semantic_vad"
+    turn_detection: str = Field(default="azure_semantic_vad", max_length=64)
     eou_detection: bool = True
     noise_suppression: bool = True
     echo_cancellation: bool = True
@@ -105,12 +107,12 @@ class PersonaCreate(VoiceKnobs):
     greeting_map: str = "{}"
     # Editor's remembered "Language" selector locale (which voice_map/greeting_map locale it opens
     # on). Not the interview runtime language — that's chosen per session.
-    default_locale: str = "en-US"
+    default_locale: str = Field(default="en-US", max_length=16)
     enabled: bool = True
     is_default: bool = False
     tools_config: str = "[]"
     # Per-persona model deployment ("" → fall back to the global foundry_agent_model).
-    model: str = ""
+    model: str = Field(default="", max_length=100)
     # Which interview engine drives this persona — "bank" (built-in question bank) or "external"
     # (the client's external interview API/server). Vendor-neutral: the token is never a product
     # name. Snapshotted onto the session at start (see app.models.interview.BRAIN_MODES).
@@ -132,11 +134,11 @@ class PersonaUpdate(BaseModel):
     external_reader_prompt: str | None = None
     voice_map: str | None = None
     greeting_map: str | None = None
-    default_locale: str | None = None
+    default_locale: str | None = Field(default=None, max_length=16)
     enabled: bool | None = None
     is_default: bool | None = None
     tools_config: str | None = None
-    turn_detection: str | None = None
+    turn_detection: str | None = Field(default=None, max_length=64)
     eou_detection: bool | None = None
     noise_suppression: bool | None = None
     echo_cancellation: bool | None = None
@@ -152,7 +154,7 @@ class PersonaUpdate(BaseModel):
     external_auto_submit_silence_seconds: int | None = Field(
         default=None, ge=VOICE_AUTO_SUBMIT_MIN_SECONDS, le=VOICE_AUTO_SUBMIT_MAX_SECONDS
     )
-    model: str | None = None
+    model: str | None = Field(default=None, max_length=100)
     interview_brain: str | None = None
     bank_turn_mode: str | None = None
     judge_silence_seconds: int | None = Field(

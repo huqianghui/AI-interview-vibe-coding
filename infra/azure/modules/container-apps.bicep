@@ -65,7 +65,11 @@ param voiceLiveDefaultModel string = 'gpt-5-mini'
 param voiceLiveApiVersion string = '2026-01-01-preview'
 
 // Ephemeral writable paths inside the container (mirrors the Dockerfile ENV defaults).
-var databaseUrl = 'sqlite+aiosqlite:///./data/ai_interview.db'
+@description('Backend DATABASE_URL. The PostgreSQL URL from postgres.bicep; the in-container SQLite default is lost on every restart and is kept only for a deployment without the server.')
+param databaseUrl string = 'sqlite+aiosqlite:///./data/ai_interview.db'
+
+@description('DATABASE_AUTH for the backend: "entra" for the keyless PostgreSQL server, "password" otherwise.')
+param databaseAuth string = 'password'
 var materialStoragePath = '/app/data/_sop_storage'
 
 var environmentResourceName = 'cae-${namePrefix}-${environmentName}'
@@ -179,6 +183,10 @@ resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
             {
               name: 'DATABASE_URL'
               value: databaseUrl
+            }
+            {
+              name: 'DATABASE_AUTH'
+              value: databaseAuth
             }
             {
               name: 'MATERIAL_STORAGE_PATH'

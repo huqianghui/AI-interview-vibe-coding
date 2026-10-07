@@ -215,6 +215,21 @@ module roleAssignments './modules/role-assignments.bicep' = {
   }
 }
 
+module postgres './modules/postgres.bicep' = {
+  name: '${deploymentName}-postgres'
+  scope: deploymentResourceGroup
+  params: {
+    namePrefix: namePrefix
+    environmentName: environmentName
+    location: location
+    tags: commonTags
+    delegatedSubnetId: network.outputs.pgSubnetId
+    privateDnsZoneId: network.outputs.pgDnsZoneId
+    backendIdentityName: managedIdentity.outputs.backendIdentityName
+    backendIdentityPrincipalId: managedIdentity.outputs.backendIdentityPrincipalId
+  }
+}
+
 module containerApps './modules/container-apps.bicep' = {
   name: '${deploymentName}-container-apps'
   scope: deploymentResourceGroup
@@ -246,6 +261,8 @@ module containerApps './modules/container-apps.bicep' = {
     foundryAgentModel: foundryAgentModel
     voiceLiveDefaultModel: voiceLiveDefaultModel
     voiceLiveApiVersion: voiceLiveApiVersion
+    databaseUrl: postgres.outputs.databaseUrl
+    databaseAuth: 'entra'
   }
 }
 
@@ -262,6 +279,8 @@ output frontendContainerAppName string = containerApps.outputs.frontendAppName
 output backendUrl string = containerApps.outputs.backendUrl
 output frontendUrl string = containerApps.outputs.frontendUrl
 output natEgressIp string = network.outputs.natEgressIp
+output postgresServerName string = postgres.outputs.serverName
+output databaseUrl string = postgres.outputs.databaseUrl
 output backendIdentityName string = managedIdentity.outputs.backendIdentityName
 output backendIdentityPrincipalId string = managedIdentity.outputs.backendIdentityPrincipalId
 output githubDeploymentClientId string = githubOidc.outputs.githubDeploymentClientId
