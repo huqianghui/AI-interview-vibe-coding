@@ -19,9 +19,19 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
+# Any fixed number; every replica of this app takes the same one.
+_MIGRATION_LOCK_ID = 7_187_050_001
+
+
 def do_run_migrations(connection) -> None:
+    # During a revision swap Container Apps can run the old and the new replica side by side, and
+    # each runs `alembic upgrade head` at boot. On PostgreSQL two concurrent upgrades race on the
+    # same DDL; the transaction-scoped advisory lock makes the second wait, then find the schema at
+    # head and do nothing. (SQLite's single file lock already serialized this.)
     context.configure(connection=connection, target_metadata=target_metadata)
     with context.begin_transaction():
+        if connection.dialect.name == "postgresql":
+            connection.exec_driver_sql(f"SELECT pg_advisory_xact_lock({_MIGRATION_LOCK_ID})")
         context.run_migrations()
 
 

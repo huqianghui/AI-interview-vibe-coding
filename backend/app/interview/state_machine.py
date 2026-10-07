@@ -16,9 +16,10 @@ more; the read side stays because sessions recorded before then still carry them
 
 Status lifecycle enforced: created → in_progress → completed → scored.
 
-Concurrency (TODOS.md, "mutation routes race on a stale session snapshot"): production runs
-SQLite, where ``SELECT ... FOR UPDATE`` is a silent no-op (the dialect drops it) — a row lock would
-look correct in review and protect nothing. ``answer_finalized`` and ``abandon_interview`` instead
+Concurrency (TODOS.md, "mutation routes race on a stale session snapshot"): written when production
+ran SQLite, where ``SELECT ... FOR UPDATE`` is a silent no-op; production is PostgreSQL now, and the
+CAS below holds on both (the guarded UPDATE takes PostgreSQL's row lock). ``answer_finalized`` and
+``abandon_interview`` instead
 reuse the CAS already proven in ``external_runner._reserve_turn``: a single guarded
 ``UPDATE ... WHERE turn_version = :seen AND <status guard>`` that bumps ``turn_version`` atomically.
 Zero rows affected means another commit (an interleaved ``/answer`` or ``/restart``) landed first,
@@ -34,6 +35,7 @@ import os
 from datetime import UTC, datetime
 
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.interview.questions import question_at, resolve_questions
@@ -219,7 +221,16 @@ async def start_interview(
     )
     session.started_at = _now()
     db.add(session)
-    await db.flush()  # assign session.id before writing the turn (avoids a second round-trip)
+    try:
+        await db.flush()  # assign session.id before writing the turn (avoids a second round-trip)
+    except IntegrityError:
+        # A concurrent /start (double click, reload) created this candidate's live interview first:
+        # uq_one_live_interview_per_candidate refused ours, so resume theirs instead.
+        await db.rollback()
+        winner = await find_resumable_interview(db, candidate_session_id)
+        if winner is None:
+            raise
+        return winner
 
     questions = await resolve_questions(db, session.bank_id)
     first = question_at(questions, 0)
@@ -467,6 +478,10 @@ async def score_and_finalize_events(
                 ),
             )
         )
+
+    # Phase 1 only read. End that transaction before Phase 2: grading takes ~18 s per question, and
+    # on PostgreSQL an open transaction holds a pooled connection for the whole of it.
+    await db.commit()
 
     # ── Phase 2: the LLM calls, concurrently ──────────────────────────────────────────────────
     # Grading one question is ~18 s against the live bank, and the questions are independent, so

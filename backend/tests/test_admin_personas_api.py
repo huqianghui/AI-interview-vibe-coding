@@ -553,22 +553,31 @@ async def test_renaming_onto_another_personas_name_is_refused(client):
     assert same.status_code == 200
 
 
-async def test_an_existing_same_named_pair_stays_editable(client, db_session):
-    """The live duplicate predates the guard: saving either twin (the editor always sends the
-    name) must still work, so the admin can edit or rename one of them out of the clash."""
+async def test_the_database_itself_refuses_a_second_persona_of_the_same_name(db_session):
+    """The service's name check is check-then-insert: two concurrent creates both pass it. The
+    unique index on lower(trim(name)) is what actually holds (PostgreSQL runs them side by side)."""
+    import pytest
+    from sqlalchemy.exc import IntegrityError
+
     from app.models.persona import InterviewerPersona
 
-    twins = [InterviewerPersona(name="interview02") for _ in range(2)]
-    db_session.add_all(twins)
+    db_session.add(InterviewerPersona(name="interview02"))
     await db_session.commit()
-    for twin in twins:
-        saved = await client.put(
-            f"/admin/personas/{twin.id}",
-            headers=AUTH,
-            json={"name": "interview02", "enabled": True},
-        )
-        assert saved.status_code == 200, saved.text
-    renamed = await client.put(
-        f"/admin/personas/{twins[1].id}", headers=AUTH, json={"name": "interview02 (copy)"}
-    )
-    assert renamed.status_code == 200
+    db_session.add(InterviewerPersona(name=" Interview02 "))
+    with pytest.raises(IntegrityError):
+        await db_session.commit()
+    await db_session.rollback()
+
+
+async def test_a_concurrent_duplicate_create_is_a_409_not_a_500(client, monkeypatch):
+    """When the race beats the service check, the DB refusal still comes back as the 409."""
+    from app.services import persona_service
+
+    async def _pass(*_a, **_k):
+        return None  # simulate the other request winning between check and insert
+
+    await client.post("/admin/personas", headers=AUTH, json={"name": "Ava"})
+    monkeypatch.setattr(persona_service, "_ensure_name_free", _pass)
+    again = await client.post("/admin/personas", headers=AUTH, json={"name": "ava"})
+    assert again.status_code == 409
+    assert "already exists" in again.json()["detail"]

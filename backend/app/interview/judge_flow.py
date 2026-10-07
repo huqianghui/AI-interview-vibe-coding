@@ -27,7 +27,8 @@ from app.services import checklist_service, persona_service
 JUDGE_LLM_CALLS_PER_APPLIED = 3
 
 # One in-flight judge per session (single-process guard; a second concurrent request is a 409 the
-# page treats as "wait"). Cleared in a finally block, so a crash can never wedge a session.
+# page treats as "wait"). Cleared in a finally block, so a crash can never wedge a session. Valid
+# only while the backend runs ONE replica (maxReplicas=1): a second replica would not see it.
 _JUDGE_IN_FLIGHT: set[str] = set()
 
 
@@ -153,6 +154,10 @@ async def judge(
             follow_ups_asked=asked,
             max_follow_ups=current.max_follow_ups,
         )
+        # Nothing is written above; end the read so the pooled connection is not held while the
+        # LLM thinks (on PostgreSQL an open transaction pins a connection; ~15 at once starve the
+        # pool for every request).
+        await db.commit()
         result = await judge_mod.run_judge(inp, judge_mod.get_judge_adapter())
         # The LLM call above is the slow part; re-check freshness now, right before writing, so a
         # candidate who submitted (or restarted) while it was in flight gets a silent "wait"

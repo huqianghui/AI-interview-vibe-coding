@@ -16,7 +16,7 @@ question projection (F2) already omits the rubric link.
 PUBLIC repo: no real SOP content — schema + neutral defaults only.
 """
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -36,6 +36,18 @@ class Checklist(TimestampMixin, Base):
     # Which prompt/version drafted this checklist (registry pattern, mirrors F4 scoring versioning).
     prompt_version: Mapped[str] = mapped_column(String(64), default="v1", nullable=False)
     is_default: Mapped[bool] = mapped_column(default=True, nullable=False)
+
+    # At most one default rubric per question, in the DB (migration d8e9f0a1b2c3): two concurrent
+    # "generate" calls each demoted the old default and inserted their own.
+    __table_args__ = (
+        Index(
+            "uq_one_default_checklist_per_question",
+            "question_id",
+            unique=True,
+            sqlite_where=text("is_default = 1"),
+            postgresql_where=text("is_default = true"),
+        ),
+    )
 
 
 class ChecklistItem(TimestampMixin, Base):

@@ -9,23 +9,20 @@
 
 ## Why this exists
 
-The deployed backend runs on **ephemeral SQLite**: every boot/redeploy wipes the DB and reseeds it
-with the generic, rubric-less **demo bank** (`question_seed.seed_default_bank`, 10 questions, **no
-checklists**). Since 2026-08-31 the private-blob channel that seeds the real client bank at boot is
-**live and durable** — the storage account's `publicNetworkAccess: Disabled` (MCAPS policy) is
-satisfied by a blob **private endpoint** reachable from the VNet-integrated Container Apps env, so the
-container pulls the bundle at start-up on every boot (see the header note). This runbook is the
-**recovery path** for when that boot fetch fails.
+The deployed backend keeps its data in **Azure Database for PostgreSQL** (since v0.50.0.0;
+[`database.md`](database.md)). Banks are seeded at boot **only when missing**: the private-blob
+channel imports the client rf-CSM bank and its extra banks on a fresh database, and every later boot
+leaves existing banks alone (bank ids, user assignments and interview pins all survive a restart).
 
-If boot-seeding is not applied/verified, or a boot fetch fails, two symptoms follow directly, and both
-are fixed by running the sync below:
+So this sync is no longer a "re-run after every restart" step. Use it when you deliberately want to
+**update a bank that already exists** on the server, e.g. corrected questions or a revised rubric in
+a bundle. A re-import of a same-named bank replaces its questions and rubric **in place, keeping the
+bank id**, so candidates assigned to the bank stay assigned. Note what that cannot keep: interviews
+already recorded against the old questions reference question ids that no longer exist, so re-scoring
+such an interview after a sync scores it against the new rubric.
 
-1. **Server questions differ from local.** The server shows the demo bank; local shows the real
-   default bank.
-2. **The report shows coverage 0 / no final result.** Scoring needs rubric (checklist) items to
-   score against. The demo bank has none, so every answer falls to a length **stub**
-   (`any_graded=False` → `total_score=0.0`, no grade/outcome). This is not a scoring bug — it is
-   missing rubric data.
+(Before v0.50.0.0 the server ran ephemeral SQLite, wiped and reseeded on every boot; this runbook
+was then a recovery step for a boot whose bundle fetch failed.)
 
 ## The sync channel (admin API)
 
@@ -66,13 +63,10 @@ The script logs in, uploads any referenced SOP documents the server is missing
 
 ## When to re-run
 
-With boot-time auto-seeding live (2026-08-31), the server self-seeds the real rf-CSM bank on **every**
-boot/restart/redeploy — you no longer need to re-run this sync routinely. Run it only as a **recovery
-step** when boot-seeding hasn't been applied to a given environment, or when the boot logs show a
-`client bundle fetch failed` WARNING (bundle-content or DNS issue). The server DB is **ephemeral**, so
-a sync you run by hand is itself wiped on the next restart — the durable seed comes from the boot
-channel, not this script. `question_seed.seed_default_bank` is idempotent (no-op when an enabled
-default already exists), so it never overwrites the imported bank *within a single boot*.
+The server DB is **persistent** (PostgreSQL), so a sync you run by hand stays. Boot seeding only
+creates banks that do not exist yet, so it never overwrites a bank you synced. If the boot logs show
+a `client bundle fetch failed` WARNING on a FRESH database, the client bank is simply missing: fix
+the bundle and restart, or run this sync once.
 
 There is no client content in `scripts/sync_bank_to_server.py`: bank/question/rubric text is read
 from the local DB at run time, and SOP files from the local `--sop-dir`. Nothing is hardcoded, so

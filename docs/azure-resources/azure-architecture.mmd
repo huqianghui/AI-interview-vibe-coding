@@ -3,7 +3,8 @@ graph LR
 
   subgraph RG["资源组（应用层，Bicep 一键创建）"]
     FE["Container App 前端<br/>nginx + React<br/>0.5 vCPU / 1 GiB"]
-    BE["Container App 后端<br/>FastAPI + SQLite<br/>1 vCPU / 2 GiB"]
+    BE["Container App 后端<br/>FastAPI<br/>1 vCPU / 2 GiB"]
+    PG["PostgreSQL 灵活服务器<br/>B1ms · v16<br/>私网 + 仅 Entra 登录"]
     ACR["Container Registry<br/>Basic"]
     ST["Storage Account<br/>client-bundle / materials"]
     MON["App Insights +<br/>Log Analytics"]
@@ -26,6 +27,7 @@ graph LR
   FD -->|"知识检索 / SOP 引用"| KB
   KB --> AS
   BE -->|"托管身份拉取客户题库包"| ST
+  BE -->|"托管身份 Entra token 登录（私网）"| PG
   BE -->|"日志 / 链路追踪"| MON
   GH -->|"推送镜像"| ACR
   GH -->|"更新两个 Container App"| BE

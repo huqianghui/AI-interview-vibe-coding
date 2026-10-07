@@ -124,6 +124,7 @@ answer-submission timing (auto-submit on/off + silence window) — synced to a r
 frontend  React 18 + TypeScript + Vite + Fluent UI v9 (own design language, not the
           factory theme) · TanStack Query · i18next (zh-CN / en-US)
 backend   Python 3.11 + FastAPI + SQLAlchemy 2.0 async + Alembic · JWT auth
+database  PostgreSQL 16 on Azure (private, Entra-only, managed-identity login) · SQLite for dev/tests
 azure     AI Foundry agents (Responses API) · Voice Live (avatar, via a backend WS proxy)
           · Foundry IQ / AI Search (RAG with strict citation gating) · Blob Storage
 infra     Azure Container Apps (Sweden Central) · Bicep · GitHub Actions OIDC (keyless)
@@ -155,6 +156,11 @@ model. Which models are realtime, and the measurements behind this table:
   Azure Voice Live SDK connection, so avatar ICE/SDP, transcripts, and audio relay over one socket.
 - **Config precedence** — DB-backed `ServiceConfig` (set in `/admin`, keys encrypted) > `.env` >
   code default.
+- **Persistence** — the deployment keeps everything (interviewers, assignments, every interview and
+  its report) in Azure Database for PostgreSQL, reachable only from the app's VNet, with password
+  login disabled: the backend signs in with its managed identity's Entra token. Boot migrations and
+  seeds are idempotent and never replace existing rows, so a deploy or restart changes no data.
+  Details: [`docs/database.md`](docs/database.md).
 - **Candidate privacy boundary (P3)** — the candidate API never exposes rubric/checklist content;
   enforced by tests.
 - **Scoring is concurrent and survives failure** — each question is graded against its own

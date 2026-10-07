@@ -113,6 +113,8 @@ async def draft_checklist(
     if question is None:
         raise QuestionNotFound(question_id)
 
+    # Only reads so far: end the transaction so no pooled connection waits on retrieval + the LLM.
+    await db.commit()
     # 1. Retrieve SOP context (citations carry the source quote + page for attribution).
     retrieval = get_retrieval_adapter(retrieval_provider)
     citations = await retrieval.retrieve_citations(question.text, max_citations=3)

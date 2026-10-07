@@ -47,7 +47,9 @@ commodity. Those are table stakes / on-screen support, not the headline.
 
 ## 3. Tech stack (inherited from reference, domain rewritten)
 
-**Backend:** Python 3.11+, FastAPI, SQLAlchemy 2.0 async + Alembic (SQLite dev / Postgres prod),
+**Backend:** Python 3.11+, FastAPI, SQLAlchemy 2.0 async + Alembic (SQLite for dev/tests; the
+Azure deployment runs Azure Database for PostgreSQL 16, private + Entra-only — see
+[`docs/database.md`](docs/database.md)),
 JWT auth (python-jose + passlib bcrypt), pydantic-settings.
 **Frontend:** React 18 + TypeScript, Vite 6, Fluent UI v9 (`@fluentui/react-components`,
 `@fluentui/react-icons`) — pure Fluent, no Radix, no lucide, TanStack Query v5, React Router v7,
@@ -71,8 +73,8 @@ agent registry 2025-01-01-preview; AI Search retrieve 2026-05-01-preview (PREVIE
   **Token storage:** candidate JWT → `sessionStorage` (dies with the tab); session token and the saved
   interview id → `localStorage` (so a reload can resume). Three candidate accounts `user1/user2/user3`
   are seeded on every boot with passwords DERIVED from the deployment's `SECRET_KEY`
-  (HMAC-SHA256 → `xxxx-xxxx-xxxx`): unique per deployment, identical after an ephemeral-SQLite
-  rebuild, never stored in plaintext, and viewable by the admin in `/admin` → Users. `SECRET_KEY`
+  (HMAC-SHA256 → `xxxx-xxxx-xxxx`): unique per deployment, identical after a database rebuild
+  (they derive from `SECRET_KEY`, not from stored state), never stored in plaintext, and viewable by the admin in `/admin` → Users. `SECRET_KEY`
   is therefore REQUIRED (no code default; boot refuses a missing/placeholder value). Usage rule:
   one account is used by one person at a time.
 - **Admin:** standard JWT, role `admin` (seeded from `SEED_ADMIN_PASSWORD`; self-set, never viewable).
@@ -438,7 +440,8 @@ owner's call are tracked separately (see the /autoplan approval gate, not this f
   transcript number as-is.
 - **P8. SQLite lock contention:** F5 agent-sync writes must use the prefetch-before-flush pattern
   (reference `prefetch_sync_config`). Demo day uses Postgres, or serializes writes, for concurrent
-  candidates.
+  candidates. **Resolved 2026-10-07 (v0.50.0.0):** the deployment runs PostgreSQL; the concurrency
+  audit that followed the switch is in [`docs/database.md`](docs/database.md).
 
 ### State machine framing (Eng — Med)
 - **P9. State machine transition contract** = a single `answer_finalized(text, source)` event with

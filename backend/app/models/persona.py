@@ -327,4 +327,7 @@ class InterviewerPersona(TimestampMixin, Base):
             sqlite_where=text("enabled = 1 AND is_default = 1"),
             postgresql_where=text("enabled = true AND is_default = true"),
         ),
+        # Names are unique ignoring case and surrounding spaces, in the DB (migration d8e9f0a1b2c3):
+        # the service's own check is check-then-insert, which two concurrent creates both pass.
+        Index("uq_persona_name_ci", text("lower(trim(name))"), unique=True),
     )

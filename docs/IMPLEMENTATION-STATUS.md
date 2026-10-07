@@ -67,6 +67,7 @@ Planning trail: [`planning/spec-candidate-login.md`](planning/spec-candidate-log
 | Live-Azure validation | ⏳ Pending | — | Verified on the mock stack (e2e `user-assignment-history.spec.ts`) + 2000px screenshots; not yet exercised on the Sweden Central deployment. |
 | Persistent database | ✅ Done | v0.50.0.0 | The live backend ran SQLite inside the container with no volume, so every deploy wiped all of the above. Now Azure Database for PostgreSQL (B1ms, v16), private + Entra-only (`modules/postgres.bicep`, `DATABASE_AUTH=entra`). Migration chain + E2E suite verified on PostgreSQL 16; restart on the same DB keeps all rows with no duplicate seeds. |
 | Admin "Interview results" tab | ✅ Done | v0.51.0.0 | `GET /admin/interviews` (filter: user, status[], persona, bank, started_from/to, outcome, score_min/max; sort started_at/total_score asc/desc, NULLS LAST; limit 1-100 + offset; `total`). Tab: filter grid, sortable headers, pager, row → side drawer (report + PDF + transcript + generate). Users-tab history panel + `GET /admin/users/{id}/interviews` removed. Verified on PostgreSQL 16 + 2000px screenshots. |
+| PostgreSQL concurrency hardening | ✅ Done | v0.51.0.1 | Audit of SQLite-era assumptions ([`database.md`](database.md) §6). DB-enforced: one live interview per candidate session, one default rubric per question, persona names unique (migration `d8e9f0a1b2c3`, dedupes first). External /start commits before the vendor call; LLM/vendor paths end their transaction first; pool 10+15; Alembic advisory lock. Concurrent-start tests fail on the old code, pass on the new; verified on PostgreSQL 16. |
 
 Planning trail: [`planning/spec-user-assignment-and-history.md`](planning/spec-user-assignment-and-history.md) (GitHub #187).
 
@@ -190,8 +191,9 @@ Full deploy pipeline to **Azure Container Apps** in **Sweden Central** (co-locat
 Foundry resource). Plan: [`planning/spec-azure-cicd-deploy.md`](planning/spec-azure-cicd-deploy.md);
 one-time setup + IaC: [`../infra/azure/README.md`](../infra/azure/README.md).
 
-- **Compute** — backend + frontend Container Apps, **single replica each** (`min=max=1`): ephemeral
-  SQLite is per-replica, and Voice Live WS affinity stays trivial. Frontend nginx serves the SPA and
+- **Compute** — backend + frontend Container Apps, **single replica each** (`min=max=1`): Voice Live
+  WS affinity stays trivial and the judge/scoring in-flight guards are process-local. (The original
+  reason, per-replica ephemeral SQLite, is gone since v0.50.0.0.) Frontend nginx serves the SPA and
   reverse-proxies `/api` (incl. the `/api/voice-live/ws` upgrade) to the backend same-origin (no
   CORS). Backend containerized `python:3.11-slim`, `pip install -e ".[azure]"`.
 - **Auth = managed identity, keyless** — a user-assigned MI runs both apps; `AZURE_CLIENT_ID` selects
@@ -199,7 +201,9 @@ one-time setup + IaC: [`../infra/azure/README.md`](../infra/azure/README.md).
   Storage Blob Data Reader by Bicep; **Cognitive Services User + Azure AI
   Developer on the EXISTING Foundry account** by `infra/azure/scripts/grant-foundry-rbac.sh` (cross-RG,
   out of Bicep scope). GitHub Actions deploys via **OIDC federated identity** (no stored cloud creds).
-- **Data = ephemeral SQLite, reseeded every boot** (no DB PaaS). `backend/entrypoint.sh`:
+- **Data** — *at v0.33.0.0:* ephemeral SQLite, reseeded every boot. **Since v0.50.0.0: Azure
+  Database for PostgreSQL** (private, Entra-only; [`database.md`](database.md)), and boot seeding
+  is create-only. `backend/entrypoint.sh`:
   `alembic upgrade head` → (if `CLIENT_BUNDLE_BLOB` set) fetch the private client bundle from the
   `client-bundle` blob via MI + run the importer → `exec uvicorn`, whose lifespan idempotently seeds
   the generic demo bank + admin. This **replaces the reference's separate bootstrap Job** (a Job's
@@ -228,7 +232,8 @@ one-time setup + IaC: [`../infra/azure/README.md`](../infra/azure/README.md).
 
 ### Boot-time client-bank seeding via VNet + Storage private endpoint
 
-**The durable fix** for the ephemeral-SQLite reseed problem: put the Container Apps managed
+**The durable fix** for the ephemeral-SQLite reseed problem of the time (the database itself became
+persistent in v0.50.0.0): put the Container Apps managed
 environment inside a **VNet** and give the storage account a **blob private endpoint** +
 `privatelink.blob.core.windows.net` private DNS zone, so the backend MI reaches the private
 `client-bundle` blob at boot. This **revives the existing `entrypoint.sh` fetch→import channel** with
