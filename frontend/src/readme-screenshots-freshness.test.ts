@@ -15,7 +15,8 @@
  * does make "the screen changed and the picture did not" impossible to merge silently.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -57,6 +58,27 @@ function lastCommit(path: string): number {
   }
 }
 
+/**
+ * When `image` was last verified by a recapture that produced the same bytes, or 0. The capture spec
+ * writes docs/images/captures.json (sha256 + time) for every shot; an identical recapture leaves git
+ * nothing to commit for the image itself, so without this the test could only be satisfied by
+ * altering a picture that was already correct. Only an entry whose hash matches the image on disk
+ * byte for byte counts, and never later than the ledger's own last commit.
+ */
+function verifiedAt(image: string): number {
+  const ledgerPath = "docs/images/captures.json";
+  if (!existsSync(resolve(REPO, ledgerPath))) return 0;
+  const ledger = JSON.parse(readFileSync(resolve(REPO, ledgerPath), "utf8")) as Record<
+    string,
+    { sha256: string; capturedAt: string }
+  >;
+  const entry = ledger[image];
+  if (!entry) return 0;
+  const sha = createHash("sha256").update(readFileSync(resolve(REPO, `docs/images/${image}`))).digest("hex");
+  if (sha !== entry.sha256) return 0;
+  return Math.min(lastCommit(ledgerPath), Math.floor(Date.parse(entry.capturedAt) / 1000));
+}
+
 describe("README screenshot freshness", () => {
   const shared = DEPICTS["*"];
 
@@ -69,7 +91,7 @@ describe("README screenshot freshness", () => {
         true,
       );
 
-      const shotAt = lastCommit(imagePath);
+      const shotAt = Math.max(lastCommit(imagePath), verifiedAt(image));
       expect(shotAt, `${imagePath} has no commit history`).toBeGreaterThan(0);
 
       for (const src of [...sources, ...shared]) {
@@ -97,5 +119,19 @@ describe("README screenshot freshness", () => {
     const EXEMPT = new Set(["09-live-avatar-voice.png", "07-admin-rubric-editor.png", "08-admin-agent-editor.png"]);
     const unmapped = [...new Set(referenced)].filter((f) => !mapped.has(f) && !EXEMPT.has(f));
     expect(unmapped, `add these to DEPICTS or EXEMPT: ${unmapped.join(", ")}`).toEqual([]);
+  });
+});
+
+describe("the capture ledger", () => {
+  it("records the bytes of the image it vouches for, so it cannot vouch for a different picture", () => {
+    const ledgerPath = resolve(REPO, "docs/images/captures.json");
+    if (!existsSync(ledgerPath)) return; // no ledger yet: every image relies on its own commit
+    const ledger = JSON.parse(readFileSync(ledgerPath, "utf8")) as Record<string, { sha256: string }>;
+    for (const [image, entry] of Object.entries(ledger)) {
+      const bytes = readFileSync(resolve(REPO, `docs/images/${image}`));
+      expect(createHash("sha256").update(bytes).digest("hex"), `${image} changed after capture`).toBe(
+        entry.sha256,
+      );
+    }
   });
 });
