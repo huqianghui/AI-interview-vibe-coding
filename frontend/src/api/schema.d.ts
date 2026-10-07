@@ -280,6 +280,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/interviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Results
+         * @description Every candidate's interviews for the admin results table: filtered, sorted, one page.
+         *
+         *     ``status`` may repeat (``?status=scored&status=completed``). 422 on an unknown status or
+         *     outcome, a reversed date or score range, or a bad sort/order/page parameter.
+         */
+        get: operations["list_results_admin_interviews_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/interviews/{interview_id}": {
         parameters: {
             query?: never;
@@ -746,26 +769,6 @@ export interface paths {
          *     persona/bank (a disabled one would silently fall back to the default at start).
          */
         patch: operations["set_assignment_admin_users__user_id__assignment_patch"];
-        trace?: never;
-    };
-    "/admin/users/{user_id}/interviews": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * User Interviews
-         * @description Every interview this user has started, newest first, every status (#187).
-         */
-        get: operations["user_interviews_admin_users__user_id__interviews_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/auth/login": {
@@ -1610,6 +1613,49 @@ export interface components {
             voice_judge_silence_seconds?: number | null;
             /** Voice Linear Turns */
             voice_linear_turns?: boolean | null;
+        };
+        /**
+         * InterviewResultItem
+         * @description One row of the admin "Interview results" table: a history row plus who and what it was.
+         */
+        InterviewResultItem: {
+            /** Bank Id */
+            bank_id: string | null;
+            /** Bank Name */
+            bank_name: string | null;
+            /** Completed At */
+            completed_at: string | null;
+            /** Has Report */
+            has_report: boolean;
+            /** Id */
+            id: string;
+            /** Outcome */
+            outcome: string | null;
+            /** Persona Id */
+            persona_id: string | null;
+            /** Persona Name */
+            persona_name: string | null;
+            /** Started At */
+            started_at: string | null;
+            /** Status */
+            status: string;
+            /** Total Score */
+            total_score: number | null;
+            /** User Id */
+            user_id: string | null;
+            /** Username */
+            username: string | null;
+        };
+        /** InterviewResultsPage */
+        InterviewResultsPage: {
+            /** Items */
+            items: components["schemas"]["InterviewResultItem"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
         };
         /** JudgeApplyIn */
         JudgeApplyIn: {
@@ -2559,6 +2605,49 @@ export interface operations {
             };
         };
     };
+    list_results_admin_interviews_get: {
+        parameters: {
+            query?: {
+                user_id?: string | null;
+                status?: string[] | null;
+                persona_id?: string | null;
+                bank_id?: string | null;
+                started_from?: string | null;
+                started_to?: string | null;
+                outcome?: string | null;
+                score_min?: number | null;
+                score_max?: number | null;
+                sort?: string;
+                order?: string;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InterviewResultsPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     interview_detail_admin_interviews__interview_id__get: {
         parameters: {
             query?: never;
@@ -3473,37 +3562,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminUserResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    user_interviews_admin_users__user_id__interviews_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                user_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InterviewHistoryItem"][];
                 };
             };
             /** @description Validation Error */

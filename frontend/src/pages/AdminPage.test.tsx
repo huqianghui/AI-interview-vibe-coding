@@ -9,7 +9,7 @@ import { AdminPage } from "./AdminPage";
 import * as admin from "../api/admin";
 import * as auth from "../api/auth";
 import * as personas from "../api/personas";
-import { SCORING_POLL } from "./admin/useUsersTab";
+import { SCORING_POLL } from "./admin/useInterviewsTab";
 
 // AdminPage now uses react-router `Link` (top-bar nav to /admin/agent), so it must render inside a
 // router. A stub route for /admin/agent lets the nav test assert navigation lands there.
@@ -813,7 +813,7 @@ describe("AdminPage", () => {
   });
 
   // #187: each user's interviewer + bank assignment, and their interview history.
-  describe("Users tab assignment + history (#187)", () => {
+  describe("Users tab assignment (#187)", () => {
     const CANDIDATE: admin.AdminUser = {
       id: "u1",
       username: "user1",
@@ -823,17 +823,6 @@ describe("AdminPage", () => {
       password_stale: false,
       assigned_persona_id: null,
       assigned_bank_id: null,
-    };
-    const HISTORY_ITEM = {
-      id: "i1",
-      status: "completed" as const,
-      started_at: "2026-10-07T09:00:00",
-      completed_at: "2026-10-07T09:20:00",
-      persona_name: "Ava",
-      bank_name: "Safety bank",
-      total_score: null,
-      outcome: null,
-      has_report: false,
     };
 
     async function openUsersTab(
@@ -873,9 +862,9 @@ describe("AdminPage", () => {
       await user.selectOptions(bankSelect, "b2");
       expect(save).toHaveBeenCalledWith("u1", { persona_id: null, bank_id: "b2" });
       expect(await screen.findByTestId("user-assign-saved-user1")).toBeInTheDocument();
-      // Admin accounts are not interviewed: no assignment, no history.
+      // Admin accounts are not interviewed: no assignment. Interview results have their own tab.
       expect(screen.queryByTestId("user-assign-bank-test-admin")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("user-interviews-test-admin")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("user-interviews-user1")).not.toBeInTheDocument();
     });
 
     it("shows a failed save next to the row", async () => {
@@ -884,50 +873,6 @@ describe("AdminPage", () => {
       await openUsersTab(user);
       await user.selectOptions(await screen.findByTestId("user-assign-persona-user1"), "p2");
       expect(await screen.findByText(/Unknown or disabled question bank/)).toHaveAttribute("role", "alert");
-    });
-
-    it("expands a user's interviews, opens one, and generates its missing report", async () => {
-      SCORING_POLL.ms = 0;
-      const user = userEvent.setup();
-      const list = vi.spyOn(admin, "listUserInterviews").mockResolvedValue([HISTORY_ITEM]);
-      const unscored = { item: HISTORY_ITEM, report: null, transcript: [] };
-      const scored = {
-        item: { ...HISTORY_ITEM, status: "scored" as const, has_report: true, total_score: 40 },
-        report: { interview_session_id: "i1", status: "scored", coverage_pct: 40, per_question: [], is_stub: true },
-        transcript: [],
-      };
-      vi.spyOn(admin, "getInterview")
-        .mockResolvedValueOnce(unscored) // opening it
-        .mockResolvedValueOnce({ ...unscored, scoring: true }) // first poll: still scoring
-        .mockResolvedValue(scored); // then saved
-      const generate = vi.spyOn(admin, "generateInterviewReport").mockResolvedValue({ status: "scoring" });
-      await openUsersTab(user);
-
-      await user.click(screen.getByTestId("user-interviews-user1"));
-      expect(list).toHaveBeenCalledWith("u1");
-      await user.click(await screen.findByTestId("history-open-i1"));
-      await user.click(await screen.findByTestId("history-generate-report"));
-      expect(generate).toHaveBeenCalledWith("i1");
-      await waitFor(() => expect(screen.queryByTestId("history-no-report")).not.toBeInTheDocument());
-      expect(list).toHaveBeenCalledTimes(2); // the list refreshes to show the new score
-
-      await user.click(screen.getByTestId("history-close"));
-      expect(await screen.findByTestId("user-history-table-user1")).toBeInTheDocument();
-      await user.click(screen.getByTestId("user-interviews-user1"));
-      expect(screen.queryByTestId("user-history-user1")).not.toBeInTheDocument();
-    });
-
-    it("says so when background scoring ends without a report", async () => {
-      SCORING_POLL.ms = 0;
-      const user = userEvent.setup();
-      vi.spyOn(admin, "listUserInterviews").mockResolvedValue([HISTORY_ITEM]);
-      vi.spyOn(admin, "getInterview").mockResolvedValue({ item: HISTORY_ITEM, report: null, transcript: [] });
-      vi.spyOn(admin, "generateInterviewReport").mockResolvedValue({ status: "scoring" });
-      await openUsersTab(user);
-      await user.click(screen.getByTestId("user-interviews-user1"));
-      await user.click(await screen.findByTestId("history-open-i1"));
-      await user.click(await screen.findByTestId("history-generate-report"));
-      expect(await screen.findByText(/scoring failed/)).toHaveAttribute("role", "alert");
     });
 
     it("a second quick change on one row keeps the first", async () => {
@@ -946,30 +891,180 @@ describe("AdminPage", () => {
       release();
     });
 
-    it("drops a late history response for a user the admin already left", async () => {
-      const user = userEvent.setup();
-      let answerFirst: (v: (typeof HISTORY_ITEM)[]) => void = () => {};
-      vi.spyOn(admin, "listUserInterviews").mockImplementation((userId) =>
-        userId === "u1"
-          ? new Promise((resolve) => {
-              answerFirst = resolve;
-            })
-          : Promise.resolve([]),
-      );
-      await openUsersTab(user, [{ ...CANDIDATE, id: "u2", username: "user2" }]);
-      await user.click(await screen.findByTestId("user-interviews-user1"));
-      await user.click(await screen.findByTestId("user-interviews-user2"));
-      answerFirst([HISTORY_ITEM]); // user1's list arrives after the admin moved on
-      expect(await screen.findByTestId("user-history-table-user2-empty")).toBeInTheDocument();
-      expect(screen.queryByTestId("history-row-i1")).not.toBeInTheDocument();
+  });
+
+  describe("Interview results tab", () => {
+    const ROW = {
+      id: "i1",
+      status: "completed" as const,
+      started_at: "2026-10-07T09:00:00",
+      completed_at: "2026-10-07T09:20:00",
+      persona_name: "Ava",
+      bank_name: "Safety bank",
+      total_score: null,
+      outcome: null,
+      has_report: false,
+      user_id: "u1",
+      username: "user1",
+      persona_id: "p2",
+      bank_id: "b2",
+    };
+    const page = (items: (typeof ROW)[], total = items.length) => ({
+      items,
+      total,
+      limit: 20,
+      offset: 0,
     });
 
-    it("says when a user's interviews cannot be loaded", async () => {
+    async function openResultsTab(user: ReturnType<typeof userEvent.setup>) {
+      mockAdminLogin();
+      vi.spyOn(admin, "listBanks").mockResolvedValue([
+        { bank_id: "b2", name: "Safety bank", description: "", language: "en-US", enabled: true, is_default: false },
+      ]);
+      vi.spyOn(personas, "listPersonas").mockResolvedValue([
+        { id: "p2", name: "Ava", enabled: true, is_default: false },
+      ] as unknown as Awaited<ReturnType<typeof personas.listPersonas>>);
+      vi.spyOn(admin, "listUsers").mockResolvedValue([
+        {
+          id: "u1",
+          username: "user1",
+          role: "user",
+          is_active: true,
+          generated_password: null,
+          password_stale: false,
+          assigned_persona_id: null,
+          assigned_bank_id: null,
+        },
+      ]);
+      vi.spyOn(admin, "getAiFoundryConfig").mockResolvedValue(EMPTY_CFG);
+      renderPage();
+      await signIn(user);
+      await user.click(await screen.findByTestId("admin-tab-results"));
+    }
+
+    it("lists every interview newest first and filters, going back to page 1", async () => {
       const user = userEvent.setup();
-      vi.spyOn(admin, "listUserInterviews").mockRejectedValue(new Error("nope"));
-      await openUsersTab(user);
-      await user.click(screen.getByTestId("user-interviews-user1"));
-      expect(await screen.findByText(/nope/)).toHaveAttribute("role", "alert");
+      const list = vi
+        .spyOn(admin, "listInterviewResults")
+        .mockResolvedValue(page([ROW], 45));
+      await openResultsTab(user);
+
+      expect(await screen.findByTestId("results-row-i1")).toHaveTextContent("user1");
+      expect(list).toHaveBeenLastCalledWith({ sort: "started_at", order: "desc", limit: 20, offset: 0 });
+      expect(screen.getByTestId("results-pager")).toHaveTextContent("1–20 of 45");
+
+      await user.click(screen.getByTestId("results-next"));
+      await waitFor(() => expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 20 })));
+      await user.selectOptions(await screen.findByTestId("results-filter-user"), "u1");
+      await waitFor(() =>
+        expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ user_id: "u1", offset: 0 })),
+      );
+      await user.click(screen.getByTestId("results-filter-status-scored"));
+      await waitFor(() =>
+        expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ status: ["scored"] })),
+      );
+      await user.click(screen.getByTestId("results-clear"));
+      await waitFor(() =>
+        expect(list).toHaveBeenLastCalledWith({ sort: "started_at", order: "desc", limit: 20, offset: 0 }),
+      );
+    });
+
+    it("applies a score bound only when the field is left, and sorts by a header", async () => {
+      const user = userEvent.setup();
+      const list = vi.spyOn(admin, "listInterviewResults").mockResolvedValue(page([ROW]));
+      await openResultsTab(user);
+      await screen.findByTestId("results-row-i1");
+
+      const min = screen.getByTestId("results-filter-score-min");
+      await user.type(min, "75");
+      expect(list).not.toHaveBeenCalledWith(expect.objectContaining({ score_min: 7 }));
+      await user.tab();
+      await waitFor(() =>
+        expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ score_min: 75 })),
+      );
+
+      await user.click(screen.getByTestId("results-sort-total_score"));
+      await waitFor(() =>
+        expect(list).toHaveBeenLastCalledWith(
+          expect.objectContaining({ sort: "total_score", order: "desc" }),
+        ),
+      );
+      await user.click(screen.getByTestId("results-sort-total_score"));
+      await waitFor(() =>
+        expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ order: "asc" })),
+      );
+    });
+
+    it("says when no interview matches", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(admin, "listInterviewResults").mockResolvedValue(page([]));
+      await openResultsTab(user);
+      await user.selectOptions(await screen.findByTestId("results-filter-outcome"), "Does Not Meet");
+      expect(await screen.findByTestId("results-empty")).toHaveTextContent(
+        "No interviews match these filters.",
+      );
+    });
+
+    it("drops a slow response for an older query", async () => {
+      const user = userEvent.setup();
+      let answerFirst: (v: ReturnType<typeof page>) => void = () => {};
+      vi.spyOn(admin, "listInterviewResults")
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              answerFirst = resolve;
+            }),
+        )
+        .mockResolvedValue(page([]));
+      await openResultsTab(user);
+      await user.selectOptions(await screen.findByTestId("results-filter-outcome"), "Does Not Meet");
+      answerFirst(page([ROW])); // the first (unfiltered) answer arrives after the filter was set
+      expect(await screen.findByTestId("results-empty")).toBeInTheDocument();
+      expect(screen.queryByTestId("results-row-i1")).not.toBeInTheDocument();
+    });
+
+    it("opens a row in the drawer and generates its missing report", async () => {
+      SCORING_POLL.ms = 0;
+      const user = userEvent.setup();
+      const list = vi.spyOn(admin, "listInterviewResults").mockResolvedValue(page([ROW]));
+      const unscored = { item: ROW, report: null, transcript: [] };
+      vi.spyOn(admin, "getInterview")
+        .mockResolvedValueOnce(unscored)
+        .mockResolvedValueOnce({ ...unscored, scoring: true })
+        .mockResolvedValue({
+          item: { ...ROW, status: "scored" as const, has_report: true, total_score: 40 },
+          report: { interview_session_id: "i1", status: "scored", coverage_pct: 40, per_question: [], is_stub: true },
+          transcript: [],
+        });
+      const generate = vi.spyOn(admin, "generateInterviewReport").mockResolvedValue({ status: "scoring" });
+      await openResultsTab(user);
+
+      await user.click(await screen.findByTestId("results-row-i1"));
+      await user.click(await screen.findByTestId("history-generate-report"));
+      expect(generate).toHaveBeenCalledWith("i1");
+      await waitFor(() => expect(screen.queryByTestId("history-no-report")).not.toBeInTheDocument());
+      expect(list).toHaveBeenCalledTimes(2); // the table refreshes to show the new score
+      await user.click(screen.getByTestId("history-close"));
+      await waitFor(() => expect(screen.queryByTestId("history-detail")).not.toBeInTheDocument());
+    });
+
+    it("says so when background scoring ends without a report", async () => {
+      SCORING_POLL.ms = 0;
+      const user = userEvent.setup();
+      vi.spyOn(admin, "listInterviewResults").mockResolvedValue(page([ROW]));
+      vi.spyOn(admin, "getInterview").mockResolvedValue({ item: ROW, report: null, transcript: [] });
+      vi.spyOn(admin, "generateInterviewReport").mockResolvedValue({ status: "scoring" });
+      await openResultsTab(user);
+      await user.click(await screen.findByTestId("results-row-i1"));
+      await user.click(await screen.findByTestId("history-generate-report"));
+      expect(await screen.findByText(/scoring failed/)).toHaveAttribute("role", "alert");
+    });
+
+    it("says when the list cannot be loaded", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(admin, "listInterviewResults").mockRejectedValue(new Error("nope"));
+      await openResultsTab(user);
+      expect(await screen.findByTestId("results-error")).toHaveTextContent("nope");
     });
   });
 });

@@ -78,4 +78,6 @@ export type ApiContract = [
   Holds<Refines<Client.InterviewHistoryItem, Schemas["InterviewHistoryItem"]>>,
   Holds<Refines<Client.TranscriptTurn, Schemas["TranscriptTurn"]>>,
   Holds<Refines<Admin.Assignment, Schemas["AssignmentIn"]>>,
+  Holds<Refines<Admin.InterviewResultItem, Schemas["InterviewResultItem"]>>,
+  Holds<Refines<Admin.InterviewResultsPage, Schemas["InterviewResultsPage"]>>,
 ];

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.51.0.0 (2026-10-07)
+
+### Added
+- **An "Interview results" tab in the admin page.** Every candidate's interviews in one table:
+  candidate, start and finish time, interviewer, question bank, status, score and outcome.
+  - Filter by any of them: candidate, interviewer, question bank, status (several at once),
+    outcome, a start-date range and a score range. Filters combine.
+  - Sort by start time or score (click the column header; unscored interviews stay last).
+  - Pages of 20, 50 or 100, with the total count.
+  - Click a row to open the interview in a side panel: the full report with its PDF download, the
+    transcript and its download, and "Generate report" for a finished interview that was never
+    scored. The table keeps its filters and page behind the panel.
+
+### Changed
+- The Users tab now only manages accounts and each candidate's interviewer and bank; interview
+  records moved to the new tab.
+
 ## 0.50.0.1 (2026-10-07)
 
 ### Fixed

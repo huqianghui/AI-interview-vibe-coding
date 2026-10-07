@@ -25,10 +25,14 @@ import { LoginCard } from "../components/LoginCard";
 import { useAdminStyles } from "./admin/shared";
 import { ConnectionTab } from "./admin/ConnectionTab";
 import { ContentTab } from "./admin/ContentTab";
+import { InterviewsTab } from "./admin/InterviewsTab";
 import { UsersTab } from "./admin/UsersTab";
 import { useConnectionTab } from "./admin/useConnectionTab";
+import { useInterviewsTab } from "./admin/useInterviewsTab";
 import { useContentTab } from "./admin/useContentTab";
 import { useUsersTab } from "./admin/useUsersTab";
+
+type AdminTab = "content" | "connection" | "users" | "results";
 
 export function AdminPage() {
   const styles = useAdminStyles();
@@ -43,7 +47,7 @@ export function AdminPage() {
   // InterviewPage's), so the login flow tracks it separately just for the card's disabled state.
   const [loginBusy, setLoginBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"content" | "connection" | "users">("content");
+  const [tab, setTab] = useState<AdminTab>("content");
 
   const guard = useCallback(async (fn: () => Promise<void>) => {
     setError(null);
@@ -57,6 +61,7 @@ export function AdminPage() {
   const content = useContentTab(guard);
   const connection = useConnectionTab(guard);
   const users = useUsersTab(authed && tab === "users");
+  const results = useInterviewsTab(authed && tab === "results");
   const { refreshBanks } = content;
   const { refreshConfig, refreshExternalConfig } = connection;
 
@@ -134,7 +139,7 @@ export function AdminPage() {
 
         <TabList
           selectedValue={tab}
-          onTabSelect={(_, d) => setTab(d.value as "content" | "connection" | "users")}
+          onTabSelect={(_, d) => setTab(d.value as AdminTab)}
         >
           <Tab value="content" data-testid="admin-tab-content">
             {t("admin.tabContent")}
@@ -145,11 +150,15 @@ export function AdminPage() {
           <Tab value="users" data-testid="admin-tab-users">
             {t("admin.users.tab")}
           </Tab>
+          <Tab value="results" data-testid="admin-tab-results">
+            {t("admin.results.tab")}
+          </Tab>
         </TabList>
 
         {tab === "content" && <ContentTab state={content} guard={guard} />}
         {tab === "connection" && <ConnectionTab state={connection} guard={guard} />}
         {tab === "users" && <UsersTab state={users} />}
+        {tab === "results" && <InterviewsTab state={results} />}
 
         {error && (
           <Body1 role="alert" className={styles.errorText}>

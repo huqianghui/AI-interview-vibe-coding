@@ -1,5 +1,5 @@
-/** The admin page's Users tab: hand out a seeded seat's username/password (#102), assign each
- * user an interviewer and a question bank, and read each user's interview history (#187). */
+/** The admin page's Users tab: hand out a seeded seat's username/password (#102) and assign each
+ * user an interviewer and a question bank (#187). Interview results live in their own tab. */
 import { Fragment } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -16,26 +16,13 @@ import {
   TableRow,
   Text,
   Title3,
-  makeStyles,
   tokens,
 } from "@fluentui/react-components";
-import { fetchInterviewSopDocument, type AdminUser } from "../../api/admin";
-import { InterviewDetailView, InterviewHistoryTable } from "../../components/InterviewHistory";
+import type { AdminUser } from "../../api/admin";
 import { useAdminStyles } from "./shared";
 import type { UsersTabState } from "./useUsersTab";
 
-// A user-role row has 7 cells; the expanded history spans all of them.
-const COLUMNS = 7;
 
-const useStyles = makeStyles({
-  // The expanded history holds a whole report. A table row's hover/press tint would paint all of
-  // it lavender whenever the pointer is over it (seen at 2000px, 2026-10-07), so this row has none.
-  historyRow: {
-    backgroundColor: "transparent",
-    ":hover": { backgroundColor: "transparent" },
-    ":active": { backgroundColor: "transparent" },
-  },
-});
 
 function PasswordCell({ u, state }: { u: AdminUser; state: UsersTabState }) {
   const { t } = useTranslation();
@@ -129,41 +116,8 @@ function AssignmentCells({ u, state }: { u: AdminUser; state: UsersTabState }) {
   );
 }
 
-function HistoryPanel({ u, state }: { u: AdminUser; state: UsersTabState }) {
-  const { t } = useTranslation();
-  return (
-    <div style={{ padding: "8px 0 16px" }} data-testid={`user-history-${u.username}`}>
-      <Title3 as="h3" style={{ display: "block", marginBottom: 8 }}>
-        {t("admin.users.historyFor", { username: u.username })}
-      </Title3>
-      {state.historyError && (
-        <Body1 role="alert" style={{ color: tokens.colorPaletteRedForeground1 }}>
-          {t("history.loadError", { message: state.historyError })}
-        </Body1>
-      )}
-      {state.detail ? (
-        <InterviewDetailView
-          detail={state.detail}
-          openSop={fetchInterviewSopDocument}
-          onClose={state.closeInterview}
-          onGenerateReport={state.generateReport}
-        />
-      ) : state.history === null ? (
-        !state.historyError && <Text>{t("history.loading")}</Text>
-      ) : (
-        <InterviewHistoryTable
-          items={state.history}
-          onOpen={(id) => void state.openInterview(id)}
-          testId={`user-history-table-${u.username}`}
-        />
-      )}
-    </div>
-  );
-}
-
 export function UsersTab({ state }: { state: UsersTabState }) {
   const styles = useAdminStyles();
-  const local = useStyles();
   const { t } = useTranslation();
   const { users, usersLoading, usersError } = state;
 
@@ -188,13 +142,11 @@ export function UsersTab({ state }: { state: UsersTabState }) {
                 <TableHeaderCell>{t("admin.users.colPassword")}</TableHeaderCell>
                 <TableHeaderCell>{t("admin.users.colInterviewer")}</TableHeaderCell>
                 <TableHeaderCell>{t("admin.users.colBank")}</TableHeaderCell>
-                <TableHeaderCell>{t("admin.users.colInterviews")}</TableHeaderCell>
               </TableRow>
             </TableHeader>
             <TableBody>
               {users.map((u) => {
                 const candidate = u.role === "user";
-                const expanded = state.historyUserId === u.id;
                 return (
                   <Fragment key={u.id}>
                     <TableRow data-testid={`user-row-${u.username}`}>
@@ -207,36 +159,14 @@ export function UsersTab({ state }: { state: UsersTabState }) {
                         <PasswordCell u={u} state={state} />
                       </TableCell>
                       {candidate ? (
-                        <>
-                          <AssignmentCells u={u} state={state} />
-                          <TableCell>
-                            <Button
-                              size="small"
-                              appearance={expanded ? "primary" : "secondary"}
-                              data-testid={`user-interviews-${u.username}`}
-                              onClick={() => state.toggleHistory(u.id)}
-                            >
-                              {expanded
-                                ? t("admin.users.hideInterviews")
-                                : t("admin.users.showInterviews")}
-                            </Button>
-                          </TableCell>
-                        </>
+                        <AssignmentCells u={u} state={state} />
                       ) : (
                         <>
-                          <TableCell />
                           <TableCell />
                           <TableCell />
                         </>
                       )}
                     </TableRow>
-                    {expanded && (
-                      <TableRow className={local.historyRow}>
-                        <TableCell colSpan={COLUMNS}>
-                          <HistoryPanel u={u} state={state} />
-                        </TableCell>
-                      </TableRow>
-                    )}
                   </Fragment>
                 );
               })}
