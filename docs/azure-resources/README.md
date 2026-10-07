@@ -32,16 +32,17 @@
 | 7 | Application Insights | 基于 Log Analytics | 链路追踪/告警（含 Failure Anomalies 智能告警） | 计入 6 |
 | 8 | User-assigned Managed Identity ×2 | — | 后端免密访问 Foundry/Storage；GitHub OIDC 免密部署 | 免费 |
 | 9 | 角色分配（RBAC） | AcrPull、Storage Blob Data Reader、Contributor、AcrPush | 免密（keyless）运行与部署 | 免费 |
+| 10 | Azure Database for PostgreSQL 灵活服务器 | **Burstable B1ms**、PostgreSQL 16、32 GiB 存储、备份 7 天 | 持久化数据库：面试官、题库、分配、全部面试记录与报告，发布/重启不丢；仅 VNet 内私网访问、只允许 Entra 登录（后端托管身份） | 计算 ~$14.5 + 存储 ~$4.4（32 GB × $0.1369）≈ **$19** |
+| 11 | VNet + 私有终结点 + 私有 DNS | ACA 环境子网、PE 子网、PostgreSQL 委派子网；blob 与 PostgreSQL 私有 DNS 区域；NAT 网关固定出站 IP | Storage 与数据库只走私网（满足订阅策略对公网访问的限制） | ~$10/终结点 + NAT 网关 |
 
-*应用层合计约 **$85–100/月**（单副本常驻、演示负载）。
+*应用层合计约 **$105–120/月**（单副本常驻、演示负载，含 PostgreSQL 约 $19；NAT 网关与私有终结点按用量另计）。
 
 **刻意不部署的组件**（演示环境的成本取舍，生产化建议见第五节）：
 
-- **数据库 PaaS**：应用运行在副本本地的**临时 SQLite** 上，每次启动重建并自动播种。
 - **独立密钥服务**：4 个运行时密钥用 Container App 原生 secrets（平台静态加密），无需额外密钥服务。
   注：部分受管订阅（如 MCAPS）的 Azure Policy 会强制关闭 Storage 的公网访问，
   无 VNet 的 Container App 无法访问 —— 申请订阅时需确认策略约束。
-- **VNet / Private Endpoint**：全公网 ingress。
+- **多副本**：前后端各单副本。后端的「判断 / 评分进行中」防重是进程内的，要多副本需先改成数据库锁（见 `docs/database.md` 第六节）。
 
 ## 三、AI 能力资源（核心成本项，可复用已有资源）
 
@@ -85,9 +86,9 @@ Avatar 视频是其中最大的可变项，纯语音（orb 模式）可显著降
 
 | 升级项 | 推荐规格 | 月成本量级* | 解决的问题 |
 |--------|---------|------------|-----------|
-| Azure Database for PostgreSQL Flexible Server | B2s 起步（2 vCPU/4 GiB）+ 备份 | ~$60+ | 替换临时 SQLite，数据持久化、可多副本 |
-| Container Apps 多副本 + 弹性伸缩 | min 2 / max 5，需先完成 DB 外置 | 按副本线性 | 高可用；注意 Voice Live WS 需要会话亲和 |
-| VNet + Private Endpoint（Storage/DB/Search） | — | ~$10/端点 + 流量 | 满足企业安全基线；解锁受策略限制订阅的私有 blob 通道 |
+| PostgreSQL 升配 | B1ms → B2s（2 vCPU/4 GiB）或 General Purpose；按需开启区域冗余高可用 | B2s ~$60+ | 并发面试量上来后的连接数与性能余量（B1ms 约 40 个可用连接）；高可用 |
+| Container Apps 多副本 + 弹性伸缩 | min 2 / max 5（数据库已外置，但需先把进程内防重改为数据库锁） | 按副本线性 | 高可用；注意 Voice Live WS 需要会话亲和 |
+| AI Search 私有终结点 | — | ~$10/端点 + 流量 | 满足企业安全基线（Storage 与数据库已走私网） |
 | ACR Standard | — | ~$20 | 更大镜像配额 + geo 复制选项 |
 | 区域冗余 / 多区域 | 按 SLA 要求评估 | — | 容灾 |
 | Azure Front Door / 自定义域名 + WAF | Standard 档 | ~$35+ | 对客域名、防护、就近接入 |
@@ -96,8 +97,8 @@ Avatar 视频是其中最大的可变项，纯语音（orb 模式）可显著降
 
 | 场景 | 月成本量级* |
 |------|------------|
-| PoC / 演示（本仓库当前配置 + Search Basic） | **~$160–200 + AI 用量（$100–300）** |
-| 生产基线（+Postgres、双副本、VNet、Front Door） | **~$450–600 + AI 用量（随并发增长）** |
+| PoC / 演示（本仓库当前配置，含 PostgreSQL B1ms + Search Basic） | **~$180–220 + AI 用量（$100–300）** |
+| 生产基线（PostgreSQL 升配、双副本、Front Door） | **~$450–600 + AI 用量（随并发增长）** |
 
 *均为 pay-as-you-go 挂牌价量级（美元），未含协议折扣；AI 用量与面试场次、时长、是否启用 Avatar 视频强相关。
 

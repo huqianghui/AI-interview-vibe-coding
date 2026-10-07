@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.51.0.1 (2026-10-07)
+
+### Fixed
+- **A double-clicked or reloaded "Start interview" no longer starts two interviews.** With an
+  external interviewer it also opened two conversations with the external service. A candidate now
+  has at most one interview in progress, and the second request continues the first one.
+- **Slow AI calls no longer tie up the database.** Scoring, the pause judge, rubric drafting and
+  the external interviewer used to hold a database connection open while waiting on the model, so
+  a busy moment could stall every page, sign-in included. They now give the connection back first.
+- **Two interviewers can no longer end up with the same name**, and a question can no longer end up
+  with two default rubrics, even when two admins act at the same moment.
+- **A new version starting while the old one is still running no longer races on the database
+  upgrade.**
+
+### For contributors
+- Migration `d8e9f0a1b2c3` adds `uq_one_live_interview_per_candidate`,
+  `uq_one_default_checklist_per_question` and `uq_persona_name_ci`, resolving existing duplicates
+  first. Alembic takes a PostgreSQL advisory lock. The PostgreSQL pool is sized explicitly
+  (10 + 15). The audit behind all of this, and what was checked and found safe, is in
+  `docs/database.md`.
+- Architecture docs now describe the PostgreSQL deployment: README, SPEC, `docs/database.md` (new),
+  `docs/azure-resources/` (resource list, costs, diagram), `docs/RUNBOOK-bank-sync.md`.
+
 ## 0.51.0.0 (2026-10-07)
 
 ### Added
