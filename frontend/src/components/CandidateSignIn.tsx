@@ -70,10 +70,14 @@ const useStyles = makeStyles({
   headline: {
     fontFamily: fonts.display,
     fontWeight: 800,
-    // The hero. clamp() so it stays the hero on a laptop and still fits a phone. Up to 1440px this
-    // is exactly the approved clamp(32px, 4.4vw, 62px); past 1440px the 62px ceiling itself grows
-    // (to 84px at 2000px) so the hero does not shrink into a wide monitor.
-    fontSize: "clamp(32px, 4.4vw, clamp(62px, calc(62px + (100vw - 1440px) * 0.0393), 84px))",
+    // The hero. clamp() so it stays the hero on a laptop and still fits a phone. Up to 1440px wide
+    // OR 900px tall this is exactly the approved clamp(32px, 4.4vw, 62px). Past both, the 62px
+    // ceiling grows (to 84px) with whichever allows less: width (0.0393px per px past 1440) or
+    // height (0.1px per px past 900). Growing with width alone overflowed a short wide screen
+    // (1920x800: 140px of scroll, the portrait below the fold); together with the portrait below
+    // (0.4px per px of height) the column grows 0.71px per px of height, so it always fits.
+    fontSize:
+      "clamp(32px, 4.4vw, clamp(62px, min(calc(62px + (100vw - 1440px) * 0.0393), calc(62px + (100vh - 900px) * 0.1)), 84px))",
     lineHeight: 1.04,
     letterSpacing: "-0.032em",
     color: palette.ink,
@@ -116,8 +120,9 @@ const useStyles = makeStyles({
     marginRight: 0,
     marginTop: "auto",
     marginBottom: tokens.spacingVerticalXXL,
-    // 310px on a laptop (as approved), growing with the viewport to 420px on a wide monitor.
-    width: "min(54%, clamp(310px, 21vw, 420px))",
+    // 310px on a laptop (as approved), growing to 420px on a monitor that is both wide (21vw) and
+    // tall (0.4px per px past 900px of height); see the headline for why height bounds it too.
+    width: "min(54%, clamp(310px, min(21vw, calc(310px + (100vh - 900px) * 0.4)), 420px))",
     backgroundColor: tokens.colorNeutralBackground1,
     borderRadius: tokens.borderRadiusXLarge,
     boxShadow: tokens.shadow4,

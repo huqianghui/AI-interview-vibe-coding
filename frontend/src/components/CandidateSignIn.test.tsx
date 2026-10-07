@@ -49,6 +49,14 @@ describe("CandidateSignIn composition", () => {
     );
   });
 
+  it("grows the portrait only on a screen that is both wide and tall", () => {
+    // Growing with width alone overflowed a short wide screen (1920x800: 140px of scroll, the
+    // portrait below the fold, measured in a browser). Height bounds the growth too.
+    renderSignIn();
+    const width = getComputedStyle(screen.getByTestId("candidate-signin-split").querySelector("figure")!).width;
+    for (const term of ["310px", "21vw", "100vh - 900px", "420px"]) expect(width).toContain(term);
+  });
+
   it("sets the tagline as a DISPLAY headline, not a caption", () => {
     // It shipped as a 12px grey line in the header band. The approved direction promotes it to the
     // page's visual hero, so the assertion is on the rendered size, not just the text.
@@ -60,7 +68,7 @@ describe("CandidateSignIn composition", () => {
     // assert its terms rather than its spelling (a real browser at 1440px renders it pixel-identical
     // to the approved screenshot, checked when this was written).
     const size = getComputedStyle(headline).fontSize;
-    for (const term of ["32px", "4.4vw", "62px", "84px", "1440px"]) expect(size).toContain(term);
+    for (const term of ["32px", "4.4vw", "62px", "84px", "1440px", "900px"]) expect(size).toContain(term);
     // All three clauses of the tagline are present and in order.
     expect(headline).toHaveTextContent(/SOP-traceable,\s*digital-human\s*interviewing/);
   });
