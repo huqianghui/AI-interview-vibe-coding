@@ -145,7 +145,7 @@ async def test_voice_auto_submit_pairs_round_trip_and_validate(client):
     for field in ("bank_auto_submit_silence_seconds", "external_auto_submit_silence_seconds"):
         for ok in (1, 60):
             created = await client.post(
-                "/admin/personas", headers=AUTH, json={"name": "S2", field: ok}
+                "/admin/personas", headers=AUTH, json={"name": f"S2 {field} {ok}", field: ok}
             )
             assert created.status_code == 201, created.text
             assert created.json()[field] == ok
@@ -528,3 +528,47 @@ async def test_voice_knobs_are_bounded_to_the_voice_live_range(client):
         )
     ).json()
     assert ok["voice_temperature"] == 1.0 and ok["playback_speed"] == 1.5
+
+
+async def test_a_second_persona_with_the_same_name_is_refused(client):
+    """A double-clicked Save once created two identical personas (live, 2026-10-07): the second
+    create of a name that already exists is a 409, whatever its case or surrounding spaces."""
+    first = await client.post("/admin/personas", headers=AUTH, json={"name": "interview02"})
+    assert first.status_code == 201
+    for dup in ("interview02", "  Interview02 "):
+        again = await client.post("/admin/personas", headers=AUTH, json={"name": dup})
+        assert again.status_code == 409, again.text
+        assert "already exists" in again.json()["detail"]
+    listed = (await client.get("/admin/personas", headers=AUTH)).json()
+    assert [p["name"] for p in listed].count("interview02") == 1
+
+
+async def test_renaming_onto_another_personas_name_is_refused(client):
+    a = (await client.post("/admin/personas", headers=AUTH, json={"name": "Ava"})).json()
+    b = (await client.post("/admin/personas", headers=AUTH, json={"name": "Ben"})).json()
+    clash = await client.put(f"/admin/personas/{b['id']}", headers=AUTH, json={"name": "ava"})
+    assert clash.status_code == 409
+    # Saving a persona under its own name (every ordinary Save) is fine.
+    same = await client.put(f"/admin/personas/{a['id']}", headers=AUTH, json={"name": "Ava"})
+    assert same.status_code == 200
+
+
+async def test_an_existing_same_named_pair_stays_editable(client, db_session):
+    """The live duplicate predates the guard: saving either twin (the editor always sends the
+    name) must still work, so the admin can edit or rename one of them out of the clash."""
+    from app.models.persona import InterviewerPersona
+
+    twins = [InterviewerPersona(name="interview02") for _ in range(2)]
+    db_session.add_all(twins)
+    await db_session.commit()
+    for twin in twins:
+        saved = await client.put(
+            f"/admin/personas/{twin.id}",
+            headers=AUTH,
+            json={"name": "interview02", "enabled": True},
+        )
+        assert saved.status_code == 200, saved.text
+    renamed = await client.put(
+        f"/admin/personas/{twins[1].id}", headers=AUTH, json={"name": "interview02 (copy)"}
+    )
+    assert renamed.status_code == 200

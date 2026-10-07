@@ -897,13 +897,16 @@ async def _judged_setup(
     client, db_session, *, max_follow_ups=1, judged=True, max_calls=2, with_rubric=True
 ):
     """Default JUDGED persona + a default bank whose Q1 owes one follow-up and has a required item."""  # noqa: E501
+    import uuid
+
     from app.services import checklist_service
     from app.services import persona_service as psvc
     from app.services import question_service as qsvc
 
+    # A unique name: some tests call this twice, and two personas cannot share one.
     await psvc.create_persona(
         db_session,
-        name="Interviewer",
+        name=f"Interviewer {uuid.uuid4().hex[:6]}",
         is_default=True,
         bank_turn_mode="judged" if judged else "linear",
         judge_max_calls_per_question=max_calls,

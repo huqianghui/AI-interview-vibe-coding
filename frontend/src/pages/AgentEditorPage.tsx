@@ -19,6 +19,7 @@ import {
 } from "@fluentui/react-components";
 import * as auth from "../api/auth";
 import * as personas from "../api/personas";
+import { HttpError } from "../api/http";
 import { AppShell } from "../components/AppShell";
 import { AgentEditorLayout } from "../components/agent-editor/AgentEditorLayout";
 import { PersonaSwitcher } from "../components/agent-editor/PersonaSwitcher";
@@ -72,6 +73,11 @@ export function AgentEditorPage() {
   // loads with the persona and is included in the Save payload, so a refresh restores it.
   const [status, setStatus] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
+  // A save also creates/updates the Foundry agent, so it takes seconds. While it runs, Save is
+  // disabled and a second call is dropped: a double-clicked Save on a NEW persona used to create
+  // two identical personas (seen live, 2026-10-07). The ref closes the gap before the re-render.
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const formInitialized = useRef(false);
   // Tracks the persona currently open so a slow background reconcile can't apply to a persona the
   // user has since switched away from.
@@ -87,7 +93,10 @@ export function AgentEditorPage() {
     try {
       await fn();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      // A 409 is a sentence for the admin ("An interviewer named 'X' already exists"), so it is
+      // shown alone; other failures keep the status line, which is what diagnoses them.
+      if (e instanceof HttpError && e.status === 409) setError(e.detail);
+      else setError(e instanceof Error ? e.message : String(e));
     }
   }, []);
 
@@ -186,19 +195,28 @@ export function AgentEditorPage() {
         : { character: "", style: "" },
     );
 
-  const save = () =>
-    guard(async () => {
-      setStatus(null);
-      const payload = formToPayload(form);
-      const saved = isNew
-        ? await personas.createPersona(payload)
-        : await personas.updatePersona(selectedId!, payload);
-      setStatus("Saved.");
-      setCurrent(saved);
-      setSelectedId(saved.id);
-      setForm(personaToForm(saved));
-      await refreshList();
+  const save = () => {
+    if (savingRef.current) return Promise.resolve();
+    savingRef.current = true;
+    setSaving(true);
+    return guard(async () => {
+      try {
+        setStatus(null);
+        const payload = formToPayload(form);
+        const saved = isNew
+          ? await personas.createPersona(payload)
+          : await personas.updatePersona(selectedId!, payload);
+        setStatus("Saved.");
+        setCurrent(saved);
+        setSelectedId(saved.id);
+        setForm(personaToForm(saved));
+        await refreshList();
+      } finally {
+        savingRef.current = false;
+        setSaving(false);
+      }
     });
+  };
 
   const reset = () => {
     if (current) setForm(personaToForm(current));
@@ -282,11 +300,23 @@ export function AgentEditorPage() {
         !nothingSelected && (
           <>
             {status && <Body1 data-testid="editor-status">{status}</Body1>}
+            {/* Before this, a failed save (or any editor call) set `error` but only the login
+                screen rendered it, so Save failed silently. */}
+            {error && (
+              <Body1 role="alert" className={styles.loginError} data-testid="editor-error">
+                {error}
+              </Body1>
+            )}
             <Button appearance="secondary" onClick={reset} data-testid="persona-reset">
               Reset
             </Button>
-            <Button appearance="primary" onClick={save} data-testid="persona-save">
-              Save
+            <Button
+              appearance="primary"
+              onClick={() => void save()}
+              disabled={saving}
+              data-testid="persona-save"
+            >
+              {saving ? "Saving…" : "Save"}
             </Button>
           </>
         )

@@ -6,6 +6,7 @@ import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import "../i18n"; // AgentEditorPage uses useTranslation — ensure the i18n singleton is initialized
 import { AgentEditorPage } from "./AgentEditorPage";
 import * as personas from "../api/personas";
+import { HttpError } from "../api/http";
 import * as admin from "../api/admin";
 import * as auth from "../api/auth";
 import * as personaKnowledge from "../api/personaKnowledge";
@@ -364,6 +365,55 @@ describe("AgentEditorPage", () => {
 
     await waitFor(() => expect(create).toHaveBeenCalled());
     expect(create.mock.calls[0][0].name).toBe("Fresh");
+  });
+
+  it("a duplicate name shows the server's sentence, not the raw response", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    mockDiscovery();
+    mockKnowledge();
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([]);
+    const detail = "An interviewer named 'interview02' already exists";
+    vi.spyOn(personas, "createPersona").mockRejectedValue(
+      new HttpError(409, "Conflict", JSON.stringify({ detail }), detail),
+    );
+    renderPage();
+    await signIn(user);
+    await user.click(await screen.findByTestId("persona-new"));
+    await user.type(screen.getByTestId("persona-name"), "interview02");
+    await user.click(screen.getByTestId("persona-save"));
+    expect(await screen.findByText(detail)).toBeInTheDocument();
+    expect(screen.queryByText(/409 Conflict/)).not.toBeInTheDocument();
+  });
+
+  it("a double-clicked Save on a new persona creates it once", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    mockDiscovery();
+    mockKnowledge();
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([]);
+    let finish: () => void = () => {};
+    const create = vi.spyOn(personas, "createPersona").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve(PERSONA);
+        }),
+    );
+
+    renderPage();
+    await signIn(user);
+    await user.click(await screen.findByTestId("persona-new"));
+    await user.type(screen.getByTestId("persona-name"), "Fresh");
+    const saveButton = screen.getByTestId("persona-save");
+    await user.dblClick(saveButton);
+
+    // The create (with its Foundry agent) is still running: Save is disabled, one request only.
+    await waitFor(() => expect(saveButton).toBeDisabled());
+    expect(saveButton).toHaveTextContent("Saving…");
+    expect(create).toHaveBeenCalledTimes(1);
+    finish();
+    await waitFor(() => expect(screen.getByTestId("persona-save")).not.toBeDisabled());
+    expect(create).toHaveBeenCalledTimes(1);
   });
 
   it("shows a persona's attached knowledge bases and removes one", async () => {
