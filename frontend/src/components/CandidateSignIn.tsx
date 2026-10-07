@@ -43,7 +43,12 @@ const useStyles = makeStyles({
     // `box-sizing`, so without it `minHeight` is the CONTENT height and the 64px of vertical
     // padding is added on top — the column overran the viewport by exactly that, clipping the
     // portrait's bottom edge by 1px and giving the page a 49px scroll it should not have.
-    minHeight: "calc(100vh - 64px)",
+    //
+    // Capped, not just the viewport: the portrait sits at the BOTTOM of the editorial column
+    // (marginTop: auto), so on a tall monitor an uncapped column pushed it 700px below the
+    // headline it belongs to (owner, 2026-10-07, measured at 2000x1470). The cap is above a 900px
+    // laptop's own height, so that composition, the approved one, is unchanged.
+    minHeight: "min(calc(100vh - 64px), 980px)",
     boxSizing: "border-box",
     [`@media (max-width: ${layout.stackBelow})`]: {
       gridTemplateColumns: "1fr",
@@ -65,8 +70,10 @@ const useStyles = makeStyles({
   headline: {
     fontFamily: fonts.display,
     fontWeight: 800,
-    // The hero. clamp() so it stays the hero on a laptop and still fits a phone.
-    fontSize: "clamp(32px, 4.4vw, 62px)",
+    // The hero. clamp() so it stays the hero on a laptop and still fits a phone. Up to 1440px this
+    // is exactly the approved clamp(32px, 4.4vw, 62px); past 1440px the 62px ceiling itself grows
+    // (to 84px at 2000px) so the hero does not shrink into a wide monitor.
+    fontSize: "clamp(32px, 4.4vw, clamp(62px, calc(62px + (100vw - 1440px) * 0.0393), 84px))",
     lineHeight: 1.04,
     letterSpacing: "-0.032em",
     color: palette.ink,
@@ -109,7 +116,8 @@ const useStyles = makeStyles({
     marginRight: 0,
     marginTop: "auto",
     marginBottom: tokens.spacingVerticalXXL,
-    width: "min(54%, 310px)",
+    // 310px on a laptop (as approved), growing with the viewport to 420px on a wide monitor.
+    width: "min(54%, clamp(310px, 21vw, 420px))",
     backgroundColor: tokens.colorNeutralBackground1,
     borderRadius: tokens.borderRadiusXLarge,
     boxShadow: tokens.shadow4,
@@ -188,7 +196,9 @@ const useStyles = makeStyles({
     paddingTop: "clamp(24px, 9vh, 104px)",
     [`@media (max-width: ${layout.stackBelow})`]: { paddingTop: tokens.spacingVerticalXXL },
   },
-  panel: { width: "100%", maxWidth: layout.narrowWidth },
+  // The form card grows a little with a wide monitor too (440px up to 540px), so it is not a
+  // postage stamp beside an 84px headline.
+  panel: { width: "100%", maxWidth: `clamp(${layout.narrowWidth}, 27vw, 540px)` },
 });
 
 export type CandidateSignInProps = Pick<

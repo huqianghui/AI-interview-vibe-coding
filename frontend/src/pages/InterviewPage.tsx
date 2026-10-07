@@ -953,7 +953,8 @@ export function InterviewPage() {
   // All non-live phases: the shared reading measure (orientation / review / scoring / report).
   return (
     <>
-      <AppShell measure="reading" actions={candidateActions}>
+      {/* The report uses the wide measure (it is cards, not prose); the other phases read. */}
+      <AppShell measure={phase === "scored" ? "wide" : "reading"} actions={candidateActions}>
         <div className={styles.page}>
         {/* Phase 2: an external turn that stalled before any question is on screen (e.g. a `start`
             that never posed one) — offer 恢复 rather than the dead-end "no questions" card. */}

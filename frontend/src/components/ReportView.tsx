@@ -71,7 +71,9 @@ const useStyles = makeStyles({
     padding: tokens.spacingVerticalXXL,
   },
   execRow: { display: "flex", gap: tokens.spacingHorizontalXXXL, alignItems: "center", flexWrap: "wrap" },
-  narrative: { flex: "1 1 260px", minWidth: 0 },
+  // Capped at a reading measure: the report moved to the wide layout, and an uncapped narrative ran
+  // ~1350px per line on a 2000px screen. The gauge and the cards still use the width.
+  narrative: { flex: "1 1 260px", minWidth: 0, maxWidth: "88ch" },
   outcomeDisplay: {
     fontFamily: fonts.display,
     fontWeight: 800,
@@ -113,12 +115,21 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
   },
   /** The cards inside one question's panel. */
+  /**
+   * The scored items, as many columns as fit at 620px each: two on a laptop's wide measure, still
+   * two (wider) on a big monitor, one when the screen is narrower than two. A single column on a
+   * wide screen read as one long strip (owner, 2026-10-07); three would squeeze each card's own
+   * SOP | answer pair below a readable width.
+   */
   itemList: {
-    display: "flex",
-    flexDirection: "column",
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 620px), 1fr))",
+    alignItems: "start",
     gap: tokens.spacingVerticalL,
     paddingBlock: tokens.spacingVerticalM,
   },
+  /** A question-level note (not scored, no rubric) spans the whole row rather than one card's cell. */
+  itemListNote: { gridColumn: "1 / -1" },
   itemCard: {
     backgroundColor: tokens.colorNeutralBackground1,
     borderRadius: tokens.borderRadiusXLarge,
@@ -580,12 +591,17 @@ export function ReportView({ report }: { report: Report }) {
                       note is styled as a neutral disclosure, not a warning: grading failing is the
                       system's problem, never the candidate's. */}
                   {q.scoring_failed && (
-                    <div className={styles.disclosure} data-testid="question-not-scored">
+                    <div
+                      className={mergeClasses(styles.disclosure, styles.itemListNote)}
+                      data-testid="question-not-scored"
+                    >
                       {t("report.notScoredNote")}
                     </div>
                   )}
                   {q.is_stub && !q.scoring_failed && (
-                    <div className={styles.disclosure}>{t("stubNote")}</div>
+                    <div className={mergeClasses(styles.disclosure, styles.itemListNote)}>
+                      {t("stubNote")}
+                    </div>
                   )}
                   {(q.items ?? []).map((it, ii) => (
                     <ScoredItemCard

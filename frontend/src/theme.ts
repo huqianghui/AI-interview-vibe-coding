@@ -188,12 +188,18 @@ export const appTheme: Theme = {
  * 38% of a wide screen. ONE width, one gutter, applied by AppShell.
  */
 export const layout = {
-  /** Max content width for the two-column screens (live interview, admin). */
-  contentWidth: "1320px",
   /**
-   * Prose measure: orientation, review, scoring, report. The old app's 760px was not wrong as a
-   * measure — ~75 characters is right for reading. The defect was that it was ONE of three widths
-   * nested inside each other so nothing shared a left edge. Here it is a named, deliberate choice.
+   * Max content width for the wide screens (live interview, report, admin). It GROWS with the
+   * viewport instead of stopping at 1320px: on a 2000px monitor a fixed 1320px left 340px of empty
+   * margin on each side (owner, 2026-10-07: "没有充分使用屏幕面积"). 88vw keeps the margin
+   * proportional; 1320px is the floor, so a 1440px laptop (and every README screenshot) renders
+   * exactly as before, and 1840px is the ceiling, so an ultrawide does not stretch lines past use.
+   */
+  contentWidth: "clamp(1320px, 88vw, 1840px)",
+  /**
+   * Prose measure: orientation, review, scoring. ~75 characters is right for reading prose, so this
+   * one stays fixed. The report moved off it to the wide measure: it is cards, not prose, and in a
+   * 760px column it read as one long strip on a wide screen.
    */
   readingWidth: "760px",
   /** Form measure: the sign-in card. */
