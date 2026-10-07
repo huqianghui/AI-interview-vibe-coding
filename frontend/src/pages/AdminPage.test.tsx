@@ -9,6 +9,7 @@ import { AdminPage } from "./AdminPage";
 import * as admin from "../api/admin";
 import * as auth from "../api/auth";
 import * as personas from "../api/personas";
+import { SCORING_POLL } from "./admin/useUsersTab";
 
 // AdminPage now uses react-router `Link` (top-bar nav to /admin/agent), so it must render inside a
 // router. A stub route for /admin/agent lets the nav test assert navigation lands there.
@@ -719,6 +720,8 @@ describe("AdminPage", () => {
           is_active: true,
           generated_password: "abc12345",
           password_stale: false,
+          assigned_persona_id: null,
+          assigned_bank_id: null,
         },
         {
           id: "u2",
@@ -727,6 +730,8 @@ describe("AdminPage", () => {
           is_active: false,
           generated_password: null,
           password_stale: true,
+          assigned_persona_id: null,
+          assigned_bank_id: null,
         },
         {
           id: "u3",
@@ -735,6 +740,8 @@ describe("AdminPage", () => {
           is_active: true,
           generated_password: null,
           password_stale: false,
+          assigned_persona_id: null,
+          assigned_bank_id: null,
         },
       ]);
 
@@ -762,6 +769,8 @@ describe("AdminPage", () => {
           is_active: true,
           generated_password: "abc12345",
           password_stale: false,
+          assigned_persona_id: null,
+          assigned_bank_id: null,
         },
       ]);
       const writeText = vi.fn().mockResolvedValue(undefined);
@@ -800,6 +809,167 @@ describe("AdminPage", () => {
 
       await waitFor(() => expect(screen.getByTestId("users-error")).toHaveTextContent(/500 Internal Server Error: boom/));
       expect(screen.queryByTestId("users-table")).not.toBeInTheDocument();
+    });
+  });
+
+  // #187: each user's interviewer + bank assignment, and their interview history.
+  describe("Users tab assignment + history (#187)", () => {
+    const CANDIDATE: admin.AdminUser = {
+      id: "u1",
+      username: "user1",
+      role: "user",
+      is_active: true,
+      generated_password: null,
+      password_stale: false,
+      assigned_persona_id: null,
+      assigned_bank_id: null,
+    };
+    const HISTORY_ITEM = {
+      id: "i1",
+      status: "completed" as const,
+      started_at: "2026-10-07T09:00:00",
+      completed_at: "2026-10-07T09:20:00",
+      persona_name: "Ava",
+      bank_name: "Safety bank",
+      total_score: null,
+      outcome: null,
+      has_report: false,
+    };
+
+    async function openUsersTab(
+      user: ReturnType<typeof userEvent.setup>,
+      extraUsers: admin.AdminUser[] = [],
+    ) {
+      mockAdminLogin();
+      vi.spyOn(admin, "listBanks").mockResolvedValue([
+        { bank_id: "b1", name: "Default bank", description: "", language: "en-US", enabled: true, is_default: true },
+        { bank_id: "b2", name: "Safety bank", description: "", language: "en-US", enabled: true, is_default: false },
+      ]);
+      vi.spyOn(personas, "listPersonas").mockResolvedValue([
+        { id: "p1", name: "Default persona", enabled: true, is_default: true },
+        { id: "p2", name: "Ava", enabled: true, is_default: false },
+      ] as unknown as Awaited<ReturnType<typeof personas.listPersonas>>);
+      vi.spyOn(admin, "getAiFoundryConfig").mockResolvedValue(EMPTY_CFG);
+      vi.spyOn(admin, "listUsers").mockResolvedValue([
+        CANDIDATE,
+        ...extraUsers,
+        { ...CANDIDATE, id: "a1", username: "test-admin", role: "admin" },
+      ]);
+      renderPage();
+      await signIn(user);
+      await user.click(await screen.findByTestId("admin-tab-users"));
+      await screen.findByTestId("user-row-user1");
+    }
+
+    it("offers the default plus every enabled persona and bank, and saves a choice", async () => {
+      const user = userEvent.setup();
+      const save = vi
+        .spyOn(admin, "setUserAssignment")
+        .mockResolvedValue({ ...CANDIDATE, assigned_bank_id: "b2" });
+      await openUsersTab(user);
+
+      const bankSelect = await screen.findByTestId("user-assign-bank-user1");
+      await waitFor(() => expect(bankSelect).toHaveTextContent("Default (Default bank)"));
+      await user.selectOptions(bankSelect, "b2");
+      expect(save).toHaveBeenCalledWith("u1", { persona_id: null, bank_id: "b2" });
+      expect(await screen.findByTestId("user-assign-saved-user1")).toBeInTheDocument();
+      // Admin accounts are not interviewed: no assignment, no history.
+      expect(screen.queryByTestId("user-assign-bank-test-admin")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("user-interviews-test-admin")).not.toBeInTheDocument();
+    });
+
+    it("shows a failed save next to the row", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(admin, "setUserAssignment").mockRejectedValue(new Error("Unknown or disabled question bank"));
+      await openUsersTab(user);
+      await user.selectOptions(await screen.findByTestId("user-assign-persona-user1"), "p2");
+      expect(await screen.findByText(/Unknown or disabled question bank/)).toHaveAttribute("role", "alert");
+    });
+
+    it("expands a user's interviews, opens one, and generates its missing report", async () => {
+      SCORING_POLL.ms = 0;
+      const user = userEvent.setup();
+      const list = vi.spyOn(admin, "listUserInterviews").mockResolvedValue([HISTORY_ITEM]);
+      const unscored = { item: HISTORY_ITEM, report: null, transcript: [] };
+      const scored = {
+        item: { ...HISTORY_ITEM, status: "scored" as const, has_report: true, total_score: 40 },
+        report: { interview_session_id: "i1", status: "scored", coverage_pct: 40, per_question: [], is_stub: true },
+        transcript: [],
+      };
+      vi.spyOn(admin, "getInterview")
+        .mockResolvedValueOnce(unscored) // opening it
+        .mockResolvedValueOnce({ ...unscored, scoring: true }) // first poll: still scoring
+        .mockResolvedValue(scored); // then saved
+      const generate = vi.spyOn(admin, "generateInterviewReport").mockResolvedValue({ status: "scoring" });
+      await openUsersTab(user);
+
+      await user.click(screen.getByTestId("user-interviews-user1"));
+      expect(list).toHaveBeenCalledWith("u1");
+      await user.click(await screen.findByTestId("history-open-i1"));
+      await user.click(await screen.findByTestId("history-generate-report"));
+      expect(generate).toHaveBeenCalledWith("i1");
+      await waitFor(() => expect(screen.queryByTestId("history-no-report")).not.toBeInTheDocument());
+      expect(list).toHaveBeenCalledTimes(2); // the list refreshes to show the new score
+
+      await user.click(screen.getByTestId("history-close"));
+      expect(await screen.findByTestId("user-history-table-user1")).toBeInTheDocument();
+      await user.click(screen.getByTestId("user-interviews-user1"));
+      expect(screen.queryByTestId("user-history-user1")).not.toBeInTheDocument();
+    });
+
+    it("says so when background scoring ends without a report", async () => {
+      SCORING_POLL.ms = 0;
+      const user = userEvent.setup();
+      vi.spyOn(admin, "listUserInterviews").mockResolvedValue([HISTORY_ITEM]);
+      vi.spyOn(admin, "getInterview").mockResolvedValue({ item: HISTORY_ITEM, report: null, transcript: [] });
+      vi.spyOn(admin, "generateInterviewReport").mockResolvedValue({ status: "scoring" });
+      await openUsersTab(user);
+      await user.click(screen.getByTestId("user-interviews-user1"));
+      await user.click(await screen.findByTestId("history-open-i1"));
+      await user.click(await screen.findByTestId("history-generate-report"));
+      expect(await screen.findByText(/scoring failed/)).toHaveAttribute("role", "alert");
+    });
+
+    it("a second quick change on one row keeps the first", async () => {
+      const user = userEvent.setup();
+      let release: () => void = () => {};
+      const save = vi.spyOn(admin, "setUserAssignment").mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            release = () => resolve(CANDIDATE);
+          }),
+      );
+      await openUsersTab(user);
+      await user.selectOptions(await screen.findByTestId("user-assign-persona-user1"), "p2");
+      await user.selectOptions(screen.getByTestId("user-assign-bank-user1"), "b2"); // first still in flight
+      expect(save).toHaveBeenLastCalledWith("u1", { persona_id: "p2", bank_id: "b2" });
+      release();
+    });
+
+    it("drops a late history response for a user the admin already left", async () => {
+      const user = userEvent.setup();
+      let answerFirst: (v: (typeof HISTORY_ITEM)[]) => void = () => {};
+      vi.spyOn(admin, "listUserInterviews").mockImplementation((userId) =>
+        userId === "u1"
+          ? new Promise((resolve) => {
+              answerFirst = resolve;
+            })
+          : Promise.resolve([]),
+      );
+      await openUsersTab(user, [{ ...CANDIDATE, id: "u2", username: "user2" }]);
+      await user.click(await screen.findByTestId("user-interviews-user1"));
+      await user.click(await screen.findByTestId("user-interviews-user2"));
+      answerFirst([HISTORY_ITEM]); // user1's list arrives after the admin moved on
+      expect(await screen.findByTestId("user-history-table-user2-empty")).toBeInTheDocument();
+      expect(screen.queryByTestId("history-row-i1")).not.toBeInTheDocument();
+    });
+
+    it("says when a user's interviews cannot be loaded", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(admin, "listUserInterviews").mockRejectedValue(new Error("nope"));
+      await openUsersTab(user);
+      await user.click(screen.getByTestId("user-interviews-user1"));
+      expect(await screen.findByText(/nope/)).toHaveAttribute("role", "alert");
     });
   });
 });

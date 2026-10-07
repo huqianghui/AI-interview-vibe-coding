@@ -25,7 +25,7 @@ from app.interview.state_machine import ANSWER_SOURCES, InterviewStateError
 from app.models.anonymous_session import AnonymousCandidateSession
 from app.models.interview import InterviewSession
 from app.models.judge_event import JUDGE_TRIGGERS
-from app.services import persona_service, sop_document_service
+from app.services import assignment_service, persona_service, sop_document_service
 from app.services.agents.voice_live_metadata import has_configured_voice
 
 logger = logging.getLogger(__name__)
@@ -241,7 +241,7 @@ async def _persona_voice_flags(db: AsyncSession, session: InterviewSession) -> d
     always ``True`` for external sessions (no brain of their own); for bank sessions the persona's
     admin-set ``bank_turn_mode`` (default linear). With no persona the engine alone decides.
     """
-    persona = await persona_service.get_default_persona(db)
+    persona = await persona_service.get_session_persona(db, session)
     judged = session.turn_mode == "judged"
     if persona is None:
         return {
@@ -319,21 +319,28 @@ async def start(
     # different brain after an interview started must not re-interpret that live session (that's why
     # brain_mode is a per-session snapshot). Only a fresh start reads the default persona's engine.
     existing = await state_machine.find_resumable_interview(db, candidate.id)
-    session = existing if existing is not None else await _start_fresh(db, candidate.id)
+    session = existing if existing is not None else await _start_fresh(db, candidate)
     question = await _current_question(db, session)
     return _to_interview_out(session, question, **(await _persona_voice_flags(db, session)))
 
 
-async def _start_fresh(db: AsyncSession, candidate_session_id: str) -> InterviewSession:
-    """Create a brand-new interview on the default persona's CURRENT engine (never resumes)."""
-    persona = await persona_service.get_default_persona(db)
+async def _start_fresh(db: AsyncSession, candidate: AnonymousCandidateSession) -> InterviewSession:
+    """Create a brand-new interview (never resumes) on the candidate's interviewer and bank.
+
+    #187: the user's assignment, else the default, resolved once and pinned onto the session with
+    the persona's CURRENT engine and turn contract (review D6): a later edit of the persona, the
+    default, or the assignment never re-interprets this interview.
+    """
+    assigned = await assignment_service.resolve_for_candidate(db, candidate)
+    persona = assigned.persona
+    persona_id = persona.id if persona else None
     brain = persona.interview_brain if persona else "bank"
     if brain == "external":
-        return await external_runner.start_interview(db, candidate_session_id)
-    # Snapshot the persona's turn contract onto the session (review D6): a later persona edit never
-    # re-interprets this interview.
+        return await external_runner.start_interview(db, candidate.id, persona_id=persona_id)
     turn_mode = persona.bank_turn_mode if persona else "linear"
-    return await state_machine.start_interview(db, candidate_session_id, turn_mode=turn_mode)
+    return await state_machine.start_interview(
+        db, candidate.id, turn_mode=turn_mode, persona_id=persona_id, bank_id=assigned.bank_id
+    )
 
 
 @router.post("/{interview_id}/restart", response_model=InterviewOut)
@@ -371,7 +378,7 @@ async def restart(
         await state_machine.abandon_interview(db, session)
     except state_machine.InterviewStateError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    fresh = await _start_fresh(db, candidate.id)
+    fresh = await _start_fresh(db, candidate)
     question = await _current_question(db, fresh)
     return _to_interview_out(fresh, question, **(await _persona_voice_flags(db, fresh)))
 
@@ -698,6 +705,17 @@ async def sop_document(
       id is indistinguishable from a missing one.
     """
     session = await _owned_interview(db, interview_id, candidate)
+    return await serve_cited_document(db, session, document_id)
+
+
+async def serve_cited_document(
+    db: AsyncSession, session: InterviewSession, document_id: str
+) -> Response:
+    """The bytes of one SOP document cited by ``session``'s report, or a 404.
+
+    Shared by the candidate's live report, their history (#187), and the admin's read of any
+    interview; each caller has already checked who may read ``session``.
+    """
     # Same 404 whether uncited, unknown, bytes gone or not-owned: don't reveal which SOP documents
     # exist.
     found = await sop_document_service.load_cited_document(db, session, document_id)

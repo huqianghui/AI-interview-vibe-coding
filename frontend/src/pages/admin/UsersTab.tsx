@@ -1,10 +1,13 @@
-/** The admin page's Users tab (#102, read-only): hand out a seeded seat's username/password. */
+/** The admin page's Users tab: hand out a seeded seat's username/password (#102), assign each
+ * user an interviewer and a question bank, and read each user's interview history (#187). */
+import { Fragment } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Body1,
   Button,
   Card,
   CardHeader,
+  Select,
   Table,
   TableBody,
   TableCell,
@@ -13,83 +16,234 @@ import {
   TableRow,
   Text,
   Title3,
+  makeStyles,
+  tokens,
 } from "@fluentui/react-components";
+import { fetchInterviewSopDocument, type AdminUser } from "../../api/admin";
+import { InterviewDetailView, InterviewHistoryTable } from "../../components/InterviewHistory";
 import { useAdminStyles } from "./shared";
 import type { UsersTabState } from "./useUsersTab";
 
-export function UsersTab({ state }: { state: UsersTabState }) {
-  const styles = useAdminStyles();
-  const { t } = useTranslation();
-  const {
-    users,
-    usersLoading,
-    usersError,
-    copiedUserId,
-    copyPassword,
-  } = state;
+// A user-role row has 7 cells; the expanded history spans all of them.
+const COLUMNS = 7;
 
+const useStyles = makeStyles({
+  // The expanded history holds a whole report. A table row's hover/press tint would paint all of
+  // it lavender whenever the pointer is over it (seen at 2000px, 2026-10-07), so this row has none.
+  historyRow: {
+    backgroundColor: "transparent",
+    ":hover": { backgroundColor: "transparent" },
+    ":active": { backgroundColor: "transparent" },
+  },
+});
+
+function PasswordCell({ u, state }: { u: AdminUser; state: UsersTabState }) {
+  const { t } = useTranslation();
+  if (u.password_stale) {
+    return (
+      <Text data-testid={`user-password-stale-${u.username}`}>{t("admin.users.passwordStale")}</Text>
+    );
+  }
+  if (u.generated_password) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <Text style={{ fontFamily: "monospace" }} data-testid={`user-password-${u.username}`}>
+          {u.generated_password}
+        </Text>
+        <Button
+          size="small"
+          data-testid={`user-copy-${u.username}`}
+          onClick={() => state.copyPassword(u.id, u.generated_password as string)}
+        >
+          {state.copiedUserId === u.id ? t("admin.users.copied") : t("admin.users.copy")}
+        </Button>
+      </div>
+    );
+  }
   return (
-  <Card className={styles.card} data-testid="users-tab">
-    <CardHeader header={<Title3>{t("admin.users.tab")}</Title3>} />
-    <div style={{ padding: "0 16px 16px" }}>
-      <Body1 style={{ display: "block", marginBottom: 12 }}>{t("admin.users.hint")}</Body1>
-      {usersLoading && <Text data-testid="users-loading">{t("admin.users.loading")}</Text>}
-      {usersError && (
-        <Body1 role="alert" className={styles.errorText} data-testid="users-error">
-          {t("admin.users.loadError", { message: usersError })}
+    <Text data-testid={`user-password-not-viewable-${u.username}`}>{t("admin.users.notViewable")}</Text>
+  );
+}
+
+function AssignmentCells({ u, state }: { u: AdminUser; state: UsersTabState }) {
+  const { t } = useTranslation();
+  const defaultPersona = state.personas.find((p) => p.is_default && p.enabled);
+  const defaultBank = state.banks.find((b) => b.is_default && b.enabled);
+  const status = state.assignStatus[u.id];
+  // A disabled target stays listed only while it is the one assigned, so the select can show it.
+  const personas = state.personas.filter((p) => p.enabled || p.id === u.assigned_persona_id);
+  const banks = state.banks.filter((b) => b.enabled || b.bank_id === u.assigned_bank_id);
+  return (
+    <>
+      <TableCell>
+        <Select
+          size="small"
+          aria-label={t("admin.users.colInterviewer")}
+          data-testid={`user-assign-persona-${u.username}`}
+          value={u.assigned_persona_id ?? ""}
+          onChange={(_, d) => void state.assign(u, { persona_id: d.value || null })}
+        >
+          <option value="">
+            {t("admin.users.useDefault", { name: defaultPersona?.name ?? t("admin.users.noDefault") })}
+          </option>
+          {personas.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </Select>
+      </TableCell>
+      <TableCell>
+        <Select
+          size="small"
+          aria-label={t("admin.users.colBank")}
+          data-testid={`user-assign-bank-${u.username}`}
+          value={u.assigned_bank_id ?? ""}
+          onChange={(_, d) => void state.assign(u, { bank_id: d.value || null })}
+        >
+          <option value="">
+            {t("admin.users.useDefault", { name: defaultBank?.name ?? t("admin.users.noDefault") })}
+          </option>
+          {banks.map((b) => (
+            <option key={b.bank_id} value={b.bank_id}>
+              {b.name}
+            </option>
+          ))}
+        </Select>
+        {status?.kind === "saved" && (
+          <Text size={200} style={{ marginLeft: 6 }} data-testid={`user-assign-saved-${u.username}`}>
+            {t("admin.users.assignSaved")}
+          </Text>
+        )}
+        {status?.kind === "error" && (
+          <Text
+            size={200}
+            role="alert"
+            style={{ marginLeft: 6, color: tokens.colorPaletteRedForeground1 }}
+          >
+            {t("admin.users.assignError", { message: status.message })}
+          </Text>
+        )}
+      </TableCell>
+    </>
+  );
+}
+
+function HistoryPanel({ u, state }: { u: AdminUser; state: UsersTabState }) {
+  const { t } = useTranslation();
+  return (
+    <div style={{ padding: "8px 0 16px" }} data-testid={`user-history-${u.username}`}>
+      <Title3 as="h3" style={{ display: "block", marginBottom: 8 }}>
+        {t("admin.users.historyFor", { username: u.username })}
+      </Title3>
+      {state.historyError && (
+        <Body1 role="alert" style={{ color: tokens.colorPaletteRedForeground1 }}>
+          {t("history.loadError", { message: state.historyError })}
         </Body1>
       )}
-      {!usersLoading && !usersError && (
-        <Table data-testid="users-table">
-          <TableHeader>
-            <TableRow>
-              <TableHeaderCell>{t("admin.users.colUsername")}</TableHeaderCell>
-              <TableHeaderCell>{t("admin.users.colRole")}</TableHeaderCell>
-              <TableHeaderCell>{t("admin.users.colStatus")}</TableHeaderCell>
-              <TableHeaderCell>{t("admin.users.colPassword")}</TableHeaderCell>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {users.map((u) => (
-              <TableRow key={u.id} data-testid={`user-row-${u.username}`}>
-                <TableCell>{u.username}</TableCell>
-                <TableCell>{u.role}</TableCell>
-                <TableCell>
-                  {u.is_active ? t("admin.users.statusActive") : t("admin.users.statusInactive")}
-                </TableCell>
-                <TableCell>
-                  {u.password_stale ? (
-                    <Text data-testid={`user-password-stale-${u.username}`}>
-                      {t("admin.users.passwordStale")}
-                    </Text>
-                  ) : u.generated_password ? (
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <Text
-                        style={{ fontFamily: "monospace" }}
-                        data-testid={`user-password-${u.username}`}
-                      >
-                        {u.generated_password}
-                      </Text>
-                      <Button
-                        size="small"
-                        data-testid={`user-copy-${u.username}`}
-                        onClick={() => copyPassword(u.id, u.generated_password as string)}
-                      >
-                        {copiedUserId === u.id ? t("admin.users.copied") : t("admin.users.copy")}
-                      </Button>
-                    </div>
-                  ) : (
-                    <Text data-testid={`user-password-not-viewable-${u.username}`}>
-                      {t("admin.users.notViewable")}
-                    </Text>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+      {state.detail ? (
+        <InterviewDetailView
+          detail={state.detail}
+          openSop={fetchInterviewSopDocument}
+          onClose={state.closeInterview}
+          onGenerateReport={state.generateReport}
+        />
+      ) : state.history === null ? (
+        !state.historyError && <Text>{t("history.loading")}</Text>
+      ) : (
+        <InterviewHistoryTable
+          items={state.history}
+          onOpen={(id) => void state.openInterview(id)}
+          testId={`user-history-table-${u.username}`}
+        />
       )}
     </div>
-  </Card>
+  );
+}
+
+export function UsersTab({ state }: { state: UsersTabState }) {
+  const styles = useAdminStyles();
+  const local = useStyles();
+  const { t } = useTranslation();
+  const { users, usersLoading, usersError } = state;
+
+  return (
+    <Card className={styles.card} data-testid="users-tab">
+      <CardHeader header={<Title3>{t("admin.users.tab")}</Title3>} />
+      <div style={{ padding: "0 16px 16px", overflowX: "auto" }}>
+        <Body1 style={{ display: "block", marginBottom: 12 }}>{t("admin.users.hint")}</Body1>
+        {usersLoading && <Text data-testid="users-loading">{t("admin.users.loading")}</Text>}
+        {usersError && (
+          <Body1 role="alert" className={styles.errorText} data-testid="users-error">
+            {t("admin.users.loadError", { message: usersError })}
+          </Body1>
+        )}
+        {!usersLoading && !usersError && (
+          <Table data-testid="users-table">
+            <TableHeader>
+              <TableRow>
+                <TableHeaderCell>{t("admin.users.colUsername")}</TableHeaderCell>
+                <TableHeaderCell>{t("admin.users.colRole")}</TableHeaderCell>
+                <TableHeaderCell>{t("admin.users.colStatus")}</TableHeaderCell>
+                <TableHeaderCell>{t("admin.users.colPassword")}</TableHeaderCell>
+                <TableHeaderCell>{t("admin.users.colInterviewer")}</TableHeaderCell>
+                <TableHeaderCell>{t("admin.users.colBank")}</TableHeaderCell>
+                <TableHeaderCell>{t("admin.users.colInterviews")}</TableHeaderCell>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {users.map((u) => {
+                const candidate = u.role === "user";
+                const expanded = state.historyUserId === u.id;
+                return (
+                  <Fragment key={u.id}>
+                    <TableRow data-testid={`user-row-${u.username}`}>
+                      <TableCell>{u.username}</TableCell>
+                      <TableCell>{u.role}</TableCell>
+                      <TableCell>
+                        {u.is_active ? t("admin.users.statusActive") : t("admin.users.statusInactive")}
+                      </TableCell>
+                      <TableCell>
+                        <PasswordCell u={u} state={state} />
+                      </TableCell>
+                      {candidate ? (
+                        <>
+                          <AssignmentCells u={u} state={state} />
+                          <TableCell>
+                            <Button
+                              size="small"
+                              appearance={expanded ? "primary" : "secondary"}
+                              data-testid={`user-interviews-${u.username}`}
+                              onClick={() => state.toggleHistory(u.id)}
+                            >
+                              {expanded
+                                ? t("admin.users.hideInterviews")
+                                : t("admin.users.showInterviews")}
+                            </Button>
+                          </TableCell>
+                        </>
+                      ) : (
+                        <>
+                          <TableCell />
+                          <TableCell />
+                          <TableCell />
+                        </>
+                      )}
+                    </TableRow>
+                    {expanded && (
+                      <TableRow className={local.historyRow}>
+                        <TableCell colSpan={COLUMNS}>
+                          <HistoryPanel u={u} state={state} />
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </div>
+    </Card>
   );
 }

@@ -56,6 +56,18 @@ a fused text/voice interview flow, in phases (branch-per-phase, independently re
 
 Planning trail: [`planning/spec-candidate-login.md`](planning/spec-candidate-login.md) (spec + `/plan-eng-review` decisions; GitHub #102).
 
+## Per-user assignment + interview history (#187, v0.49.0.0)
+
+| Item | Status | Shipped | Notes |
+|---|---|---|---|
+| Interview pins its persona + bank | ✅ Done | v0.49.0.0 | `interview_sessions.persona_id` / `bank_id` (migration `c7d8e9f0a1b2`, nullable, `ON DELETE SET NULL`); every in-interview read uses them (`resolve_questions(db, bank_id)`, `get_session_persona`, voice WS). NULL = current default, so pre-#187 rows behave as before. Closes architecture-review deferred item 1. |
+| Per-user assignment | ✅ Done | v0.49.0.0 | `users.assigned_persona_id` / `assigned_bank_id`; resolved per field at a fresh start (`assignment_service`), disabled/deleted target → default; anonymous → default. `PATCH /admin/users/{id}/assignment` (422 unknown/disabled). Users-tab dropdowns. |
+| Saved reports | ✅ Done | v0.49.0.0 | Scoring writes `report_json` / `total_score` / `outcome`; history reads them. Admin `POST /admin/interviews/{id}/report` scores a completed-but-unsubmitted interview. |
+| Interview history | ✅ Done | v0.49.0.0 | Candidate `GET /candidate/interviews[/{id}]` (user-scoped: earlier logins' sessions included) → "My interviews" on the start screen. Admin `GET /admin/users/{id}/interviews`, `GET /admin/interviews/{id}` → Users tab per-user history with report, PDF, transcript + `.txt` download. All statuses incl. `in_progress` / `abandoned`. SOP citations open via `.../sop/{doc}` on both (cited-only rule). |
+| Live-Azure validation | ⏳ Pending | — | Verified on the mock stack (e2e `user-assignment-history.spec.ts`) + 2000px screenshots; not yet exercised on the Sweden Central deployment. |
+
+Planning trail: [`planning/spec-user-assignment-and-history.md`](planning/spec-user-assignment-and-history.md) (GitHub #187).
+
 ## External interview brain (Phase 2, [`planning/design-external-interview-brain-integration.md`](planning/design-external-interview-brain-integration.md))
 
 A second, per-persona interview mode that hands every turn to the client's **external interview

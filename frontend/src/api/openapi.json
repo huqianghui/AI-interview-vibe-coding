@@ -55,6 +55,28 @@
       "AdminUserResponse": {
         "description": "Admin view of a user (adds business_unit + the #102 derived-password view).\n\n``generated_password`` is the derived password when the account has a system-derived one\n(``password_generation`` set) AND it still matches the stored hash; ``password_stale`` is True\nwhen it no longer matches (SECRET_KEY was rotated after seeding) — the UI shows \"Reset\nrequired\" instead of a wrong password. Both are null/False for self-set (admin) passwords.",
         "properties": {
+          "assigned_bank_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned Bank Id"
+          },
+          "assigned_persona_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned Persona Id"
+          },
           "business_unit": {
             "title": "Business Unit",
             "type": "string"
@@ -289,6 +311,35 @@
           "answer_text"
         ],
         "title": "AnsweredQuestionOut",
+        "type": "object"
+      },
+      "AssignmentIn": {
+        "description": "A user's interviewer + bank; null = use the global default.",
+        "properties": {
+          "bank_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bank Id"
+          },
+          "persona_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Persona Id"
+          }
+        },
+        "title": "AssignmentIn",
         "type": "object"
       },
       "BankIn": {
@@ -669,6 +720,141 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "InterviewDetail": {
+        "properties": {
+          "item": {
+            "$ref": "#/components/schemas/InterviewHistoryItem"
+          },
+          "report": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report"
+          },
+          "scoring": {
+            "default": false,
+            "title": "Scoring",
+            "type": "boolean"
+          },
+          "transcript": {
+            "items": {
+              "$ref": "#/components/schemas/TranscriptTurn"
+            },
+            "title": "Transcript",
+            "type": "array"
+          }
+        },
+        "required": [
+          "item",
+          "report",
+          "transcript"
+        ],
+        "title": "InterviewDetail",
+        "type": "object"
+      },
+      "InterviewHistoryItem": {
+        "properties": {
+          "bank_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bank Name"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "has_report": {
+            "title": "Has Report",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          },
+          "persona_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Persona Name"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "total_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Score"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "started_at",
+          "completed_at",
+          "persona_name",
+          "bank_name",
+          "total_score",
+          "outcome",
+          "has_report"
+        ],
+        "title": "InterviewHistoryItem",
         "type": "object"
       },
       "InterviewOut": {
@@ -2138,6 +2324,40 @@
         "title": "TokenResponse",
         "type": "object"
       },
+      "TranscriptTurn": {
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "turn_index": {
+            "title": "Turn Index",
+            "type": "integer"
+          },
+          "turn_kind": {
+            "title": "Turn Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "turn_index",
+          "role",
+          "turn_kind",
+          "content",
+          "created_at"
+        ],
+        "title": "TranscriptTurn",
+        "type": "object"
+      },
       "UserResponse": {
         "description": "Public profile of the current user (`GET /auth/me`).",
         "properties": {
@@ -2758,6 +2978,158 @@
         "summary": "Test External Config",
         "tags": [
           "admin-external-config"
+        ]
+      }
+    },
+    "/admin/interviews/{interview_id}": {
+      "get": {
+        "operationId": "interview_detail_admin_interviews__interview_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "title": "Interview Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Interview Detail",
+        "tags": [
+          "admin-interviews"
+        ]
+      }
+    },
+    "/admin/interviews/{interview_id}/report": {
+      "post": {
+        "description": "Start scoring a finished interview the candidate never submitted (or re-score one).\n\nScoring takes ~18 s per question, longer than the ingress idle timeout for a whole interview,\nso this does not hold the request open: it starts the same scoring the candidate's submit runs\nin the background and returns 202. The page polls ``GET /{interview_id}`` until the saved\nreport appears. 409 while not finished, while a scoring run for it is already going, and for an\nexternal-brain interview (its provider owns the results; nothing is scored here).",
+        "operationId": "generate_report_admin_interviews__interview_id__report_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "title": "Interview Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Generate Report Admin Interviews  Interview Id  Report Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Generate Report",
+        "tags": [
+          "admin-interviews"
+        ]
+      }
+    },
+    "/admin/interviews/{interview_id}/sop/{document_id}": {
+      "get": {
+        "description": "A SOP document cited by this interview's report, so the admin's report links open.",
+        "operationId": "interview_sop_admin_interviews__interview_id__sop__document_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "title": "Interview Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Interview Sop",
+        "tags": [
+          "admin-interviews"
         ]
       }
     },
@@ -4019,6 +4391,116 @@
         ]
       }
     },
+    "/admin/users/{user_id}/assignment": {
+      "patch": {
+        "description": "Set the interviewer + bank this user's NEXT interview starts with (#187); null = default.\n\nA live interview keeps what it started with. 404 unknown user; 422 an unknown or disabled\npersona/bank (a disabled one would silently fall back to the default at start).",
+        "operationId": "set_assignment_admin_users__user_id__assignment_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignmentIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Set Assignment",
+        "tags": [
+          "admin-users"
+        ]
+      }
+    },
+    "/admin/users/{user_id}/interviews": {
+      "get": {
+        "description": "Every interview this user has started, newest first, every status (#187).",
+        "operationId": "user_interviews_admin_users__user_id__interviews_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/InterviewHistoryItem"
+                  },
+                  "title": "Response User Interviews Admin Users  User Id  Interviews Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "User Interviews",
+        "tags": [
+          "admin-users"
+        ]
+      }
+    },
     "/auth/login": {
       "post": {
         "description": "Authenticate and return a JWT access token.",
@@ -4850,6 +5332,185 @@
         "summary": "Sop Document",
         "tags": [
           "interview"
+        ]
+      }
+    },
+    "/candidate/interviews": {
+      "get": {
+        "description": "The caller's interviews, newest first, every status.",
+        "operationId": "my_interviews_candidate_interviews_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Anon-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Anon-Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/InterviewHistoryItem"
+                  },
+                  "title": "Response My Interviews Candidate Interviews Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "My Interviews",
+        "tags": [
+          "interview-history"
+        ]
+      }
+    },
+    "/candidate/interviews/{interview_id}": {
+      "get": {
+        "description": "One of the caller's interviews with its saved report and transcript (404 when not theirs).",
+        "operationId": "my_interview_candidate_interviews__interview_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "title": "Interview Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Anon-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Anon-Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "My Interview",
+        "tags": [
+          "interview-history"
+        ]
+      }
+    },
+    "/candidate/interviews/{interview_id}/sop/{document_id}": {
+      "get": {
+        "description": "A SOP document cited by one of the caller's past reports (the live-report rule, user-scoped:\nan interview from an earlier login's session is still theirs).",
+        "operationId": "my_interview_sop_candidate_interviews__interview_id__sop__document_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "title": "Interview Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Anon-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Anon-Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "My Interview Sop",
+        "tags": [
+          "interview-history"
         ]
       }
     },

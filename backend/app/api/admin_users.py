@@ -2,14 +2,15 @@
 
 import asyncio
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.dependencies import require_role
 from app.models.user import User
 from app.schemas.auth import AdminUserResponse
-from app.services import user_service
+from app.schemas.history import AssignmentIn, InterviewHistoryItem
+from app.services import interview_history_service, persona_service, question_service, user_service
 from app.services.auth_service import derive_candidate_password, verify_password
 
 router = APIRouter(
@@ -27,6 +28,52 @@ async def list_users(
     """List users with optional search (name/username/email), role, and active filters."""
     rows = await user_service.list_users(db, search=search, role=role, is_active=is_active)
     return [await _with_derived_password(u) for u in rows]
+
+
+@router.patch("/{user_id}/assignment", response_model=AdminUserResponse)
+async def set_assignment(
+    user_id: str, body: AssignmentIn, db: AsyncSession = Depends(get_db)
+) -> AdminUserResponse:
+    """Set the interviewer + bank this user's NEXT interview starts with (#187); null = default.
+
+    A live interview keeps what it started with. 404 unknown user; 422 an unknown or disabled
+    persona/bank (a disabled one would silently fall back to the default at start).
+    """
+    user = await user_service.get_user(db, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if body.persona_id is not None:
+        try:
+            persona = await persona_service.get_persona(db, body.persona_id)
+        except persona_service.PersonaNotFound:
+            persona = None
+        if persona is None or not persona.enabled:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Unknown or disabled interviewer",
+            )
+    if body.bank_id is not None:
+        bank = await question_service.find_bank(db, body.bank_id)
+        if bank is None or not bank.enabled:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Unknown or disabled question bank",
+            )
+    user.assigned_persona_id = body.persona_id
+    user.assigned_bank_id = body.bank_id
+    await db.commit()
+    await db.refresh(user)
+    return await _with_derived_password(user)
+
+
+@router.get("/{user_id}/interviews", response_model=list[InterviewHistoryItem])
+async def user_interviews(
+    user_id: str, db: AsyncSession = Depends(get_db)
+) -> list[InterviewHistoryItem]:
+    """Every interview this user has started, newest first, every status (#187)."""
+    if await user_service.get_user(db, user_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return await interview_history_service.list_for_user(db, user_id)
 
 
 async def _with_derived_password(user: User) -> AdminUserResponse:

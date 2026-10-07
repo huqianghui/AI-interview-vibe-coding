@@ -5,7 +5,7 @@ agent-editor + config UI — SEPARATE from the candidate-facing ``AnonymousCandi
 which is untouched. Uses this repo's ``Base`` (app.db) + ``TimestampMixin`` (app.models.mixins).
 """
 
-from sqlalchemy import Boolean, Integer, String
+from sqlalchemy import Boolean, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -30,3 +30,12 @@ class User(TimestampMixin, Base):
     # password (the admin) that the server cannot show to anyone. See
     # auth_service.derive_candidate_password.
     password_generation: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # #187: the interviewer and question bank this user's interviews start with. NULL = the global
+    # default. ``SET NULL`` on delete, and a disabled target is skipped at start, so a stale
+    # assignment falls back to the default instead of failing (assignment_service).
+    assigned_persona_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("interviewer_personas.id", ondelete="SET NULL"), nullable=True
+    )
+    assigned_bank_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("question_banks.id", ondelete="SET NULL"), nullable=True
+    )

@@ -122,6 +122,20 @@ which interviewer and bank each past interview used.
     - Expanded rows / open drawer survive admin tab switches, like the other admin tabs (#181).
 - Strings in en-US and zh-CN.
 
+### Found during implementation (2026-10-07)
+
+- **Reports were never saved.** `POST /report` re-scored with the LLM on every call (median ~18 s
+  per question), so a history had no score or report to show. `interview_sessions` gains
+  `report_json` / `total_score` / `outcome`, written by every scoring run; the history reads them.
+- **Admin "Generate report"** (`POST /admin/interviews/{id}/report`): a `completed` interview the
+  candidate never submitted has no report, so the admin can score it from the detail view.
+  409 before completion and for external-brain interviews.
+- **Final route shapes:** candidate `GET /candidate/interviews`, `GET /candidate/interviews/{id}`
+  (detail = item + saved report + transcript); admin `GET /admin/users/{id}/interviews`,
+  `GET /admin/interviews/{id}`; plus `.../sop/{document_id}` on both so report citations open
+  (same cited-documents-only rule as the live report). The separate `/review` and `/transcript`
+  admin routes collapsed into the one detail route.
+
 ## Acceptance Criteria
 
 1. Admin sets user U to persona X + bank Y; U logs in and starts an interview; the session row has

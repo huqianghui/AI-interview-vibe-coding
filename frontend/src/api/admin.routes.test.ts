@@ -163,10 +163,43 @@ const ROUTES: Array<[string, Call, string, string, unknown]> = [
     undefined,
   ],
   ["listUsers", () => admin.listUsers(), "GET", "/api/admin/users", undefined],
+  [
+    "setUserAssignment",
+    () => admin.setUserAssignment("u1", { persona_id: "p1", bank_id: null }),
+    "PATCH",
+    "/api/admin/users/u1/assignment",
+    { persona_id: "p1", bank_id: null },
+  ],
+  [
+    "listUserInterviews",
+    () => admin.listUserInterviews("u1"),
+    "GET",
+    "/api/admin/users/u1/interviews",
+    undefined,
+  ],
+  ["getInterview", () => admin.getInterview("iv1"), "GET", "/api/admin/interviews/iv1", undefined],
+  [
+    "generateInterviewReport",
+    () => admin.generateInterviewReport("iv1"),
+    "POST",
+    "/api/admin/interviews/iv1/report",
+    undefined,
+  ],
+  [
+    "fetchInterviewSopDocument",
+    () => admin.fetchInterviewSopDocument("iv1", "doc/1"),
+    "GET",
+    "/api/admin/interviews/iv1/sop/doc%2F1",
+    undefined,
+  ],
 ];
 
 describe("admin route wrappers", () => {
-  beforeEach(() => setAdminToken("adm"));
+  beforeEach(() => {
+    setAdminToken("adm");
+    // The SOP-document wrapper returns a blob URL; jsdom has no createObjectURL.
+    Object.assign(URL, { createObjectURL: vi.fn().mockReturnValue("blob:x") });
+  });
   afterEach(() => {
     vi.unstubAllGlobals();
     sessionStorage.clear();

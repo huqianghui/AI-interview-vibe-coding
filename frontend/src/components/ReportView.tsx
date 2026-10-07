@@ -10,7 +10,7 @@
  *
  * Stub reports (no checklist authored) render the pre-F4 minimal list so the page still works.
  */
-import { useState } from "react";
+import { useContext, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Accordion,
@@ -30,7 +30,7 @@ import {
   tokens,
 } from "@fluentui/react-components";
 import type { Report, QuestionScore, ScoredItem } from "../api/client";
-import { fetchSopDocument } from "../api/client";
+import { SopOpenerContext } from "./sopOpener";
 import { ScoreGauge } from "./ScoreGauge";
 import { downloadReportPdf } from "./reportPdf";
 import { splitWarnings, unscoredCount } from "./reportModel";
@@ -285,6 +285,7 @@ function SopSourceLink({
   suffix?: string;
 }) {
   const { t } = useTranslation();
+  const openSop = useContext(SopOpenerContext);
   const [state, setState] = useState<"idle" | "opening" | "failed">("idle");
   const label = `${t("report.sopSource")}${item.source_page ? ` · ${item.source_page}` : ""}`;
 
@@ -302,7 +303,7 @@ function SopSourceLink({
     if (state === "opening") return;
     setState("opening");
     try {
-      const url = await fetchSopDocument(interviewId, docId);
+      const url = await openSop(interviewId, docId);
       window.open(url, "_blank", "noopener,noreferrer");
       // Give the new tab time to load before releasing the object URL.
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);

@@ -59,15 +59,21 @@ def parse_points(raw: str | None) -> tuple[str, ...]:
     return tuple(str(p) for p in parsed) if isinstance(parsed, list) else ()
 
 
-async def resolve_questions(db: AsyncSession) -> tuple[Question, ...]:
-    """Ordered questions for the current interview: the default bank's, or the fallback set.
+async def resolve_questions(db: AsyncSession, bank_id: str | None = None) -> tuple[Question, ...]:
+    """Ordered questions for an interview: the pinned bank's, the default bank's, or the fallback.
+
+    ``bank_id`` is the session's pinned bank (#187). A pinned bank is used even if it was disabled
+    after the interview started (an interview never changes question set mid-way); ``None`` (a
+    pre-#187 session, or a pinned bank since deleted) reads the current enabled default.
 
     Imported lazily to avoid a models/service import cycle at module load. Returns the fallback
-    when no enabled default bank exists or the bank has no enabled questions.
+    when no bank resolves or the bank has no enabled questions.
     """
     from app.services import question_service
 
-    bank = await question_service.get_default_bank(db)
+    bank = await question_service.find_bank(db, bank_id) if bank_id else None
+    if bank is None:
+        bank = await question_service.get_default_bank(db)
     if bank is None:
         return FALLBACK_QUESTIONS
     rows = await question_service.list_questions_for_bank(db, bank.id, enabled_only=True)
