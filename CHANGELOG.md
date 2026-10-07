@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.50.0.1 (2026-10-07)
+
+### Fixed
+- **A restart no longer clears candidates' bank assignments or interviews' banks.** On every start
+  the server re-imported its built-in question banks by deleting and re-creating them, so each
+  restart gave them new ids: every candidate's assigned bank was cleared, every interview lost the
+  bank it was recorded with (an interview in progress then continued on the default bank's
+  questions), and admin edits to those banks' rubrics were lost. Banks that already exist are now
+  left alone on start; only missing ones are created.
+
 ## 0.50.0.0 (2026-10-07)
 
 ### Changed

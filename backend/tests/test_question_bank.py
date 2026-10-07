@@ -83,7 +83,7 @@ async def test_seed_bundled_banks_is_idempotent_and_preserves_default(db_session
     # and re-running (every boot) converges by name rather than duplicating.
     rf = await svc.create_bank(db_session, name="rf-CSM (client)", is_default=True)
     await question_seed.seed_bundled_banks(db_session)
-    await question_seed.seed_bundled_banks(db_session)  # second boot: replace-by-name, no dupes
+    await question_seed.seed_bundled_banks(db_session)  # second boot: already there, skipped
     banks = await svc.list_banks(db_session)
     names = [b.name for b in banks]
     assert names.count("Demo interview bank") == 1  # not duplicated across the two runs
@@ -91,15 +91,40 @@ async def test_seed_bundled_banks_is_idempotent_and_preserves_default(db_session
     assert (await svc.get_default_bank(db_session)).id == rf.id  # default untouched
 
 
-async def test_seed_bundled_banks_public_demo_keeps_a_default(db_session):
-    # Public-demo boot order (main.py): seed_default_bank creates "Demo interview bank" as the
-    # default, THEN seed_bundled_banks imports a same-named non-default bundle that replaces it.
-    # The seeder must restore the default so the interview doesn't drop to the built-in fallback.
-    await question_seed.seed_default_bank(db_session)  # "Demo interview bank" is now default
+async def test_a_reboot_keeps_bank_ids_so_assignments_and_pins_survive(db_session):
+    """With a persistent database a boot must not delete-and-recreate seeded banks: that changed
+    their ids, and the SET NULL FKs then cleared every user's assignment and every interview's
+    pinned bank on each restart (live, 2026-10-07)."""
+    from app.models.user import User
+
     await question_seed.seed_bundled_banks(db_session)
+    before = {b.name: b.id for b in await svc.list_banks(db_session)}
+    user = User(username="u", email="u@local", hashed_password="x", role="user")
+    user.assigned_bank_id = before["Deployment SOP Interview"]
+    db_session.add(user)
+    await db_session.commit()
+
+    await question_seed.seed_bundled_banks(db_session)  # the next boot
+    after = {b.name: b.id for b in await svc.list_banks(db_session)}
+    assert after == before
+    await db_session.refresh(user)
+    assert user.assigned_bank_id == before["Deployment SOP Interview"]
+
+
+async def test_public_demo_boot_makes_the_rubric_bundle_the_default(db_session):
+    # Public-demo boot order (main.py): bundled banks first, then seed_default_bank. With no
+    # default yet, the committed "Demo interview bank" bundle (it carries a rubric) is PROMOTED,
+    # not shadowed by a rubric-less programmatic bank of the same name.
+    await question_seed.seed_bundled_banks(db_session)
+    await question_seed.seed_default_bank(db_session)
     default = await svc.get_default_bank(db_session)
     assert default is not None
     assert default.name == "Demo interview bank"
+    assert [b.name for b in await svc.list_banks(db_session)].count("Demo interview bank") == 1
+    from app.services import checklist_service
+
+    first = (await svc.list_questions_for_bank(db_session, default.id))[0]
+    assert await checklist_service.get_default_checklist(db_session, first.id) is not None
 
 
 async def test_seed_bundled_bank_preserves_hand_authored_rubric(db_session):

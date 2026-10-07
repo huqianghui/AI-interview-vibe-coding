@@ -78,14 +78,17 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # table must not block the rest of startup, but it must not vanish either — a silently skipped
     # seed is how the server once came up with only the rubric-less demo bank.
     boot_steps = (
-        ("default bank", seed_default_bank),
-        # The committed generic bank bundles (Demo / Deployment SOP / test), so the ephemeral
-        # server presents the same catalogue as a local checkout. Each is non-default, so it never
-        # fights the boot importer's rf-CSM default.
+        # The committed generic bank bundles (Demo / Deployment SOP / test), so the server presents
+        # the same catalogue as a local checkout. Each is non-default, so it never fights the boot
+        # importer's rf-CSM default. Create-only: a bank that already exists is never replaced.
+        # BEFORE the default bank: with nothing replaced any more, the rubric-carrying "Demo
+        # interview bank" bundle must exist first so seed_default_bank promotes it rather than
+        # creating the rubric-less programmatic one.
         ("bundled banks", seed_bundled_banks),
         # Client-derived bundles from the private-blob channel (CLIENT_BANKS_DIR). No-op when
         # absent (public-demo mode / CI). These carry client SOP quotes and are NEVER committed.
         ("client banks", seed_client_banks),
+        ("default bank", seed_default_bank),
         ("default admin", seed_default_admin),
         # #102: under the read-only Users tab this is the ONLY way candidate accounts come to exist,
         # so a failure here means nobody can take an interview until the next restart.
