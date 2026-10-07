@@ -9,6 +9,10 @@ import { continueByTextIfAsked } from "./helpers/micDialog";
  *
  * user3, not user1: the other candidate specs share user1, and an assignment on it would change
  * which bank they get.
+ *
+ * Both fields are assigned. The interviewer matters as much as the bank: external-interview.spec
+ * leaves an external-brain persona as the DEFAULT, and an interview on that never reads a bank, so
+ * a spec that assigned only the bank passed alone and failed after it in the full run.
  */
 const CANDIDATE = "user3";
 const ADMIN_USER = "admin";
@@ -37,10 +41,17 @@ test("an assigned bank drives the interview, which then appears in both historie
     username: string;
   }>;
   const userId = users.find((u) => u.username === CANDIDATE)!.id;
+  // A question-bank interviewer with no avatar character, so the candidate answers by keyboard.
+  const persona = (await (
+    await api.post("/admin/personas", {
+      headers,
+      data: { name: `E2E assigned interviewer ${stamp}`, interview_brain: "bank", enabled: true },
+    })
+  ).json()) as { id: string; name: string };
   try {
     const assigned = await api.patch(`/admin/users/${userId}/assignment`, {
       headers,
-      data: { persona_id: null, bank_id: bank.bank_id },
+      data: { persona_id: persona.id, bank_id: bank.bank_id },
     });
     expect(assigned.ok()).toBe(true);
 
@@ -64,6 +75,7 @@ test("an assigned bank drives the interview, which then appears in both historie
     // assigned bank before this spec's own, so the bank appears twice; ours is the top row.
     const myRow = mine.locator('[data-testid^="history-row-"]').filter({ hasText: bankName }).first();
     await expect(myRow).toContainText(/已评分|Scored/);
+    await expect(myRow).toContainText(persona.name);
     await myRow.getByRole("button").click();
     await expect(page.getByTestId("history-transcript")).toContainText(answer);
     await expect(page.getByTestId("report-exec")).toBeVisible();
@@ -76,6 +88,7 @@ test("an assigned bank drives the interview, which then appears in both historie
     await page.getByTestId("admin-login").click();
     await page.getByTestId("admin-tab-users").click();
     await expect(page.getByTestId(`user-assign-bank-${CANDIDATE}`)).toHaveValue(bank.bank_id);
+    await expect(page.getByTestId(`user-assign-persona-${CANDIDATE}`)).toHaveValue(persona.id);
     await page.getByTestId(`user-interviews-${CANDIDATE}`).click();
     const adminRow = page
       .getByTestId(`user-history-table-${CANDIDATE}`)
