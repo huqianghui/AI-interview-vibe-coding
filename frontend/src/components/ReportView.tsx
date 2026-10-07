@@ -71,9 +71,17 @@ const useStyles = makeStyles({
     padding: tokens.spacingVerticalXXL,
   },
   execRow: { display: "flex", gap: tokens.spacingHorizontalXXXL, alignItems: "center", flexWrap: "wrap" },
-  // Capped at a reading measure: the report moved to the wide layout, and an uncapped narrative ran
-  // ~1350px per line on a 2000px screen. The gauge and the cards still use the width.
-  narrative: { flex: "1 1 260px", minWidth: 0, maxWidth: "88ch" },
+  // Fills the card beside the gauge. A cap on the whole column left half the band empty on a wide
+  // screen (owner, 2026-10-07); only the summary sentence keeps a reading measure (`summary`).
+  narrative: { flex: "1 1 260px", minWidth: 0 },
+  summary: { display: "block", marginTop: "8px", maxWidth: "110ch" },
+  /** The critical-error warnings, as many columns as fit at 420px: each is one or two lines, so a
+   *  single full-width column would run a short sentence across ~1600px. */
+  warningList: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 420px), 1fr))",
+    columnGap: tokens.spacingHorizontalM,
+  },
   outcomeDisplay: {
     fontFamily: fonts.display,
     fontWeight: 800,
@@ -511,18 +519,22 @@ export function ReportView({ report }: { report: Report }) {
               </Badge>
             </div>
           {report.narrative && (
-            <Body1 style={{ display: "block", marginTop: 8 }}>{report.narrative}</Body1>
+            <Body1 className={styles.summary}>{report.narrative}</Body1>
           )}
           {report.capped && (
             <div className={styles.cappedNote} data-testid="report-capped">
               {t("report.cappedNote")}
             </div>
           )}
-          {criticalWarnings.map((w, i) => (
-            <div key={i} className={styles.warning} data-testid="report-warning">
-              {w}
+          {criticalWarnings.length > 0 && (
+            <div className={styles.warningList}>
+              {criticalWarnings.map((w, i) => (
+                <div key={i} className={styles.warning} data-testid="report-warning">
+                  {w}
+                </div>
+              ))}
             </div>
-          ))}
+          )}
           {disclosures.map((_w, i) => (
             <div key={i} className={styles.disclosure} data-testid="report-disclosure">
               <Text className={styles.disclosureLabel}>{t("report.disclosure")}:</Text>

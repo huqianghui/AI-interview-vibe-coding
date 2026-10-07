@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.48.2.1 (2026-10-07)
+
+### Fixed
+- **The report's summary band fills the card.** On a wide screen the verdict, summary and
+  forbidden-item warnings stopped at half the card's width, leaving the right half empty. The
+  column now uses the full width; only the summary sentence keeps a reading measure, and the
+  warnings sit side by side in as many columns as fit (one on a narrow screen).
+
 ## 0.48.2.0 (2026-10-07)
 
 ### Changed
