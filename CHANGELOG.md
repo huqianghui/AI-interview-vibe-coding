@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.49.0.0 (2026-10-07)
+
+### Added
+- **Assign each candidate an interviewer and a question bank.** In the admin Users tab every
+  candidate row has an "Interviewer" and a "Question bank" dropdown. A candidate's next interview
+  starts with what you chose; "Default" keeps today's behaviour. If an assigned interviewer or bank
+  is later disabled or deleted, that candidate quietly falls back to the default for that field.
+  Candidates who are not signed in always get the default.
+- **Every interview is kept, and you can read it again.**
+  - Candidates see "My interviews" under the start screen: date, interviewer, question bank,
+    status and score, including interviews they abandoned or left unfinished, and can open any of
+    them for the full report and transcript.
+  - Admins open "Interviews" on any user's row in the Users tab to see that user's whole history,
+    in-progress interviews included, open the report (with its PDF download), read the transcript,
+    and download it as a text file.
+  - A finished interview the candidate never submitted has no report yet; the admin can score it
+    from there with "Generate report".
+
+### Changed
+- **An interview keeps the interviewer and question bank it started with.** Changing the default
+  bank (or a candidate's assignment) during an interview no longer switches the remaining
+  questions to another bank.
+- **A scored report is saved.** Opening a past report reads the saved one instead of scoring the
+  interview again.
+
 ## 0.48.2.1 (2026-10-07)
 
 ### Fixed
