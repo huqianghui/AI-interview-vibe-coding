@@ -2,36 +2,36 @@
   "00-signin.png": {
     "sha256": "a81d038445967aa8aa76cd54d9c90cdd939bed934972577788e68a65ed60c138",
     "sources": "5b8e26841904ed8cce2776c1a1dfd27007276641eb98835d7829944b5644dd4c",
-    "capturedAt": "2026-10-07T00:48:53.751Z"
+    "capturedAt": "2026-10-07T01:28:52.150Z"
   },
   "01-landing.png": {
-    "sha256": "3385340d976877aa73d1d5b8d7a156c7b77d38a508c9658f164d8a0e8efe0298",
+    "sha256": "95053885ad7701161c6ac315a34569406501dd46049287388006370e26bbe56f",
     "sources": "278bfa7fdb7ba411ffe70b90fdf3d6bd0f95e5bd87a524fc8bb15a3348a14851",
-    "capturedAt": "2026-10-07T00:48:56.584Z"
+    "capturedAt": "2026-10-07T01:29:00.159Z"
   },
   "01b-orientation.png": {
     "sha256": "75b529d4f3d3bbaa68dcff061b05f05100cf165516a97bc48f4ac9fb072fe07c",
     "sources": "f607b6f555708567593ad0624f54a0bf5869b9d8452bf1133f52c04458f5e6f7",
-    "capturedAt": "2026-10-07T00:48:56.997Z"
+    "capturedAt": "2026-10-07T01:29:00.562Z"
   },
   "02-interview-question.png": {
-    "sha256": "8659e8a3311f4770c7958ccb01b2d7cd85b4c0f791b1c77c03531379bc439b24",
+    "sha256": "21fd5dfeec0d2313447600d92faece3e11cb0b0d98cd4a8708e190aa3077319e",
     "sources": "d6213de4ad28df98a2dcdfc1b6d49a57b8a5def17e161c6222e7f84451aa1ba3",
-    "capturedAt": "2026-10-07T00:49:01.300Z"
+    "capturedAt": "2026-10-07T01:29:05.533Z"
   },
   "04-review-before-scoring.png": {
     "sha256": "ca7864a27abdbb41795c5e7914e3f2e32789cfc363df47e9265ebd7650c2717d",
     "sources": "33aa2af3f6cea1afd367aa48ebbd502c583cd79b134364b0a5286afd4c8f6170",
-    "capturedAt": "2026-10-07T00:49:02.296Z"
+    "capturedAt": "2026-10-07T01:29:06.532Z"
   },
   "05-report-executive.png": {
-    "sha256": "13895e3be107ed472417b95481ae669a0ad18fe8cd647c724696b97fe3f217d1",
-    "sources": "412568a544ebbc2681e8cb2073b261bc685b9818dceecec3bf6cdcb2b8786f6e",
-    "capturedAt": "2026-10-07T00:49:15.344Z"
+    "sha256": "64af1a2403a0cd2746cb64159ead430bf5d5cfda5d6a3523276e2a63c3c3b3cf",
+    "sources": "7b9d4bb379ff0b5e048b885679e691adb9861ec07b7da81199b5e6944c9e8ccb",
+    "capturedAt": "2026-10-07T01:29:21.577Z"
   },
   "06-report-detail.png": {
-    "sha256": "25cb2e76605694aea1bba8287b519a9373f617cb3e40edd898b1752fed0f94b7",
-    "sources": "412568a544ebbc2681e8cb2073b261bc685b9818dceecec3bf6cdcb2b8786f6e",
-    "capturedAt": "2026-10-07T00:49:15.778Z"
+    "sha256": "f7e6a5dd885412d8244f66fa40ace1b0d2efc629a6534d6e6dc6159a809edd44",
+    "sources": "7b9d4bb379ff0b5e048b885679e691adb9861ec07b7da81199b5e6944c9e8ccb",
+    "capturedAt": "2026-10-07T01:29:22.037Z"
   }
 }
