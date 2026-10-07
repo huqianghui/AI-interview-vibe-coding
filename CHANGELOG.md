@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.49.0.1 (2026-10-07)
+
+### Fixed
+- **A double-clicked Save no longer creates the same interviewer twice.** Creating an interviewer
+  also creates its Foundry agent, so Save takes a few seconds; a second click in that time used to
+  create a second, identical interviewer with the same name. Save is now disabled ("Saving…")
+  until the first save finishes, and the server refuses a second interviewer with a name that is
+  already taken (ignoring case and surrounding spaces), on create and on rename. Two interviewers
+  that already share a name stay editable, so one of them can be renamed.
+- **A failed save in the interviewer editor now says why.** The editor showed errors only on its
+  sign-in screen, so a save that failed looked like nothing happened. The reason now appears next
+  to the Save button.
+
 ## 0.49.0.0 (2026-10-07)
 
 ### Added
