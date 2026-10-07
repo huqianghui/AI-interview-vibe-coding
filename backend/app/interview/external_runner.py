@@ -17,8 +17,9 @@ Correctness spine (all three matter, all three are tested in the Slice-1 chaos s
    external_phase = 'idle'`` atomically reserves the turn (bumps the version, flips to ``awaiting``)
    BEFORE any external call. Two distinct answers racing the same turn: exactly one UPDATE matches;
    the loser gets :class:`ExternalTurnConflict` (→ 409) and never reaches the brain. The version
-   guard alone is sufficient under SQLite's serialized writers; the phase guard additionally blocks
-   a submit while a turn is already in flight or while recovery is owed.
+   guard alone makes two reservations exclusive (on PostgreSQL the guarded UPDATE takes the row
+   lock, so the loser waits, re-checks the version and matches nothing); the phase guard
+   additionally blocks a submit while a turn is already in flight or while recovery is owed.
 
 2. **Stateless + retry ⇒ pure function.** Because the brain is stateless and every attempt re-sends
    the SAME committed state + the SAME pending answer, a retry is a pure re-application
@@ -42,6 +43,7 @@ import json
 import logging
 
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.interview.state_machine import find_resumable_interview
@@ -246,8 +248,9 @@ async def _reserve_turn(
     """Atomically reserve the next turn via a single guarded UPDATE; return whether we won.
 
     The guard is BOTH the optimistic-lock version (``turn_version == seen_version``) AND the phase
-    (``external_phase IN from_phases``). Under SQLite's serialized writers the version guard alone
-    already makes two concurrent reservations mutually exclusive; the phase guard additionally
+    (``external_phase IN from_phases``). The version guard alone makes two concurrent reservations
+    mutually exclusive (SQLite serializes the writers; PostgreSQL's row lock makes the loser wait
+    and then match zero rows under READ COMMITTED); the phase guard additionally
     rejects a submit while a turn is in flight (``awaiting``) or, for a normal answer, while a
     recovery is owed. On success we bump the version and flip to ``awaiting``; ``rowcount != 1``
     means a concurrent writer got there first (or the phase moved) — the caller raises
@@ -297,20 +300,34 @@ async def start_interview(
     if existing is not None:
         return existing
 
+    # Created ``awaiting`` and COMMITTED before the external call. Held open across the call (as it
+    # was), the row was invisible to a concurrent /start under PostgreSQL's READ COMMITTED, so a
+    # double click created a second interview AND a second vendor conversation; it also pinned a
+    # pooled connection for the length of the vendor's retries. Committed, a concurrent /start hits
+    # uq_one_live_interview_per_candidate and resumes this one (a fresh page treats ``awaiting`` as
+    # "a turn is in flight").
     session = InterviewSession(
         candidate_session_id=candidate_session_id,
         status="in_progress",
         current_question_index=0,
         brain_mode="external",
-        external_phase="idle",
+        external_phase="awaiting",
         turn_version=0,
         persona_id=persona_id,
     )
     session.started_at = _now()
     db.add(session)
-    await db.flush()  # assign session.id before the first external call / turn write
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        winner = await find_resumable_interview(db, candidate_session_id)
+        if winner is None:
+            raise
+        return winner
 
     endpoint, api_key, user_tag = await resolve_external_connection(db)
+    await db.commit()  # end the read before the network call: no connection held while waiting
     provider = _select_provider(endpoint)
     try:
         turn = await _run_turn_with_retry(
@@ -371,6 +388,7 @@ async def answer(
     await db.refresh(session)
 
     endpoint, api_key, user_tag = await resolve_external_connection(db)
+    await db.commit()  # end the read before the network call: no connection held while waiting
     provider = _select_provider(endpoint)
     try:
         turn = await _run_turn_with_retry(
@@ -421,6 +439,7 @@ async def recover(db: AsyncSession, session: InterviewSession) -> InterviewSessi
     event = EVENT_MESSAGE if pending is not None else EVENT_START
 
     endpoint, api_key, user_tag = await resolve_external_connection(db)
+    await db.commit()  # end the read before the network call: no connection held while waiting
     provider = _select_provider(endpoint)
     try:
         turn = await _run_turn_with_retry(
@@ -459,6 +478,7 @@ async def end(db: AsyncSession, session: InterviewSession) -> InterviewSession:
         raise ExternalTurnConflict("A turn is already being processed")
 
     endpoint, api_key, user_tag = await resolve_external_connection(db)
+    await db.commit()  # end the read before the network call: no connection held while waiting
     provider = _select_provider(endpoint)
     try:
         turn = await _run_turn_with_retry(

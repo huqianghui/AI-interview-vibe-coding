@@ -182,3 +182,59 @@ async def test_judge_freshness_check_detects_an_answer_committed_during_its_slow
 
     assert advanced.turn_version != seen_turn_version
     assert changed is True
+
+
+async def test_two_concurrent_starts_yield_one_live_interview(tmp_path):
+    """Double-clicked or reloaded /start: both requests pass the "is there a resumable one?" check
+    before either commits. uq_one_live_interview_per_candidate refuses the second insert and that
+    caller resumes the winner, so both get the SAME interview and only one is in progress. (On
+    PostgreSQL the two run fully in parallel; this is the bug the index was added for.)"""
+    from sqlalchemy import func, select
+
+    async with _file_factory(tmp_path) as factory:
+        async with factory() as setup_db:
+            cand_id = await _seed_candidate(setup_db)
+        async with factory() as a, factory() as b:
+            first, second = await asyncio.gather(
+                state_machine.start_interview(a, cand_id), state_machine.start_interview(b, cand_id)
+            )
+        assert first.id == second.id
+        async with factory() as check:
+            live = (
+                await check.execute(
+                    select(func.count())
+                    .select_from(InterviewSession)
+                    .where(
+                        InterviewSession.candidate_session_id == cand_id,
+                        InterviewSession.status == "in_progress",
+                    )
+                )
+            ).scalar_one()
+        assert live == 1
+
+
+async def test_two_concurrent_external_starts_open_one_vendor_conversation(tmp_path, monkeypatch):
+    """The external /start used to hold its new row uncommitted across the vendor call, so a second
+    /start could not see it and opened a SECOND interview and vendor conversation. The row is now
+    committed first; the second caller resumes it and the vendor is called once."""
+    from app.interview import external_runner
+
+    calls: list[str] = []
+    real = external_runner._run_turn_with_retry
+
+    async def _counting(provider, **kwargs):
+        calls.append(kwargs["event"])
+        await asyncio.sleep(0.05)  # a slow vendor: the window the old code left open
+        return await real(provider, **kwargs)
+
+    monkeypatch.setattr(external_runner, "_run_turn_with_retry", _counting)
+    async with _file_factory(tmp_path) as factory:
+        async with factory() as setup_db:
+            cand_id = await _seed_candidate(setup_db)
+        async with factory() as a, factory() as b:
+            first, second = await asyncio.gather(
+                external_runner.start_interview(a, cand_id),
+                external_runner.start_interview(b, cand_id),
+            )
+        assert first.id == second.id
+        assert calls == [external_runner.EVENT_START]  # one vendor conversation, not two

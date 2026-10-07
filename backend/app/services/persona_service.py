@@ -358,6 +358,10 @@ async def _commit_translating_conflict(db: AsyncSession) -> None:
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
+        # Two DB invariants can refuse this commit; say which one (a concurrent create of the same
+        # name passes the service's own check and is caught only here).
+        if "uq_persona_name_ci" in str(exc.orig):
+            raise PersonaConflict("An interviewer with this name already exists") from exc
         raise PersonaConflict("more than one enabled default persona") from exc
 
 

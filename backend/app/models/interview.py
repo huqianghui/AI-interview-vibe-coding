@@ -11,7 +11,7 @@ F6. ``turn_kind`` distinguishes them so follow-up content is scorable without a 
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -40,6 +40,18 @@ EXTERNAL_PHASES = ("idle", "awaiting", "recovery_required")
 
 class InterviewSession(TimestampMixin, Base):
     __tablename__ = "interview_sessions"
+    # At most one live interview per candidate session, in the DB (migration d8e9f0a1b2c3). On
+    # SQLite the single writer serialized two concurrent /start calls; on PostgreSQL both passed
+    # the "is there a resumable one?" check and each created an interview.
+    __table_args__ = (
+        Index(
+            "uq_one_live_interview_per_candidate",
+            "candidate_session_id",
+            unique=True,
+            sqlite_where=text("status = 'in_progress'"),
+            postgresql_where=text("status = 'in_progress'"),
+        ),
+    )
 
     candidate_session_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("anonymous_candidate_sessions.id"), nullable=False, index=True

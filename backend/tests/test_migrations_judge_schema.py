@@ -102,3 +102,78 @@ def test_alembic_head_schema_accepts_orm_style_inserts(tmp_path):
 def _has_columns(conn: sqlite3.Connection, table: str, names: set[str]) -> bool:
     have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
     return names <= have
+
+
+@pytest.mark.skipif(
+    not (BACKEND / "alembic.ini").exists(), reason="alembic.ini missing (not a source checkout)"
+)
+def test_concurrency_constraints_migration_resolves_existing_duplicates(tmp_path):
+    """d8e9f0a1b2c3 adds three unique indexes; old data that already breaks them (possible while
+    the app only checked in Python) must be resolved first, or the upgrade fails on a client DB."""
+    db = tmp_path / "dup.db"
+    env = dict(os.environ)
+    env.update(
+        {
+            "DATABASE_URL": f"sqlite+aiosqlite:///{db}",
+            "SECRET_KEY": "test-secret-key-do-not-use-in-prod",
+            "ENCRYPTION_KEY": "v_ftieq-S7JwF27OzZw7kUFzULt1FF_rY2vn0jEkfYQ=",
+        }
+    )
+
+    def alembic(*args):
+        run = subprocess.run(
+            [sys.executable, "-m", "alembic", *args],
+            cwd=BACKEND,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        assert run.returncode == 0, run.stderr[-2000:]
+
+    alembic("upgrade", "c7d8e9f0a1b2")  # the revision before the constraints
+    conn = sqlite3.connect(db)
+
+    def insert(table: str, **values) -> None:
+        """Insert ``values``; every other NOT NULL column without a default gets a filler (0 or
+        ''), so the test survives columns added by later migrations."""
+        for _cid, col, ctype, notnull, default, _pk in conn.execute(f"PRAGMA table_info({table})"):
+            if col not in values and notnull and default is None:
+                numeric = any(t in ctype.upper() for t in ("INT", "BOOL", "FLOAT"))
+                values[col] = 0 if numeric else ""
+        cols = ", ".join(values)
+        marks = ", ".join("?" for _ in values)
+        conn.execute(f"INSERT INTO {table} ({cols}) VALUES ({marks})", tuple(values.values()))
+
+    try:
+        insert("interviewer_personas", id="p1", name="interview02", created_at="2026-10-01")
+        insert("interviewer_personas", id="p2", name=" Interview02 ", created_at="2026-10-02")
+        for sid, ts in (("old", "2026-10-01"), ("new", "2026-10-02")):
+            insert(
+                "interview_sessions",
+                id=sid,
+                candidate_session_id="c1",
+                status="in_progress",
+                created_at=ts,
+            )
+        insert("question_banks", id="b1", name="B")
+        insert("questions", id="q1", bank_id="b1", text="Q?")
+        for cid, ts in (("cl_old", "2026-10-01"), ("cl_new", "2026-10-02")):
+            insert("checklists", id=cid, question_id="q1", is_default=1, created_at=ts)
+        conn.commit()
+    finally:
+        conn.close()
+
+    alembic("upgrade", "head")
+
+    conn = sqlite3.connect(db)
+    try:
+        names = dict(conn.execute("SELECT id, name FROM interviewer_personas").fetchall())
+        assert names["p1"] == "interview02"  # the older one keeps its name
+        assert names["p2"] == "Interview02 (2)"
+        status = dict(conn.execute("SELECT id, status FROM interview_sessions").fetchall())
+        assert status == {"new": "in_progress", "old": "abandoned"}
+        default = dict(conn.execute("SELECT id, is_default FROM checklists").fetchall())
+        assert default == {"cl_new": 1, "cl_old": 0}
+    finally:
+        conn.close()
