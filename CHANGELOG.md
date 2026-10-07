@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.48.2.0 (2026-10-07)
+
+### Changed
+- **The app uses a wide screen's width.** On a ~2000px monitor the pages sat in a fixed 1320px
+  column with 340px of empty margin on each side. The content width now grows with the screen,
+  from 1320px on a laptop (unchanged, so a 1440px screen looks exactly as before) up to 1840px.
+- **Sign-in on a tall screen.** The interviewer's portrait no longer falls to the bottom of the
+  screen, far below the headline; the headline, portrait and form card scale up on a wide monitor.
+- **The report is no longer a narrow strip.** It moved from the 760px reading column to the wide
+  layout: each question's scored items sit side by side in two columns (one on a narrow screen),
+  and the summary's narrative keeps a readable line length.
+
+### Tests
+- The README screenshot freshness check accepts a recapture that came out identical to the
+  committed image (recorded with its hash in `docs/images/captures.json`), instead of requiring a
+  correct picture to be altered before it counts as current.
+
 ## 0.48.1.0 (2026-10-06)
 
 ### Fixed

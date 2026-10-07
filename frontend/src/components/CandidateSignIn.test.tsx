@@ -40,15 +40,35 @@ describe("CandidateSignIn composition", () => {
     expect(cs.gridTemplateColumns).toBe("58fr 42fr");
   });
 
+  it("caps the composition's height, so a tall monitor does not drop the portrait to the bottom", () => {
+    // The portrait sits at the foot of the editorial column; with the column tied to the full
+    // viewport height it fell ~700px below the headline on a 1470px-tall screen.
+    renderSignIn();
+    expect(getComputedStyle(screen.getByTestId("candidate-signin-split")).minHeight).toBe(
+      "min(calc(100vh - 64px), 980px)",
+    );
+  });
+
+  it("grows the portrait only on a screen that is both wide and tall", () => {
+    // Growing with width alone overflowed a short wide screen (1920x800: 140px of scroll, the
+    // portrait below the fold, measured in a browser). Height bounds the growth too.
+    renderSignIn();
+    const width = getComputedStyle(screen.getByTestId("candidate-signin-split").querySelector("figure")!).width;
+    for (const term of ["310px", "21vw", "100vh - 900px", "420px"]) expect(width).toContain(term);
+  });
+
   it("sets the tagline as a DISPLAY headline, not a caption", () => {
     // It shipped as a 12px grey line in the header band. The approved direction promotes it to the
     // page's visual hero, so the assertion is on the rendered size, not just the text.
     renderSignIn();
     const headline = screen.getByTestId("signin-headline");
     expect(headline.tagName).toBe("H2");
-    // clamp(32px, 4.4vw, 62px) — jsdom resolves clamp() to its stated value, so assert the floor
-    // is a display size rather than body copy.
-    expect(getComputedStyle(headline).fontSize).toContain("clamp(32px");
+    // The formula: a 32px floor, the approved 4.4vw slope and 62px ceiling up to 1440px, then a
+    // ceiling that grows to 84px. jsdom re-serialises nested clamp() into a mangled string, so
+    // assert its terms rather than its spelling (a real browser at 1440px renders it pixel-identical
+    // to the approved screenshot, checked when this was written).
+    const size = getComputedStyle(headline).fontSize;
+    for (const term of ["32px", "4.4vw", "62px", "84px", "1440px", "900px"]) expect(size).toContain(term);
     // All three clauses of the tagline are present and in order.
     expect(headline).toHaveTextContent(/SOP-traceable,\s*digital-human\s*interviewing/);
   });

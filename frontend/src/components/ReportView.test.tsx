@@ -219,6 +219,26 @@ describe("ReportView", () => {
  * so these assert that claim is on screen with real weight, not that the colours are right.
  */
 describe("ReportView composition", () => {
+  it("lays a question's scored items out in as many 620px columns as the width allows", () => {
+    // Two columns on a laptop, two wider ones on a big monitor, one on a narrow screen: a single
+    // column on a wide screen read as one long strip (owner, 2026-10-07).
+    renderReport(SCORED);
+    const list = screen.getAllByTestId("report-item")[0].parentElement as HTMLElement;
+    const cs = getComputedStyle(list);
+    expect(cs.display).toBe("grid");
+    expect(cs.gridTemplateColumns).toBe("repeat(auto-fill, minmax(min(100%, 620px), 1fr))");
+  });
+
+  it("spans a question-level note across the whole row, not one card's cell", () => {
+    renderReport({
+      ...SCORED,
+      per_question: [{ question_id: "q9", prompt: "Unscored?", scoring_failed: true, items: [] }],
+    });
+    expect(getComputedStyle(screen.getByTestId("question-not-scored")).gridColumn).toMatch(
+      /^1\s*\/\s*-1$/,
+    );
+  });
+
   it("sets the overall rating as display type, not a 12px chip", () => {
     // The base fixture carries no classification outcome, so this one supplies it: the rating is
     // the single thing a reader takes away from the report, and a tint badge was not carrying it.

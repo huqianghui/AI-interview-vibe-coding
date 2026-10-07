@@ -16,6 +16,7 @@ import { InterviewPage } from "./InterviewPage";
 import { collectVoiceAnswer } from "./interviewVoiceAnswer";
 import * as client from "../api/client";
 import * as auth from "../api/auth";
+import { layout } from "../theme";
 import type { TranscriptSegment } from "../types/voice";
 
 function seg(id: string, content: string, role: "user" | "assistant", isFinal: boolean): TranscriptSegment {
@@ -131,6 +132,8 @@ describe("InterviewPage", () => {
     // scoring only starts on an explicit submit. Assert we land on review with getReport NOT called.
     await waitFor(() => expect(screen.getByTestId("review")).toBeInTheDocument());
     expect(screen.getByTestId("review-answer")).toHaveTextContent("a sufficiently long answer");
+    // Review is prose: it keeps the reading measure.
+    expect(getComputedStyle(screen.getByRole("main")).maxWidth).toBe(layout.readingWidth);
     expect(getReportSpy).not.toHaveBeenCalled();
 
     // Explicit "Submit & evaluate" → scoring → report-ready reveal. The SOP coverage check
@@ -146,6 +149,9 @@ describe("InterviewPage", () => {
       expect.any(Function),
     );
     expect(screen.getByText(/met/)).toBeInTheDocument();
+    // The report is cards, not prose: it takes the wide measure, which grows with the screen
+    // (owner, 2026-10-07: a 760px column read as one long strip on a wide monitor).
+    expect(getComputedStyle(screen.getByRole("main")).maxWidth).toBe(layout.contentWidth);
   });
 
   it("gives the SOP coverage audit its own progress line instead of a frozen 'N of N scored'", async () => {

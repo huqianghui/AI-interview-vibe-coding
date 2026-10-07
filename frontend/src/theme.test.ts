@@ -64,16 +64,21 @@ describe("theme contracts", () => {
     // AppShell interpolates these straight into makeStyles. `undefined` would not throw; it would
     // silently produce `max-width: undefined`, which the browser ignores — so the page would go
     // full-bleed and look like the width bug this refresh exists to fix.
+    const length = String.raw`\d+(\.\d+)?(px|rem|em|%|vw)`;
     for (const v of [
-      layout.contentWidth,
       layout.readingWidth,
       layout.narrowWidth,
       layout.gutter,
       layout.gutterNarrow,
       layout.stackBelow,
     ]) {
-      expect(v).toMatch(/^\d+(\.\d+)?(px|rem|em|%)$/);
+      expect(v).toMatch(new RegExp(`^${length}$`));
     }
+    // The wide measure is fluid, so it must be a well-formed clamp(min, preferred, max) of real
+    // lengths, with a pixel floor no smaller than the old fixed 1320px (the laptop layout).
+    const clamp = layout.contentWidth.match(new RegExp(`^clamp\\((${length}), (${length}), (${length})\\)$`));
+    expect(clamp, layout.contentWidth).not.toBeNull();
+    expect(layout.contentWidth.startsWith("clamp(1320px,")).toBe(true);
   });
 
   it("keeps global.css in agreement with the palette it duplicates", () => {

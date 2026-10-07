@@ -15,34 +15,12 @@
  * does make "the screen changed and the picture did not" impossible to merge silently.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { DEPICTS, sha256, sourcesFingerprint, type CaptureEntry } from "./readmeScreenshots";
 
 const REPO = resolve(__dirname, "..", "..");
-
-/** Screenshot → the source files whose appearance it is supposed to show. */
-const DEPICTS: Record<string, string[]> = {
-  "00-signin.png": ["frontend/src/components/CandidateSignIn.tsx"],
-  "01-landing.png": ["frontend/src/components/CandidateIdle.tsx"],
-  "01b-orientation.png": ["frontend/src/components/CandidateOrientation.tsx"],
-  // The interviewing screen: the page lays out the stage; the question card + answer controls, the
-  // status legend, the channel switch and their styles live in pages/interview/.
-  "02-interview-question.png": [
-    "frontend/src/pages/InterviewPage.tsx",
-    "frontend/src/pages/interview/AnswerCard.tsx",
-    "frontend/src/pages/interview/StatusLegend.tsx",
-    "frontend/src/pages/interview/ChannelSwitch.tsx",
-    "frontend/src/pages/interview/styles.ts",
-    "frontend/src/components/Transcript.tsx",
-  ],
-  "04-review-before-scoring.png": ["frontend/src/components/ReviewView.tsx"],
-  "05-report-executive.png": ["frontend/src/components/ReportView.tsx"],
-  "06-report-detail.png": ["frontend/src/components/ReportView.tsx"],
-  // Shared by every screen: the design language and the page shell. A change here restyles all of
-  // them at once, which is exactly what went unnoticed for five weeks.
-  "*": ["frontend/src/theme.ts", "frontend/src/styles/global.css", "frontend/src/components/AppShell.tsx"],
-};
 
 /** Unix timestamp of the last commit touching `path`, or 0 when git knows nothing about it. */
 function lastCommit(path: string): number {
@@ -57,6 +35,25 @@ function lastCommit(path: string): number {
   }
 }
 
+const LEDGER = "docs/images/captures.json";
+
+function readLedger(): Record<string, CaptureEntry> {
+  const path = resolve(REPO, LEDGER);
+  return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
+}
+
+/**
+ * Whether `image` is vouched for by an identical recapture: its ledger entry matches the image's
+ * bytes AND the current content of every source it depicts. Checked by content, not time: a squash
+ * merge rewrites commit times, so a time-based proof passes on the PR and fails on main.
+ */
+function recapturedFromCurrentSources(image: string): boolean {
+  const entry = readLedger()[image];
+  const imagePath = resolve(REPO, `docs/images/${image}`);
+  if (!entry || !existsSync(imagePath)) return false;
+  return entry.sha256 === sha256(readFileSync(imagePath)) && entry.sources === sourcesFingerprint(REPO, image);
+}
+
 describe("README screenshot freshness", () => {
   const shared = DEPICTS["*"];
 
@@ -69,6 +66,8 @@ describe("README screenshot freshness", () => {
         true,
       );
 
+      // An identical recapture from the current sources is current, whatever the commit times say.
+      if (recapturedFromCurrentSources(image)) return;
       const shotAt = lastCommit(imagePath);
       expect(shotAt, `${imagePath} has no commit history`).toBeGreaterThan(0);
 
@@ -97,5 +96,26 @@ describe("README screenshot freshness", () => {
     const EXEMPT = new Set(["09-live-avatar-voice.png", "07-admin-rubric-editor.png", "08-admin-agent-editor.png"]);
     const unmapped = [...new Set(referenced)].filter((f) => !mapped.has(f) && !EXEMPT.has(f));
     expect(unmapped, `add these to DEPICTS or EXEMPT: ${unmapped.join(", ")}`).toEqual([]);
+  });
+});
+
+describe("the capture ledger", () => {
+  it("vouches only for the exact bytes it recorded", () => {
+    for (const [image, entry] of Object.entries(readLedger())) {
+      const path = resolve(REPO, `docs/images/${image}`);
+      if (!existsSync(path)) continue; // a removed screenshot simply has nothing to vouch for
+      expect(sha256(readFileSync(path)), `${image} changed after its capture was recorded`).toBe(
+        entry.sha256,
+      );
+    }
+  });
+
+  it("fingerprints sources by content, so a source edit invalidates a recorded capture", () => {
+    const image = "00-signin.png";
+    const before = sourcesFingerprint(REPO, image);
+    expect(before).toMatch(/^[0-9a-f]{64}$/);
+    // Same sources, same fingerprint; a different file list (another image), a different one.
+    expect(sourcesFingerprint(REPO, image)).toBe(before);
+    expect(sourcesFingerprint(REPO, "01-landing.png")).not.toBe(before);
   });
 });
