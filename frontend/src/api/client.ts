@@ -550,4 +550,62 @@ export async function fetchSopDocument(
   return URL.createObjectURL(blob);
 }
 
+// ── Interview history (#187) ───────────────────────────────────────────
+
+export type HistoryStatus = "created" | "in_progress" | "completed" | "scored" | "abandoned";
+
+/** One past (or live) interview in a history list. Mirrors `InterviewHistoryItem`. */
+export interface InterviewHistoryItem {
+  id: string;
+  status: HistoryStatus;
+  started_at: string | null;
+  completed_at: string | null;
+  // null on interviews started before #187 (nothing was recorded) or when the row was deleted.
+  persona_name: string | null;
+  bank_name: string | null;
+  // From the last scoring run; null until scored.
+  total_score: number | null;
+  outcome: Outcome | null;
+  has_report: boolean;
+}
+
+/** One turn of an interview's transcript. Mirrors `TranscriptTurn`. */
+export interface TranscriptTurn {
+  turn_index: number;
+  role: "interviewer" | "candidate";
+  turn_kind: "main" | "follow_up";
+  content: string;
+  created_at: string;
+}
+
+/** One interview with its saved report (null until scored) and transcript. Mirrors
+ * `InterviewDetail`. */
+export interface InterviewDetail {
+  item: InterviewHistoryItem;
+  report: Report | null;
+  transcript: TranscriptTurn[];
+  /** Admin read only: an admin-started scoring run is still going. */
+  scoring?: boolean;
+}
+
+/** The signed-in candidate's interviews, newest first, every status. */
+export async function listMyInterviews(): Promise<InterviewHistoryItem[]> {
+  return request<InterviewHistoryItem[]>("/candidate/interviews");
+}
+
+export async function getMyInterview(interviewId: string): Promise<InterviewDetail> {
+  return request<InterviewDetail>(`/candidate/interviews/${interviewId}`);
+}
+
+/** {@link fetchSopDocument} for a report opened from the history: the same citation rule, but an
+ * interview from an earlier login is still the candidate's. */
+export async function fetchMySopDocument(interviewId: string, documentId: string): Promise<string> {
+  const resp = await anonFetch(
+    `/candidate/interviews/${interviewId}/sop/${encodeURIComponent(documentId)}`,
+    {},
+    { json: false },
+  );
+  return URL.createObjectURL(await resp.blob());
+}
+
 export const _internal = { TOKEN_KEY, getToken, setToken };

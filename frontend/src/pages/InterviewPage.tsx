@@ -42,6 +42,7 @@ import { AvatarView } from "../components/AvatarView";
 import { AppShell } from "../components/AppShell";
 import { CandidateSignIn } from "../components/CandidateSignIn";
 import { CandidateIdle } from "../components/CandidateIdle";
+import { MyInterviews } from "../components/MyInterviews";
 import { CandidateOrientation } from "../components/CandidateOrientation";
 import { palette } from "../theme";
 import { QuestionProgress } from "../components/QuestionProgress";
@@ -846,6 +847,7 @@ export function InterviewPage() {
       <>
         <AppShell measure="bare" showTagline={false} actions={candidateActions}>
           <CandidateIdle busy={busy} onStart={onStart} />
+          <MyInterviews />
         </AppShell>
         {errorBanner}
         {micDialog}

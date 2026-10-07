@@ -280,6 +280,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/interviews/{interview_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Interview Detail */
+        get: operations["interview_detail_admin_interviews__interview_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/interviews/{interview_id}/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Report
+         * @description Start scoring a finished interview the candidate never submitted (or re-score one).
+         *
+         *     Scoring takes ~18 s per question, longer than the ingress idle timeout for a whole interview,
+         *     so this does not hold the request open: it starts the same scoring the candidate's submit runs
+         *     in the background and returns 202. The page polls ``GET /{interview_id}`` until the saved
+         *     report appears. 409 while not finished, while a scoring run for it is already going, and for an
+         *     external-brain interview (its provider owns the results; nothing is scored here).
+         */
+        post: operations["generate_report_admin_interviews__interview_id__report_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/interviews/{interview_id}/sop/{document_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Interview Sop
+         * @description A SOP document cited by this interview's report, so the admin's report links open.
+         */
+        get: operations["interview_sop_admin_interviews__interview_id__sop__document_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/personas": {
         parameters: {
             query?: never;
@@ -662,6 +725,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/users/{user_id}/assignment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set Assignment
+         * @description Set the interviewer + bank this user's NEXT interview starts with (#187); null = default.
+         *
+         *     A live interview keeps what it started with. 404 unknown user; 422 an unknown or disabled
+         *     persona/bank (a disabled one would silently fall back to the default at start).
+         */
+        patch: operations["set_assignment_admin_users__user_id__assignment_patch"];
+        trace?: never;
+    };
+    "/admin/users/{user_id}/interviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * User Interviews
+         * @description Every interview this user has started, newest first, every status (#187).
+         */
+        get: operations["user_interviews_admin_users__user_id__interviews_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/login": {
         parameters: {
             query?: never;
@@ -991,6 +1097,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/candidate/interviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My Interviews
+         * @description The caller's interviews, newest first, every status.
+         */
+        get: operations["my_interviews_candidate_interviews_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/candidate/interviews/{interview_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My Interview
+         * @description One of the caller's interviews with its saved report and transcript (404 when not theirs).
+         */
+        get: operations["my_interview_candidate_interviews__interview_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/candidate/interviews/{interview_id}/sop/{document_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My Interview Sop
+         * @description A SOP document cited by one of the caller's past reports (the live-report rule, user-scoped:
+         *     an interview from an earlier login's session is still theirs).
+         */
+        get: operations["my_interview_sop_candidate_interviews__interview_id__sop__document_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -1064,6 +1231,10 @@ export interface components {
          *     required" instead of a wrong password. Both are null/False for self-set (admin) passwords.
          */
         AdminUserResponse: {
+            /** Assigned Bank Id */
+            assigned_bank_id?: string | null;
+            /** Assigned Persona Id */
+            assigned_persona_id?: string | null;
             /** Business Unit */
             business_unit: string;
             /** Email */
@@ -1196,6 +1367,16 @@ export interface components {
             prompt: string;
             /** Question Id */
             question_id: string;
+        };
+        /**
+         * AssignmentIn
+         * @description A user's interviewer + bank; null = use the global default.
+         */
+        AssignmentIn: {
+            /** Bank Id */
+            bank_id?: string | null;
+            /** Persona Id */
+            persona_id?: string | null;
         };
         /** BankIn */
         BankIn: {
@@ -1368,6 +1549,42 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** InterviewDetail */
+        InterviewDetail: {
+            item: components["schemas"]["InterviewHistoryItem"];
+            /** Report */
+            report: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Scoring
+             * @default false
+             */
+            scoring: boolean;
+            /** Transcript */
+            transcript: components["schemas"]["TranscriptTurn"][];
+        };
+        /** InterviewHistoryItem */
+        InterviewHistoryItem: {
+            /** Bank Name */
+            bank_name: string | null;
+            /** Completed At */
+            completed_at: string | null;
+            /** Has Report */
+            has_report: boolean;
+            /** Id */
+            id: string;
+            /** Outcome */
+            outcome: string | null;
+            /** Persona Name */
+            persona_name: string | null;
+            /** Started At */
+            started_at: string | null;
+            /** Status */
+            status: string;
+            /** Total Score */
+            total_score: number | null;
         };
         /** InterviewOut */
         InterviewOut: {
@@ -1937,6 +2154,22 @@ export interface components {
              */
             token_type: string;
         };
+        /** TranscriptTurn */
+        TranscriptTurn: {
+            /** Content */
+            content: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Role */
+            role: string;
+            /** Turn Index */
+            turn_index: number;
+            /** Turn Kind */
+            turn_kind: string;
+        };
         /**
          * UserResponse
          * @description Public profile of the current user (`GET /auth/me`).
@@ -2322,6 +2555,102 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConnectionTestResult"];
+                };
+            };
+        };
+    };
+    interview_detail_admin_interviews__interview_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                interview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InterviewDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_report_admin_interviews__interview_id__report_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                interview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    interview_sop_admin_interviews__interview_id__sop__document_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                interview_id: string;
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -3122,6 +3451,72 @@ export interface operations {
             };
         };
     };
+    set_assignment_admin_users__user_id__assignment_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssignmentIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    user_interviews_admin_users__user_id__interviews_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InterviewHistoryItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     login_auth_login_post: {
         parameters: {
             query?: never;
@@ -3557,6 +3952,104 @@ export interface operations {
         };
     };
     sop_document_candidate_interview__interview_id__sop__document_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Anon-Session"?: string | null;
+            };
+            path: {
+                interview_id: string;
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    my_interviews_candidate_interviews_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Anon-Session"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InterviewHistoryItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    my_interview_candidate_interviews__interview_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Anon-Session"?: string | null;
+            };
+            path: {
+                interview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InterviewDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    my_interview_sop_candidate_interviews__interview_id__sop__document_id__get: {
         parameters: {
             query?: never;
             header?: {

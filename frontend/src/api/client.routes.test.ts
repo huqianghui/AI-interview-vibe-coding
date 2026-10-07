@@ -68,6 +68,15 @@ const ROUTES: Array<[string, Call, string, string, unknown]> = [
     { sop_coverage_check: true },
   ],
   ["getReview", () => client.getReview("iv1"), "GET", "/api/candidate/interview/iv1/review", undefined],
+  ["listMyInterviews", () => client.listMyInterviews(), "GET", "/api/candidate/interviews", undefined],
+  ["getMyInterview", () => client.getMyInterview("iv1"), "GET", "/api/candidate/interviews/iv1", undefined],
+  [
+    "fetchMySopDocument",
+    () => client.fetchMySopDocument("iv1", "doc/1"),
+    "GET",
+    "/api/candidate/interviews/iv1/sop/doc%2F1",
+    undefined,
+  ],
 ];
 
 function okJson(body: unknown) {
@@ -78,6 +87,8 @@ describe("candidate route wrappers", () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem(TOKEN_KEY, "anon-1");
+    // The SOP-document wrapper returns a blob URL; jsdom has no createObjectURL.
+    Object.assign(URL, { createObjectURL: vi.fn().mockReturnValue("blob:x") });
   });
   afterEach(() => vi.unstubAllGlobals());
 

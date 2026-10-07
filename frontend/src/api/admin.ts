@@ -3,7 +3,8 @@
  * (`api/auth.ts`), never the anonymous candidate session, so this module attaches only that bearer.
  */
 import { getAdminToken } from "./auth";
-import { HttpError, requestJson } from "./http";
+import type { InterviewDetail, InterviewHistoryItem } from "./client";
+import { apiFetch, HttpError, requestJson } from "./http";
 
 /** A failed admin call: the shared {@link HttpError} (status + the server's detail). */
 export const AdminApiError = HttpError;
@@ -259,6 +260,47 @@ export interface AdminUser {
   // True when the backend's signing key has rotated since this password was generated — the
   // account needs a fresh password before it can be handed out again.
   password_stale: boolean;
+  // #187: the interviewer + bank this user's next interview starts with; null = the default.
+  assigned_persona_id: string | null;
+  assigned_bank_id: string | null;
 }
 
 export const listUsers = () => adminRequest<AdminUser[]>("/admin/users");
+
+// ── Assignment + interview history (#187) ──────────────────────────────
+
+export interface Assignment {
+  persona_id: string | null;
+  bank_id: string | null;
+}
+
+export const setUserAssignment = (userId: string, assignment: Assignment) =>
+  adminRequest<AdminUser>(`/admin/users/${userId}/assignment`, {
+    method: "PATCH",
+    body: JSON.stringify(assignment),
+  });
+
+export const listUserInterviews = (userId: string) =>
+  adminRequest<InterviewHistoryItem[]>(`/admin/users/${userId}/interviews`);
+
+export const getInterview = (interviewId: string) =>
+  adminRequest<InterviewDetail>(`/admin/interviews/${interviewId}`);
+
+/** Start scoring a finished interview the candidate never submitted. Scoring runs in the
+ * background (it outlasts one request); poll {@link getInterview} until the report is saved. */
+export const generateInterviewReport = (interviewId: string) =>
+  adminRequest<{ status: string }>(`/admin/interviews/${interviewId}/report`, { method: "POST" });
+
+/** A SOP document cited by an interview's report, as a blob URL (the caller revokes it). */
+export async function fetchInterviewSopDocument(
+  interviewId: string,
+  documentId: string,
+): Promise<string> {
+  const resp = await apiFetch(
+    `/admin/interviews/${interviewId}/sop/${encodeURIComponent(documentId)}`,
+    {},
+    { bearer: getAdminToken() },
+    { json: false },
+  );
+  return URL.createObjectURL(await resp.blob());
+}
