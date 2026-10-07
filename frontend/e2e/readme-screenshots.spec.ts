@@ -1,7 +1,8 @@
-import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { test, expect, request as pwRequest } from "@playwright/test";
 import { primeCandidateLogin } from "./helpers/candidateLogin";
+import { DEPICTS, sha256, sourcesFingerprint, type CaptureEntry } from "../src/readmeScreenshots";
 
 /**
  * README screenshot capture (opt-in, NOT a test of behavior).
@@ -25,19 +26,24 @@ const OUT = "../docs/images";
 const LEDGER = `${OUT}/captures.json`;
 
 /**
- * Record that `name` was just captured: its sha256 and the time. A recapture that produces the SAME
- * bytes (the screen did not change) leaves git nothing to commit for the image, so its last commit
- * stays older than the source change that prompted the recapture, and the freshness test could
- * never pass short of altering the picture. The ledger is what changes instead, and the freshness
- * test accepts it only for an entry whose hash matches the committed image byte for byte.
+ * Record that `name` was just captured: its sha256 and the content fingerprint of the sources it
+ * depicts (src/readmeScreenshots.ts). A recapture that produces the SAME bytes (the screen did not
+ * change) leaves git nothing to commit for the image, and the freshness test would then demand a
+ * correct picture be altered. The ledger says instead "these bytes were taken from these sources",
+ * which the test checks by content, so it survives the squash merge that rewrites commit times.
+ * Only images in the freshness map are recorded.
  */
 function recordCapture(name: string): void {
-  const ledger: Record<string, { sha256: string; capturedAt: string }> = existsSync(LEDGER)
+  if (!(name in DEPICTS)) return;
+  const ledger: Record<string, CaptureEntry> = existsSync(LEDGER)
     ? JSON.parse(readFileSync(LEDGER, "utf8"))
     : {};
-  const sha256 = createHash("sha256").update(readFileSync(`${OUT}/${name}`)).digest("hex");
-  ledger[name] = { sha256, capturedAt: new Date().toISOString() };
-  const sorted = Object.fromEntries(Object.entries(ledger).sort(([a], [b]) => a.localeCompare(b)));
+  ledger[name] = {
+    sha256: sha256(readFileSync(`${OUT}/${name}`)),
+    sources: sourcesFingerprint(resolve(OUT, "..", ".."), name),
+    capturedAt: new Date().toISOString(),
+  };
+  const sorted = Object.fromEntries(Object.entries(ledger).sort(([x], [y]) => x.localeCompare(y)));
   writeFileSync(LEDGER, `${JSON.stringify(sorted, null, 2)}\n`);
 }
 const ADMIN_USER = "admin";
