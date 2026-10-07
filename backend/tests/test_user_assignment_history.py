@@ -239,8 +239,11 @@ async def test_scoring_saves_the_report_for_the_history(client, db_session, admi
     assert mine["report"]["total_score"] == report["total_score"]
     assert [t["role"] for t in mine["transcript"]][:2] == ["interviewer", "candidate"]
 
-    listed = (await client.get(f"/admin/users/{user.id}/interviews", headers=admin_auth)).json()
-    assert [i["id"] for i in listed] == [interview_id]
+    listed = (
+        await client.get("/admin/interviews", headers=admin_auth, params={"user_id": user.id})
+    ).json()
+    assert [i["id"] for i in listed["items"]] == [interview_id]
+    assert listed["items"][0]["username"] == user.username
     admin_view = (await client.get(f"/admin/interviews/{interview_id}", headers=admin_auth)).json()
     assert admin_view["report"] == mine["report"]
 
@@ -329,15 +332,12 @@ async def test_a_rescore_that_grades_nothing_keeps_the_saved_report(
 async def test_admin_history_routes_are_admin_only(client, db_session):
     user = await _user(db_session)
     bearer = {"Authorization": f"Bearer {create_access_token(data={'sub': user.id})}"}
-    assert (
-        await client.get(f"/admin/users/{user.id}/interviews", headers=bearer)
-    ).status_code == 403
+    assert (await client.get("/admin/interviews", headers=bearer)).status_code == 403
     assert (await client.get("/admin/interviews/x", headers=bearer)).status_code == 403
     assert (await client.post("/admin/interviews/x/report", headers=bearer)).status_code == 403
 
 
 async def test_admin_history_404s(client, admin_auth):
-    assert (await client.get("/admin/users/nope/interviews", headers=admin_auth)).status_code == 404
     assert (await client.get("/admin/interviews/nope", headers=admin_auth)).status_code == 404
     assert (
         await client.post("/admin/interviews/nope/report", headers=admin_auth)

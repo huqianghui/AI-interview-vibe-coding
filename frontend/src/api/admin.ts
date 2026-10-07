@@ -3,7 +3,7 @@
  * (`api/auth.ts`), never the anonymous candidate session, so this module attaches only that bearer.
  */
 import { getAdminToken } from "./auth";
-import type { InterviewDetail, InterviewHistoryItem } from "./client";
+import type { HistoryStatus, InterviewDetail, InterviewHistoryItem } from "./client";
 import { apiFetch, HttpError, requestJson } from "./http";
 
 /** A failed admin call: the shared {@link HttpError} (status + the server's detail). */
@@ -280,8 +280,54 @@ export const setUserAssignment = (userId: string, assignment: Assignment) =>
     body: JSON.stringify(assignment),
   });
 
-export const listUserInterviews = (userId: string) =>
-  adminRequest<InterviewHistoryItem[]>(`/admin/users/${userId}/interviews`);
+/** One row of the admin "Interview results" table. Mirrors `InterviewResultItem`. */
+export interface InterviewResultItem extends InterviewHistoryItem {
+  user_id: string | null; // null = an anonymous (not signed-in) candidate
+  username: string | null;
+  persona_id: string | null;
+  bank_id: string | null;
+}
+
+/** One page of results. `total` counts every match, for the pager. Mirrors `InterviewResultsPage`. */
+export interface InterviewResultsPage {
+  items: InterviewResultItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** Every filter the results table offers; an empty value means "any". */
+export interface InterviewResultFilters {
+  user_id?: string;
+  status?: HistoryStatus[];
+  persona_id?: string;
+  bank_id?: string;
+  started_from?: string; // YYYY-MM-DD, inclusive
+  started_to?: string; // YYYY-MM-DD, inclusive
+  outcome?: string;
+  score_min?: number;
+  score_max?: number;
+}
+
+export interface InterviewResultsQuery extends InterviewResultFilters {
+  sort?: "started_at" | "total_score";
+  order?: "asc" | "desc";
+  limit?: number;
+  offset?: number;
+}
+
+/** Every candidate's interviews, filtered, sorted and paged server-side. */
+export function listInterviewResults(query: InterviewResultsQuery = {}) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null || value === "") continue;
+    if (Array.isArray(value)) value.forEach((v) => params.append(key, String(v)));
+    else params.set(key, String(value));
+  }
+  // Always "?…" (an empty query is just "/admin/interviews?"): one literal path keeps the static
+  // route check (backend tests/test_frontend_api_contract.py) able to read it.
+  return adminRequest<InterviewResultsPage>(`/admin/interviews?${params.toString()}`);
+}
 
 export const getInterview = (interviewId: string) =>
   adminRequest<InterviewDetail>(`/admin/interviews/${interviewId}`);

@@ -19,6 +19,24 @@ class InterviewHistoryItem(BaseModel):
     has_report: bool
 
 
+class InterviewResultItem(InterviewHistoryItem):
+    """One row of the admin "Interview results" table: a history row plus who and what it was."""
+
+    # Null for an anonymous (not signed-in) candidate.
+    user_id: str | None
+    username: str | None
+    persona_id: str | None
+    bank_id: str | None
+
+
+class InterviewResultsPage(BaseModel):
+    items: list[InterviewResultItem]
+    # Matching rows across all pages (for the pager), not len(items).
+    total: int
+    limit: int
+    offset: int
+
+
 class TranscriptTurn(BaseModel):
     turn_index: int
     role: str

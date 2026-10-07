@@ -9,8 +9,8 @@ from app.db import get_db
 from app.dependencies import require_role
 from app.models.user import User
 from app.schemas.auth import AdminUserResponse
-from app.schemas.history import AssignmentIn, InterviewHistoryItem
-from app.services import interview_history_service, persona_service, question_service, user_service
+from app.schemas.history import AssignmentIn
+from app.services import persona_service, question_service, user_service
 from app.services.auth_service import derive_candidate_password, verify_password
 
 router = APIRouter(
@@ -64,16 +64,6 @@ async def set_assignment(
     await db.commit()
     await db.refresh(user)
     return await _with_derived_password(user)
-
-
-@router.get("/{user_id}/interviews", response_model=list[InterviewHistoryItem])
-async def user_interviews(
-    user_id: str, db: AsyncSession = Depends(get_db)
-) -> list[InterviewHistoryItem]:
-    """Every interview this user has started, newest first, every status (#187)."""
-    if await user_service.get_user(db, user_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    return await interview_history_service.list_for_user(db, user_id)
 
 
 async def _with_derived_password(user: User) -> AdminUserResponse:

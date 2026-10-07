@@ -1,13 +1,12 @@
-"""Admin read of any interview (#187): detail (saved report + transcript), and scoring one.
-
-The per-user list lives on ``/admin/users/{user_id}/interviews``; this router is the single
-interview, whoever it belongs to.
-"""
+"""Admin interview results: every candidate's interviews (filtered, sorted, paged), one
+interview's detail (saved report + transcript), and scoring one (#187)."""
 
 import asyncio
 import logging
+from datetime import date
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,8 +15,9 @@ from app.api.interview import serve_cited_document
 from app.db import get_db, get_session_factory
 from app.dependencies import require_role
 from app.interview import state_machine
-from app.models.interview import InterviewSession
-from app.schemas.history import InterviewDetail
+from app.interview.scoring_engine import OUTCOMES
+from app.models.interview import INTERVIEW_STATUSES, InterviewSession
+from app.schemas.history import InterviewDetail, InterviewResultsPage
 from app.services import interview_history_service
 
 logger = logging.getLogger(__name__)
@@ -32,6 +32,58 @@ router = APIRouter(
     tags=["admin-interviews"],
     dependencies=[Depends(require_role("admin"))],
 )
+
+
+# Every status a session can have (INTERVIEW_STATUSES predates "abandoned", v0.38.3.0).
+_FILTER_STATUSES = (*INTERVIEW_STATUSES, "abandoned")
+
+
+@router.get("", response_model=InterviewResultsPage)
+async def list_results(
+    user_id: str | None = None,
+    status_in: Annotated[list[str] | None, Query(alias="status")] = None,
+    persona_id: str | None = None,
+    bank_id: str | None = None,
+    started_from: date | None = None,
+    started_to: date | None = None,
+    outcome: str | None = None,
+    score_min: Annotated[float | None, Query(ge=0, le=100)] = None,
+    score_max: Annotated[float | None, Query(ge=0, le=100)] = None,
+    sort: Annotated[str, Query(pattern="^(started_at|total_score)$")] = "started_at",
+    order: Annotated[str, Query(pattern="^(asc|desc)$")] = "desc",
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    db: AsyncSession = Depends(get_db),
+) -> InterviewResultsPage:
+    """Every candidate's interviews for the admin results table: filtered, sorted, one page.
+
+    ``status`` may repeat (``?status=scored&status=completed``). 422 on an unknown status or
+    outcome, a reversed date or score range, or a bad sort/order/page parameter.
+    """
+    statuses = tuple(status_in or ())
+    bad = [s for s in statuses if s not in _FILTER_STATUSES]
+    if bad:
+        raise HTTPException(status_code=422, detail=f"Unknown status: {', '.join(bad)}")
+    if outcome is not None and outcome not in OUTCOMES:
+        raise HTTPException(status_code=422, detail=f"Unknown outcome: {outcome}")
+    if started_from and started_to and started_from > started_to:
+        raise HTTPException(status_code=422, detail="started_from is after started_to")
+    if score_min is not None and score_max is not None and score_min > score_max:
+        raise HTTPException(status_code=422, detail="score_min is above score_max")
+    filters = interview_history_service.ResultFilters(
+        user_id=user_id,
+        statuses=statuses,
+        persona_id=persona_id,
+        bank_id=bank_id,
+        started_from=started_from,
+        started_to=started_to,
+        outcome=outcome,
+        score_min=score_min,
+        score_max=score_max,
+    )
+    return await interview_history_service.search_results(
+        db, filters, sort=sort, descending=order == "desc", limit=limit, offset=offset
+    )
 
 
 @router.get("/{interview_id}", response_model=InterviewDetail)

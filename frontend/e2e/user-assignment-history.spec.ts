@@ -80,7 +80,7 @@ test("an assigned bank drives the interview, which then appears in both historie
     await expect(page.getByTestId("history-transcript")).toContainText(answer);
     await expect(page.getByTestId("report-exec")).toBeVisible();
 
-    // --- Admin: the same interview, opened from user3's row in the Users tab ---
+    // --- Admin: the assignment shows in the Users tab ---
     await page.setViewportSize({ width: 2000, height: 1200 });
     await page.goto("/admin");
     await page.getByTestId("admin-username-input").fill(ADMIN_USER);
@@ -89,18 +89,22 @@ test("an assigned bank drives the interview, which then appears in both historie
     await page.getByTestId("admin-tab-users").click();
     await expect(page.getByTestId(`user-assign-bank-${CANDIDATE}`)).toHaveValue(bank.bank_id);
     await expect(page.getByTestId(`user-assign-persona-${CANDIDATE}`)).toHaveValue(persona.id);
-    await page.getByTestId(`user-interviews-${CANDIDATE}`).click();
-    const adminRow = page
-      .getByTestId(`user-history-table-${CANDIDATE}`)
-      .locator('[data-testid^="history-row-"]')
-      .filter({ hasText: bankName })
-      .first();
+
+    // --- Admin: the same interview in the "Interview results" tab, filtered to user3's bank ---
+    await page.getByTestId("admin-tab-results").click();
+    await page.getByTestId("results-filter-bank").selectOption(bank.bank_id);
+    await page.getByTestId("results-filter-status-scored").click();
+    const adminRow = page.locator('[data-testid^="results-row-"]').filter({ hasText: bankName }).first();
+    await expect(adminRow).toContainText(CANDIDATE);
+    await expect(adminRow).toContainText(persona.name);
     await expect(adminRow).toContainText(/已评分|Scored/);
+    await expect(page.getByTestId("results-pager")).toContainText(/1–1 of 1|第 1–1 条，共 1 条/);
     await page.screenshot({ path: "e2e/output/user-history-list-2000.png", fullPage: true });
-    await adminRow.getByRole("button").click();
-    await expect(page.getByTestId("report-exec")).toBeVisible();
+    await adminRow.click();
+    await expect(page.getByTestId("results-drawer").getByTestId("report-exec")).toBeVisible();
     await expect(page.getByTestId("history-transcript")).toContainText(question);
     await expect(page.getByTestId("history-transcript")).toContainText(answer);
+    await page.waitForTimeout(800); // let the drawer finish sliding in before the screenshot
     await page.screenshot({ path: "e2e/output/user-history-detail-2000.png", fullPage: true });
 
     // The transcript downloads as a text file.
