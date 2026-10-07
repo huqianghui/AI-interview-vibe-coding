@@ -18,7 +18,7 @@ pure DB + CI-covered. The API layer schedules the coverage-omitted Azure adapter
 
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,7 +35,24 @@ class PersonaNotFound(PersonaError):
 
 
 class PersonaConflict(PersonaError):
-    """Raised when an operation would violate the one-enabled-default invariant."""
+    """Raised when an operation would violate the one-enabled-default invariant, or reuse a name."""
+
+
+async def _ensure_name_free(db: AsyncSession, name: str, *, exclude_id: str | None) -> None:
+    """Refuse a name another persona already has (trimmed, case-insensitive).
+
+    Two personas with one name are indistinguishable in every picker (editor, Users-tab assignment).
+    It happened on the live deployment from a double-clicked Save: create also creates the Foundry
+    agent, so it takes seconds, and the second click created a second identical persona.
+    """
+    wanted = name.strip().lower()
+    stmt = select(InterviewerPersona.id).where(
+        func.lower(func.trim(InterviewerPersona.name)) == wanted
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(InterviewerPersona.id != exclude_id)
+    if (await db.execute(stmt.limit(1))).first() is not None:
+        raise PersonaConflict(f"An interviewer named {name.strip()!r} already exists")
 
 
 async def create_persona(
@@ -59,6 +76,7 @@ async def create_persona(
     force (agent sync, Playground, and the judge's persona/tone section) — there is no hidden
     fallback any more.
     """
+    await _ensure_name_free(db, name, exclude_id=None)
     # ``external_reader_prompt`` is persisted as-is (NOT coerced None→""): NULL is the "use the
     # generated default" sentinel, and it is independent of ``prompt_fragment`` — see the model.
     if not (prompt_fragment or "").strip():
@@ -144,6 +162,12 @@ async def update_persona(
       but leaves the system with no default — the caller decides whether that's acceptable.
     """
     persona = await get_persona(db, persona_id)
+    # Only a RENAME is checked. The editor sends the name on every save, and a pair that already
+    # shares a name (the live duplicate this guard was written for) must stay editable, or neither
+    # twin could be fixed or renamed out of the clash.
+    new_name = changes.get("name")
+    if new_name is not None and str(new_name).strip().lower() != persona.name.strip().lower():
+        await _ensure_name_free(db, str(new_name), exclude_id=persona.id)
 
     becomes_default = bool(changes.get("is_default", persona.is_default))
     becomes_enabled = bool(changes.get("enabled", persona.enabled))
