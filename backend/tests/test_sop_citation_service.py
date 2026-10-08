@@ -578,7 +578,7 @@ async def test_a_question_the_library_does_not_cover_cites_nothing(db_session):
     assert row["how"] == "off_topic"
 
 
-async def test_a_bank_mostly_about_another_subject_cites_none_of_its_unlabelled_questions(
+async def test_a_bank_about_another_subject_cites_none_of_its_unlabelled_questions(
     db_session,
 ):
     await _corpus(db_session)
@@ -605,12 +605,15 @@ async def test_a_bank_mostly_about_another_subject_cites_none_of_its_unlabelled_
             ).id
         )
 
+    asked: list[str] = []
+
     class OneOfThree(ScriptedJudgeAdapter):
         name = "scripted"
 
         async def complete(self, prompt, *, json_mode=False, fast=False):
             if sop_citation_service.TOPIC_PROMPT_MARKER in prompt:
-                return json.dumps({"about": "pre-deploy" in prompt})
+                asked.append(prompt)
+                return json.dumps({"about": False})
             return json.dumps(
                 {"cite": ["C1"], "quote": "Every widget is inspected before it is packed."}
             )
@@ -622,7 +625,11 @@ async def test_a_bank_mostly_about_another_subject_cites_none_of_its_unlabelled_
     db_session.expire_all()
     for checklist_id in lists:
         (item,) = await checklist_service.list_items(db_session, checklist_id)
-        assert item.source_refs == "[]"  # even the one judged on-topic: the bank is not
+        assert item.source_refs == "[]"
+    # One decision for the whole bank: every question listed, beside the library.
+    (prompt,) = asked
+    assert all(q in prompt for q in ("pre-deploy checks", "A deploy fails.", "Rollback?"))
+    assert "- Widget Release Procedure.pdf" in prompt.split("SOP LIBRARY")[1]
 
 
 async def test_an_unanswered_topic_check_is_unknown_and_never_wipes(db_session):
