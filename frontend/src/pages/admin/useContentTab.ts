@@ -87,6 +87,25 @@ export function useContentTab(guard: Guard) {
       }
     });
 
+  // A citation relocation rewrote the draft: refresh the banks' publish state and the open rubric.
+  // Stable (the panel's effect depends on it); reads the open question through a ref.
+  const openQuestion = useRef<string | null>(null);
+  openQuestion.current = selectedQuestion;
+  const reloadAfterRelocate = useCallback(() => {
+    void guard(async () => {
+      await loadBanks();
+      const questionId = openQuestion.current;
+      if (!questionId) return;
+      try {
+        const fresh = await admin.getChecklist(questionId);
+        setChecklist(fresh);
+        setEditItems(fresh.items.map((it) => ({ ...it })));
+      } catch {
+        // none drafted
+      }
+    });
+  }, [guard, loadBanks]);
+
   const setItem = (idx: number, patch: Partial<ChecklistItem>) =>
     setEditItems((items) => items.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
 
@@ -174,6 +193,7 @@ export function useContentTab(guard: Guard) {
     publishResult,
     publishBank,
     publishing,
+    reloadAfterRelocate,
   };
 }
 

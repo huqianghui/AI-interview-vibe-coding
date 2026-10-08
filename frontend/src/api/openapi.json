@@ -640,6 +640,7 @@
                 "items": {
                   "$ref": "#/components/schemas/SourceRefIn"
                 },
+                "maxItems": 8,
                 "type": "array"
               },
               {
@@ -779,6 +780,62 @@
           "items"
         ],
         "title": "ChecklistOut",
+        "type": "object"
+      },
+      "CitationRunOut": {
+        "description": "A \"Relocate SOP citations\" run (spec-sop-section-grounding §4): progress, then each rubric\nitem's old citation beside its new one. The new citations are already in the draft.",
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "done": {
+            "title": "Done",
+            "type": "integer"
+          },
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "done",
+          "total",
+          "error",
+          "created_at",
+          "rows"
+        ],
+        "title": "CitationRunOut",
         "type": "object"
       },
       "ConnectionTestResult": {
@@ -5201,6 +5258,108 @@
           }
         ],
         "summary": "Add Question",
+        "tags": [
+          "admin-questions"
+        ]
+      }
+    },
+    "/admin/question-banks/{bank_id}/relocate-citations": {
+      "get": {
+        "description": "The bank's latest relocation run, or null if it never had one.",
+        "operationId": "latest_relocation_admin_question_banks__bank_id__relocate_citations_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bank_id",
+            "required": true,
+            "schema": {
+              "title": "Bank Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/CitationRunOut"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Latest Relocation Admin Question Banks  Bank Id  Relocate Citations Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Latest Relocation",
+        "tags": [
+          "admin-questions"
+        ]
+      },
+      "post": {
+        "description": "Relocate every SOP citation in the bank's draft rubric, in the background. The results go\ninto the DRAFT; review them and publish (owner, 2026-10-08).",
+        "operationId": "relocate_citations_admin_question_banks__bank_id__relocate_citations_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bank_id",
+            "required": true,
+            "schema": {
+              "title": "Bank Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CitationRunOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Relocate Citations",
         "tags": [
           "admin-questions"
         ]

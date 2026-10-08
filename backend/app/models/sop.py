@@ -90,3 +90,24 @@ class SopSection(TimestampMixin, Base):
     page_start: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     page_end: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     text: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+
+class CitationRun(TimestampMixin, Base):
+    """One "Relocate SOP citations" run over a bank's draft rubric (spec-sop-section-grounding §4).
+
+    The rubric items themselves are the result; this keeps the report an admin reviews before
+    publishing — every item's old citation beside its new one — and the run's progress.
+    """
+
+    __tablename__ = "citation_runs"
+
+    bank_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("question_banks.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # running | done | failed
+    status: Mapped[str] = mapped_column(String(16), default="running", nullable=False)
+    done: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # JSON list of rows: question, item, old citation, new citation, how it was found.
+    report_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    error: Mapped[str] = mapped_column(Text, default="", nullable=False)

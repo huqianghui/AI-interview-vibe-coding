@@ -6,6 +6,7 @@ exposes ``expected_points``; these admin routes DO surface it (it's the intervie
 to the rubric) and are gated by ``require_role("admin")`` (SPEC P3).
 """
 
+import json
 import logging
 from datetime import datetime
 
@@ -13,10 +14,15 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db
+from app.db import get_db, get_session_factory
 from app.dependencies import require_role
 from app.models.user import User
-from app.services import bank_bundle_service, bank_version_service, checklist_service
+from app.services import (
+    bank_bundle_service,
+    bank_version_service,
+    checklist_service,
+    sop_citation_service,
+)
 from app.services import question_service as svc
 from app.services.question_service import (
     QuestionBankConflict,
@@ -271,6 +277,59 @@ async def publish(
         version_no=result.version.version_no if result.version else None,
         problems=[PublishProblemOut(**vars(p)) for p in result.problems],
     )
+
+
+class CitationRunOut(BaseModel):
+    """A "Relocate SOP citations" run (spec-sop-section-grounding §4): progress, then each rubric
+    item's old citation beside its new one. The new citations are already in the draft."""
+
+    run_id: str
+    status: str  # running | done | failed
+    done: int
+    total: int
+    error: str
+    created_at: datetime | None
+    rows: list[dict]
+
+
+def _run_out(run) -> CitationRunOut:
+    return CitationRunOut(
+        run_id=run.id,
+        status=run.status,
+        done=run.done,
+        total=run.total,
+        error=run.error,
+        created_at=run.created_at,
+        rows=json.loads(run.report_json or "[]") if run.status == "done" else [],
+    )
+
+
+@router.post(
+    "/{bank_id}/relocate-citations",
+    response_model=CitationRunOut,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def relocate_citations(
+    bank_id: str,
+    db: AsyncSession = Depends(get_db),
+    session_factory=Depends(get_session_factory),  # noqa: ANN001
+) -> CitationRunOut:
+    """Relocate every SOP citation in the bank's draft rubric, in the background. The results go
+    into the DRAFT; review them and publish (owner, 2026-10-08)."""
+    try:
+        await svc.get_bank(db, bank_id)
+    except QuestionBankNotFound as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bank not found") from exc
+    return _run_out(await sop_citation_service.start_relocation(db, session_factory, bank_id))
+
+
+@router.get("/{bank_id}/relocate-citations", response_model=CitationRunOut | None)
+async def latest_relocation(
+    bank_id: str, db: AsyncSession = Depends(get_db)
+) -> CitationRunOut | None:
+    """The bank's latest relocation run, or null if it never had one."""
+    run = await sop_citation_service.latest_run(db, bank_id)
+    return _run_out(run) if run is not None else None
 
 
 @router.get("/{bank_id}/questions", response_model=list[AdminQuestionOut])

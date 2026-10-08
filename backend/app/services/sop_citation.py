@@ -19,8 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.sop import SopDocument, SopSection
 from app.services import sop_section_service
 
-# The most references one item keeps: a rubric item that "cites" ten sections cites nothing.
-MAX_REFS_PER_ITEM = 5
+# The most references one item keeps (an imported label lists up to 8: "sections 5.1-5.8"); a
+# rubric item that "cites" a dozen sections cites nothing.
+MAX_REFS_PER_ITEM = 8
 
 
 @dataclass(frozen=True)

@@ -16,6 +16,21 @@
   on save.
 - Bank bundles carry the cited sections by document name; bank versions keep them.
 
+### Added
+- **"Relocate SOP citations"** on each bank. For every rubric item in the bank's draft:
+  - Sections an imported label names ("…SOP section 4.2", "sections 5.1-5.8") are cited as named.
+  - A label that names only a document is searched within that document.
+  - Everything else (no label, or the made-up "SOP Handbook") is searched across all SOPs.
+
+  The model picks among the candidate sections and copies one supporting sentence. The sentence
+  is kept only if it appears word for word in the cited section, and an item with no match says
+  "no SOP found". Results go into the draft with an old → new table to review before publishing.
+  Checked on every label in the live banks: each names the right document and section, except
+  "Country Quality Plan", which is not in the SOP library.
+- **AI-drafted rubrics cite our own SOP sections.** Drafting searches the converted sections for
+  the question; a citation is kept only if it names a section the model was shown and quotes it
+  verbatim. It no longer falls back to a built-in placeholder source ("SOP Handbook").
+
 ### Removed
 - The 600-character SOP slice scoring used (`sop_context`).
 

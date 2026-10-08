@@ -484,3 +484,33 @@ export const saveSopSummary = (documentId: string, summary: string, approve: boo
 
 export const redraftSopSummary = (documentId: string) =>
   adminRequest<SopSummary>(`/admin/sop/documents/${documentId}/summary/draft`, { method: "POST" });
+
+// ── Relocating a bank's SOP citations (spec-sop-section-grounding §4) ──────
+// Runs in the background over the bank's DRAFT; each row is one rubric item, old → new.
+
+export interface CitationRunRow {
+  question_no: number;
+  question: string;
+  item: string;
+  old: { document_name: string; quote: string };
+  new: { sections: { document_name: string; section: string; title: string }[]; quote: string };
+  how: "label" | "search" | "none" | "error";
+}
+
+export interface CitationRun {
+  run_id: string;
+  status: "running" | "done" | "failed";
+  done: number;
+  total: number;
+  error: string;
+  created_at: string | null;
+  rows: CitationRunRow[];
+}
+
+export const relocateCitations = (bankId: string) =>
+  adminRequest<CitationRun>(`/admin/question-banks/${bankId}/relocate-citations`, {
+    method: "POST",
+  });
+
+export const getCitationRun = (bankId: string) =>
+  adminRequest<CitationRun | null>(`/admin/question-banks/${bankId}/relocate-citations`);

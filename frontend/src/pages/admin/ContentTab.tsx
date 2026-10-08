@@ -18,6 +18,7 @@ import type { PublishResult } from "../../api/admin";
 import { BoundedIntInput } from "../../components/BoundedIntInput";
 import { KIND_COLOR, KINDS, useAdminStyles, type Guard } from "./shared";
 import { CitationEditor } from "./CitationEditor";
+import { RelocateCitations } from "./RelocateCitations";
 import type { ContentTabState } from "./useContentTab";
 
 /** What the last Publish did: the version it made, that nothing changed, or every reason it was
@@ -175,6 +176,7 @@ export function ContentTab({ state, guard }: { state: ContentTabState; guard: Gu
             }
           />
           {publishResult && <PublishOutcome result={publishResult} />}
+          <RelocateCitations bankId={selectedBank} onDone={state.reloadAfterRelocate} />
           <ul className={styles.list} data-testid="question-list">
             {questions.map((q, i) => (
               <li key={q.question_id} className={styles.row}>

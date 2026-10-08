@@ -710,6 +710,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/question-banks/{bank_id}/relocate-citations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Latest Relocation
+         * @description The bank's latest relocation run, or null if it never had one.
+         */
+        get: operations["latest_relocation_admin_question_banks__bank_id__relocate_citations_get"];
+        put?: never;
+        /**
+         * Relocate Citations
+         * @description Relocate every SOP citation in the bank's draft rubric, in the background. The results go
+         *     into the DRAFT; review them and publish (owner, 2026-10-08).
+         */
+        post: operations["relocate_citations_admin_question_banks__bank_id__relocate_citations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/question-banks/{bank_id}/reorder": {
         parameters: {
             query?: never;
@@ -1722,6 +1747,29 @@ export interface components {
             question_id: string;
             /** Weights Sum */
             weights_sum: number;
+        };
+        /**
+         * CitationRunOut
+         * @description A "Relocate SOP citations" run (spec-sop-section-grounding §4): progress, then each rubric
+         *     item's old citation beside its new one. The new citations are already in the draft.
+         */
+        CitationRunOut: {
+            /** Created At */
+            created_at: string | null;
+            /** Done */
+            done: number;
+            /** Error */
+            error: string;
+            /** Rows */
+            rows: {
+                [key: string]: unknown;
+            }[];
+            /** Run Id */
+            run_id: string;
+            /** Status */
+            status: string;
+            /** Total */
+            total: number;
         };
         /** ConnectionTestResult */
         ConnectionTestResult: {
@@ -3833,6 +3881,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminQuestionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    latest_relocation_admin_question_banks__bank_id__relocate_citations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bank_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CitationRunOut"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    relocate_citations_admin_question_banks__bank_id__relocate_citations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bank_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CitationRunOut"];
                 };
             };
             /** @description Validation Error */
