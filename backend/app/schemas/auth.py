@@ -42,3 +42,6 @@ class AdminUserResponse(UserResponse):
     # #187: the interviewer + bank this user's interviews start with; null = the global default.
     assigned_persona_id: str | None = None
     assigned_bank_id: str | None = None
+    # The version of that bank's rubric the user is scored against (spec-rubric-versioning).
+    assigned_rubric_version_id: str | None = None
+    assigned_rubric_version_no: int | None = None

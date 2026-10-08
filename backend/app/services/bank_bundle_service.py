@@ -29,14 +29,15 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.interview.checklist_draft import ChecklistDraft, DraftItem, normalize_weights
 from app.models.checklist import Checklist, ChecklistItem
 from app.models.question import Question, QuestionBank
 from app.models.sop import SopDocument
-from app.services import checklist_service, question_service
+from app.models.user import User
+from app.services import checklist_service, question_service, rubric_version_service
 
 
 @dataclass
@@ -207,10 +208,23 @@ async def import_bank_bundle(db: AsyncSession, bundle: dict) -> ImportResult:
                 prompt_version=str(checklist_spec.get("prompt_version", "imported_v1")),
                 items=items,
             )
-            await checklist_service._persist_draft(db, question.id, draft)
+            await checklist_service._persist_draft(db, question.id, draft, snapshot=False)
             total_items += len(items)
 
     await db.commit()
+    await db.refresh(bank)
+    # One version for the whole import (spec-rubric-versioning).
+    version = await rubric_version_service.snapshot(db, bank.id, reason="import")
+    if replaced:
+        # The questions were replaced (new ids), so every older version of this bank names
+        # questions that no longer exist. Users pinned to one move to this import's version;
+        # otherwise their next interview would find no rubric for any question.
+        await db.execute(
+            update(User)
+            .where(User.assigned_bank_id == bank.id)
+            .values(assigned_rubric_version_id=version.id)
+        )
+        await db.commit()
     await db.refresh(bank)
     return ImportResult(
         bank_id=bank.id,

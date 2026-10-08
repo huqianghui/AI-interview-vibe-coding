@@ -36,7 +36,7 @@ from app.interview.scoring_engine import (
     ScoringIncomplete,
     enforce_and_score,
 )
-from app.services import checklist_service, sop_context
+from app.services import rubric_version_service, sop_context
 from app.services.agents.adapters.foundry_llm import LLMAdapterError
 from app.services.agents.registry import get_llm_adapter
 
@@ -260,21 +260,23 @@ async def prepare_scoring(
     question_text: str,
     answer_text: str,
     include_source_context: bool = True,
+    rubric_version_id: str | None = None,
 ) -> ScoringTask | None:
     """Read everything one question's grading needs. Returns None when no checklist is authored.
 
-    All of the DB work, none of the LLM work. Cheap and local: three queries against SQLite.
+    All of the DB work, none of the LLM work. Cheap and local. The rubric comes from the
+    interview's pinned ``rubric_version_id`` (spec-rubric-versioning); without one (an interview
+    started before versioning) it is the question's current default checklist.
     """
-    checklist = await checklist_service.get_default_checklist(db, question_id)
-    if checklist is None:
-        return None
-    item_rows = await checklist_service.list_items(db, checklist.id)
+    item_rows = await rubric_version_service.rubric_rows(
+        db, question_id=question_id, rubric_version_id=rubric_version_id
+    )
     if not item_rows:
         return None
 
     rubric = [
         RubricItem(
-            item_id=row.id,
+            item_id=row.item_id,
             kind=row.kind,
             text=row.text,
             weight=row.weight,

@@ -20,7 +20,7 @@ from app.interview import state_machine
 from app.interview.state_machine import InterviewStateError
 from app.models.interview import InterviewSession
 from app.models.judge_event import JudgeEvent
-from app.services import checklist_service, persona_service
+from app.services import persona_service, rubric_version_service
 
 # Raw LLM calls allowed per question = applied budget × this factor (speculative prefetches that get
 # discarded because the candidate kept talking still cost a call; this bounds a very chatty answer).
@@ -134,8 +134,9 @@ async def judge(
         raise JudgeInFlight("A judge call is already in flight")
     _JUDGE_IN_FLIGHT.add(session.id)
     try:
-        checklist = await checklist_service.get_default_checklist(db, current.id)
-        items = await checklist_service.list_items(db, checklist.id) if checklist else []
+        items = await rubric_version_service.rubric_rows(
+            db, question_id=current.id, rubric_version_id=session.rubric_version_id
+        )
         prior = await state_machine.follow_up_texts(db, session.id, current.id)
         inp = judge_mod.JudgeInput(
             question_text=current.prompt,

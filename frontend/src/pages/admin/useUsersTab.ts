@@ -3,7 +3,7 @@
  * is opened. Interview results have their own tab (useInterviewsTab). */
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as admin from "../../api/admin";
-import type { AdminUser, Assignment, Bank } from "../../api/admin";
+import type { AdminUser, Assignment, Bank, RubricVersion } from "../../api/admin";
 import { listPersonas, type PersonaOut } from "../../api/personas";
 
 function message(e: unknown): string {
@@ -19,6 +19,17 @@ export function useUsersTab(active: boolean) {
   // Assignment choices: every persona/bank, so a disabled one already assigned still shows by name.
   const [personas, setPersonas] = useState<PersonaOut[]>([]);
   const [banks, setBanks] = useState<Bank[]>([]);
+  // Each assigned bank's rubric versions (newest first), fetched once per bank for the picker.
+  const [versionsByBank, setVersionsByBank] = useState<Record<string, RubricVersion[]>>({});
+  const requestedVersions = useRef<Set<string>>(new Set());
+  const loadVersions = useCallback((bankId: string, force = false) => {
+    if (!force && requestedVersions.current.has(bankId)) return;
+    requestedVersions.current.add(bankId);
+    void admin.listRubricVersions(bankId).then(
+      (versions) => setVersionsByBank((prev) => ({ ...prev, [bankId]: versions })),
+      (e: unknown) => console.warn("[users] rubric versions", e),
+    );
+  }, []);
   const [assignStatus, setAssignStatus] = useState<
     Record<string, { kind: "saved" } | { kind: "error"; message: string }>
   >({});
@@ -35,13 +46,18 @@ export function useUsersTab(active: boolean) {
     void listPersonas().then(setPersonas, (e: unknown) => console.warn("[users] personas", e));
     void admin.listBanks().then(setBanks, (e: unknown) => console.warn("[users] banks", e));
     try {
-      setUsers(await admin.listUsers());
+      const loaded = await admin.listUsers();
+      setUsers(loaded);
+      requestedVersions.current.clear();
+      for (const bankId of new Set(loaded.map((u) => u.assigned_bank_id).filter(Boolean))) {
+        loadVersions(bankId as string, true);
+      }
     } catch (e) {
       setUsersError(message(e));
     } finally {
       setUsersLoading(false);
     }
-  }, []);
+  }, [loadVersions]);
 
   useEffect(() => {
     if (active) void loadUsers();
@@ -59,19 +75,46 @@ export function useUsersTab(active: boolean) {
     const base = pendingAssignment.current[user.id] ?? {
       persona_id: user.assigned_persona_id,
       bank_id: user.assigned_bank_id,
+      rubric_version_id: user.assigned_rubric_version_id ?? null,
     };
     const next: Assignment = { ...base, ...change };
+    // A new bank starts on that bank's latest version: the backend picks it when the id is null.
+    if ("bank_id" in change && change.bank_id !== base.bank_id && !("rubric_version_id" in change)) {
+      next.rubric_version_id = null;
+    }
     pendingAssignment.current[user.id] = next;
     // Show the choice at once; the save confirms it (or the error says it did not stick).
     setUsers((prev) =>
       prev.map((u) =>
         u.id === user.id
-          ? { ...u, assigned_persona_id: next.persona_id, assigned_bank_id: next.bank_id }
+          ? {
+              ...u,
+              assigned_persona_id: next.persona_id,
+              assigned_bank_id: next.bank_id,
+              assigned_rubric_version_id: next.rubric_version_id ?? null,
+            }
           : u,
       ),
     );
     try {
-      await admin.setUserAssignment(user.id, next);
+      const saved = await admin.setUserAssignment(user.id, next);
+      // The backend resolved "latest" to a concrete version: show it and build on it next time.
+      pendingAssignment.current[user.id] = {
+        ...next,
+        rubric_version_id: saved?.assigned_rubric_version_id ?? null,
+      };
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === user.id
+            ? {
+                ...u,
+                assigned_rubric_version_id: saved?.assigned_rubric_version_id ?? null,
+                assigned_rubric_version_no: saved?.assigned_rubric_version_no ?? null,
+              }
+            : u,
+        ),
+      );
+      if (next.bank_id) loadVersions(next.bank_id, true);
       setAssignStatus((prev) => ({ ...prev, [user.id]: { kind: "saved" } }));
     } catch (e) {
       setAssignStatus((prev) => ({ ...prev, [user.id]: { kind: "error", message: message(e) } }));
@@ -86,6 +129,7 @@ export function useUsersTab(active: boolean) {
     copyPassword,
     personas,
     banks,
+    versionsByBank,
     assign,
     assignStatus,
   };

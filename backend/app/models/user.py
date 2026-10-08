@@ -39,3 +39,8 @@ class User(TimestampMixin, Base):
     assigned_bank_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("question_banks.id", ondelete="SET NULL"), nullable=True
     )
+    # The version of that bank's rubric this user is scored against (spec-rubric-versioning).
+    # Assignment defaults it to the bank's latest; a version of another bank is ignored at start.
+    assigned_rubric_version_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("rubric_versions.id", ondelete="SET NULL"), nullable=True
+    )

@@ -232,6 +232,10 @@ export const resources = {
           "No longer used: since 2026-09-28 the judge only nudges (\"please go on\") during pauses and never asks follow-up questions in any turn mode; \"I'm done\" always moves to the next question. Kept for existing banks; the value has no effect.",
         selectBankHint: "Select a bank to view its questions.",
         rubricTitle: "Scoring rubric",
+        rubricVersion: "Saved as version {{no}}",
+        rubricVersionHint:
+          "Each save creates a new version. Interviews that already started keep the version they started with.",
+        advisory: "Disclosure only — never deducts",
         weightsTotal: "Weights total: {{sum}} — {{count}} items",
         weightsHint: " (re-normalized to 100 on save)",
         rubricItemPlaceholder: "Rubric item text",
@@ -265,6 +269,9 @@ export const resources = {
           noDefault: "none set",
           assignSaved: "Saved",
           assignError: "Couldn't save: {{message}}",
+          rubricVersion: "Rubric version",
+          versionOption: "v{{no}} · {{date}}",
+          versionLatest: "v{{no}} · {{date}} (latest)",
         },
         results: {
           tab: "Interview results",
@@ -284,6 +291,7 @@ export const resources = {
           next: "Next",
           page: "Page {{page}} of {{pages}}",
           detailTitle: "Interview",
+          rubricVersion: "Rubric v{{no}}",
         },
       },
       // Candidate sign-in gate (#102) — shown on the interview page whenever no candidate JWT is
@@ -558,6 +566,9 @@ export const resources = {
         maxFollowUpsHint: "已停用：自 2026-09-28 起，judge 在候选人停顿时只会轻声提示「请继续」，任何模式下都不再追问；点击「我答完了」一定进入下一题。字段为兼容旧题库保留，取值不再生效。",
         selectBankHint: "选择一个题库以查看题目。",
         rubricTitle: "评分标准",
+        rubricVersion: "已保存为第 {{no}} 版",
+        rubricVersionHint: "每次保存都会生成一个新版本。已经开始的面试继续使用开始时的版本。",
+        advisory: "仅作提示，不扣分",
         weightsTotal: "权重合计: {{sum}} — {{count}} 项",
         weightsHint: " (保存后按 100 归一)",
         rubricItemPlaceholder: "评分要点",
@@ -590,6 +601,9 @@ export const resources = {
           noDefault: "未设置",
           assignSaved: "已保存",
           assignError: "保存失败: {{message}}",
+          rubricVersion: "评分标准版本",
+          versionOption: "v{{no}} · {{date}}",
+          versionLatest: "v{{no}} · {{date}}（最新）",
         },
         results: {
           tab: "面试结果",
@@ -609,6 +623,7 @@ export const resources = {
           next: "下一页",
           page: "第 {{page}} / {{pages}} 页",
           detailTitle: "面试详情",
+          rubricVersion: "评分标准 v{{no}}",
         },
       },
       // 候选人登录门(#102)——面试页在没有候选人 JWT 时展示。候选人使用与管理员相同的

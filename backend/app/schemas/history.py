@@ -27,6 +27,8 @@ class InterviewResultItem(InterviewHistoryItem):
     username: str | None
     persona_id: str | None
     bank_id: str | None
+    # The rubric version the interview was pinned to (spec-rubric-versioning); NULL before that.
+    rubric_version_no: int | None = None
 
 
 class InterviewResultsPage(BaseModel):
@@ -52,6 +54,8 @@ class InterviewDetail(BaseModel):
     transcript: list[TranscriptTurn]
     # Admin read only: an admin-started scoring run for it is still going (the page polls on this).
     scoring: bool = False
+    # Admin read only: the rubric version it is scored against (spec-rubric-versioning).
+    rubric_version_no: int | None = None
 
 
 class AssignmentIn(BaseModel):
@@ -59,3 +63,5 @@ class AssignmentIn(BaseModel):
 
     persona_id: str | None = None
     bank_id: str | None = None
+    # A version of THAT bank's rubric (spec-rubric-versioning); null with a bank = its latest.
+    rubric_version_id: str | None = None

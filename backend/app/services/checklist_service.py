@@ -30,8 +30,10 @@ from app.interview.checklist_draft import (
     parse_draft_items,
 )
 from app.interview.questions import parse_points
-from app.models.checklist import Checklist, ChecklistItem
+from app.models.checklist import CHECKLIST_ITEM_KINDS, Checklist, ChecklistItem
 from app.models.question import Question
+from app.models.sop import SopDocument
+from app.services import rubric_version_service
 from app.services.agents.registry import get_llm_adapter, get_retrieval_adapter
 
 DRAFT_PROMPT_VERSION = "v1"
@@ -149,7 +151,9 @@ async def draft_checklist(
     return await _persist_draft(db, question_id, draft)
 
 
-async def _persist_draft(db: AsyncSession, question_id: str, draft: ChecklistDraft) -> Checklist:
+async def _persist_draft(
+    db: AsyncSession, question_id: str, draft: ChecklistDraft, *, snapshot: bool = True
+) -> Checklist:
     """Persist a draft as the new default checklist for a question; demote prior defaults."""
     for prior in await _default_checklists(db, question_id):
         prior.is_default = False
@@ -176,6 +180,9 @@ async def _persist_draft(db: AsyncSession, question_id: str, draft: ChecklistDra
         )
     await db.commit()
     await db.refresh(checklist)
+    # A bank import writes many questions and snapshots once at the end instead (snapshot=False).
+    if snapshot:
+        await rubric_version_service.snapshot_for_question(db, question_id, reason="draft")
     return checklist
 
 
@@ -204,7 +211,62 @@ class ChecklistNotFound(ChecklistError):
     """Raised when a checklist id does not exist."""
 
 
-async def update_items(db: AsyncSession, checklist_id: str, raw_items: list[dict]) -> Checklist:
+async def document_names(db: AsyncSession, document_ids: set[str]) -> dict[str, str]:
+    """``{document_id: file name}`` for the SOP documents a rubric cites."""
+    if not document_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(SopDocument.id, SopDocument.name).where(SopDocument.id.in_(document_ids))
+        )
+    ).all()
+    return {doc_id: name for doc_id, name in rows}
+
+
+async def _keep_item_sources(
+    db: AsyncSession,
+    items: list[DraftItem],
+    raw_items: list[dict],
+    existing: Sequence[ChecklistItem],
+) -> None:
+    """Keep each edited item's SOP link and advisory flag (they were lost on every editor save).
+
+    The editor now sends both back. A client that omits a field altogether (a tab still running an
+    older bundle) keeps the value of the existing item with the same text and quote, so an old tab
+    cannot strip them either. A ``source_document_id`` naming no SOP document is cleared.
+    """
+    by_content = {(row.text.strip(), row.source_quote.strip()): row for row in existing}
+    survivors = [
+        raw
+        for raw in raw_items
+        if isinstance(raw, dict)
+        and str(raw.get("kind", "")).strip().lower() in CHECKLIST_ITEM_KINDS
+        and str(raw.get("text", "")).strip()
+    ]
+    for item, raw in zip(items, survivors, strict=True):
+        previous = by_content.get((item.text, item.source_quote))
+        if "source_document_id" not in raw and previous is not None:
+            item.source_document_id = previous.source_document_id
+        if "advisory" not in raw and previous is not None:
+            item.advisory = previous.advisory and item.kind == "forbidden"
+    wanted = {it.source_document_id for it in items if it.source_document_id}
+    if not wanted:
+        return
+    known = set(
+        (await db.execute(select(SopDocument.id).where(SopDocument.id.in_(wanted)))).scalars().all()
+    )
+    for it in items:
+        if it.source_document_id and it.source_document_id not in known:
+            it.source_document_id = None
+
+
+async def update_items(
+    db: AsyncSession,
+    checklist_id: str,
+    raw_items: list[dict],
+    *,
+    created_by: str | None = None,
+) -> Checklist:
     """Replace a checklist's items with an edited set (F3b). Weights are re-normalized to 100.
 
     Business editing (F3 AC #4): the caller sends the full desired item set (kind/text/weight/
@@ -218,11 +280,13 @@ async def update_items(db: AsyncSession, checklist_id: str, raw_items: list[dict
     if checklist is None:
         raise ChecklistNotFound(checklist_id)
 
-    items = parse_draft_items(raw_items)
+    existing_rows = list(await list_items(db, checklist_id))
+    items = parse_draft_items(raw_items, trust_item_sources=True)
+    await _keep_item_sources(db, items, raw_items, existing_rows)
     normalize_weights(items)
 
     # Replace: delete existing rows, then write the edited set.
-    for existing in await list_items(db, checklist_id):
+    for existing in existing_rows:
         await db.delete(existing)
     await db.flush()
     for it in items:
@@ -241,6 +305,10 @@ async def update_items(db: AsyncSession, checklist_id: str, raw_items: list[dict
         )
     await db.commit()
     await db.refresh(checklist)
+    # Every saved rubric becomes an immutable version of its bank (spec-rubric-versioning).
+    await rubric_version_service.snapshot_for_question(
+        db, checklist.question_id, reason="edit", created_by=created_by
+    )
     return checklist
 
 

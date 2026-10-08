@@ -197,6 +197,7 @@ async def start_interview(
     turn_mode: str = "linear",
     persona_id: str | None = None,
     bank_id: str | None = None,
+    rubric_version_id: str | None = None,
 ) -> InterviewSession:
     """Start a new interview — or resume the candidate's existing in-progress one.
 
@@ -218,6 +219,7 @@ async def start_interview(
         turn_mode=turn_mode if turn_mode in TURN_MODES else "linear",
         persona_id=persona_id,
         bank_id=bank_id,
+        rubric_version_id=rubric_version_id,
     )
     session.started_at = _now()
     db.add(session)
@@ -475,6 +477,7 @@ async def score_and_finalize_events(
                     question_id=question_id,
                     question_text=prompt_by_id.get(question_id, ""),
                     answer_text=answer_text,
+                    rubric_version_id=session.rubric_version_id,
                 ),
             )
         )
@@ -578,7 +581,10 @@ async def score_and_finalize_events(
         coverage_tasks = []
         for question_id in auditable:
             coverage_task = await sop_coverage.prepare_coverage(
-                db, question_id=question_id, question_text=prompt_by_id.get(question_id, "")
+                db,
+                question_id=question_id,
+                question_text=prompt_by_id.get(question_id, ""),
+                rubric_version_id=session.rubric_version_id,
             )
             if coverage_task is not None:
                 coverage_tasks.append(coverage_task)
@@ -878,6 +884,18 @@ async def cited_document_ids(db: AsyncSession, session: InterviewSession) -> set
     answered_qids = {qid for qid, _ in await _candidate_answers(db, session.id)}
     if not answered_qids:
         return set()
+    if session.rubric_version_id:
+        # The pinned version (spec-rubric-versioning): a rubric edited after this interview must
+        # neither break its report's links nor open documents its report never cited.
+        from app.services import rubric_version_service
+
+        cited: set[str] = set()
+        for qid in answered_qids:
+            pinned = await rubric_version_service.rubric_rows(
+                db, question_id=qid, rubric_version_id=session.rubric_version_id
+            )
+            cited.update(r.source_document_id for r in pinned if r.source_document_id)
+        return cited
     rows = (
         await db.execute(
             select(ChecklistItem.source_document_id)

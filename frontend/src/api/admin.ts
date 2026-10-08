@@ -84,6 +84,12 @@ export interface ChecklistItem {
   source_quote: string;
   source_page: string | null;
   order_index: number;
+  // The SOP document behind the report's "SOP source" link, and a forbidden item that is disclosed
+  // but never deducts. Both MUST be sent back on save: dropping them unlinked the SOP and turned a
+  // disclosure into a deduction.
+  source_document_id?: string | null;
+  source_document_name?: string | null;
+  advisory?: boolean;
 }
 
 export interface Checklist {
@@ -92,6 +98,8 @@ export interface Checklist {
   prompt_version: string;
   weights_sum: number;
   items: ChecklistItem[];
+  // The bank's latest rubric version; after a save, the version that save produced.
+  rubric_version_no?: number | null;
 }
 
 export const draftChecklist = (questionId: string) =>
@@ -102,7 +110,7 @@ export const getChecklist = (questionId: string) =>
 
 export const editChecklistItems = (
   checklistId: string,
-  items: Array<Omit<ChecklistItem, "order_index">>,
+  items: Array<Omit<ChecklistItem, "order_index" | "source_document_name">>,
 ) =>
   adminRequest<Checklist>(`/admin/checklists/${checklistId}/items`, {
     method: "PUT",
@@ -263,6 +271,9 @@ export interface AdminUser {
   // #187: the interviewer + bank this user's next interview starts with; null = the default.
   assigned_persona_id: string | null;
   assigned_bank_id: string | null;
+  // The version of that bank's rubric this user is scored against (null with no bank assigned).
+  assigned_rubric_version_id?: string | null;
+  assigned_rubric_version_no?: number | null;
 }
 
 export const listUsers = () => adminRequest<AdminUser[]>("/admin/users");
@@ -272,7 +283,22 @@ export const listUsers = () => adminRequest<AdminUser[]>("/admin/users");
 export interface Assignment {
   persona_id: string | null;
   bank_id: string | null;
+  // A version of `bank_id`'s rubric; null with a bank = that bank's latest (the backend picks it).
+  rubric_version_id?: string | null;
 }
+
+/** One frozen version of a bank's rubric. Mirrors `RubricVersionOut`. */
+export interface RubricVersion {
+  id: string;
+  version_no: number;
+  created_at: string | null;
+  reason: string;
+  question_count: number;
+  is_latest: boolean;
+}
+
+export const listRubricVersions = (bankId: string) =>
+  adminRequest<RubricVersion[]>(`/admin/question-banks/${bankId}/rubric-versions`);
 
 export const setUserAssignment = (userId: string, assignment: Assignment) =>
   adminRequest<AdminUser>(`/admin/users/${userId}/assignment`, {
@@ -286,6 +312,7 @@ export interface InterviewResultItem extends InterviewHistoryItem {
   username: string | null;
   persona_id: string | null;
   bank_id: string | null;
+  rubric_version_no?: number | null;
 }
 
 /** One page of results. `total` counts every match, for the pager. Mirrors `InterviewResultsPage`. */

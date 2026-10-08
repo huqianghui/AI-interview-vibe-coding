@@ -704,6 +704,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/question-banks/{bank_id}/rubric-versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Rubric Versions
+         * @description The bank's rubric versions, newest first (spec-rubric-versioning). A bank that has never had
+         *     one gets its first here, so the assignment picker always has something to offer.
+         */
+        get: operations["list_rubric_versions_admin_question_banks__bank_id__rubric_versions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/sop/documents": {
         parameters: {
             query?: never;
@@ -763,7 +784,10 @@ export interface paths {
         head?: never;
         /**
          * Set Assignment
-         * @description Set the interviewer + bank this user's NEXT interview starts with (#187); null = default.
+         * @description Set the interviewer, bank and rubric version this user's NEXT interview starts with.
+         *
+         *     #187 + spec-rubric-versioning. A null persona or bank means the global default; a bank with no
+         *     rubric version means that bank's latest version.
          *
          *     A live interview keeps what it started with. 404 unknown user; 422 an unknown or disabled
          *     persona/bank (a disabled one would silently fall back to the default at start).
@@ -1258,6 +1282,10 @@ export interface components {
             assigned_bank_id?: string | null;
             /** Assigned Persona Id */
             assigned_persona_id?: string | null;
+            /** Assigned Rubric Version Id */
+            assigned_rubric_version_id?: string | null;
+            /** Assigned Rubric Version No */
+            assigned_rubric_version_no?: number | null;
             /** Business Unit */
             business_unit: string;
             /** Email */
@@ -1400,6 +1428,8 @@ export interface components {
             bank_id?: string | null;
             /** Persona Id */
             persona_id?: string | null;
+            /** Rubric Version Id */
+            rubric_version_id?: string | null;
         };
         /** BankIn */
         BankIn: {
@@ -1466,8 +1496,15 @@ export interface components {
         };
         /** ChecklistItemIn */
         ChecklistItemIn: {
+            /**
+             * Advisory
+             * @default false
+             */
+            advisory: boolean;
             /** Kind */
             kind: string;
+            /** Source Document Id */
+            source_document_id?: string | null;
             /** Source Page */
             source_page?: string | null;
             /**
@@ -1485,10 +1522,19 @@ export interface components {
         };
         /** ChecklistItemOut */
         ChecklistItemOut: {
+            /**
+             * Advisory
+             * @default false
+             */
+            advisory: boolean;
             /** Kind */
             kind: string;
             /** Order Index */
             order_index: number;
+            /** Source Document Id */
+            source_document_id?: string | null;
+            /** Source Document Name */
+            source_document_name?: string | null;
             /** Source Page */
             source_page: string | null;
             /** Source Quote */
@@ -1508,6 +1554,8 @@ export interface components {
             prompt_version: string;
             /** Question Id */
             question_id: string;
+            /** Rubric Version No */
+            rubric_version_no?: number | null;
             /** Weights Sum */
             weights_sum: number;
         };
@@ -1592,6 +1640,8 @@ export interface components {
             report: {
                 [key: string]: unknown;
             } | null;
+            /** Rubric Version No */
+            rubric_version_no?: number | null;
             /**
              * Scoring
              * @default false
@@ -1667,6 +1717,8 @@ export interface components {
             persona_id: string | null;
             /** Persona Name */
             persona_name: string | null;
+            /** Rubric Version No */
+            rubric_version_no?: number | null;
             /** Started At */
             started_at: string | null;
             /** Status */
@@ -2185,6 +2237,21 @@ export interface components {
             interview_session_id: string;
             /** Status */
             status: string;
+        };
+        /** RubricVersionOut */
+        RubricVersionOut: {
+            /** Created At */
+            created_at: string | null;
+            /** Id */
+            id: string;
+            /** Is Latest */
+            is_latest: boolean;
+            /** Question Count */
+            question_count: number;
+            /** Reason */
+            reason: string;
+            /** Version No */
+            version_no: number;
         };
         /** SessionCreateResponse */
         SessionCreateResponse: {
@@ -3474,6 +3541,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_rubric_versions_admin_question_banks__bank_id__rubric_versions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bank_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RubricVersionOut"][];
+                };
             };
             /** @description Validation Error */
             422: {

@@ -88,6 +88,7 @@ def parse_draft_items(
     raw_items: list[dict],
     *,
     source_document_id: str | None = None,
+    trust_item_sources: bool = False,
 ) -> list[DraftItem]:
     """Turn raw LLM item dicts into validated :class:`DraftItem`s (invalid ones dropped).
 
@@ -95,6 +96,9 @@ def parse_draft_items(
     Items missing a valid kind or non-empty text are dropped (never persisted). Weights are NOT
     normalized here — call :func:`normalize_weights` after, so the caller can add/derive items
     first. ``order_index`` is assigned by surviving order.
+
+    ``trust_item_sources`` takes each raw item's own ``source_document_id`` (the admin editor's
+    round-trip, validated by the caller). Never set it for LLM output: a model can invent an id.
     """
     items: list[DraftItem] = []
     for raw in raw_items:
@@ -110,7 +114,11 @@ def parse_draft_items(
                 text=text,
                 weight=int(_coerce_weight(raw.get("weight"))),
                 source_quote=str(raw.get("source_quote", "")).strip(),
-                source_document_id=source_document_id,
+                source_document_id=(
+                    (str(raw["source_document_id"]) if raw.get("source_document_id") else None)
+                    if trust_item_sources
+                    else source_document_id
+                ),
                 source_page=(str(raw["source_page"]) if raw.get("source_page") else None),
                 order_index=len(items),
                 advisory=bool(raw.get("advisory", False)) and kind == "forbidden",

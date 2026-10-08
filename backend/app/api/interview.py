@@ -339,7 +339,12 @@ async def _start_fresh(db: AsyncSession, candidate: AnonymousCandidateSession) -
         return await external_runner.start_interview(db, candidate.id, persona_id=persona_id)
     turn_mode = persona.bank_turn_mode if persona else "linear"
     return await state_machine.start_interview(
-        db, candidate.id, turn_mode=turn_mode, persona_id=persona_id, bank_id=assigned.bank_id
+        db,
+        candidate.id,
+        turn_mode=turn_mode,
+        persona_id=persona_id,
+        bank_id=assigned.bank_id,
+        rubric_version_id=assigned.rubric_version_id,
     )
 
 
