@@ -16,18 +16,13 @@ import {
   DrawerHeader,
   DrawerHeaderTitle,
   OverlayDrawer,
-  Table,
-  TableBody,
-  TableCell,
-  TableHeader,
-  TableHeaderCell,
-  TableRow,
   Text,
 } from "@fluentui/react-components";
 import { ChevronDownRegular, ChevronRightRegular, DismissRegular } from "@fluentui/react-icons";
 import * as admin from "../../api/admin";
 import type { CitationRun, CitationRunRow } from "../../api/admin";
 import { sectionName } from "../../api/client";
+import { DataTable, type DataColumn } from "../../components/DataTable";
 import { useAdminStyles } from "./shared";
 
 export const RELOCATE_POLL_MS = 3000;
@@ -44,6 +39,12 @@ const HOW_COLOR = {
 // No SOP found, failed, or saved during the run: the admin decides what to do with these.
 const NEEDS_ATTENTION: ReadonlySet<CitationRunRow["how"]> = new Set(["none", "error", "edited"]);
 
+const oldText = (row: CitationRunRow) =>
+  [row.old.document_name, row.old.quote].filter(Boolean).join(" — ");
+const newText = (row: CitationRunRow) =>
+  row.new.sections.map((s) => `${s.document_name} · ${sectionName(s)}`).join("; ") +
+  (row.new.quote ? ` — “${row.new.quote}”` : "");
+
 function RowsTable({
   rows,
   testId,
@@ -54,55 +55,72 @@ function RowsTable({
   onOpenQuestion: (row: CitationRunRow) => void;
 }) {
   const { t } = useTranslation();
+  const columns: DataColumn<CitationRunRow>[] = [
+    {
+      id: "question",
+      header: t("admin.relocate.colQuestion"),
+      long: true,
+      maxWidth: 300,
+      text: (row) => `${row.question_no}. ${row.question}`,
+      cell: (row) => (
+        <Text size={200}>
+          <Text weight="semibold" size={200}>
+            {row.question_no}.
+          </Text>{" "}
+          {row.question}
+        </Text>
+      ),
+    },
+    {
+      id: "item",
+      header: t("admin.relocate.colItem"),
+      long: true,
+      maxWidth: 300,
+      text: (row) => row.item,
+      cell: (row) => <Text size={200}>{row.item}</Text>,
+    },
+    {
+      id: "old",
+      header: t("admin.relocate.colOld"),
+      long: true,
+      maxWidth: 240,
+      text: (row) => oldText(row) || t("admin.relocate.nothing"),
+      cell: (row) => <Text size={200}>{oldText(row) || t("admin.relocate.nothing")}</Text>,
+    },
+    {
+      id: "new",
+      header: t("admin.relocate.colNew"),
+      long: true,
+      pad: 110, // the outcome badge in front of the text
+      text: newText,
+      cell: (row) => (
+        <>
+          <Badge appearance="tint" color={HOW_COLOR[row.how]}>
+            {t(`admin.relocate.how.${row.how}`)}
+          </Badge>{" "}
+          <Text size={200}>{newText(row)}</Text>
+        </>
+      ),
+    },
+    {
+      id: "open",
+      header: "",
+      width: 140,
+      cell: (row) => (
+        <Button size="small" appearance="subtle" onClick={() => onOpenQuestion(row)}>
+          {t("admin.relocate.openEditor")}
+        </Button>
+      ),
+    },
+  ];
   return (
-    <Table size="small" data-testid={testId}>
-      <TableHeader>
-        <TableRow>
-          <TableHeaderCell style={{ width: "26%" }}>{t("admin.relocate.colQuestion")}</TableHeaderCell>
-          <TableHeaderCell style={{ width: "24%" }}>{t("admin.relocate.colItem")}</TableHeaderCell>
-          <TableHeaderCell style={{ width: "18%" }}>{t("admin.relocate.colOld")}</TableHeaderCell>
-          <TableHeaderCell>{t("admin.relocate.colNew")}</TableHeaderCell>
-          <TableHeaderCell style={{ width: 130 }} />
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((row, i) => (
-          <TableRow key={i}>
-            <TableCell>
-              <Text size={200}>
-                <Text weight="semibold" size={200}>
-                  {row.question_no}.
-                </Text>{" "}
-                {row.question}
-              </Text>
-            </TableCell>
-            <TableCell>
-              <Text size={200}>{row.item}</Text>
-            </TableCell>
-            <TableCell>
-              <Text size={200}>
-                {[row.old.document_name, row.old.quote].filter(Boolean).join(" — ") ||
-                  t("admin.relocate.nothing")}
-              </Text>
-            </TableCell>
-            <TableCell>
-              <Badge appearance="tint" color={HOW_COLOR[row.how]}>
-                {t(`admin.relocate.how.${row.how}`)}
-              </Badge>{" "}
-              <Text size={200}>
-                {row.new.sections.map((s) => `${s.document_name} · ${sectionName(s)}`).join("; ")}
-                {row.new.quote ? ` — “${row.new.quote}”` : ""}
-              </Text>
-            </TableCell>
-            <TableCell>
-              <Button size="small" appearance="subtle" onClick={() => onOpenQuestion(row)}>
-                {t("admin.relocate.openEditor")}
-              </Button>
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+    <DataTable
+      size="small"
+      testId={testId}
+      items={rows}
+      getRowId={(row) => row.item_id ?? `${row.question_no}:${row.item}`}
+      columns={columns}
+    />
   );
 }
 

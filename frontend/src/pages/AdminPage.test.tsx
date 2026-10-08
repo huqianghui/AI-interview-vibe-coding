@@ -1056,7 +1056,7 @@ describe("AdminPage", () => {
         page([{ ...ROW, bank_version_no: 3 } as typeof ROW, { ...ROW, id: "i2" }]),
       );
       await openResultsTab(user);
-      expect(await screen.findByTestId("result-bank-version-i1")).toHaveTextContent("Bank v3");
+      expect(await screen.findByTestId("result-bank-version-i1")).toHaveTextContent(/^v3$/);
       expect(screen.queryByTestId("result-bank-version-i2")).not.toBeInTheDocument();
     });
 

@@ -489,6 +489,7 @@ export const redraftSopSummary = (documentId: string) =>
 // Runs in the background over the bank's DRAFT; each row is one rubric item, old → new.
 
 export interface CitationRunRow {
+  item_id?: string;
   question_no: number;
   question: string;
   item: string;

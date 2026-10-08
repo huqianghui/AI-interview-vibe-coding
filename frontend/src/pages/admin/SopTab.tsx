@@ -9,17 +9,12 @@ import {
   Button,
   Card,
   CardHeader,
-  Table,
-  TableBody,
-  TableCell,
-  TableHeader,
-  TableHeaderCell,
-  TableRow,
   Text,
   Textarea,
   Title3,
 } from "@fluentui/react-components";
 import type { SopDocument } from "../../api/admin";
+import { DataTable, type DataColumn } from "../../components/DataTable";
 import { useAdminStyles } from "./shared";
 import type { SopTabState } from "./useSopTab";
 
@@ -116,6 +111,43 @@ export function SopTab({ state }: { state: SopTabState }) {
   const styles = useAdminStyles();
   const { t } = useTranslation();
   const current = state.documents.find((d) => d.document_id === state.selected);
+  const columns: DataColumn<SopDocument>[] = [
+    {
+      id: "name",
+      header: t("admin.sop.colName"),
+      text: (d) => d.name,
+      pad: 24, // the name is a subtle button
+      cell: (d) => (
+        <Button appearance="subtle" onClick={() => void state.openDocument(d.document_id)}>
+          {d.name}
+        </Button>
+      ),
+    },
+    {
+      id: "conversion",
+      header: t("admin.sop.colConversion"),
+      long: true,
+      minWidth: 120,
+      text: (d) => d.markdown_error ?? "",
+      cell: (d) => (
+        <>
+          <ConversionBadge doc={d} />
+          {d.markdown_error && (
+            <Text size={200} className={styles.errorText} style={{ marginLeft: 6 }}>
+              {d.markdown_error}
+            </Text>
+          )}
+        </>
+      ),
+    },
+    { id: "sections", header: t("admin.sop.colSections"), text: (d) => String(d.section_count), cell: (d) => d.section_count },
+    {
+      id: "summary",
+      header: t("admin.sop.colSummary"),
+      width: 140,
+      cell: (d) => <SummaryBadge status={d.summary_status} busy={d.summarizing} />,
+    },
+  ];
 
   return (
     <>
@@ -129,43 +161,17 @@ export function SopTab({ state }: { state: SopTabState }) {
             {state.error}
           </Body1>
         )}
-        <Table size="small" data-testid="sop-documents">
-          <TableHeader>
-            <TableRow>
-              <TableHeaderCell>{t("admin.sop.colName")}</TableHeaderCell>
-              <TableHeaderCell>{t("admin.sop.colConversion")}</TableHeaderCell>
-              <TableHeaderCell>{t("admin.sop.colSections")}</TableHeaderCell>
-              <TableHeaderCell>{t("admin.sop.colSummary")}</TableHeaderCell>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {state.documents.map((d) => (
-              <TableRow
-                key={d.document_id}
-                data-testid={`sop-doc-${d.document_id}`}
-                aria-selected={d.document_id === state.selected}
-              >
-                <TableCell>
-                  <Button appearance="subtle" onClick={() => void state.openDocument(d.document_id)}>
-                    {d.name}
-                  </Button>
-                </TableCell>
-                <TableCell>
-                  <ConversionBadge doc={d} />
-                  {d.markdown_error && (
-                    <Text size={200} className={styles.errorText} style={{ marginLeft: 6 }}>
-                      {d.markdown_error}
-                    </Text>
-                  )}
-                </TableCell>
-                <TableCell>{d.section_count}</TableCell>
-                <TableCell>
-                  <SummaryBadge status={d.summary_status} busy={d.summarizing} />
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <DataTable
+          size="small"
+          testId="sop-documents"
+          items={state.documents}
+          getRowId={(d) => d.document_id}
+          rowProps={(d) => ({
+            "data-testid": `sop-doc-${d.document_id}`,
+            "aria-selected": d.document_id === state.selected,
+          })}
+          columns={columns}
+        />
       </Card>
 
       {current && <SummaryCard state={state} />}

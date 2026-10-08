@@ -8,6 +8,7 @@
  * through) and `onGenerateReport` (score a finished interview the candidate never submitted).
  */
 import { useState } from "react";
+import { DataTable, type DataColumn } from "./DataTable";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import {
@@ -15,12 +16,6 @@ import {
   Body1,
   Button,
   Spinner,
-  Table,
-  TableBody,
-  TableCell,
-  TableHeader,
-  TableHeaderCell,
-  TableRow,
   Text,
   Title3,
   makeStyles,
@@ -113,40 +108,46 @@ export function InterviewHistoryTable({
   if (items.length === 0) {
     return <Body1 data-testid={`${testId}-empty`}>{t("history.empty")}</Body1>;
   }
+  const when = (v: string | null) => formatWhen(v, i18n.language);
+  const score = (it: InterviewHistoryItem) => (it.total_score == null ? "—" : `${it.total_score}/100`);
+  const columns: DataColumn<InterviewHistoryItem>[] = [
+    { id: "started", header: t("history.colStarted"), text: (it) => when(it.started_at), cell: (it) => when(it.started_at) },
+    { id: "completed", header: t("history.colCompleted"), text: (it) => when(it.completed_at), cell: (it) => when(it.completed_at) },
+    {
+      id: "interviewer",
+      header: t("history.colInterviewer"),
+      text: (it) => it.persona_name ?? t("history.notRecorded"),
+      cell: (it) => it.persona_name ?? t("history.notRecorded"),
+    },
+    {
+      id: "bank",
+      header: t("history.colBank"),
+      text: (it) => it.bank_name ?? t("history.notRecorded"),
+      cell: (it) => it.bank_name ?? t("history.notRecorded"),
+    },
+    { id: "status", header: t("history.colStatus"), width: 130, cell: (it) => <StatusBadge status={it.status} /> },
+    { id: "score", header: t("history.colScore"), text: score, cell: score },
+    {
+      id: "open",
+      header: "",
+      width: 96,
+      cell: (it) => (
+        <Button size="small" onClick={() => onOpen(it.id)} data-testid={`history-open-${it.id}`}>
+          {t("history.open")}
+        </Button>
+      ),
+    },
+  ];
   return (
     <div className={styles.scroll}>
-      <Table data-testid={testId} size="small">
-        <TableHeader>
-          <TableRow>
-            <TableHeaderCell>{t("history.colStarted")}</TableHeaderCell>
-            <TableHeaderCell>{t("history.colCompleted")}</TableHeaderCell>
-            <TableHeaderCell>{t("history.colInterviewer")}</TableHeaderCell>
-            <TableHeaderCell>{t("history.colBank")}</TableHeaderCell>
-            <TableHeaderCell>{t("history.colStatus")}</TableHeaderCell>
-            <TableHeaderCell>{t("history.colScore")}</TableHeaderCell>
-            <TableHeaderCell />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {items.map((it) => (
-            <TableRow key={it.id} data-testid={`history-row-${it.id}`}>
-              <TableCell>{formatWhen(it.started_at, i18n.language)}</TableCell>
-              <TableCell>{formatWhen(it.completed_at, i18n.language)}</TableCell>
-              <TableCell>{it.persona_name ?? t("history.notRecorded")}</TableCell>
-              <TableCell>{it.bank_name ?? t("history.notRecorded")}</TableCell>
-              <TableCell>
-                <StatusBadge status={it.status} />
-              </TableCell>
-              <TableCell>{it.total_score == null ? "—" : `${it.total_score}/100`}</TableCell>
-              <TableCell>
-                <Button size="small" onClick={() => onOpen(it.id)} data-testid={`history-open-${it.id}`}>
-                  {t("history.open")}
-                </Button>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+      <DataTable
+        testId={testId}
+        size="small"
+        items={items}
+        getRowId={(it) => it.id}
+        rowProps={(it) => ({ "data-testid": `history-row-${it.id}` })}
+        columns={columns}
+      />
     </div>
   );
 }
