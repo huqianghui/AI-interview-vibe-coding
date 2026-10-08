@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.56.2.0 (2026-10-09)
+
+### Changed
+- **The report shows one evaluation card per row, across the full width.** It used to fit two
+  side by side. Each card's SOP source and the candidate's answer still sit next to each other,
+  and stack on a narrow screen.
+- **Every table stripes its rows.** Alternate rows are a light warm tint, set once for every
+  table in the app (results, users, SOP documents, interview history, citation changes).
+- README screenshots retaken.
+
+### Fixed
+- **The Users tab loads as fast as the other tabs.** Measured on live: `/admin/users` took
+  1.7-3.6 s against 0.8-1.1 s for every other admin list. The difference was the check behind
+  "show the seeded candidates' passwords": three bcrypt verifications (about 230 ms each), one
+  after another, on every load. Each result is now kept until the stored password hash changes.
+
 ## 0.56.1.3 (2026-10-08)
 
 ### Fixed

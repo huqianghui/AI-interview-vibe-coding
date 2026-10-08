@@ -125,14 +125,13 @@ const useStyles = makeStyles({
   },
   /** The cards inside one question's panel. */
   /**
-   * The scored items, as many columns as fit at 620px each: two on a laptop's wide measure, still
-   * two (wider) on a big monitor, one when the screen is narrower than two. A single column on a
-   * wide screen read as one long strip (owner, 2026-10-07); three would squeeze each card's own
-   * SOP | answer pair below a readable width.
+   * The scored items, one per row across the full width (owner, 2026-10-08: "一行只占有一个…
+   * 让一个自适应沾满这个宽度"). Each card's own SOP | answer pair then has the room to sit side
+   * by side, and folds to one column on a narrow screen.
    */
   itemList: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 620px), 1fr))",
+    gridTemplateColumns: "minmax(0, 1fr)",
     alignItems: "start",
     gap: tokens.spacingVerticalL,
     paddingBlock: tokens.spacingVerticalM,
