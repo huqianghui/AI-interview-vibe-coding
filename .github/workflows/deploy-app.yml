@@ -98,6 +98,22 @@ jobs:
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --image "$ACR_NAME.azurecr.io/$BACKEND_IMAGE_NAME:$IMAGE_TAG"
 
+      - name: Update the database auto-start job image
+        # The scheduled job that starts PostgreSQL when it is stopped runs a script from the backend
+        # image (infra/azure/modules/db-autostart-job.bicep); keep it on the image just deployed.
+        run: |
+          job="caj-${NAME_PREFIX:-aiinterview-public}-db-autostart"
+          if az containerapp job show --name "$job" --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query name --output tsv >/dev/null 2>&1; then
+            az containerapp job update \
+              --name "$job" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --image "$ACR_NAME.azurecr.io/$BACKEND_IMAGE_NAME:$IMAGE_TAG" \
+              --output none
+          else
+            echo "::notice::$job not found; skipped (create it from the Bicep module)"
+          fi
+
       - name: Get backend FQDN
         id: backend-fqdn
         run: |

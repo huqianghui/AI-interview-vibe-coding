@@ -267,6 +267,26 @@ module containerApps './modules/container-apps.bicep' = {
   }
 }
 
+module dbAutostartJob './modules/db-autostart-job.bicep' = {
+  name: '${deploymentName}-db-autostart-job'
+  scope: deploymentResourceGroup
+  dependsOn: [
+    containerApps
+  ]
+  params: {
+    namePrefix: namePrefix
+    environmentName: environmentName
+    location: location
+    tags: commonTags
+    backendIdentityId: managedIdentity.outputs.backendIdentityId
+    backendIdentityClientId: managedIdentity.outputs.backendIdentityClientId
+    backendIdentityPrincipalId: managedIdentity.outputs.backendIdentityPrincipalId
+    registryLoginServer: containerRegistry.outputs.registryLoginServer
+    backendImage: backendImage
+    postgresServerName: postgres.outputs.serverName
+  }
+}
+
 output resourceGroupName string = effectiveResourceGroupName
 output location string = location
 output tenantId string = tenant().tenantId
