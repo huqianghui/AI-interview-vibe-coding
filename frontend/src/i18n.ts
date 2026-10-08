@@ -30,6 +30,13 @@ export const resources = {
       coverage: "Coverage",
       stubNote: "Stub scoring — not yet SOP-graded.",
       language: "Language",
+      // Sign-in errors raised by api/auth.ts (admin, agent editor and candidate login all share it).
+      // `detail` is the server's own reason, so a 503 says why instead of only a status code.
+      auth: {
+        wrongCredentials: "Incorrect username or password.",
+        loginFailed: "Sign-in failed ({{status}}): {{detail}}",
+        loginFailedNoDetail: "Sign-in failed ({{status}}).",
+      },
       orientation: {
         title: "Before we begin",
         body: "You'll answer {{total}} questions. Take your time — you can speak or type, and you decide when each answer is finished.",
@@ -377,6 +384,11 @@ export const resources = {
       coverage: "覆盖率",
       stubNote: "占位评分 —— 尚未按 SOP 评分。",
       language: "语言",
+      auth: {
+        wrongCredentials: "用户名或密码错误。",
+        loginFailed: "登录失败 ({{status}}):{{detail}}",
+        loginFailedNoDetail: "登录失败 ({{status}})。",
+      },
       orientation: {
         title: "开始之前",
         body: "你将回答 {{total}} 道题。不用着急 —— 可以语音或打字作答，每题何时答完由你决定。",

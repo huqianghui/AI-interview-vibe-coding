@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.51.0.2 (2026-10-08)
+
+### Fixed
+- **Sign-in no longer hangs for a minute and then shows a bare "登录失败 (500)" when the database is
+  down.** It now fails within about 10 seconds with "The database is unavailable. Please try again in
+  a few minutes."
+- **Sign-in errors follow the page language and say why they failed.** The messages were hard-coded
+  in Chinese and kept only the status code, so an English page showed Chinese with no reason.
+
+### Added
+- **The live database is started again automatically if it has been stopped.** A scheduled workflow
+  checks every 10 minutes and starts it when it finds it stopped.
+
+### For contributors
+- PostgreSQL connects time out after `CONNECT_TIMEOUT_S` (10 s; asyncpg's default was 60 s). An
+  unreachable server raises `DatabaseUnavailableError`, which `app.main` maps to a 503.
+- New `.github/workflows/db-keepalive.yml` runs `infra/azure/scripts/ensure-db-running.sh` with the
+  deploy OIDC identity. The script can also be run by hand.
+
 ## 0.51.0.1 (2026-10-07)
 
 ### Fixed

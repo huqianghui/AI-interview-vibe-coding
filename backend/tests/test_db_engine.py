@@ -92,3 +92,43 @@ def test_entra_token_uses_the_postgres_scope_and_one_credential(monkeypatch):
     assert db._entra_token() == "abc"
     assert db._entra_token() == "abc"
     assert len(made) == 1  # long-lived: its token cache is kept between connections
+
+
+@pytest.mark.parametrize("error", [TimeoutError(), ConnectionRefusedError()])
+async def test_an_unreachable_server_raises_database_unavailable(monkeypatch, error):
+    async def _connect(**kwargs):
+        assert kwargs["timeout"] == db.CONNECT_TIMEOUT_S  # not asyncpg's 60 s default
+        raise error
+
+    monkeypatch.setitem(sys.modules, "asyncpg", types.SimpleNamespace(connect=_connect))
+    monkeypatch.setattr(db._settings, "database_auth", "entra")
+    monkeypatch.setattr(db, "_entra_token", lambda: "t")
+    captured: dict = {}
+    real = db.create_async_engine
+    monkeypatch.setattr(
+        db, "create_async_engine", lambda url, **kw: captured.update(kw) or real(url, **kw)
+    )
+    db.make_engine("postgresql+asyncpg://u@pg.example/d")
+    with pytest.raises(db.DatabaseUnavailableError, match="pg.example"):
+        await captured["async_creator"]()
+
+
+async def test_database_unavailable_is_a_503_with_a_reason(monkeypatch):
+    from httpx import ASGITransport, AsyncClient
+
+    from app.db import get_db
+    from app.main import app
+
+    async def _down():
+        raise db.DatabaseUnavailableError("TimeoutError connecting to pg.example")
+        yield  # pragma: no cover
+
+    app.dependency_overrides[get_db] = _down
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+            resp = await client.post("/auth/login", json={"username": "u", "password": "p"})
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+    assert resp.status_code == 503
+    assert "database is unavailable" in resp.json()["detail"]
+    assert "pg.example" not in resp.json()["detail"]  # the host stays in the log, not the page

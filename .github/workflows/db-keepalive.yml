@@ -1,0 +1,47 @@
+name: DB keepalive
+
+# Start the live PostgreSQL server again if it has been stopped. The subscription's administrators
+# can stop it (cost policy); while it is stopped every sign-in fails and /api/health still reports
+# ok. Keyless: the same GitHub OIDC identity as deploy-app.yml (Contributor on the resource group),
+# whose federated credential is bound to main, which is where scheduled runs execute.
+#
+# GitHub may run a schedule late under load, and turns schedules off after 60 days with no repo
+# activity; re-enable it from the Actions tab if that happens.
+on:
+  schedule:
+    - cron: "7-59/10 * * * *" # every 10 minutes, off the :00 mark
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: db-keepalive
+  cancel-in-progress: false
+
+jobs:
+  ensure-running:
+    name: Start the database if stopped
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load deployment profile
+        id: profile
+        run: |
+          p=infra/azure/environments/public.json
+          for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID AZURE_RESOURCE_GROUP; do
+            echo "$name=$(jq -r --arg n "$name" '.[$n] // empty' "$p")" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ steps.profile.outputs.AZURE_CLIENT_ID }}
+          tenant-id: ${{ steps.profile.outputs.AZURE_TENANT_ID }}
+          subscription-id: ${{ steps.profile.outputs.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Ensure PostgreSQL is running
+        run: bash infra/azure/scripts/ensure-db-running.sh "${{ steps.profile.outputs.AZURE_RESOURCE_GROUP }}"

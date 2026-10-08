@@ -6,6 +6,7 @@
  * but their JWT is kept under a separate sessionStorage key so an admin and a candidate session
  * never collide (and so a candidate sign-out never touches the admin token).
  */
+import i18n from "../i18n";
 import { apiFetch, HttpError, requestJson } from "./http";
 import { tokenStore } from "./tokenStore";
 
@@ -56,8 +57,17 @@ async function exchangePassword(username: string, password: string): Promise<str
     return body.access_token;
   } catch (e) {
     if (!(e instanceof HttpError)) throw e;
-    throw new AuthError(e.status === 401 ? "用户名或密码错误" : `登录失败 (${e.status})`, e.status);
+    throw new AuthError(loginErrorMessage(e), e.status);
   }
+}
+
+/** The sign-in error in the UI language, carrying the server's reason when it sent a readable one
+ * (a JSON `detail` or a short plain-text body — not an HTML error page from the ingress). */
+function loginErrorMessage(e: HttpError): string {
+  if (e.status === 401) return i18n.t("auth.wrongCredentials");
+  const detail = e.detail.trim();
+  if (!detail || detail.startsWith("<")) return i18n.t("auth.loginFailedNoDetail", { status: e.status });
+  return i18n.t("auth.loginFailed", { status: e.status, detail: detail.slice(0, 200) });
 }
 
 /** Log in; on success stores the JWT and returns it. Throws AuthError on bad credentials. */

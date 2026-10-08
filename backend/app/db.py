@@ -20,6 +20,15 @@ POSTGRES_ENTRA_SCOPE = "https://ossrdbms-aad.database.windows.net/.default"
 
 _settings = get_settings()
 
+# How long one PostgreSQL connect may take before the request gives up. asyncpg's own default is
+# 60 s, so an unreachable server (stopped, network cut) held every request for a full minute and
+# then surfaced as a bare 500.
+CONNECT_TIMEOUT_S = 10
+
+
+class DatabaseUnavailableError(Exception):
+    """The database server could not be reached. ``app.main`` turns it into a 503 with a reason."""
+
 
 # One long-lived credential for the database alone. azure-identity caches each token until shortly
 # before it expires, so most connections cost no network call; the shared credential in
@@ -58,14 +67,21 @@ def make_engine(url: str, **kwargs: Any) -> AsyncEngine:
             import asyncpg
 
             token = await asyncio.to_thread(_entra_token)
-            return await asyncpg.connect(
-                host=parsed.host,
-                port=parsed.port or 5432,
-                user=parsed.username,
-                database=parsed.database,
-                password=token,
-                ssl=ssl,
-            )
+            try:
+                return await asyncpg.connect(
+                    host=parsed.host,
+                    port=parsed.port or 5432,
+                    user=parsed.username,
+                    database=parsed.database,
+                    password=token,
+                    ssl=ssl,
+                    timeout=CONNECT_TIMEOUT_S,
+                )
+            except (TimeoutError, OSError) as exc:
+                # Unreachable, not refused: a bad token or role is a PostgresError and stays a 500.
+                raise DatabaseUnavailableError(
+                    f"{type(exc).__name__} connecting to {parsed.host}"
+                ) from exc
 
         kwargs["async_creator"] = _connect
         # Recycle long-idle connections well inside the token lifetime, and check before reuse.

@@ -1,5 +1,6 @@
 /** auth API client: login stores token, me() reads it, 401 clears it. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import i18n from "../i18n";
 import * as auth from "./auth";
 
 afterEach(() => {
@@ -21,6 +22,32 @@ describe("auth client", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 401 }));
     await expect(auth.login("admin", "bad")).rejects.toBeInstanceOf(auth.AuthError);
     expect(auth.getAdminToken()).toBe("");
+  });
+
+  it("a 401 is the localized wrong-credentials message, in the UI language", async () => {
+    await i18n.changeLanguage("en-US");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 401 }));
+    await expect(auth.login("admin", "bad")).rejects.toThrow("Incorrect username or password.");
+  });
+
+  it("another failure carries the server's reason, not just the status", async () => {
+    await i18n.changeLanguage("en-US");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ detail: "The database is unavailable." }), { status: 503 }),
+    );
+    const err = await auth.login("admin", "pw").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(auth.AuthError);
+    expect((err as auth.AuthError).status).toBe(503);
+    expect((err as Error).message).toBe("Sign-in failed (503): The database is unavailable.");
+  });
+
+  it("an HTML error page is not echoed into the message", async () => {
+    await i18n.changeLanguage("zh-CN");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<html><body>502 Bad Gateway</body></html>", { status: 502 }),
+    );
+    await expect(auth.login("admin", "pw")).rejects.toThrow("登录失败 (502)。");
+    await i18n.changeLanguage("en-US");
   });
 
   it("me returns null and clears token on 401", async () => {
