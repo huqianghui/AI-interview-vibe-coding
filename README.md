@@ -19,6 +19,18 @@ placeholder output, not a working interview.
 The differentiator is **SOP-traceable, source-cited compliance scoring**: the system scores whether
 answers comply with the client's *own* SOP, and every judgment points back to its source.
 
+## Live deployment
+
+The app is deployed on Azure Container Apps. Every page needs an account; ask the owner for one.
+
+| Who | URL |
+|---|---|
+| Candidate (interview) | https://ca-aiinterview-public-frontend.victoriousocean-10de9a49.swedencentral.azurecontainerapps.io/interview |
+| Admin (banks, rubrics, personas, users, reports) | https://ca-aiinterview-public-frontend.victoriousocean-10de9a49.swedencentral.azurecontainerapps.io/admin |
+
+This frontend URL is the only public address. The backend has internal ingress and is reached only
+through the frontend's `/api` proxy, so it has no URL of its own.
+
 ## Key scenarios
 
 > Most screenshots are captured on the mock stack the test suite uses, so the scores, rubric items
