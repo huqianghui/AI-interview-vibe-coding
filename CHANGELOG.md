@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.51.0.4 (2026-10-08)
+
+### Security
+- **The backend no longer has a public address.** Its ingress is now internal, so the API, its
+  `/docs` page and the voice WebSocket are reachable only through the frontend's `/api` proxy. Before,
+  anyone could call the backend directly and skip the frontend entirely.
+- The frontend proxy now looks the backend up with the environment's own DNS. Azure DNS resolves the
+  backend's internal name to the environment's public IP, which internal ingress does not serve.
+- The deploy check, the bank-sync runbook and the latency probes go through the frontend's `/api`.
+
+### Fixed
+- **SOP uploads larger than 1 MB no longer fail with 413.** nginx's default 1 MB body limit was
+  rejecting them before they reached the backend, whose own limit is 25 MB.
+
 ## 0.51.0.3 (2026-10-08)
 
 ### Added

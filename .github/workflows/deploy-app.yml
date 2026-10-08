@@ -134,12 +134,13 @@ jobs:
             --query properties.configuration.ingress.fqdn \
             --output tsv)
           echo "Frontend URL: https://$frontend_fqdn"
-          echo "Backend URL:  https://${{ steps.backend-fqdn.outputs.fqdn }}"
-          # The backend serves /health at root; the frontend nginx serves its own /health.
+          echo "Backend URL:  https://${{ steps.backend-fqdn.outputs.fqdn }} (internal only)"
+          # The frontend nginx serves its own /health. The backend's ingress is internal, so it is
+          # checked THROUGH the frontend's /api proxy, which also proves the proxy reaches it.
           if [ "$HEALTH_CHECK" = "frontend" ]; then
             health_url="https://$frontend_fqdn/health"
           else
-            health_url="https://${{ steps.backend-fqdn.outputs.fqdn }}/health"
+            health_url="https://$frontend_fqdn/api/health"
           fi
           for i in $(seq 1 15); do
             if curl -sf "$health_url" > /dev/null; then
