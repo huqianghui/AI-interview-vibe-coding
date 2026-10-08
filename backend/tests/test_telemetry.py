@@ -38,9 +38,8 @@ def test_a_connection_string_turns_the_distro_on(monkeypatch):
     monkeypatch.setattr(monitor, "configure_azure_monitor", lambda **kw: calls.append(kw))
     assert telemetry.configure() is True
     assert calls[0]["connection_string"] == "InstrumentationKey=x"
-    import os
-
-    assert os.environ["OTEL_PYTHON_FASTAPI_EXCLUDED_URLS"] == telemetry.EXCLUDED_URLS
+    assert telemetry.excluded_urls() == telemetry.EXCLUDED_URLS
+    assert calls[0]["instrumentation_options"] == {"fastapi": {"enabled": False}}
     assert telemetry.configure() is True and len(calls) == 1  # idempotent: configured once
 
 
@@ -50,9 +49,7 @@ def test_an_operator_setting_cannot_drop_the_token_exclusion(monkeypatch):
     monkeypatch.setenv("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS", "/metrics")
     monkeypatch.setattr(monitor, "configure_azure_monitor", lambda **kw: None)
     telemetry.configure()
-    import os
-
-    assert os.environ["OTEL_PYTHON_FASTAPI_EXCLUDED_URLS"].split(",") == [
+    assert telemetry.excluded_urls().split(",") == [
         "/metrics",
         *telemetry.EXCLUDED_URLS.split(","),
     ]
@@ -136,3 +133,43 @@ def test_an_avatar_rate_limit_error_is_flagged(monkeypatch):
     )
     assert [a["avatar_rate_limited"] for _, a in seen] == [True, False]
     assert all("message" not in a for _, a in seen)  # the message text is never recorded
+
+
+def test_the_app_is_traced_without_the_excluded_urls(monkeypatch):
+    """The health probes and the voice WebSocket (token in its query string) make no request span;
+    other requests do. Instrumented on the app itself, so import order cannot change it."""
+    sdk = pytest.importorskip("opentelemetry.sdk.trace")
+    pytest.importorskip("opentelemetry.instrumentation.fastapi")
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    exporter = InMemorySpanExporter()
+    provider = sdk.TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(telemetry, "_tracer", provider.get_tracer("test"))
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+    app = FastAPI()
+
+    @app.get("/health")
+    def health():
+        return {}
+
+    @app.get("/admin/users")
+    def users():
+        return []
+
+    real = FastAPIInstrumentor.instrument_app
+    monkeypatch.setattr(
+        FastAPIInstrumentor,
+        "instrument_app",
+        staticmethod(lambda a, **kw: real(a, tracer_provider=provider, **kw)),
+    )
+    telemetry.instrument_app(app)
+    with TestClient(app) as client:
+        client.get("/health")
+        client.get("/admin/users?x=1")
+    servers = [s.name for s in exporter.get_finished_spans() if s.kind.name == "SERVER"]
+    assert servers == ["GET /admin/users"]

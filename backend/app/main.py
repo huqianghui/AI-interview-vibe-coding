@@ -189,6 +189,7 @@ async def _sync_default_persona() -> None:
 telemetry.configure(engine)
 
 app = FastAPI(title=settings.app_name, debug=settings.debug, lifespan=lifespan)
+telemetry.instrument_app(app)
 
 
 @app.exception_handler(DatabaseUnavailableError)

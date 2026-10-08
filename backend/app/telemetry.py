@@ -4,9 +4,9 @@
 ``APPLICATIONINSIGHTS_CONNECTION_STRING`` is set (the deployment injects it; dev and CI have none)
 and the Azure Monitor distro is installed (the ``azure`` extra; CI installs ``.[dev]`` only). It
 turns on the distro's automatic instrumentation (FastAPI requests, Azure SDK calls, warnings and
-errors from the ``app`` loggers) plus two the distro does not include: httpx (Azure OpenAI and
-the external interview brain: URL and status only) and SQLAlchemy (parameterised statements; bound
-values are never exported).
+errors from the ``app`` loggers, httpx: Azure OpenAI and the external interview brain, URL and
+status only) plus SQLAlchemy, which the distro does not include (parameterised statements; bound
+values are never exported). FastAPI requests are instrumented on the app (:func:`instrument_app`).
 
 :func:`span` is the one way code opens a business span. Without the SDK it is a no-op, so call
 sites never check. Business spans carry ids, counts, durations and outcomes — never a transcript,
@@ -59,9 +59,6 @@ def configure(engine: Any = None) -> bool:
     except ImportError:
         logger.warning("APPLICATIONINSIGHTS_CONNECTION_STRING is set but the SDK is not installed")
         return False
-    os.environ["OTEL_PYTHON_FASTAPI_EXCLUDED_URLS"] = _merged(
-        "OTEL_PYTHON_FASTAPI_EXCLUDED_URLS", EXCLUDED_URLS
-    )
     os.environ["OTEL_PYTHON_DISABLED_INSTRUMENTATIONS"] = _merged(
         "OTEL_PYTHON_DISABLED_INSTRUMENTATIONS", DISABLED_INSTRUMENTATIONS
     )
@@ -69,13 +66,16 @@ def configure(engine: Any = None) -> bool:
     # Every trace by default (a PoC's traffic is small); an operator can sample down without a
     # code change.
     ratio = float(os.environ.get("APPLICATIONINSIGHTS_SAMPLING_RATIO", "1.0"))
-    configure_azure_monitor(connection_string=connection, logger_name="app", sampling_ratio=ratio)
-    try:
-        from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
-
-        HTTPXClientInstrumentor().instrument()
-    except ImportError:
-        logger.info("httpx instrumentation not installed; outgoing httpx calls are not traced")
+    # FastAPI is instrumented by :func:`instrument_app`, on the app object itself, with the URL
+    # exclusions passed in: the distro's own FastAPI hook patches the FastAPI class and reads the
+    # exclusions from the environment at import, so its result depended on import order (measured
+    # on live: health probes were traced although the exclusion matched them).
+    configure_azure_monitor(
+        connection_string=connection,
+        logger_name="app",
+        sampling_ratio=ratio,
+        instrumentation_options={"fastapi": {"enabled": False}},
+    )
     if engine is not None:
         try:
             from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
@@ -86,6 +86,23 @@ def configure(engine: Any = None) -> bool:
     _tracer = trace.get_tracer("ai-interview")
     logger.info("Application Insights telemetry on")
     return True
+
+
+def excluded_urls() -> str:
+    """The URL exclusions in force: ours, merged into any an operator set."""
+    return _merged("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS", EXCLUDED_URLS)
+
+
+def instrument_app(app: Any) -> None:
+    """Trace the app's requests, minus :data:`EXCLUDED_URLS`. A no-op without telemetry."""
+    if _tracer is None:
+        return
+    try:
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    except ImportError:
+        logger.warning("FastAPI instrumentation not installed; requests are not traced")
+        return
+    FastAPIInstrumentor.instrument_app(app, excluded_urls=excluded_urls())
 
 
 class _NoSpan:
