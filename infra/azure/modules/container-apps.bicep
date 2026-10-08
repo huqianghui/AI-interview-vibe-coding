@@ -262,6 +262,11 @@ resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
               value: storageAccountBlobEndpoint
             }
             {
+              // SOP originals go to the `materials` blob container, never the revision's own disk.
+              name: 'DEFAULT_STORAGE_PROVIDER'
+              value: 'azure'
+            }
+            {
               name: 'CLIENT_BUNDLE_CONTAINER'
               value: clientBundleContainerName
             }

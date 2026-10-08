@@ -188,6 +188,8 @@ async def test_boot_steps_run_in_dependency_order(db_session, boot, monkeypatch)
     assert order == [
         "bundled banks",
         "client banks",
+        # After the client banks: their importer is what writes a fresh DB's SOP rows.
+        "SOP file repair",
         "default bank",
         "default admin",
         "candidate accounts",

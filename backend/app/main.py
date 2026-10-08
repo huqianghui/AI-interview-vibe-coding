@@ -61,6 +61,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         seed_client_banks,
         seed_default_bank,
     )
+    from app.services.sop_file_repair import repair_missing_sop_files
     from app.services.user_seed import seed_default_admin, seed_default_candidates
 
     async def _seed_master_config(session) -> None:
@@ -90,6 +91,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # Client-derived bundles from the private-blob channel (CLIENT_BANKS_DIR). No-op when
         # absent (public-demo mode / CI). These carry client SOP quotes and are NEVER committed.
         ("client banks", seed_client_banks),
+        # SOP rows whose stored bytes are gone (the pre-blob local disk did not survive revisions)
+        # get them back from the originals in the client bundle. No-op once they live in blob.
+        ("SOP file repair", repair_missing_sop_files),
         ("default bank", seed_default_bank),
         ("default admin", seed_default_admin),
         # #102: under the read-only Users tab this is the ONLY way candidate accounts come to exist,

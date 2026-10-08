@@ -165,6 +165,7 @@ module storage './modules/storage.bicep' = {
     location: location
     tags: commonTags
     storageAccountName: storageAccountName
+    backendIdentityPrincipalId: managedIdentity.outputs.backendIdentityPrincipalId
   }
 }
 
