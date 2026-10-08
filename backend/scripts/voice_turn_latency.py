@@ -23,7 +23,7 @@ persona) keep the original bare ``response.create`` / user-item flow.
 
 Usage:
     PROBE_USERNAME=probe PROBE_PASSWORD=... python scripts/voice_turn_latency.py \
-        --server https://<backend>.azurecontainerapps.io \
+        --server https://<frontend>.azurecontainerapps.io/api \
         --audio-dir /tmp/voice-latency-audio \
         --runs 5 --out /tmp/voice-turn-latency
 

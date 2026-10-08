@@ -49,10 +49,12 @@ stay out of shell history and the repo:
 ```bash
 ADMIN_USERNAME=admin ADMIN_PASSWORD='<server-admin-password>' \
   .venv/bin/python scripts/sync_bank_to_server.py \
-    --server https://<backend-app>.azurecontainerapps.io \
+    --server https://<frontend-app>.azurecontainerapps.io/api \
     --sop-dir ../EU_avatar_inspector_interview/Data_Sources_AI_Inspector
 ```
 
+- `--server` is the FRONTEND's `/api` proxy: the backend's ingress is internal, so it has no public
+  URL of its own.
 - Without `--bank-id`, the local **enabled default** bank is synced.
 - `--sop-dir` is optional; it points at the local SOP source files so the rubric's citations resolve
   by name. Omit it and the bank + rubric still import — only the citation links are skipped

@@ -16,7 +16,7 @@ mid-interview for a real person to resume.
 
 Usage:
     PROBE_USERNAME=probe PROBE_PASSWORD=... python scripts/brain_turn_rtt.py \
-        --server https://<backend>.azurecontainerapps.io --runs 5 --out /tmp/brain-rtt
+        --server https://<frontend>.azurecontainerapps.io/api --runs 5 --out /tmp/brain-rtt
 """
 
 from __future__ import annotations

@@ -21,7 +21,7 @@ Usage (from ``backend/``, venv active)::
 
     ADMIN_USERNAME=admin ADMIN_PASSWORD=... \\
       .venv/bin/python scripts/sync_bank_to_server.py \\
-        --server https://ca-...azurecontainerapps.io \\
+        --server https://<frontend-app>.azurecontainerapps.io/api \\
         [--bank-id <id>] [--sop-dir ../EU_avatar_inspector_interview/Data_Sources_AI_Inspector]
 
 Without ``--bank-id`` the local enabled default bank is used. Credentials come from the environment
@@ -123,7 +123,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Sync the local default bank to a deployed server."
     )
-    parser.add_argument("--server", required=True, help="Server base URL (https://...).")
+    parser.add_argument(
+        "--server",
+        required=True,
+        help="Server base URL: the frontend's /api proxy (https://.../api).",
+    )
     parser.add_argument("--bank-id", default=None, help="Local bank id (default: enabled default).")
     parser.add_argument(
         "--sop-dir",

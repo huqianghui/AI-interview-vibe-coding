@@ -9,8 +9,11 @@ targetScope = 'resourceGroup'
 //
 // The managed environment is VNet-INTEGRATED (vnetConfiguration.infrastructureSubnetId, from
 // network.bicep) so the backend can reach the storage account's blob private endpoint at boot —
-// this is what revives the client-bank seeding channel. Ingress stays EXTERNAL (internal: false):
-// public traffic still reaches both apps; only egress to storage routes through the VNet.
+// this is what revives the client-bank seeding channel. The ENVIRONMENT stays external
+// (internal: false) so the frontend is public, but the BACKEND app's own ingress is INTERNAL:
+// it is reachable only from inside the environment, i.e. through the frontend's /api proxy. Its
+// ingress.fqdn is therefore the `<app>.internal.<domain>` name, which only the environment's DNS
+// (127.0.0.11, see frontend/nginx.conf) resolves to the in-cluster address.
 // NOTE: vnetConfiguration is immutable — changing it requires deleting + recreating the environment
 // (which reassigns the env-unique FQDN segment on both apps). See infra/azure/README.md.
 
@@ -144,7 +147,8 @@ resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
     configuration: {
       activeRevisionsMode: 'Single'
       ingress: {
-        external: true
+        // Internal: no public route to the API, /docs, or /voice-live/ws except via the frontend.
+        external: false
         targetPort: 8000
         transport: 'auto'
         allowInsecure: false
