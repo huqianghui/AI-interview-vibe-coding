@@ -10,6 +10,7 @@ from app.services import voice_live_proxy
 @pytest.fixture(autouse=True)
 def _reset(monkeypatch):
     monkeypatch.setattr(telemetry, "_tracer", None)
+    monkeypatch.setattr(telemetry, "_configured", False)
 
 
 def test_without_a_connection_string_nothing_is_configured(monkeypatch):
@@ -31,15 +32,48 @@ async def test_traced_runs_the_function_and_returns_its_value_without_telemetry(
 
 def test_a_connection_string_turns_the_distro_on(monkeypatch):
     monitor = pytest.importorskip("azure.monitor.opentelemetry")
-    calls = {}
+    calls: list[dict] = []
     monkeypatch.setenv("APPLICATIONINSIGHTS_CONNECTION_STRING", "InstrumentationKey=x")
     monkeypatch.delenv("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS", raising=False)
-    monkeypatch.setattr(monitor, "configure_azure_monitor", lambda **kw: calls.update(kw))
+    monkeypatch.setattr(monitor, "configure_azure_monitor", lambda **kw: calls.append(kw))
     assert telemetry.configure() is True
-    assert calls["connection_string"] == "InstrumentationKey=x"
+    assert calls[0]["connection_string"] == "InstrumentationKey=x"
     import os
 
-    assert os.environ["OTEL_PYTHON_FASTAPI_EXCLUDED_URLS"] == "health,voice-live/ws"
+    assert os.environ["OTEL_PYTHON_FASTAPI_EXCLUDED_URLS"] == telemetry.EXCLUDED_URLS
+    assert telemetry.configure() is True and len(calls) == 1  # idempotent: configured once
+
+
+def test_an_operator_setting_cannot_drop_the_token_exclusion(monkeypatch):
+    monitor = pytest.importorskip("azure.monitor.opentelemetry")
+    monkeypatch.setenv("APPLICATIONINSIGHTS_CONNECTION_STRING", "InstrumentationKey=x")
+    monkeypatch.setenv("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS", "/metrics")
+    monkeypatch.setattr(monitor, "configure_azure_monitor", lambda **kw: None)
+    telemetry.configure()
+    import os
+
+    assert os.environ["OTEL_PYTHON_FASTAPI_EXCLUDED_URLS"].split(",") == [
+        "/metrics",
+        *telemetry.EXCLUDED_URLS.split(","),
+    ]
+
+
+def test_the_exclusions_match_exactly_the_health_and_voice_urls():
+    import re
+
+    patterns = [re.compile(p) for p in telemetry.EXCLUDED_URLS.split(",")]
+
+    def excluded(url):
+        return any(p.search(url) for p in patterns)
+
+    base = "https://ca-x.example.io"
+    assert excluded(f"{base}/health")
+    assert excluded(f"{base}/api/health/db")
+    assert excluded(f"{base}/voice-live/ws?token=secret")
+    assert excluded(f"{base}/api/voice-live/ws?token=secret")
+    assert not excluded(f"{base}/admin/users")
+    assert not excluded(f"{base}/candidate/interview/healthy-habits")
+    assert not excluded("https://health-records.example.io/admin/users")
 
 
 @pytest.mark.asyncio
@@ -63,6 +97,32 @@ async def test_a_business_span_records_outcomes_only(monkeypatch):
     assert span.name == "scoring.question"
     assert dict(span.attributes) == {"kind": "t", "scoring.items": 3}
     assert span.events[0].name == "voice.azure_error"
+
+    @telemetry.traced("judge.call")
+    async def fails():
+        raise ValueError("the model said: the candidate's whole answer")
+
+    with pytest.raises(ValueError):
+        await fails()
+    failed = exporter.get_finished_spans()[-1]
+    assert failed.status.description == "ValueError"  # the type, never the message
+    assert failed.attributes["error.type"] == "ValueError"
+    assert not failed.events  # no recorded exception event carrying the message
+
+    class WebSocketDisconnect(Exception):
+        pass
+
+    with pytest.raises(WebSocketDisconnect):
+        with telemetry.span("voice.session"):
+            raise WebSocketDisconnect()
+    ended = exporter.get_finished_spans()[-1]
+    assert ended.status.status_code.name == "UNSET"  # a closed tab is not a failure
+
+    @telemetry.traced("scoring.question", result=lambda r: {"x": r.missing})
+    async def bad_mapping():
+        return 1
+
+    assert await bad_mapping() == 1  # a broken attribute mapping never breaks the call
 
 
 def test_an_avatar_rate_limit_error_is_flagged(monkeypatch):

@@ -331,9 +331,8 @@ def parse_result(raw: str, inp: JudgeInput) -> JudgeResult:
     return JudgeResult(verdict, speech_text=speech, reason=reason)
 
 
-@telemetry.traced(
-    "judge.call", result=lambda r: {"judge.verdict": r.event_verdict, "judge.error": r.error}
-)
+# The verdict only: JudgeResult.error can quote the model's output or an SDK message.
+@telemetry.traced("judge.call", result=lambda r: {"judge.verdict": r.event_verdict})
 async def run_judge(
     inp: JudgeInput, adapter: LLMAdapter, *, timeout_s: float = JUDGE_TIMEOUT_SECONDS
 ) -> JudgeResult:
@@ -348,7 +347,10 @@ async def run_judge(
     except TimeoutError:
         result = JudgeResult("wait", error="timeout", event_verdict="error")
     except Exception as exc:  # noqa: BLE001 — the judge must never break the interview
-        logger.warning("judge adapter failed: %s", exc)
+        # The type at WARNING (exported to Application Insights); the message, which can quote the
+        # model or the request, only at DEBUG.
+        logger.warning("judge adapter failed: %s", type(exc).__name__)
+        logger.debug("judge adapter failure detail: %s", exc)
         result = JudgeResult("wait", error=f"adapter error: {exc}"[:300], event_verdict="error")
     else:
         result = parse_result(raw, inp)

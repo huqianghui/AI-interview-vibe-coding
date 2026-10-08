@@ -3,8 +3,10 @@
 ``configure()`` runs once, before the FastAPI app exists, and only when
 ``APPLICATIONINSIGHTS_CONNECTION_STRING`` is set (the deployment injects it; dev and CI have none)
 and the Azure Monitor distro is installed (the ``azure`` extra; CI installs ``.[dev]`` only). It
-turns on the distro's automatic instrumentation (FastAPI requests, httpx/requests calls, Azure
-SDK calls, logging) and SQLAlchemy, which the distro does not cover for asyncpg.
+turns on the distro's automatic instrumentation (FastAPI requests, Azure SDK calls, warnings and
+errors from the ``app`` loggers) plus two the distro does not include: httpx (Azure OpenAI and
+the external interview brain: URL and status only) and SQLAlchemy (parameterised statements; bound
+values are never exported).
 
 :func:`span` is the one way code opens a business span. Without the SDK it is a no-op, so call
 sites never check. Business spans carry ids, counts, durations and outcomes — never a transcript,
@@ -22,16 +24,32 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Requests that are noise as traces: the health probes (every few seconds) and the voice WebSocket
-# (one "request" lasting a whole interview; its spans are the voice.session span instead).
-EXCLUDED_URLS = "health,voice-live/ws"
+# Requests left out of the request traces, as the FastAPI instrumentation reads them: regexes
+# searched in the FULL URL. The health probes (every few seconds) are noise. The voice WebSocket is
+# one "request" lasting a whole interview, and its URL carries the session token in the query
+# string: this exclusion is what keeps that token out of telemetry, so it is merged into any value
+# an operator sets, never replaced by it.
+EXCLUDED_URLS = r"/health(/db)?(\?|$),/voice-live/ws"
+# The distro's instrumentations this app has no use for.
+DISABLED_INSTRUMENTATIONS = "django,flask,psycopg2"
+# Exceptions that end a span normally: a candidate closing the tab, a cancelled task at shutdown.
+_NOT_ERRORS = ("WebSocketDisconnect", "CancelledError")
 
 _tracer: Any = None
+_configured = False
+
+
+def _merged(name: str, ours: str) -> str:
+    current = [v for v in os.environ.get(name, "").split(",") if v.strip()]
+    return ",".join(dict.fromkeys([*current, *ours.split(",")]))
 
 
 def configure(engine: Any = None) -> bool:
-    """Turn telemetry on if this deployment has App Insights. Returns whether it did."""
-    global _tracer
+    """Turn telemetry on if this deployment has App Insights. Returns whether it did. Idempotent."""
+    global _tracer, _configured
+    if _configured:
+        return _tracer is not None
+    _configured = True
     connection = os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING", "").strip()
     if not connection:
         return False
@@ -41,9 +59,23 @@ def configure(engine: Any = None) -> bool:
     except ImportError:
         logger.warning("APPLICATIONINSIGHTS_CONNECTION_STRING is set but the SDK is not installed")
         return False
-    os.environ.setdefault("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS", EXCLUDED_URLS)
+    os.environ["OTEL_PYTHON_FASTAPI_EXCLUDED_URLS"] = _merged(
+        "OTEL_PYTHON_FASTAPI_EXCLUDED_URLS", EXCLUDED_URLS
+    )
+    os.environ["OTEL_PYTHON_DISABLED_INSTRUMENTATIONS"] = _merged(
+        "OTEL_PYTHON_DISABLED_INSTRUMENTATIONS", DISABLED_INSTRUMENTATIONS
+    )
     os.environ.setdefault("OTEL_SERVICE_NAME", "ai-interview-backend")
-    configure_azure_monitor(connection_string=connection, logger_name="app")
+    # Every trace by default (a PoC's traffic is small); an operator can sample down without a
+    # code change.
+    ratio = float(os.environ.get("APPLICATIONINSIGHTS_SAMPLING_RATIO", "1.0"))
+    configure_azure_monitor(connection_string=connection, logger_name="app", sampling_ratio=ratio)
+    try:
+        from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+
+        HTTPXClientInstrumentor().instrument()
+    except ImportError:
+        logger.info("httpx instrumentation not installed; outgoing httpx calls are not traced")
     if engine is not None:
         try:
             from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
@@ -70,11 +102,24 @@ def span(name: str, **attributes: Any) -> Iterator[Any]:
     if _tracer is None:
         yield _NoSpan()
         return
-    with _tracer.start_as_current_span(name) as current:
+    from opentelemetry.trace import Status, StatusCode
+
+    # Exceptions are recorded by TYPE only: an exception message can carry model output or request
+    # detail, and nothing in a span may carry text.
+    with _tracer.start_as_current_span(
+        name, record_exception=False, set_status_on_exception=False
+    ) as current:
         for key, value in attributes.items():
             if value is not None:
                 current.set_attribute(key, value)
-        yield current
+        try:
+            yield current
+        except BaseException as exc:
+            kind = type(exc).__name__
+            if kind not in _NOT_ERRORS:
+                current.set_status(Status(StatusCode.ERROR, kind))
+                current.set_attribute("error.type", kind)
+            raise
 
 
 def event(name: str, **attributes: Any) -> None:
@@ -96,9 +141,12 @@ def traced(name: str, result: Callable[[Any], dict] | None = None, **static: Any
             with span(name, **static) as current:
                 value = await fn(*args, **kwargs)
                 if result is not None:
-                    for key, attr in result(value).items():
-                        if attr is not None:
-                            current.set_attribute(key, attr)
+                    try:  # telemetry never breaks the call it observes
+                        for key, attr in result(value).items():
+                            if attr is not None:
+                                current.set_attribute(key, attr)
+                    except Exception:  # noqa: BLE001
+                        logger.debug("Span attributes for %s failed", name, exc_info=True)
                 return value
 
         return wrapper
