@@ -67,7 +67,7 @@ class MockLLMAdapter(LLMAdapter):
                     '{"missing": [{"point": "mock uncovered SOP point", '
                     '"sop_evidence": "mock SOP evidence"}]}'
                 )
-            if "deciding whether an interview question is about these sops" in lowered:
+            if "deciding whether a question bank tests knowledge of an sop library" in lowered:
                 return '{"about": true}'
             if "locating the sop citation" in lowered:
                 # Cite the first candidate, no quote: exercises the checked path deterministically.

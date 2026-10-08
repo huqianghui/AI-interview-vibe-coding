@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.56.1.3 (2026-10-08)
+
+### Fixed
+- **The "is this bank about our SOPs" check is made once per bank.** All of the bank's questions
+  are compared with the library: each document's name and the purpose line of its summary.
+  Asked one question at a time, the answer flipped between runs, so the three-question
+  software-deployment bank was still cited to clinical SOPs on live. Measured with the real model,
+  3 runs per bank: the two clinical banks were judged on-topic 3/3; the deployment, behavioural
+  and small-talk banks were judged off-topic 3/3.
+
 ## 0.56.1.2 (2026-10-08)
 
 ### Fixed
