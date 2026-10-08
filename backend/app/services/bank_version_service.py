@@ -262,10 +262,52 @@ async def list_versions(db: AsyncSession, bank_id: str) -> Sequence[BankVersion]
     )
 
 
+async def publish_state(db: AsyncSession, bank_id: str) -> tuple[int | None, bool]:
+    """``(latest version_no or None, draft differs from it)`` for the bank list.
+
+    Reads two columns of the latest version, never its content blob: the list shows this for every
+    bank on every load of three admin tabs.
+    """
+    row = (
+        await db.execute(
+            select(BankVersion.version_no, BankVersion.content_hash)
+            .where(BankVersion.bank_id == bank_id)
+            .order_by(BankVersion.version_no.desc())
+            .limit(1)
+        )
+    ).first()
+    if row is None:
+        return None, True
+    return row[0], row[1] != _hash(await draft_content(db, bank_id))
+
+
 async def has_unpublished_changes(db: AsyncSession, bank_id: str) -> bool:
     """Whether the draft differs from the latest published version (True when there is none)."""
-    current = await latest(db, bank_id)
-    return current is None or current.content_hash != _hash(await draft_content(db, bank_id))
+    return (await publish_state(db, bank_id))[1]
+
+
+async def publish_unversioned_banks(db: AsyncSession) -> int:
+    """Boot step: publish, as version 1, every COMPLETE bank that has never had a version.
+
+    Banks written straight to the draft tables (the boot seeds, the private client importer) would
+    otherwise never be published, and interviews on them would read the live draft. Only banks with
+    no version at all: a bank an admin has published before is never published behind their back.
+    """
+    versioned = set((await db.execute(select(BankVersion.bank_id).distinct())).scalars().all())
+    published = 0
+    for bank_id in (await db.execute(select(QuestionBank.id))).scalars().all():
+        if bank_id in versioned:
+            continue
+        result = await publish(db, bank_id, reason="initial")
+        if result.created:
+            published += 1
+        elif result.problems:
+            logger.warning(
+                "Bank %s left unpublished at boot: %s",
+                bank_id,
+                ", ".join(f"{p.code}#{p.question_no}" for p in result.problems),
+            )
+    return published
 
 
 async def publish(
@@ -283,7 +325,10 @@ async def publish(
     if problems:
         return PublishResult(version=None, problems=problems)
     content_hash = _hash(content)
+    # Read before the loop: the rollback in the retry branch expires every loaded object, and
+    # touching an expired attribute in an async session raises instead of reloading.
     bank = await db.get(QuestionBank, bank_id)
+    bank_name = bank.name if bank else ""
     for attempt in range(2):
         current = await latest(db, bank_id)
         if current is not None and current.content_hash == content_hash:
@@ -291,7 +336,7 @@ async def publish(
         version = BankVersion(
             bank_id=bank_id,
             version_no=(current.version_no if current else 0) + 1,
-            bank_name=bank.name if bank else "",
+            bank_name=bank_name,
             content_json=json.dumps(content, ensure_ascii=False),
             content_hash=content_hash,
             reason=reason,

@@ -78,7 +78,8 @@ async def resolve_questions(
     if bank_version_id:
         version = await bank_version_service.get(db, bank_version_id)
         if version is not None:
-            return bank_version_service.interview_questions(version) or FALLBACK_QUESTIONS
+            # Never the generic fallback for a pinned interview: its version IS its question set.
+            return bank_version_service.interview_questions(version)
 
     bank = await question_service.find_bank(db, bank_id) if bank_id else None
     if bank is None:

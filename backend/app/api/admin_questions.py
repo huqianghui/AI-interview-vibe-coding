@@ -102,7 +102,7 @@ class BundleImportOut(BaseModel):
 
 
 async def _bank_out(db: AsyncSession, bank) -> BankOut:
-    latest = await bank_version_service.latest(db, bank.id)
+    latest_no, unpublished = await bank_version_service.publish_state(db, bank.id)
     return BankOut(
         bank_id=bank.id,
         name=bank.name,
@@ -110,8 +110,8 @@ async def _bank_out(db: AsyncSession, bank) -> BankOut:
         language=bank.language,
         enabled=bank.enabled,
         is_default=bank.is_default,
-        latest_version_no=latest.version_no if latest else None,
-        has_unpublished_changes=await bank_version_service.has_unpublished_changes(db, bank.id),
+        latest_version_no=latest_no,
+        has_unpublished_changes=unpublished,
     )
 
 

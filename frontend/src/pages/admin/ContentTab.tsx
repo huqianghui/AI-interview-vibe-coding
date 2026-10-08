@@ -83,6 +83,7 @@ export function ContentTab({ state, guard }: { state: ContentTabState; guard: Gu
     editWeightsSum,
     publishResult,
     publishBank,
+    publishing,
   } = state;
   const currentBank = banks.find((b) => b.bank_id === selectedBank);
 
@@ -165,7 +166,7 @@ export function ContentTab({ state, guard }: { state: ContentTabState; guard: Gu
                 appearance="primary"
                 size="small"
                 data-testid="bank-publish"
-                disabled={!currentBank?.has_unpublished_changes}
+                disabled={!currentBank?.has_unpublished_changes || publishing}
                 onClick={publishBank}
               >
                 {t("admin.publish")}

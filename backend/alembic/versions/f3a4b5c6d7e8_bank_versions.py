@@ -160,7 +160,9 @@ def _rewrite_versions(bind) -> None:
                                 "text": "",
                                 "language": language,
                                 "order_index": 0,
-                                "enabled": False,
+                                # Enabled, so an interview pinned to this version keeps the same
+                                # question count and its current index stays on the right one.
+                                "enabled": True,
                                 "weight": 1,
                                 "expected_points": [],
                                 "max_follow_ups": 0,

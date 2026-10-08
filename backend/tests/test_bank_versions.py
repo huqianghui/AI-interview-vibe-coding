@@ -497,3 +497,79 @@ async def test_admin_detail_shows_the_version_and_the_candidate_view_hides_it(
     candidate = await db_session.get(AnonymousCandidateSession, session.candidate_session_id)
     mine = await interview_history_service.get_detail(db_session, iv, candidate=candidate)
     assert mine is not None and mine.bank_version_no is None
+
+
+# --- review follow-ups (ship pre-landing review) ---------------------------------------------
+
+
+async def test_a_publish_that_loses_the_version_number_race_retries(db_session, monkeypatch):
+    """Two publishes of one bank compute the same next number; the loser retries once. The
+    rollback in between expires the loaded bank, which once made the retry raise (a 500)."""
+    from sqlalchemy.exc import IntegrityError
+
+    bank, q, *_ = await _bank(db_session)
+    await question_service.update_question(db_session, q.id, text="Changed")
+    real_commit = db_session.commit
+    calls = {"n": 0}
+
+    async def commit_losing_once():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise IntegrityError("insert", {}, Exception("uq_bank_version_bank_no"))
+        await real_commit()
+
+    monkeypatch.setattr(db_session, "commit", commit_losing_once)
+    result = await bank_version_service.publish(db_session, bank.id)
+    assert (result.created, result.version.version_no, result.version.bank_name) == (
+        True,
+        2,
+        "Bank",
+    )
+
+
+async def test_boot_publishes_complete_banks_that_never_had_a_version(db_session):
+    complete, *_ = await _bank(db_session, name="Seeded", publish=False)
+    incomplete = await question_service.create_bank(db_session, name="Rubricless", is_default=False)
+    await question_service.add_question(db_session, bank_id=incomplete.id, text="Q?", order_index=0)
+    published_before, *_ = await _bank(db_session, name="Published", is_default=False)
+    await question_service.update_question(
+        db_session,
+        (await question_service.list_questions_for_bank(db_session, published_before.id))[0].id,
+        text="An admin's unpublished draft",
+    )
+    await db_session.commit()
+
+    assert await bank_version_service.publish_unversioned_banks(db_session) == 1
+    v = await bank_version_service.latest(db_session, complete.id)
+    assert (v.version_no, v.reason) == (1, "initial")
+    assert await bank_version_service.latest(db_session, incomplete.id) is None
+    # A bank published before keeps its admin's draft unpublished.
+    assert (await bank_version_service.latest(db_session, published_before.id)).version_no == 1
+    assert await bank_version_service.has_unpublished_changes(db_session, published_before.id)
+
+
+async def test_a_pinned_version_never_falls_back_to_the_generic_questions(db_session):
+    from app.interview.questions import FALLBACK_QUESTIONS
+
+    bank, q, *_ = await _bank(db_session)
+    v1 = await bank_version_service.latest(db_session, bank.id)
+    asked = await resolve_questions(db_session, bank.id, v1.id)
+    assert asked and asked != FALLBACK_QUESTIONS
+    # A pinned id that no longer resolves falls back to the bank's draft, not the generic set.
+    draft = await resolve_questions(db_session, bank.id, "gone")
+    assert [x.prompt for x in draft] == [q.text]
+
+
+async def test_publish_is_admin_only_and_import_reports_what_it_published(
+    client, db_session, admin_auth, candidate_auth
+):
+    from app.services import bank_bundle_service
+
+    bank, *_ = await _bank(db_session, publish=False)
+    denied = await client.post(f"/admin/question-banks/{bank.id}/publish", headers=candidate_auth)
+    assert denied.status_code == 403
+    bundle = await bank_bundle_service.export_bank_bundle(db_session, bank.id)
+    bundle["bank"]["name"] = "Imported over the API"
+    resp = await client.post("/admin/question-banks/import", headers=admin_auth, json=bundle)
+    assert resp.status_code == 201, resp.text
+    assert (resp.json()["published_version_no"], resp.json()["publish_problems"]) == (1, [])

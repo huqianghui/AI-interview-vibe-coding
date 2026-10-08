@@ -1,6 +1,6 @@
 /** State and actions of the admin page's Content tab: banks, their questions, and the selected
  * question's scoring rubric (F2b/F3b). Called by AdminPage, so the state outlives tab switches. */
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import * as admin from "../../api/admin";
 import type {
@@ -27,12 +27,18 @@ export function useContentTab(guard: Guard) {
   const [newBankName, setNewBankName] = useState("");
   const [newQuestionText, setNewQuestionText] = useState("");
 
-  const refreshBanks = useCallback(
-    () => guard(async () => setBanks(await admin.listBanks())),
-    [guard],
-  );
+  // Every draft edit reloads the banks' publish state, so reloads can overlap; only the newest
+  // one's answer is kept, or a slow older reply could disable Publish on a stale "no changes".
+  const banksRequest = useRef(0);
+  const loadBanks = useCallback(async () => {
+    const mine = ++banksRequest.current;
+    const next = await admin.listBanks();
+    if (mine === banksRequest.current) setBanks(next);
+  }, []);
+  const refreshBanks = useCallback(() => guard(loadBanks), [guard, loadBanks]);
   // The outcome of the last publish of the selected bank (version, or why it was refused).
   const [publishResult, setPublishResult] = useState<PublishResult | null>(null);
+  const [publishing, setPublishing] = useState(false);
 
   // Every draft edit (question or rubric) can change whether the bank has unpublished changes,
   // so the banks' publish state is reloaded with it.
@@ -44,9 +50,14 @@ export function useContentTab(guard: Guard) {
 
   const publishBank = () =>
     guard(async () => {
-      if (!selectedBank) return;
-      setPublishResult(await admin.publishBank(selectedBank));
-      setBanks(await admin.listBanks());
+      if (!selectedBank || publishing) return;
+      setPublishing(true);
+      try {
+        setPublishResult(await admin.publishBank(selectedBank));
+        await loadBanks();
+      } finally {
+        setPublishing(false);
+      }
     });
 
   // Adopt a freshly loaded/generated/saved checklist as both the display + edit state.
@@ -116,7 +127,7 @@ export function useContentTab(guard: Guard) {
       adoptChecklist(await admin.editChecklistItems(checklist.checklist_id, payload));
       setChecklistStatus(t("admin.saved"));
       setPublishResult(null);
-      setBanks(await admin.listBanks());
+      await loadBanks();
     });
 
   // (Re)generate a checklist from the question via AI, then refresh the question list so the
@@ -157,6 +168,7 @@ export function useContentTab(guard: Guard) {
     editWeightsSum,
     publishResult,
     publishBank,
+    publishing,
   };
 }
 
