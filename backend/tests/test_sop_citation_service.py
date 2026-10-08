@@ -415,3 +415,35 @@ async def test_a_fresh_run_starts_again_from_the_original_labels(db_session):
     (row,) = json.loads((await db_session.get(CitationRun, second_id)).report_json)
     assert row["old"]["quote"] == "Widget Release Procedure SOP section 4.2"
     assert row["item_id"] == item.id
+
+
+async def test_original_labels_come_from_the_first_run_that_saw_each_item(db_session):
+    bank, _ = await _bank(db_session, [("x", 100, "")])
+    rows1 = [
+        {"question": "Q1", "item": "Accuracy", "old": {"quote": "A SOP section 4.2"}},
+        {"question": "Q2", "item": "Accuracy", "old": {"quote": "B SOP section 5"}},
+        {"question": "Q3", "item": "Dup", "old": {"quote": "label one"}},
+        {"question": "Q3", "item": "Dup", "old": {"quote": "label two"}},
+    ]
+    rows2 = [
+        {"item_id": "new", "question": "Q1", "item": "Added later", "old": {"quote": "C SOP"}},
+        {"question": "Q1", "item": "Accuracy", "old": {"quote": "a quote written by run 1"}},
+    ]
+    from datetime import timedelta
+
+    start = sop_citation_service._now()
+    for n, rows in enumerate((rows1, rows2)):
+        db_session.add(
+            CitationRun(
+                bank_id=bank.id,
+                status="done",
+                report_json=json.dumps(rows),
+                created_at=start + timedelta(seconds=n),
+            )
+        )
+        await db_session.commit()
+    labels = await sop_citation_service._original_labels(db_session, bank.id, before="")
+    assert labels[("Q1", "Accuracy")] == "A SOP section 4.2"  # the first run's, not run 2's quote
+    assert labels[("Q2", "Accuracy")] == "B SOP section 5"  # same text, other question
+    assert ("Q3", "Dup") not in labels  # ambiguous: not guessed
+    assert labels["new"] == "C SOP"  # an item first seen by the second run

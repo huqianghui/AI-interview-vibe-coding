@@ -255,32 +255,47 @@ def _cited(choice: Choice) -> list[dict]:
     ]
 
 
+_AMBIGUOUS = object()
+
+
 async def _original_labels(db: AsyncSession, bank_id: str, before: str) -> dict:
-    """Each item's label as the bank had it before its FIRST relocation (that run's report keeps
-    it): a relocation writes a quote over the label, and a quote must never be read as a label.
-    Keyed by item id, and by ``(question_no, item text)`` for reports written before rows carried
-    the id."""
-    first = (
-        await db.execute(
-            select(CitationRun)
-            .where(
-                CitationRun.bank_id == bank_id,
-                CitationRun.status == "done",
-                CitationRun.id != before,
+    """Each item's label as the bank had it before its first relocation: the earliest completed
+    run that saw the item keeps it in its report. A relocation writes a quote over the label, and
+    a quote must never be read as a label. Keyed by item id, and by ``(question text, item text)``
+    for reports written before rows carried the id; a text key two different labels share is
+    dropped rather than guessed."""
+    runs = (
+        (
+            await db.execute(
+                select(CitationRun)
+                .where(
+                    CitationRun.bank_id == bank_id,
+                    CitationRun.status == "done",
+                    CitationRun.id != before,
+                )
+                .order_by(CitationRun.created_at, CitationRun.id)
             )
-            .order_by(CitationRun.created_at, CitationRun.id)
-            .limit(1)
         )
-    ).scalar_one_or_none()
-    if first is None:
-        return {}
-    labels: dict = {}
-    for row in json.loads(first.report_json or "[]"):
-        label = (row.get("old") or {}).get("quote", "")
-        if row.get("item_id"):
-            labels[row["item_id"]] = label
-        labels[(row.get("question_no"), row.get("item"))] = label
-    return labels
+        .scalars()
+        .all()
+    )
+    by_id: dict[str, str] = {}
+    by_text: dict[tuple, object] = {}
+    for run in runs:  # oldest first: the first run to see an item saw its label
+        seen_here: dict[tuple, object] = {}
+        for row in json.loads(run.report_json or "[]"):
+            label = (row.get("old") or {}).get("quote", "")
+            if row.get("item_id"):
+                by_id.setdefault(row["item_id"], label)
+            key = (row.get("question"), row.get("item"))
+            previous = seen_here.get(key, label)
+            seen_here[key] = label if previous == label else _AMBIGUOUS
+        for key, label in seen_here.items():
+            by_text.setdefault(key, label)
+    return {
+        **{k: v for k, v in by_text.items() if v is not _AMBIGUOUS},
+        **by_id,
+    }
 
 
 async def relocate(
@@ -326,7 +341,7 @@ async def relocate(
             _Item(
                 it.id,
                 it.text,
-                original.get(it.id, original.get((number, it.text), it.source_quote)),
+                original.get(it.id, original.get((q.text, it.text), it.source_quote)),
                 it.source_document_id,
                 number,
                 q.text,
@@ -355,13 +370,18 @@ async def relocate(
         it.id: {"document_name": names.get(it.document_id or "", ""), "quote": it.label}
         for it in work
     }
-    # Each question's own sources, from all its items' labels.
+    # Each question's own sources, from its items' LABELS only: stored citations (an earlier run's
+    # search results) would spread one item's mistake to every other item of the question.
     by_question: dict[int, tuple[list[SectionRef], list[str]]] = {}
     for it in work:
         refs, docs_named = _label_sources(it.label, documents, numbers)
         hint_refs, hint_docs = by_question.setdefault(it.question_no, ([], []))
-        hint_refs += [r for r in [*it.refs, *refs] if r not in hint_refs]
-        hint_docs += [d for d in docs_named if d not in hint_docs]
+        for r in refs:
+            if r not in hint_refs:
+                hint_refs.append(r)
+        for d in docs_named:
+            if d not in hint_docs:
+                hint_docs.append(d)
     hints = {
         number: _QuestionSources(tuple(refs), tuple(docs_named))
         for number, (refs, docs_named) in by_question.items()
@@ -519,7 +539,9 @@ async def start_relocation(
         running.status = "failed"
         running.error = "interrupted (the server restarted); run it again"
         await db.commit()
-    run = CitationRun(bank_id=bank_id, status="running")
+    # Microsecond creation time: runs are ordered by it (the first run keeps the original labels),
+    # and the database default has one-second resolution on SQLite.
+    run = CitationRun(bank_id=bank_id, status="running", created_at=_now())
     db.add(run)
     try:
         await db.commit()
