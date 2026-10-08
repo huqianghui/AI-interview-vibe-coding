@@ -23,7 +23,8 @@ param registryLoginServer string
 param backendImage string = ''
 param postgresServerName string
 
-var jobName = 'caj-${namePrefix}-db-autostart'
+// Container Apps job names are limited to 31 characters ('caj-aiinterview-public-db-autostart' is 35).
+var jobName = 'caj-${namePrefix}-dbstart'
 
 resource managedEnvironment 'Microsoft.App/managedEnvironments@2023-05-01' existing = {
   name: 'cae-${namePrefix}-${environmentName}'

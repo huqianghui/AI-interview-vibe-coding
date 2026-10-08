@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.58.1.1 (2026-10-09)
+
+### Fixed
+- **The database auto-start job can be created.** Azure limits Container Apps job names to 31
+  characters, and the old name was 35, so the job is now `caj-<prefix>-dbstart`. The deploy step
+  looks it up under the new name. Created live and run once: it found the server Ready.
+
 ## 0.58.1.0 (2026-10-09)
 
 ### Added
