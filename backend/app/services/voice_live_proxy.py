@@ -27,6 +27,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from app import telemetry
 from app.config import get_settings
 from app.models.persona import (
     InterviewerPersona,
@@ -759,6 +760,20 @@ async def _forward_client_to_azure(
         logger.warning("Voice Live proxy: client->Azure forwarding error: %s", exc)
 
 
+def _record_azure_error(event: dict) -> None:
+    """An Azure error on the voice session, as a telemetry event: its code, and whether it is the
+    avatar creation limit (measured: 3 avatar connections per 60 s, invisible to every Azure quota
+    page — see docs/avatar-weaknet-probe.md). The message text itself is not recorded."""
+    error = event.get("error") if isinstance(event.get("error"), dict) else {}
+    text = f"{error.get('code', '')} {error.get('message', '')}".lower()
+    telemetry.event(
+        "voice.azure_error",
+        code=str(error.get("code") or "")[:64],
+        avatar_rate_limited="avatar" in text
+        and any(word in text for word in ("rate", "limit", "throttl", "concurren", "too many")),
+    )
+
+
 async def _forward_azure_to_client(
     conn: Any,
     ws: WebSocket,
@@ -781,6 +796,8 @@ async def _forward_azure_to_client(
                 )
                 if problem:
                     logger.warning("Voice Live proxy: %s", problem)
+            if event_dict.get("type") == ERROR_TYPE:
+                _record_azure_error(event_dict)
             await ws.send_text(json.dumps(event_dict))
     except connection_closed:
         logger.debug("Voice Live proxy: Azure->client forwarding stopped (Azure closed)")

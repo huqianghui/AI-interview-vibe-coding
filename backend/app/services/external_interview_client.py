@@ -35,6 +35,8 @@ from typing import Protocol, runtime_checkable
 
 import httpx
 
+from app import telemetry
+
 logger = logging.getLogger(__name__)
 
 # Deadlines (seconds). Generous read/total default per the owner decision (tune from the first live
@@ -232,6 +234,7 @@ class HttpExternalInterviewProvider:
 
     name = "http"
 
+    @telemetry.traced("external_brain.turn")
     async def run_turn(
         self,
         *,
