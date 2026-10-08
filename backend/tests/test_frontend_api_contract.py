@@ -34,7 +34,6 @@ NOT_CALLED_BY_THE_SPA: dict[str, str] = {
     "/candidate/interview/{}/end": "e2e helper candidateLogin.ts finalizes external interviews",
     "/admin/question-banks/import": "scripts/sync_bank_to_server.py",
     "/admin/question-banks/{}/export": "manual bank export for the client hand-off bundle",
-    "/admin/sop/documents": "scripts/sync_bank_to_server.py uploads SOP sources",
 }
 
 WS_ROUTES = {"/voice-live/ws"}  # not in OpenAPI

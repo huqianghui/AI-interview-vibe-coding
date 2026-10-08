@@ -118,11 +118,16 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from app.interview.judge import warm_adapter
 
     judge_warm_task = asyncio.create_task(warm_adapter())
+    # Convert every SOP not yet split into sections (spec-sop-section-grounding). Background, not a
+    # boot step: Document Intelligence takes ~15 s per document and the startup probe would fail.
+    from app.services.sop_section_service import build_missing
+
+    sections_task = asyncio.create_task(build_missing(async_session_factory))
     try:
         yield
     finally:
         # Don't leave dangling tasks on shutdown; cancel any that haven't finished.
-        for task in (prewarm_task, persona_sync_task, judge_warm_task):
+        for task in (prewarm_task, persona_sync_task, judge_warm_task, sections_task):
             if not task.done():
                 task.cancel()
 

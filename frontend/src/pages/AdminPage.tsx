@@ -26,13 +26,15 @@ import { useAdminStyles } from "./admin/shared";
 import { ConnectionTab } from "./admin/ConnectionTab";
 import { ContentTab } from "./admin/ContentTab";
 import { InterviewsTab } from "./admin/InterviewsTab";
+import { SopTab } from "./admin/SopTab";
 import { UsersTab } from "./admin/UsersTab";
 import { useConnectionTab } from "./admin/useConnectionTab";
 import { useInterviewsTab } from "./admin/useInterviewsTab";
+import { useSopTab } from "./admin/useSopTab";
 import { useContentTab } from "./admin/useContentTab";
 import { useUsersTab } from "./admin/useUsersTab";
 
-type AdminTab = "content" | "connection" | "users" | "results";
+type AdminTab = "content" | "sop" | "connection" | "users" | "results";
 
 export function AdminPage() {
   const styles = useAdminStyles();
@@ -62,6 +64,7 @@ export function AdminPage() {
   const connection = useConnectionTab(guard);
   const users = useUsersTab(authed && tab === "users");
   const results = useInterviewsTab(authed && tab === "results");
+  const sop = useSopTab(authed && tab === "sop");
   const { refreshBanks } = content;
   const { refreshConfig, refreshExternalConfig } = connection;
 
@@ -144,6 +147,9 @@ export function AdminPage() {
           <Tab value="content" data-testid="admin-tab-content">
             {t("admin.tabContent")}
           </Tab>
+          <Tab value="sop" data-testid="admin-tab-sop">
+            {t("admin.sop.tab")}
+          </Tab>
           <Tab value="connection" data-testid="admin-tab-connection">
             {t("admin.tabConnection")}
           </Tab>
@@ -156,6 +162,7 @@ export function AdminPage() {
         </TabList>
 
         {tab === "content" && <ContentTab state={content} guard={guard} />}
+        {tab === "sop" && <SopTab state={sop} />}
         {tab === "connection" && <ConnectionTab state={connection} guard={guard} />}
         {tab === "users" && <UsersTab state={users} />}
         {tab === "results" && <InterviewsTab state={results} />}

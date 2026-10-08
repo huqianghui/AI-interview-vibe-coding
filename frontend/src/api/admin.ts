@@ -396,3 +396,50 @@ export async function fetchInterviewSopDocument(
   );
   return URL.createObjectURL(await resp.blob());
 }
+
+// ── SOP documents and their sections (spec-sop-section-grounding) ──────
+// A document is converted to Markdown in the background and split into sections. All or
+// nothing: a failed conversion has no sections and says why (`markdown_error`).
+
+export interface SopDocument {
+  document_id: string;
+  name: string;
+  status: string;
+  size: number;
+  chunk_count: number;
+  // document_intelligence | pdf_text | docx | text | failed; "" = not converted yet.
+  markdown_source: string;
+  section_count: number;
+  markdown_error: string;
+}
+
+export interface SopSection {
+  order_index: number;
+  number: string; // "4.2.3"; "§n" for an unnumbered heading, "§0" for text before the first
+  title: string;
+  level: number;
+  parent_index: number | null;
+  page_start: number;
+  page_end: number;
+  // Characters of the FULL section: its own text plus every subsection.
+  full_length: number;
+}
+
+export interface SopSectionText {
+  number: string;
+  title: string;
+  page_start: number;
+  page_end: number;
+  full_text: string;
+}
+
+export const listSopDocuments = () => adminRequest<SopDocument[]>("/admin/sop/documents");
+
+export const listSopSections = (documentId: string) =>
+  adminRequest<SopSection[]>(`/admin/sop/documents/${documentId}/sections`);
+
+export const getSopSection = (documentId: string, orderIndex: number) =>
+  adminRequest<SopSectionText>(`/admin/sop/documents/${documentId}/sections/${orderIndex}`);
+
+export const rebuildSopDocument = (documentId: string) =>
+  adminRequest<SopDocument>(`/admin/sop/documents/${documentId}/rebuild`, { method: "POST" });

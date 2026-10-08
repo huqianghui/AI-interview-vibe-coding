@@ -384,3 +384,46 @@ describe("tab switching", () => {
     expect(admin.getExternalConfig).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("SOP documents tab", () => {
+  const DOCS: admin.SopDocument[] = [
+    {
+      document_id: "d1", name: "Widget SOP.pdf", status: "chunked", size: 10, chunk_count: 3,
+      markdown_source: "document_intelligence", section_count: 3, markdown_error: "",
+    },
+    {
+      document_id: "d2", name: "Matrix.pdf", status: "chunked", size: 10, chunk_count: 1,
+      markdown_source: "failed", section_count: 0, markdown_error: "pages not fully read: page 3: 34%",
+    },
+  ];
+  const SECTIONS: admin.SopSection[] = [
+    { order_index: 0, number: "1", title: "PURPOSE", level: 1, parent_index: null, page_start: 1, page_end: 1, full_length: 40 },
+    { order_index: 1, number: "2", title: "RESPONSIBILITIES", level: 1, parent_index: null, page_start: 1, page_end: 2, full_length: 90 },
+    { order_index: 2, number: "2.1", title: "Inspector", level: 2, parent_index: 1, page_start: 2, page_end: 2, full_length: 30 },
+  ];
+
+  it("lists conversions with their failure reason, then a document's sections and a full section", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(admin, "listSopDocuments").mockResolvedValue(DOCS);
+    vi.spyOn(admin, "listSopSections").mockResolvedValue(SECTIONS);
+    vi.spyOn(admin, "getSopSection").mockResolvedValue({
+      number: "2", title: "RESPONSIBILITIES", page_start: 1, page_end: 2,
+      full_text: "2 RESPONSIBILITIES\n\n2.1 Inspector checks every widget.",
+    });
+    const rebuild = vi.spyOn(admin, "rebuildSopDocument").mockResolvedValue({ ...DOCS[0], section_count: 4 });
+    renderPage();
+    await user.click(await screen.findByTestId("admin-tab-sop"));
+    expect(await screen.findByTestId("sop-doc-d2")).toHaveTextContent("Failed");
+    expect(screen.getByTestId("sop-doc-d2")).toHaveTextContent("page 3: 34%");
+    expect(screen.getByTestId("sop-doc-d1")).toHaveTextContent("Document Intelligence");
+
+    await user.click(screen.getByText("Widget SOP.pdf"));
+    expect(await screen.findByTestId("sop-section-2")).toHaveTextContent("2.1 Inspector");
+    await user.click(screen.getByTestId("sop-section-1"));
+    expect(await screen.findByTestId("sop-section-text")).toHaveTextContent("2.1 Inspector checks every widget.");
+
+    await user.click(screen.getByTestId("sop-rebuild"));
+    await waitFor(() => expect(rebuild).toHaveBeenCalledWith("d1"));
+    await waitFor(() => expect(screen.getByTestId("sop-doc-d1")).toHaveTextContent("4"));
+  });
+});
