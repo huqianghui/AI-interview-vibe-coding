@@ -221,12 +221,57 @@ describe("Content tab: rubric", () => {
   });
 });
 
+describe("Content tab: publishing a bank version", () => {
+  it("shows the publish state, lists why a publish is refused, then publishes", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(admin, "listBanks").mockResolvedValue([
+      { ...BANKS[0], latest_version_no: 2, has_unpublished_changes: true },
+      ...BANKS.slice(1),
+    ]);
+    const publish = vi
+      .spyOn(admin, "publishBank")
+      .mockResolvedValueOnce({
+        published: false,
+        created: false,
+        version_no: null,
+        problems: [
+          { code: "no_rubric", question_no: 2, question_text: "Second?", weights_sum: null },
+          { code: "weights", question_no: 3, question_text: "", weights_sum: 90 },
+        ],
+      })
+      .mockResolvedValueOnce({ published: true, created: true, version_no: 3, problems: [] });
+    await openDemoBank(user);
+    expect(screen.getByTestId("bank-version-status")).toHaveTextContent(
+      "Published v2 · Unpublished changes",
+    );
+
+    await user.click(screen.getByTestId("bank-publish"));
+    const problems = await screen.findByTestId("bank-publish-problems");
+    expect(problems).toHaveTextContent("question 2 has no scoring rubric — Second?");
+    expect(problems).toHaveTextContent("question 3: rubric weights total 90, not 100");
+
+    await user.click(screen.getByTestId("bank-publish"));
+    expect(await screen.findByTestId("bank-publish-result")).toHaveTextContent("Published as v3");
+    expect(publish).toHaveBeenCalledWith(BANKS[0].bank_id);
+  });
+
+  it("offers nothing to publish when the draft equals the latest version", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(admin, "listBanks").mockResolvedValue([
+      { ...BANKS[0], latest_version_no: 1, has_unpublished_changes: false },
+      ...BANKS.slice(1),
+    ]);
+    await openDemoBank(user);
+    expect(screen.getByTestId("bank-version-status")).toHaveTextContent("Published v1");
+    expect(screen.getByTestId("bank-publish")).toBeDisabled();
+  });
+});
+
 describe("Content tab: a rubric save keeps SOP links and disclosure-only flags", () => {
-  it("sends both back, shows the document and the version", async () => {
+  it("sends both back and shows the cited document", async () => {
     const user = userEvent.setup();
     const linked: Checklist = {
       ...CHECKLIST,
-      rubric_version_no: 3,
       items: [
         { ...CHECKLIST.items[0], source_document_id: "doc-1", source_document_name: "Monitoring Plan.pdf" },
         { ...CHECKLIST.items[1], advisory: true },
@@ -237,7 +282,6 @@ describe("Content tab: a rubric save keeps SOP links and disclosure-only flags",
     await user.click(screen.getByTestId("rubric-btn-q1"));
     expect(await screen.findByText(/SOP 4\.2/)).toHaveTextContent("— Monitoring Plan.pdf · p.3");
     expect(screen.getByTestId("checklist-advisory-1")).toBeInTheDocument();
-    expect(screen.getByTestId("checklist-version")).toHaveTextContent("Saved as version 3");
 
     const save = vi.spyOn(admin, "editChecklistItems").mockResolvedValue(linked);
     await user.click(screen.getByTestId("checklist-save"));

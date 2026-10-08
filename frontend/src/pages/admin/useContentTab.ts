@@ -3,7 +3,13 @@
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import * as admin from "../../api/admin";
-import type { AdminQuestion, Bank, Checklist, ChecklistItem } from "../../api/admin";
+import type {
+  AdminQuestion,
+  Bank,
+  Checklist,
+  ChecklistItem,
+  PublishResult,
+} from "../../api/admin";
 import type { Guard } from "./shared";
 
 export function useContentTab(guard: Guard) {
@@ -25,6 +31,23 @@ export function useContentTab(guard: Guard) {
     () => guard(async () => setBanks(await admin.listBanks())),
     [guard],
   );
+  // The outcome of the last publish of the selected bank (version, or why it was refused).
+  const [publishResult, setPublishResult] = useState<PublishResult | null>(null);
+
+  // Every draft edit (question or rubric) can change whether the bank has unpublished changes,
+  // so the banks' publish state is reloaded with it.
+  const setQuestionsAndStatus = (next: AdminQuestion[]) => {
+    setQuestions(next);
+    setPublishResult(null);
+    void refreshBanks();
+  };
+
+  const publishBank = () =>
+    guard(async () => {
+      if (!selectedBank) return;
+      setPublishResult(await admin.publishBank(selectedBank));
+      setBanks(await admin.listBanks());
+    });
 
   // Adopt a freshly loaded/generated/saved checklist as both the display + edit state.
   const adoptChecklist = (c: Checklist | null) => {
@@ -35,6 +58,7 @@ export function useContentTab(guard: Guard) {
   const loadQuestions = (bankId: string) =>
     guard(async () => {
       setSelectedBank(bankId);
+      setPublishResult(null);
       setSelectedQuestion(null);
       adoptChecklist(null);
       setChecklistStatus(null);
@@ -91,6 +115,8 @@ export function useContentTab(guard: Guard) {
       }));
       adoptChecklist(await admin.editChecklistItems(checklist.checklist_id, payload));
       setChecklistStatus(t("admin.saved"));
+      setPublishResult(null);
+      setBanks(await admin.listBanks());
     });
 
   // (Re)generate a checklist from the question via AI, then refresh the question list so the
@@ -100,7 +126,7 @@ export function useContentTab(guard: Guard) {
       if (!selectedQuestion) return;
       adoptChecklist(await admin.draftChecklist(selectedQuestion));
       setChecklistStatus(t("admin.generated"));
-      if (selectedBank) setQuestions(await admin.listBankQuestions(selectedBank));
+      if (selectedBank) setQuestionsAndStatus(await admin.listBankQuestions(selectedBank));
     });
 
   // Live weight total of the working copy (forbidden items count as their entered weight in the
@@ -111,7 +137,7 @@ export function useContentTab(guard: Guard) {
     banks,
     selectedBank,
     questions,
-    setQuestions,
+    setQuestions: setQuestionsAndStatus,
     selectedQuestion,
     checklist,
     editItems,
@@ -129,6 +155,8 @@ export function useContentTab(guard: Guard) {
     saveChecklist,
     generateChecklist,
     editWeightsSum,
+    publishResult,
+    publishBank,
   };
 }
 

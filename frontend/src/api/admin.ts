@@ -23,7 +23,28 @@ export interface Bank {
   language: string;
   enabled: boolean;
   is_default: boolean;
+  // Publish state: interviews use the latest PUBLISHED version; edits stay a draft until then.
+  latest_version_no?: number | null;
+  has_unpublished_changes?: boolean;
 }
+
+/** Why a draft cannot be published. `question_no` is 1-based in ask order. */
+export interface PublishProblem {
+  code: "no_questions" | "no_rubric" | "weights" | string;
+  question_no: number | null;
+  question_text: string;
+  weights_sum: number | null;
+}
+
+export interface PublishResult {
+  published: boolean;
+  created: boolean;
+  version_no: number | null;
+  problems: PublishProblem[];
+}
+
+export const publishBank = (bankId: string) =>
+  adminRequest<PublishResult>(`/admin/question-banks/${bankId}/publish`, { method: "POST" });
 
 export interface AdminQuestion {
   question_id: string;
@@ -98,8 +119,6 @@ export interface Checklist {
   prompt_version: string;
   weights_sum: number;
   items: ChecklistItem[];
-  // The bank's latest rubric version; after a save, the version that save produced.
-  rubric_version_no?: number | null;
 }
 
 export const draftChecklist = (questionId: string) =>
@@ -271,9 +290,9 @@ export interface AdminUser {
   // #187: the interviewer + bank this user's next interview starts with; null = the default.
   assigned_persona_id: string | null;
   assigned_bank_id: string | null;
-  // The version of that bank's rubric this user is scored against (null with no bank assigned).
-  assigned_rubric_version_id?: string | null;
-  assigned_rubric_version_no?: number | null;
+  // The published version of that bank (questions + rubric) this user's interviews use.
+  assigned_bank_version_id?: string | null;
+  assigned_bank_version_no?: number | null;
 }
 
 export const listUsers = () => adminRequest<AdminUser[]>("/admin/users");
@@ -283,12 +302,12 @@ export const listUsers = () => adminRequest<AdminUser[]>("/admin/users");
 export interface Assignment {
   persona_id: string | null;
   bank_id: string | null;
-  // A version of `bank_id`'s rubric; null with a bank = that bank's latest (the backend picks it).
-  rubric_version_id?: string | null;
+  // A published version of `bank_id`; null with a bank = its latest (the backend picks it).
+  bank_version_id?: string | null;
 }
 
-/** One frozen version of a bank's rubric. Mirrors `RubricVersionOut`. */
-export interface RubricVersion {
+/** One published version of a bank (questions + rubric). Mirrors `BankVersionOut`. */
+export interface BankVersion {
   id: string;
   version_no: number;
   created_at: string | null;
@@ -297,8 +316,8 @@ export interface RubricVersion {
   is_latest: boolean;
 }
 
-export const listRubricVersions = (bankId: string) =>
-  adminRequest<RubricVersion[]>(`/admin/question-banks/${bankId}/rubric-versions`);
+export const listBankVersions = (bankId: string) =>
+  adminRequest<BankVersion[]>(`/admin/question-banks/${bankId}/versions`);
 
 export const setUserAssignment = (userId: string, assignment: Assignment) =>
   adminRequest<AdminUser>(`/admin/users/${userId}/assignment`, {
@@ -312,7 +331,7 @@ export interface InterviewResultItem extends InterviewHistoryItem {
   username: string | null;
   persona_id: string | null;
   bank_id: string | null;
-  rubric_version_no?: number | null;
+  bank_version_no?: number | null;
 }
 
 /** One page of results. `total` counts every match, for the pager. Mirrors `InterviewResultsPage`. */

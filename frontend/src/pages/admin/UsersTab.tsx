@@ -107,17 +107,21 @@ function AssignmentCells({ u, state }: { u: AdminUser; state: UsersTabState }) {
           {u.assigned_bank_id && (
             <Select
               size="small"
-              aria-label={t("admin.users.rubricVersion")}
+              aria-label={t("admin.users.bankVersion")}
               data-testid={`user-assign-version-${u.username}`}
-              value={u.assigned_rubric_version_id ?? ""}
-              onChange={(_, d) => void state.assign(u, { rubric_version_id: d.value || null })}
+              value={u.assigned_bank_version_id ?? ""}
+              onChange={(_, d) => void state.assign(u, { bank_version_id: d.value || null })}
             >
               {/* Until the bank's versions load (or if loading failed), still name the assigned
                   version instead of rendering an empty box. */}
-              {!state.versionsByBank[u.assigned_bank_id] && u.assigned_rubric_version_id && (
-                <option value={u.assigned_rubric_version_id}>
-                  {`v${u.assigned_rubric_version_no ?? "?"}`}
+              {!state.versionsByBank[u.assigned_bank_id] && u.assigned_bank_version_id && (
+                <option value={u.assigned_bank_version_id}>
+                  {`v${u.assigned_bank_version_no ?? "?"}`}
                 </option>
+              )}
+              {/* A bank never published has no version: its interviews read the current draft. */}
+              {state.versionsByBank[u.assigned_bank_id]?.length === 0 && (
+                <option value="">{t("admin.versionNeverPublished")}</option>
               )}
               {(state.versionsByBank[u.assigned_bank_id] ?? []).map((v) => (
                 <option key={v.id} value={v.id}>

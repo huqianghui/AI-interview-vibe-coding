@@ -861,7 +861,7 @@ describe("AdminPage", () => {
       await waitFor(() => expect(bankSelect).toHaveTextContent("Default (Default bank)"));
       await user.selectOptions(bankSelect, "b2");
       // A new bank starts on its latest rubric version: null asks the backend to pick it.
-      expect(save).toHaveBeenCalledWith("u1", { persona_id: null, bank_id: "b2", rubric_version_id: null });
+      expect(save).toHaveBeenCalledWith("u1", { persona_id: null, bank_id: "b2", bank_version_id: null });
       expect(await screen.findByTestId("user-assign-saved-user1")).toBeInTheDocument();
       // Admin accounts are not interviewed: no assignment. Interview results have their own tab.
       expect(screen.queryByTestId("user-assign-bank-test-admin")).not.toBeInTheDocument();
@@ -891,22 +891,22 @@ describe("AdminPage", () => {
       expect(save).toHaveBeenLastCalledWith("u1", {
         persona_id: "p2",
         bank_id: "b2",
-        rubric_version_id: null,
+        bank_version_id: null,
       });
       release();
     });
 
     it("picks a rubric version of the assigned bank, defaulting to its latest", async () => {
       const user = userEvent.setup();
-      vi.spyOn(admin, "listRubricVersions").mockResolvedValue([
+      vi.spyOn(admin, "listBankVersions").mockResolvedValue([
         { id: "v2", version_no: 2, created_at: "2026-10-08T05:00:00", reason: "edit", question_count: 3, is_latest: true },
         { id: "v1", version_no: 1, created_at: "2026-10-01T05:00:00", reason: "initial", question_count: 3, is_latest: false },
       ]);
       const save = vi.spyOn(admin, "setUserAssignment").mockResolvedValue({
         ...CANDIDATE,
         assigned_bank_id: "b2",
-        assigned_rubric_version_id: "v1",
-        assigned_rubric_version_no: 1,
+        assigned_bank_version_id: "v1",
+        assigned_bank_version_no: 1,
       });
       await openUsersTab(user, [
         {
@@ -914,8 +914,8 @@ describe("AdminPage", () => {
           id: "u2",
           username: "user2",
           assigned_bank_id: "b2",
-          assigned_rubric_version_id: "v2",
-          assigned_rubric_version_no: 2,
+          assigned_bank_version_id: "v2",
+          assigned_bank_version_no: 2,
         },
       ]);
       // No bank assigned → no version picker (the interview uses the default bank's latest).
@@ -926,7 +926,7 @@ describe("AdminPage", () => {
       expect(save).toHaveBeenLastCalledWith("u2", {
         persona_id: null,
         bank_id: "b2",
-        rubric_version_id: "v1",
+        bank_version_id: "v1",
       });
       await waitFor(() => expect(picker).toHaveValue("v1"));
     });
@@ -1012,11 +1012,11 @@ describe("AdminPage", () => {
     it("shows the rubric version an interview is scored against, and nothing when unpinned", async () => {
       const user = userEvent.setup();
       vi.spyOn(admin, "listInterviewResults").mockResolvedValue(
-        page([{ ...ROW, rubric_version_no: 3 } as typeof ROW, { ...ROW, id: "i2" }]),
+        page([{ ...ROW, bank_version_no: 3 } as typeof ROW, { ...ROW, id: "i2" }]),
       );
       await openResultsTab(user);
-      expect(await screen.findByTestId("result-rubric-version-i1")).toHaveTextContent("Rubric v3");
-      expect(screen.queryByTestId("result-rubric-version-i2")).not.toBeInTheDocument();
+      expect(await screen.findByTestId("result-bank-version-i1")).toHaveTextContent("Bank v3");
+      expect(screen.queryByTestId("result-bank-version-i2")).not.toBeInTheDocument();
     });
 
     it("applies a score bound only when the field is left, and sorts by a header", async () => {

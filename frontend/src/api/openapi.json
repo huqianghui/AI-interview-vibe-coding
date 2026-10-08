@@ -66,6 +66,28 @@
             ],
             "title": "Assigned Bank Id"
           },
+          "assigned_bank_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned Bank Version Id"
+          },
+          "assigned_bank_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned Bank Version No"
+          },
           "assigned_persona_id": {
             "anyOf": [
               {
@@ -76,28 +98,6 @@
               }
             ],
             "title": "Assigned Persona Id"
-          },
-          "assigned_rubric_version_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Assigned Rubric Version Id"
-          },
-          "assigned_rubric_version_no": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Assigned Rubric Version No"
           },
           "business_unit": {
             "title": "Business Unit",
@@ -349,6 +349,17 @@
             ],
             "title": "Bank Id"
           },
+          "bank_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bank Version Id"
+          },
           "persona_id": {
             "anyOf": [
               {
@@ -359,17 +370,6 @@
               }
             ],
             "title": "Persona Id"
-          },
-          "rubric_version_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rubric Version Id"
           }
         },
         "title": "AssignmentIn",
@@ -419,6 +419,11 @@
             "title": "Enabled",
             "type": "boolean"
           },
+          "has_unpublished_changes": {
+            "default": false,
+            "title": "Has Unpublished Changes",
+            "type": "boolean"
+          },
           "is_default": {
             "title": "Is Default",
             "type": "boolean"
@@ -426,6 +431,17 @@
           "language": {
             "title": "Language",
             "type": "string"
+          },
+          "latest_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Version No"
           },
           "name": {
             "title": "Name",
@@ -441,6 +457,52 @@
           "is_default"
         ],
         "title": "BankOut",
+        "type": "object"
+      },
+      "BankVersionOut": {
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_latest": {
+            "title": "Is Latest",
+            "type": "boolean"
+          },
+          "question_count": {
+            "title": "Question Count",
+            "type": "integer"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "version_no": {
+            "title": "Version No",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version_no",
+          "created_at",
+          "reason",
+          "question_count",
+          "is_latest"
+        ],
+        "title": "BankVersionOut",
         "type": "object"
       },
       "Body_upload_document_admin_sop_documents_post": {
@@ -471,6 +533,25 @@
           "checklist_item_count": {
             "title": "Checklist Item Count",
             "type": "integer"
+          },
+          "publish_problems": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Publish Problems",
+            "type": "array"
+          },
+          "published_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Version No"
           },
           "question_count": {
             "title": "Question Count",
@@ -663,17 +744,6 @@
             "title": "Question Id",
             "type": "string"
           },
-          "rubric_version_no": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rubric Version No"
-          },
           "weights_sum": {
             "title": "Weights Sum",
             "type": "integer"
@@ -850,6 +920,17 @@
       },
       "InterviewDetail": {
         "properties": {
+          "bank_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bank Version No"
+          },
           "item": {
             "$ref": "#/components/schemas/InterviewHistoryItem"
           },
@@ -864,17 +945,6 @@
               }
             ],
             "title": "Report"
-          },
-          "rubric_version_no": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rubric Version No"
           },
           "scoring": {
             "default": false,
@@ -1119,6 +1189,17 @@
             ],
             "title": "Bank Name"
           },
+          "bank_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bank Version No"
+          },
           "completed_at": {
             "anyOf": [
               {
@@ -1171,17 +1252,6 @@
               }
             ],
             "title": "Persona Name"
-          },
-          "rubric_version_no": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rubric Version No"
           },
           "started_at": {
             "anyOf": [
@@ -2234,6 +2304,83 @@
         "title": "PersonaUpdate",
         "type": "object"
       },
+      "PublishOut": {
+        "properties": {
+          "created": {
+            "default": false,
+            "title": "Created",
+            "type": "boolean"
+          },
+          "problems": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PublishProblemOut"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "published": {
+            "title": "Published",
+            "type": "boolean"
+          },
+          "version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version No"
+          }
+        },
+        "required": [
+          "published"
+        ],
+        "title": "PublishOut",
+        "type": "object"
+      },
+      "PublishProblemOut": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "question_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Question No"
+          },
+          "question_text": {
+            "default": "",
+            "title": "Question Text",
+            "type": "string"
+          },
+          "weights_sum": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weights Sum"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "PublishProblemOut",
+        "type": "object"
+      },
       "QuestionIn": {
         "properties": {
           "expected_points": {
@@ -2529,52 +2676,6 @@
           "answers"
         ],
         "title": "ReviewOut",
-        "type": "object"
-      },
-      "RubricVersionOut": {
-        "properties": {
-          "created_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Created At"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "is_latest": {
-            "title": "Is Latest",
-            "type": "boolean"
-          },
-          "question_count": {
-            "title": "Question Count",
-            "type": "integer"
-          },
-          "reason": {
-            "title": "Reason",
-            "type": "string"
-          },
-          "version_no": {
-            "title": "Version No",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "id",
-          "version_no",
-          "created_at",
-          "reason",
-          "question_count",
-          "is_latest"
-        ],
-        "title": "RubricVersionOut",
         "type": "object"
       },
       "SessionCreateResponse": {
@@ -4682,6 +4783,54 @@
         ]
       }
     },
+    "/admin/question-banks/{bank_id}/publish": {
+      "post": {
+        "description": "Publish the bank's draft as a new version (spec-bank-versioning).\n\nRefused, with every reason, while the draft is incomplete: an enabled question without a rubric,\nor a rubric whose weights do not sum to 100. An unchanged draft returns the latest version.",
+        "operationId": "publish_admin_question_banks__bank_id__publish_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bank_id",
+            "required": true,
+            "schema": {
+              "title": "Bank Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublishOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Publish",
+        "tags": [
+          "admin-questions"
+        ]
+      }
+    },
     "/admin/question-banks/{bank_id}/questions": {
       "get": {
         "operationId": "list_questions_admin_question_banks__bank_id__questions_get",
@@ -4838,10 +4987,10 @@
         ]
       }
     },
-    "/admin/question-banks/{bank_id}/rubric-versions": {
+    "/admin/question-banks/{bank_id}/versions": {
       "get": {
-        "description": "The bank's rubric versions, newest first (spec-rubric-versioning). A bank that has never had\none gets its first here, so the assignment picker always has something to offer.",
-        "operationId": "list_rubric_versions_admin_question_banks__bank_id__rubric_versions_get",
+        "description": "The bank's published versions, newest first (spec-bank-versioning). Read-only: a version\nexists only once an admin publishes (or an import publishes) a complete bank.",
+        "operationId": "list_versions_admin_question_banks__bank_id__versions_get",
         "parameters": [
           {
             "in": "path",
@@ -4859,9 +5008,9 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/RubricVersionOut"
+                    "$ref": "#/components/schemas/BankVersionOut"
                   },
-                  "title": "Response List Rubric Versions Admin Question Banks  Bank Id  Rubric Versions Get",
+                  "title": "Response List Versions Admin Question Banks  Bank Id  Versions Get",
                   "type": "array"
                 }
               }
@@ -4884,7 +5033,7 @@
             "OAuth2PasswordBearer": []
           }
         ],
-        "summary": "List Rubric Versions",
+        "summary": "List Versions",
         "tags": [
           "admin-questions"
         ]
@@ -5059,7 +5208,7 @@
     },
     "/admin/users/{user_id}/assignment": {
       "patch": {
-        "description": "Set the interviewer, bank and rubric version this user's NEXT interview starts with.\n\n#187 + spec-rubric-versioning. A null persona or bank means the global default; a bank with no\nrubric version means that bank's latest version.\n\nA live interview keeps what it started with. 404 unknown user; 422 an unknown or disabled\npersona/bank (a disabled one would silently fall back to the default at start).",
+        "description": "Set the interviewer, bank and bank version this user's NEXT interview starts with.\n\n#187 + spec-bank-versioning. A null persona or bank means the global default; a bank with no\nversion means that bank's latest published version.\n\nA live interview keeps what it started with. 404 unknown user; 422 an unknown or disabled\npersona/bank (a disabled one would silently fall back to the default at start).",
         "operationId": "set_assignment_admin_users__user_id__assignment_patch",
         "parameters": [
           {
