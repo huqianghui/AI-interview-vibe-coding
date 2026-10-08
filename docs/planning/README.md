@@ -30,6 +30,8 @@ living specification is [`../../SPEC.md`](../../SPEC.md) at the repo root — st
 
 ## Post-spec feature specs
 
+- [`spec-sop-section-grounding.md`](spec-sop-section-grounding.md) — 评分标准引用真实的 SOP 章节原文（完整章节，
+  不截断）+ 每份 SOP 的要点摘要；替换 AI 生成评分标准时的 mock 检索。
 - [`spec-bank-versioning.md`](spec-bank-versioning.md) — 题库版本：一套题目 + 一套评分标准作为一个整体冻结，
   任何修改都生成新版本；取代 spec-rubric-versioning（v0.52.0.0 只冻结了评分标准）。
 - [`spec-rubric-versioning.md`](spec-rubric-versioning.md) — immutable rubric versions: chosen at
