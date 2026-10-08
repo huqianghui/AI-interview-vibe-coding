@@ -177,7 +177,7 @@ def _topic_prompt(questions: list[str], library: str) -> str:
     )
 
 
-async def _library(db: AsyncSession) -> str:
+async def library(db: AsyncSession) -> str:
     """Every converted SOP as "name: purpose" (the purpose line of its summary, when it has one)."""
     rows = (
         await db.execute(
@@ -201,7 +201,7 @@ async def _library(db: AsyncSession) -> str:
     return "\n".join(lines)
 
 
-async def _bank_is_about_the_sops(
+async def bank_is_about_the_sops(
     llm: LLMAdapter, questions: list[str], library: str
 ) -> bool | None:
     """Whether a bank's questions are about the subject the SOP library governs, asked once for
@@ -494,7 +494,7 @@ async def relocate(
     if unscoped:
         # Only the questions being decided: labelled clinical questions must not carry generic
         # unlabelled ones ("tell us about yourself") along with them.
-        about = await _bank_is_about_the_sops(llm, list(unscoped.values()), await _library(db))
+        about = await bank_is_about_the_sops(llm, list(unscoped.values()), await library(db))
         if about is False:
             off_topic = set(unscoped)
     done = 0

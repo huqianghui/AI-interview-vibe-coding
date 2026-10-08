@@ -121,15 +121,36 @@ async def draft_checklist(
     if question is None:
         raise QuestionNotFound(question_id)
 
-    # 1. The SOP sections most relevant to the question, from our own converted documents.
-    index = await sop_search.load_index(db)
-    candidates = await sop_citation_service.candidates_for(db, index, question.text)
+    # 1. The SOP sections most relevant to the question, from our own converted documents — but
+    # only for a bank about the SOP library's subject. A behavioural or software bank grounded in
+    # clinical SOPs gets clinical rubric items ("states that an SAE was identified" for "tell me
+    # about a time you caught a mistake", measured on the live Demo bank 2026-10-09), so its
+    # questions are drafted from the question alone. Same decision as relocation, one per bank.
+    llm = get_llm_adapter(llm_provider)
+    bank_questions = (
+        (
+            await db.execute(
+                select(Question.text)
+                .where(Question.bank_id == question.bank_id)
+                .order_by(Question.order_index)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    library = await sop_citation_service.library(db)
+    candidates: list[CitedSection] = []
+    if (
+        await sop_citation_service.bank_is_about_the_sops(llm, list(bank_questions), library)
+        is not False
+    ):
+        index = await sop_search.load_index(db)
+        candidates = await sop_citation_service.candidates_for(db, index, question.text)
     # Only reads so far: end the transaction so no pooled connection waits on the LLM.
     await db.commit()
 
     # 2. Ask the LLM to draft items (JSON), then keep only citations that can be checked: a
     # section it was shown, a quote copied verbatim from it.
-    llm = get_llm_adapter(llm_provider)
     raw_items = _parse_llm_items(
         await llm.complete(_build_draft_prompt(question.text, candidates), json_mode=True)
     )

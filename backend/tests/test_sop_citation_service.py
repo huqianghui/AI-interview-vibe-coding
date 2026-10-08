@@ -665,7 +665,7 @@ async def test_the_library_lists_each_converted_sop_with_its_purpose(db_session)
         SopDocument(name="Not converted.pdf", status="chunked", markdown_source="failed")
     )
     await db_session.commit()
-    library = await sop_citation_service._library(db_session)
+    library = await sop_citation_service.library(db_session)
     assert "- Widget Release Procedure.pdf: Release widgets" in library
     assert "- Release Manager_Final (1).docx" in library  # no summary: the name alone
     assert "Not converted" not in library
