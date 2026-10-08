@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.58.0.0 (2026-10-09)
+
+### Added
+- **Candidate answers are recorded in voice interviews, kept 90 days.** Only the candidate's
+  microphone is recorded, one WAV per question. The audio already passes through the backend's
+  Voice Live proxy, so nothing extra is uploaded from the browser.
+  - Storage: the private `recordings` container. A storage lifecycle rule deletes each
+    recording after 90 days, independent of the app.
+  - Notice: the candidate is told before the interview starts.
+  - Playback: admins only, in Interview results, streamed through the backend.
+  - Failures: a failed recording is logged and never affects the interview.
+  - Off switch: `CANDIDATE_AUDIO_RECORDING=false`.
+  - Details: `docs/candidate-recordings.md`.
+
 ## 0.57.0.1 (2026-10-09)
 
 ### Fixed

@@ -67,6 +67,10 @@ export interface Interview {
   /** Default persona's avatar character id (e.g. "amira"); the stage is painted in that photo's own
    * backdrop colour. Entry points only, null on mutations, latched per session. "" = no avatar. */
   voice_avatar_character?: string | null;
+  // Spoken answers are recorded (the microphone only) and kept this many days; the page says so
+  // before the voice interview starts.
+  audio_recorded?: boolean;
+  recording_retention_days?: number;
 }
 
 /** `POST /judge` result: what the interviewer should say during this pause, if anything. */

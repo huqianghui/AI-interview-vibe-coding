@@ -55,6 +55,9 @@ export const resources = {
         fact2Title: "Say when you're done",
         fact2Body: "Each answer is submitted only when you say it's finished.",
         beginNote: "Question 1 starts as soon as you press this.",
+        recordingNote:
+          "Spoken answers are recorded so the interview can be reviewed. Only your microphone is recorded, and recordings are deleted after {{days}} days.",
+        recordingIndicator: "● Your microphone is being recorded (deleted after {{days}} days).",
       },
       noQuestions: {
         title: "No questions available",
@@ -250,6 +253,14 @@ export const resources = {
         rubricItemPlaceholder: "Rubric item text",
         noRubric:
           "No rubric for this question yet — generate one from the question, or add items manually.",
+        recordings: {
+          title: "Recorded answers",
+          hint: "The candidate's microphone, one recording per question. Deleted automatically after the retention period.",
+          question: "Question {{n}}",
+          play: "Play",
+          expired: "This recording has been deleted (retention period over).",
+          failed: "Could not load this recording.",
+        },
         relocate: {
           start: "Relocate SOP citations",
           fresh: "Start from the original labels (discard earlier relocations)",
@@ -481,6 +492,8 @@ export const resources = {
         fact2Title: "答完了你说一声",
         fact2Body: "每个答案只在你说「答完了」之后才提交。",
         beginNote: "按下之后第 1 题立刻开始。",
+        recordingNote: "语音回答会录音，以便复核面试。只录制你的麦克风，录音在 {{days}} 天后删除。",
+        recordingIndicator: "● 正在录制你的麦克风（{{days}} 天后删除）。",
       },
       noQuestions: {
         title: "暂无可用题目",
@@ -651,6 +664,14 @@ export const resources = {
         weightsHint: " (保存后按 100 归一)",
         rubricItemPlaceholder: "评分要点",
         noRubric: "这道题还没有评分标准。点「重新生成 (AI)」从题目自动起草,或手动添加条目。",
+        recordings: {
+          title: "回答录音",
+          hint: "候选人的麦克风录音，每道题一段。超过保留期后自动删除。",
+          question: "第 {{n}} 题",
+          play: "播放",
+          expired: "这段录音已删除（超过保留期）。",
+          failed: "录音加载失败。",
+        },
         relocate: {
           start: "重新定位 SOP 引用",
           fresh: "从原始标签重新开始（放弃之前的定位结果）",

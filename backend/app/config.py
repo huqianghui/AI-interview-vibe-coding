@@ -78,6 +78,12 @@ class Settings(BaseSettings):
     material_storage_path: str = "./_sop_storage"
     azure_storage_account_url: str = ""
     material_blob_container: str = "materials"
+    # Candidate voice recordings (the microphone only, one WAV per question), in their own private
+    # container whose lifecycle rule deletes them after 90 days (infra/azure/modules/storage.bicep).
+    # Off = nothing is recorded and candidates are not told they are.
+    candidate_audio_recording: bool = True
+    recording_blob_container: str = "recordings"
+    recording_retention_days: int = 90
     # Where boot looks for the original of an SOP whose stored bytes are missing (by file name).
     # The private client bundle extracts here (entrypoint.sh); absent in dev/CI → nothing to repair.
     sop_repair_source_dir: str = "/app/_client_bundle"

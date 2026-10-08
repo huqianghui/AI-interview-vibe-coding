@@ -30,6 +30,7 @@ import {
 import { fetchInterviewSopDocument } from "../../api/admin";
 import type { HistoryStatus } from "../../api/client";
 import { InterviewDetailView, StatusBadge } from "../../components/InterviewHistory";
+import { InterviewRecordings } from "./InterviewRecordings";
 import { formatWhen } from "../../components/transcriptText";
 import { useAdminStyles } from "./shared";
 import { PAGE_SIZES, type InterviewsTabState, type SortKey } from "./useInterviewsTab";
@@ -410,6 +411,7 @@ export function InterviewsTab({ state }: { state: InterviewsTabState }) {
               onGenerateReport={state.generateReport}
             />
           )}
+          {state.detail && <InterviewRecordings interviewId={state.detail.item.id} />}
         </DrawerBody>
       </OverlayDrawer>
     </Card>

@@ -262,5 +262,6 @@ stored cloud credentials, managed identity everywhere, keyless. See
 | [`docs/planning/`](docs/planning/) | Spec lineage: design docs, plans, and reviews |
 | [`docs/avatar-weaknet-probe.md`](docs/avatar-weaknet-probe.md) | Weak-network digital-human media adaptation: measurement method, findings, and the shipped auto-downgrade implementation |
 | [`docs/webrtc-ice-voice-transport.md`](docs/webrtc-ice-voice-transport.md) | WebRTC vs WebSocket for Voice Live: ICE / STUN / TURN candidates, why voice-only has none, Opus vs PCM, and how to verify with chrome://webrtc-internals (中文) |
+| [`docs/candidate-recordings.md`](docs/candidate-recordings.md) | Candidate voice recordings: what is recorded, where it is kept, the 90-day deletion, who can listen (中文) |
 | [`docs/sop-coverage-audit.md`](docs/sop-coverage-audit.md) | The opt-in SOP coverage audit: why binding the SOP to a rubric does not answer "did the rubric miss anything", what it costs, and how the cited SOP sources are chosen (中文) |
 | [`CHANGELOG.md`](CHANGELOG.md) | Release history: every version and what changed in it |

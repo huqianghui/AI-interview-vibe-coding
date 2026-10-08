@@ -518,3 +518,30 @@ export const relocateCitations = (bankId: string, fresh = false) =>
 
 export const getCitationRun = (bankId: string) =>
   adminRequest<CitationRun | null>(`/admin/question-banks/${bankId}/relocate-citations`);
+
+// ── Candidate voice recordings (admin only; the microphone, one per question) ──────
+export interface InterviewRecording {
+  recording_id: string;
+  question_index: number;
+  duration_ms: number;
+  size_bytes: number;
+  created_at: string | null;
+}
+
+export const listInterviewRecordings = (interviewId: string) =>
+  adminRequest<InterviewRecording[]>(`/admin/interviews/${interviewId}/recordings`);
+
+/** The recording as an object URL for an <audio> element (the container is private, so the bytes
+ *  come through the backend with the admin token). Rejects with status 410 once it has expired. */
+export async function fetchInterviewRecording(
+  interviewId: string,
+  recordingId: string,
+): Promise<string> {
+  const resp = await apiFetch(
+    `/admin/interviews/${interviewId}/recordings/${encodeURIComponent(recordingId)}`,
+    {},
+    { bearer: getAdminToken() },
+    { json: false },
+  );
+  return URL.createObjectURL(await resp.blob());
+}

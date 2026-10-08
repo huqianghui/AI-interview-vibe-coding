@@ -25,7 +25,12 @@ from app.interview.state_machine import ANSWER_SOURCES, InterviewStateError
 from app.models.anonymous_session import AnonymousCandidateSession
 from app.models.interview import InterviewSession
 from app.models.judge_event import JUDGE_TRIGGERS
-from app.services import assignment_service, persona_service, sop_document_service
+from app.services import (
+    assignment_service,
+    persona_service,
+    recording_service,
+    sop_document_service,
+)
 from app.services.agents.voice_live_metadata import has_configured_voice
 
 logger = logging.getLogger(__name__)
@@ -78,6 +83,10 @@ class InterviewOut(BaseModel):
     # admin-set ``bank_turn_mode``. Same reporting contract as ``voice_auto_submit_seconds``: set on
     # the two entry points (start / GET-resume), ``None`` on mutation responses, latched by the UI.
     voice_linear_turns: bool | None = None
+    # Voice answers are recorded (the microphone only, kept ``recording_retention_days``): the page
+    # tells the candidate before the voice interview starts. False = nothing is recorded.
+    audio_recorded: bool = False
+    recording_retention_days: int = 0
     # JUDGED sessions (issue #114): seconds of silence (voice) / idle (text) after which the page
     # asks the judge (``POST /{id}/judge``). ``0`` ⇒ the session is not judged (never ask). Same
     # reporting contract as the two flags above: entry points only, ``None`` on mutations, latched.
@@ -212,6 +221,8 @@ def _to_interview_out(
 ) -> InterviewOut:
     is_external = session.brain_mode == "external"
     return InterviewOut(
+        audio_recorded=recording_service.recording_enabled(),
+        recording_retention_days=recording_service.retention_days(),
         interview_session_id=session.id,
         status=session.status,
         current_question=CurrentQuestionOut(**question) if question else None,
