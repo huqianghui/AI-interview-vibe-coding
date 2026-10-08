@@ -67,7 +67,7 @@ class SopSummaryOut(BaseModel):
 
 
 class SopSummaryIn(BaseModel):
-    summary: str = Field(max_length=20000)
+    summary: str = Field(max_length=sop_summary_service.MAX_SUMMARY_CHARS)
     # True = approve: the summary is used in scoring. False = save as a draft (not used).
     approve: bool = False
 
@@ -265,6 +265,10 @@ async def save_summary(
 ) -> SopSummaryOut:
     """Save an admin's edit: approved (used in scoring) or a draft (not used)."""
     document = await _document(db, document_id)
+    if sop_summary_service.drafting(document.id):
+        raise HTTPException(
+            status_code=409, detail="The summary is being drafted; save once the draft is done"
+        )
     try:
         await sop_summary_service.save(db, document, body.summary, approve=body.approve)
     except sop_summary_service.SummaryNotSaved as exc:
@@ -285,10 +289,12 @@ async def redraft_summary(
     """Ask the LLM for a new draft, in the background. It replaces the current summary as a DRAFT:
     scoring stops using it until an admin approves again."""
     document = await _document(db, document_id)
-    if document.markdown_source in ("", "failed"):
+    if not sop_summary_service.can_draft(document):
         raise HTTPException(status_code=409, detail="The document is not converted yet")
+    if not sop_summary_service.drafting_available():
+        raise HTTPException(status_code=409, detail="No AI model is configured to draft with")
     out = _summary_out(document)
     out.summarizing = True
     sop_summary_service.mark_drafting(document.id)
-    _start(sop_section_service.redraft_summary(session_factory, document.id))
+    _start(sop_summary_service.redraft(session_factory, document.id))
     return out

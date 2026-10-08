@@ -40,16 +40,22 @@ export function useSopTab(active: boolean) {
     }
   }, []);
 
-  const showSummary = useCallback((loaded: SopSummary) => {
+  // The summary text last loaded from the server: the box differs from it = unsaved edits.
+  const loadedText = useRef("");
+  const showSummary = useCallback((loaded: SopSummary, keepEdits = false) => {
     setSummary(loaded);
-    setSummaryText(loaded.summary);
+    // A background reload (a conversion finished) never throws away what the admin is typing.
+    // `before` is read now: React may run the updater after the ref below has moved on.
+    const before = loadedText.current;
+    setSummaryText((typed) => (keepEdits && typed !== before ? typed : loaded.summary));
+    loadedText.current = loaded.summary;
   }, []);
 
   const loadSummary = useCallback(
-    async (documentId: string) => {
+    async (documentId: string, keepEdits = false) => {
       try {
         const loaded = await admin.getSopSummary(documentId);
-        if (wanted.current === documentId) showSummary(loaded);
+        if (wanted.current === documentId) showSummary(loaded, keepEdits);
       } catch (e) {
         if (wanted.current === documentId) setError(message(e));
       }
@@ -85,7 +91,7 @@ export function useSopTab(active: boolean) {
     if (wasBusy.current && !currentBusy && selected) {
       setSection(null);
       void loadSections(selected);
-      void loadSummary(selected);
+      void loadSummary(selected, true);
     }
     wasBusy.current = currentBusy;
   }, [currentBusy, selected, loadSections, loadSummary]);
@@ -98,6 +104,7 @@ export function useSopTab(active: boolean) {
     setSections([]);
     setSummary(null);
     setSummaryText("");
+    loadedText.current = "";
     setError(null);
     await Promise.all([loadSections(documentId), loadSummary(documentId)]);
   };

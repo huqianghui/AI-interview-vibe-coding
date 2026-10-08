@@ -38,6 +38,9 @@ class SopDocument(TimestampMixin, Base):
     markdown_source: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     # Why the last conversion failed (which pages were not fully read, a timeout, ...); "" if not.
     markdown_error: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    # Which version of the converter for ``markdown_source`` produced ``markdown``
+    # (``sop_markdown.CONVERTER_VERSIONS``); one converted by an older version is converted again.
+    markdown_converter_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     # The document's key-points summary (spec-sop-section-grounding §2): AI-drafted from the whole
     # Markdown, edited and approved by an admin. Only an approved summary is used in scoring.
     summary: Mapped[str] = mapped_column(Text, default="", nullable=False)

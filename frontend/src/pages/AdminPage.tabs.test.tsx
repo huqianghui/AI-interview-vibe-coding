@@ -513,6 +513,37 @@ describe("SOP documents tab", () => {
     }
   });
 
+  it("keeps unsaved summary edits when a conversion finishes, and shows a failed save", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const list = vi.spyOn(admin, "listSopDocuments").mockResolvedValue(DOCS);
+      vi.spyOn(admin, "listSopSections").mockResolvedValue(SECTIONS);
+      vi.spyOn(admin, "rebuildSopDocument").mockResolvedValue({ ...DOCS[0], converting: true });
+      vi.spyOn(admin, "saveSopSummary").mockRejectedValue(new Error("The summary is being drafted"));
+      renderPage();
+      await user.click(await screen.findByTestId("admin-tab-sop"));
+      await user.click(await screen.findByText("Widget SOP.pdf"));
+      const box = await screen.findByTestId("sop-summary-text");
+
+      list.mockResolvedValue([{ ...DOCS[0], converting: true }, DOCS[1]]);
+      await user.click(screen.getByTestId("sop-rebuild"));
+      await user.type(box, " Mine.");
+      expect(screen.getByTestId("sop-summary-redraft")).toBeDisabled(); // would replace the edit
+
+      list.mockResolvedValue(DOCS);
+      vi.mocked(admin.getSopSummary).mockResolvedValue({ ...DRAFT, summary: "Server text." });
+      await vi.advanceTimersByTimeAsync(SOP_POLL_MS);
+      await waitFor(() => expect(admin.getSopSummary).toHaveBeenCalledTimes(2));
+      expect(screen.getByTestId("sop-summary-text")).toHaveValue("**Purpose:** Inspect widgets. Mine.");
+
+      await user.click(screen.getByTestId("sop-summary-save"));
+      expect(await screen.findByRole("alert")).toHaveTextContent("The summary is being drafted");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows the sections of the document clicked last, not of a slower earlier click", async () => {
     const user = userEvent.setup();
     vi.spyOn(admin, "listSopDocuments").mockResolvedValue(DOCS);

@@ -4,9 +4,9 @@ Spec: docs/planning/spec-sop-section-grounding.md (PR 2 of 3). Adds ``sop_docume
 ``summary_status`` / ``summary_error`` / ``summary_reviewed_at``. Summaries are drafted at boot by
 ``sop_summary_service.summarize_missing`` (an LLM call), not here.
 
-Also marks every Word conversion as not converted, so the boot build converts the Word documents
-again with this release's converter (merged cells once, form tables as sections). Word conversion
-is local and deterministic; PDFs are untouched (their Document Intelligence result is unchanged).
+Also adds ``markdown_converter_version``: every existing conversion is version 1, and this
+release's Word converter is version 2 (merged cells once, form tables as sections), so the boot
+build converts the Word documents again. A failed re-conversion keeps the version-1 result.
 
 Revision ID: b6c7d8e9f0a1
 Revises: a4b5c6d7e8f9
@@ -24,7 +24,13 @@ down_revision: str | None = "a4b5c6d7e8f9"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-_COLUMNS = ("summary_reviewed_at", "summary_error", "summary_status", "summary")
+_COLUMNS = (
+    "markdown_converter_version",
+    "summary_reviewed_at",
+    "summary_error",
+    "summary_status",
+    "summary",
+)
 
 
 def upgrade() -> None:
@@ -39,7 +45,16 @@ def upgrade() -> None:
         "sop_documents", sa.Column("summary_error", sa.Text(), nullable=False, server_default="")
     )
     op.add_column("sop_documents", sa.Column("summary_reviewed_at", sa.DateTime(), nullable=True))
-    op.execute("UPDATE sop_documents SET markdown_source = '' WHERE markdown_source = 'docx'")
+    op.add_column(
+        "sop_documents",
+        sa.Column(
+            "markdown_converter_version", sa.Integer(), nullable=False, server_default="0"
+        ),
+    )
+    op.execute(
+        "UPDATE sop_documents SET markdown_converter_version = 1"
+        " WHERE markdown_source NOT IN ('', 'failed')"
+    )
 
 
 def downgrade() -> None:

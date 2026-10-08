@@ -100,7 +100,9 @@ function SummaryCard({ state }: { state: SopTabState }) {
         <Button
           appearance="subtle"
           data-testid="sop-summary-redraft"
-          disabled={busy || state.rebuilding}
+          // Unsaved edits would be replaced by the new draft: save or undo them first.
+          disabled={busy || state.rebuilding || edited}
+          title={edited ? t("admin.sop.summary.redraftEdited") : undefined}
           onClick={() => void state.redraftSummary()}
         >
           {t("admin.sop.summary.redraft")}

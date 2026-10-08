@@ -389,3 +389,9 @@ def test_a_form_table_becomes_labelled_sections():
         ("General Description", "Leads the study team."),
         ("Essential Functions", "Plans visits."),
     ]
+
+
+def test_a_one_column_table_and_a_time_are_not_a_form():
+    md = docx_to_markdown(_docx_with_table([["10:30 site review"], ["Note: bring the log"]]))
+    assert md.splitlines()[0] == "| 10:30 site review |"
+    assert "## " not in md

@@ -291,6 +291,7 @@ export const resources = {
             approve: "Approve",
             saveDraft: "Save as draft",
             redraft: "Draft again with AI",
+            redraftEdited: "Save or undo your edits first: a new draft would replace them.",
           },
         },
         users: {
@@ -668,6 +669,7 @@ export const resources = {
             approve: "审核通过",
             saveDraft: "保存为草稿",
             redraft: "让 AI 重新起草",
+            redraftEdited: "请先保存或撤销你的修改：重新起草会覆盖它们。",
           },
         },
         users: {

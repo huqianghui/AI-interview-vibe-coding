@@ -111,8 +111,10 @@ def _typed_heading_level(paragraph, text: str) -> int | None:  # noqa: ANN001
     return None
 
 
-# A form row's label: "General Description:", "Essential Functions of the job:".
-_FORM_LABEL = re.compile(r"^([^:\n]{2,60}):\s*(.*)$", re.DOTALL)
+# A form row's label: "General Description:", "Essential Functions of the job:". Starts with a
+# letter, at most six words, and the colon ends the label ("10:30 review" is not one).
+_FORM_LABEL = re.compile(r"^([A-Za-z\u4e00-\u9fff][^:\n]{1,59})[:：](?:\s+|$)(.*)$", re.DOTALL)
+_FORM_LABEL_MAX_WORDS = 6
 # A table is a form when at least this share of its rows is one merged cell.
 _FORM_ROW_SHARE = 0.6
 
@@ -141,7 +143,7 @@ def _form_markdown(rows: list[list]) -> str:
             if not lines:
                 continue
             label = _FORM_LABEL.match(lines[0])
-            if label:
+            if label and len(label.group(1).split()) <= _FORM_LABEL_MAX_WORDS:
                 blocks.append(f"## {label.group(1).strip()}")
                 lines = [label.group(2).strip(), *lines[1:]]
             blocks.extend(line for line in lines if line)
@@ -152,7 +154,10 @@ def _table_markdown(table) -> str:  # noqa: ANN001 — python-docx Table
     rows = [_row_cells(row) for row in table.rows]
     if not rows:
         return ""
-    if sum(len(cells) == 1 for cells in rows) >= _FORM_ROW_SHARE * len(rows):
+    # A form: several grid columns, but most rows one cell merged across all of them. A one-column
+    # table is a list of rows, kept as a table.
+    merged_rows = sum(len(cells) == 1 for cells in rows)
+    if len(table.columns) > 1 and merged_rows >= _FORM_ROW_SHARE * len(rows):
         return _form_markdown(rows)
     lines = []
     for row in table.rows:

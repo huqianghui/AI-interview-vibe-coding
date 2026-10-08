@@ -8,12 +8,16 @@
   per client SOP). In the SOP documents tab an admin edits it and approves it; **only an approved
   summary is used in scoring**. A draft never is, and editing an approved summary without
   approving it again takes it back out. "Draft again with AI" redrafts in the background; if that
-  fails, the current summary is kept. Scoring starts using approved summaries in the next release.
+  fails, the current summary is kept. An admin's edit or approval made while a draft is being
+  written always wins over the draft. Drafting runs after conversion and never holds it up.
+  Scoring starts using approved summaries in the next release.
 
 ### Fixed
 - Word tables: a cell merged across columns was written once per column it spans (a job
   description came out three times over). It is now written once. A form-style table ("General
   Description: ...") is split into one section per labelled row instead of one large table.
+  Word documents converted by the previous converter are converted again at startup; if that
+  fails, the previous conversion is kept.
 
 ## 0.54.0.0 (2026-10-08)
 
