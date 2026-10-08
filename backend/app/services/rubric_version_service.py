@@ -252,15 +252,35 @@ async def ensure_latest(db: AsyncSession, bank_id: str) -> RubricVersion:
 async def resolve_for_start(
     db: AsyncSession, bank_id: str | None, assigned_version_id: str | None
 ) -> str | None:
-    """Which version a new interview on ``bank_id`` pins: the assigned one when it belongs to this
-    bank, otherwise the bank's latest. None only when there is no bank at all."""
+    """Which version a new interview on ``bank_id`` pins: the assigned one when it is a version of
+    this bank that still describes its questions, otherwise the bank's current version. None only
+    when there is no bank at all.
+
+    "Still describes its questions": a bank re-import keeps the bank id but replaces every question
+    (new ids). A version from before it is keyed by ids that no longer exist, so pinning it would
+    find no rubric for any question and silently score the whole interview as unauthored.
+    """
     if bank_id is None:
         return None
     if assigned_version_id:
         assigned = await get(db, assigned_version_id)
         if assigned is not None and assigned.bank_id == bank_id:
-            return assigned.id
+            frozen = set(questions_of(assigned))
+            if not frozen or frozen & set(await _question_ids(db, bank_id)):
+                return assigned.id
+            logger.warning(
+                "Assigned rubric version %s of bank %s no longer matches its questions (the bank "
+                "was re-imported); pinning the current version instead",
+                assigned.id,
+                bank_id,
+            )
     return (await current(db, bank_id)).id
+
+
+async def _question_ids(db: AsyncSession, bank_id: str) -> list[str]:
+    return list(
+        (await db.execute(select(Question.id).where(Question.bank_id == bank_id))).scalars().all()
+    )
 
 
 async def rubric_rows(
@@ -272,6 +292,12 @@ async def rubric_rows(
         version = await get(db, rubric_version_id)
         if version is not None:
             items = questions_of(version).get(question_id, [])
+            if not items:
+                # Legitimate for a question with no rubric, or one added after this version; logged
+                # so a whole interview scored without a rubric is visible rather than silent.
+                logger.info(
+                    "Rubric version %s has no items for question %s", version.id, question_id
+                )
             return sorted((_row_from(it) for it in items), key=lambda r: r.order_index)
         logger.warning("Rubric version %s is gone; reading the live checklist", rubric_version_id)
 

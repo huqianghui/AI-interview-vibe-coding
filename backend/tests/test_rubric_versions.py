@@ -460,3 +460,31 @@ async def test_the_rubric_editor_is_admin_only(client, db_session, candidate_aut
         f"/admin/checklists/{checklist.id}/items", headers=candidate_auth, json={"items": []}
     )
     assert resp.status_code == 403
+
+
+async def test_a_bank_reimport_moves_pinned_users_and_never_pins_a_dead_version(db_session):
+    """Red-team finding: a re-import replaces every question id, so a version from before it
+    describes no question of the bank; pinning it scored a whole interview as unauthored."""
+    from app.services import bank_bundle_service
+
+    bank, *_ = await _bank_with_rubric(db_session, name="Synced")
+    old = await rubric_version_service.latest(db_session, bank.id)
+    user = await _user(db_session)
+    user.assigned_bank_id = bank.id
+    user.assigned_rubric_version_id = old.id
+    await db_session.commit()
+
+    bundle = await bank_bundle_service.export_bank_bundle(db_session, bank.id)
+    await bank_bundle_service.import_bank_bundle(db_session, bundle)
+    new = await rubric_version_service.latest(db_session, bank.id)
+    await db_session.refresh(user)
+    assert user.assigned_rubric_version_id == new.id != old.id
+
+    # Even a stale pin that was never moved is refused at start.
+    pinned = await rubric_version_service.resolve_for_start(db_session, bank.id, old.id)
+    assert pinned == new.id
+    (q,) = await question_service.list_questions_for_bank(db_session, bank.id)
+    rows = await rubric_version_service.rubric_rows(
+        db_session, question_id=q.id, rubric_version_id=pinned
+    )
+    assert [r.text for r in rows] == ["Escalates within 24 hours", "Known source conflict"]
