@@ -447,3 +447,84 @@ async def test_original_labels_come_from_the_first_run_that_saw_each_item(db_ses
     assert labels[("Q2", "Accuracy")] == "B SOP section 5"  # same text, other question
     assert ("Q3", "Dup") not in labels  # ambiguous: not guessed
     assert labels["new"] == "C SOP"  # an item first seen by the second run
+
+
+async def test_a_library_wide_match_needs_a_verbatim_sentence(db_session):
+    """A question naming no SOP: the model must back a citation with a copied sentence."""
+    await _corpus(db_session)
+    bank, checklist_id = await _bank(
+        db_session, [("Explains the reasoning", 50, ""), ("Escalates a failed batch", 50, "")]
+    )
+    prompts: list[str] = []
+
+    class Llm(ScriptedJudgeAdapter):
+        name = "scripted"
+
+        async def complete(self, prompt, *, json_mode=False, fast=False):
+            prompts.append(prompt)
+            item = prompt.split("RUBRIC ITEM:\n")[1].split("\n")[0]
+            quote = (
+                "A failed batch is escalated to the site lead the same day."
+                if "failed" in item
+                else ""
+            )
+            return json.dumps({"cite": ["C1"], "quote": quote})
+
+    run = CitationRun(bank_id=bank.id)
+    db_session.add(run)
+    await db_session.commit()
+    await sop_citation_service.relocate(db_session, run, Llm())
+    assert all("searching every SOP" in p for p in prompts)
+    db_session.expire_all()
+    items = {i.text: i for i in await checklist_service.list_items(db_session, checklist_id)}
+    assert items["Explains the reasoning"].source_refs == "[]"  # cited, but nothing to quote
+    assert json.loads(items["Escalates a failed batch"].source_refs)[0]["section"] == "5"
+
+
+async def test_an_invented_quote_drops_a_library_wide_match_but_not_a_scoped_one(db_session):
+    widget, _ = await _corpus(db_session)
+    unscoped, unscoped_list = await _bank(db_session, [("Escalates a failed batch", 100, "")])
+    scoped_bank = await question_service.create_bank(db_session, name="Scoped")
+    q = await question_service.add_question(
+        db_session, bank_id=scoped_bank.id, text="How do you release a batch?", order_index=0
+    )
+    scoped_list = (
+        await checklist_service._persist_draft(
+            db_session,
+            q.id,
+            checklist_service.ChecklistDraft(
+                prompt_version="t",
+                items=[
+                    checklist_service.DraftItem(
+                        kind="required",
+                        text="Gets sign-off",
+                        weight=50,
+                        source_quote="Widget Release Procedure SOP section 4.2",
+                    ),
+                    checklist_service.DraftItem(kind="required", text="Escalates", weight=50),
+                ],
+            ),
+        )
+    ).id
+
+    class Invents(ScriptedJudgeAdapter):
+        name = "scripted"
+
+        async def complete(self, prompt, *, json_mode=False, fast=False):
+            return json.dumps({"cite": ["C1"], "quote": "A sentence that is in no section at all."})
+
+    for bank_id in (unscoped.id, scoped_bank.id):
+        run = CitationRun(bank_id=bank_id)
+        db_session.add(run)
+        await db_session.commit()
+        await sop_citation_service.relocate(db_session, run, Invents())
+    db_session.expire_all()
+    (lonely,) = await checklist_service.list_items(db_session, unscoped_list)
+    assert lonely.source_refs == "[]"  # library-wide, invented quote: nothing kept
+    scoped = {i.text: i for i in await checklist_service.list_items(db_session, scoped_list)}
+    # Scoped by its question's label: the section is kept, only the quote is dropped.
+    assert json.loads(scoped["Escalates"].source_refs) != []
+    assert scoped["Escalates"].source_quote == ""
+    assert json.loads(scoped["Gets sign-off"].source_refs) == [
+        {"document_id": widget, "section": "4.2"}
+    ]
