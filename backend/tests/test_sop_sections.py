@@ -340,3 +340,52 @@ async def test_a_failed_analysis_and_a_missing_token_raise(monkeypatch):
     monkeypatch.setattr(sop_markdown, "get_bearer_token", no_token)
     with pytest.raises(RuntimeError, match="No Entra token"):
         await real_analyze(b"%PDF", "https://di.example", 1)
+
+
+def _docx_with_table(rows: list[list[str]], merge_first_row: bool = False) -> bytes:
+    import docx
+
+    d = docx.Document()
+    table = d.add_table(rows=len(rows), cols=len(rows[0]))
+    for r, values in enumerate(rows):
+        for c, value in enumerate(values):
+            table.cell(r, c).text = value
+    if merge_first_row:
+        table.cell(0, 0).merge(table.cell(0, len(rows[0]) - 1)).text = rows[0][0]
+    buf = io.BytesIO()
+    d.save(buf)
+    return buf.getvalue()
+
+
+def test_a_merged_cell_is_written_once_and_columns_still_line_up():
+    md = docx_to_markdown(
+        _docx_with_table(
+            [["Study visits", "", ""], ["Visit", "Window", "Owner"], ["V1", "Day 1", "CRA"]],
+            merge_first_row=True,
+        )
+    )
+    assert md.count("Study visits") == 1
+    assert md.splitlines()[0] == "| Study visits |  |  |"
+    assert "| V1 | Day 1 | CRA |" in md
+
+
+def test_a_form_table_becomes_labelled_sections():
+    import docx
+
+    d = docx.Document()
+    table = d.add_table(rows=3, cols=2)
+    rows = [
+        "Job Description",
+        "General Description: Leads the study team.",
+        "Essential Functions: Plans visits.",
+    ]
+    for r, text in enumerate(rows):
+        table.cell(r, 0).merge(table.cell(r, 1)).text = text
+    buf = io.BytesIO()
+    d.save(buf)
+    sections = parse_sections(docx_to_markdown(buf.getvalue()))
+    assert [(s.title, s.text) for s in sections] == [
+        ("", "Job Description"),
+        ("General Description", "Leads the study team."),
+        ("Essential Functions", "Plans visits."),
+    ]

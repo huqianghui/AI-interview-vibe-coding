@@ -18,7 +18,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.sop import SopDocument, SopSection
-from app.services import storage
+from app.services import sop_summary_service, storage
 from app.services.sop_markdown import MarkdownResult, to_markdown
 from app.sop.sections import parse_sections
 
@@ -157,12 +157,32 @@ async def build_missing(session_factory) -> int:  # noqa: ANN001 — async_sessi
             done = 0
             for doc_id in ids:
                 done += await _build_one(session_factory, doc_id, only_if_needed=True)
+            # Then draft the summary of every converted document that has none (spec §2).
+            await sop_summary_service.summarize_missing(session_factory)
             return done
     except asyncio.CancelledError:
         raise
     except Exception:  # noqa: BLE001 — e.g. the database is down at boot; the next run retries
         logger.exception("Converting SOP documents to sections failed")
         return 0
+
+
+async def redraft_summary(session_factory, document_id: str) -> None:  # noqa: ANN001
+    """An admin's "Draft again": a new AI draft of the summary, in the background, after any build
+    already running. The new text is a DRAFT until approved. Never raises."""
+    sop_summary_service.mark_drafting(document_id)
+    try:
+        async with _BUILD_LOCK:
+            async with session_factory() as db:
+                document = await db.get(SopDocument, document_id)
+                if document is not None:
+                    await sop_summary_service.generate(db, document)
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 — background work
+        logger.exception("Drafting the summary of SOP %s failed", document_id)
+    finally:
+        sop_summary_service._DRAFTING.discard(document_id)
 
 
 async def rebuild(session_factory, document_id: str) -> None:  # noqa: ANN001

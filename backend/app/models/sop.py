@@ -8,7 +8,9 @@ leads with). ``sop_chunk`` mirrors the reference's ``material_chunks`` shape
 PUBLIC repo: no real SOP content is stored in this repo — these are schema definitions only.
 """
 
-from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
+from datetime import datetime
+
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -36,6 +38,13 @@ class SopDocument(TimestampMixin, Base):
     markdown_source: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     # Why the last conversion failed (which pages were not fully read, a timeout, ...); "" if not.
     markdown_error: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    # The document's key-points summary (spec-sop-section-grounding §2): AI-drafted from the whole
+    # Markdown, edited and approved by an admin. Only an approved summary is used in scoring.
+    summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    # "" = none yet | draft = AI-drafted or edited, not approved | reviewed = approved | failed
+    summary_status: Mapped[str] = mapped_column(String(16), default="", nullable=False)
+    summary_error: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    summary_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class SopChunk(TimestampMixin, Base):

@@ -2742,6 +2742,21 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "summarizing": {
+            "default": false,
+            "title": "Summarizing",
+            "type": "boolean"
+          },
+          "summary_error": {
+            "default": "",
+            "title": "Summary Error",
+            "type": "string"
+          },
+          "summary_status": {
+            "default": "",
+            "title": "Summary Status",
+            "type": "string"
           }
         },
         "required": [
@@ -2840,6 +2855,66 @@
           "full_text"
         ],
         "title": "SopSectionTextOut",
+        "type": "object"
+      },
+      "SopSummaryIn": {
+        "properties": {
+          "approve": {
+            "default": false,
+            "title": "Approve",
+            "type": "boolean"
+          },
+          "summary": {
+            "maxLength": 20000,
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary"
+        ],
+        "title": "SopSummaryIn",
+        "type": "object"
+      },
+      "SopSummaryOut": {
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "summarizing": {
+            "title": "Summarizing",
+            "type": "boolean"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "status",
+          "error",
+          "reviewed_at",
+          "summarizing"
+        ],
+        "title": "SopSummaryOut",
         "type": "object"
       },
       "TestChatIn": {
@@ -5375,6 +5450,158 @@
           }
         ],
         "summary": "Section Text",
+        "tags": [
+          "admin-sop"
+        ]
+      }
+    },
+    "/admin/sop/documents/{document_id}/summary": {
+      "get": {
+        "description": "The document's key-points summary and whether it is approved (only then used in scoring).",
+        "operationId": "get_summary_admin_sop_documents__document_id__summary_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SopSummaryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Summary",
+        "tags": [
+          "admin-sop"
+        ]
+      },
+      "put": {
+        "description": "Save an admin's edit: approved (used in scoring) or a draft (not used).",
+        "operationId": "save_summary_admin_sop_documents__document_id__summary_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SopSummaryIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SopSummaryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Save Summary",
+        "tags": [
+          "admin-sop"
+        ]
+      }
+    },
+    "/admin/sop/documents/{document_id}/summary/draft": {
+      "post": {
+        "description": "Ask the LLM for a new draft, in the background. It replaces the current summary as a DRAFT:\nscoring stops using it until an admin approves again.",
+        "operationId": "redraft_summary_admin_sop_documents__document_id__summary_draft_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SopSummaryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Redraft Summary",
         "tags": [
           "admin-sop"
         ]

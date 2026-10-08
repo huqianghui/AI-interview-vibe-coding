@@ -13,7 +13,10 @@ here:
   all-bold one a level-2 heading.
 
 A real heading style (Heading N / Title) always wins. Tables become Markdown tables in document
-order, other list items ``-`` items.
+order, other list items ``-`` items. A cell merged across columns is written once (Word repeats it
+at every grid position it spans, which tripled a job description's text, measured 2026-10-08).
+A FORM table — most rows one merged cell, "General Description: ..." — is not a table at all:
+each row becomes text, and a row that opens with a short "Label:" becomes a heading over it.
 """
 
 from __future__ import annotations
@@ -108,15 +111,62 @@ def _typed_heading_level(paragraph, text: str) -> int | None:  # noqa: ANN001
     return None
 
 
+# A form row's label: "General Description:", "Essential Functions of the job:".
+_FORM_LABEL = re.compile(r"^([^:\n]{2,60}):\s*(.*)$", re.DOTALL)
+# A table is a form when at least this share of its rows is one merged cell.
+_FORM_ROW_SHARE = 0.6
+
+
+def _row_cells(row) -> list:  # noqa: ANN001 — python-docx _Row
+    """The row's cells, each merged cell once (python-docx returns it at every grid column)."""
+    seen: set[int] = set()
+    cells = []
+    for cell in row.cells:
+        if id(cell._tc) not in seen:
+            seen.add(id(cell._tc))
+            cells.append(cell)
+    return cells
+
+
+def _cell_lines(cell) -> list[str]:  # noqa: ANN001
+    lines = (re.sub(r"\s+", " ", p.text).strip() for p in cell.paragraphs)
+    return [line for line in lines if line]
+
+
+def _form_markdown(rows: list[list]) -> str:
+    blocks: list[str] = []
+    for cells in rows:
+        for cell in cells:
+            lines = _cell_lines(cell)
+            if not lines:
+                continue
+            label = _FORM_LABEL.match(lines[0])
+            if label:
+                blocks.append(f"## {label.group(1).strip()}")
+                lines = [label.group(2).strip(), *lines[1:]]
+            blocks.extend(line for line in lines if line)
+    return "\n\n".join(blocks)
+
+
 def _table_markdown(table) -> str:  # noqa: ANN001 — python-docx Table
-    rows = []
-    for row in table.rows:
-        cells = [re.sub(r"\s+", " ", cell.text).strip().replace("|", "\\|") for cell in row.cells]
-        rows.append("| " + " | ".join(cells) + " |")
+    rows = [_row_cells(row) for row in table.rows]
     if not rows:
         return ""
-    width = rows[0].count("|") - 1
-    return "\n".join([rows[0], "|" + " --- |" * width, *rows[1:]])
+    if sum(len(cells) == 1 for cells in rows) >= _FORM_ROW_SHARE * len(rows):
+        return _form_markdown(rows)
+    lines = []
+    for row in table.rows:
+        seen: set[int] = set()
+        cells = []
+        for cell in row.cells:
+            # A merged cell's text once; its other grid positions stay empty so columns align.
+            first = id(cell._tc) not in seen
+            seen.add(id(cell._tc))
+            text = re.sub(r"\s+", " ", cell.text).strip() if first else ""
+            cells.append(text.replace("|", "\\|"))
+        lines.append("| " + " | ".join(cells) + " |")
+    width = lines[0].count(" | ") + 1
+    return "\n".join([lines[0], "|" + " --- |" * width, *lines[1:]])
 
 
 def docx_to_markdown(content: bytes) -> str:
