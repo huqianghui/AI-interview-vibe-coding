@@ -32,10 +32,9 @@
   <rect class="box" x="20" y="190" width="150" height="170" rx="10"/>
   <text class="t" x="95" y="220" text-anchor="middle">Browser</text>
   <text class="s" x="95" y="244" text-anchor="middle">candidate · admin</text>
-  <text class="s" x="95" y="272" text-anchor="middle">React 18 + TS</text>
-  <text class="s" x="95" y="290" text-anchor="middle">Vite · Fluent UI v9</text>
-  <text class="s" x="95" y="308" text-anchor="middle">TanStack Query</text>
-  <text class="s" x="95" y="326" text-anchor="middle">i18next zh / en</text>
+  <text class="s" x="95" y="280" text-anchor="middle">React · TypeScript</text>
+  <text class="s" x="95" y="298" text-anchor="middle">Fluent UI</text>
+  <text class="s" x="95" y="316" text-anchor="middle">Chinese / English</text>
 
   <!-- Container Apps environment (VNet) -->
   <rect class="zone" x="200" y="40" width="650" height="460" rx="14"/>
@@ -50,8 +49,7 @@
 
   <rect class="key" x="470" y="110" width="190" height="360" rx="12"/>
   <text class="t" x="565" y="140" text-anchor="middle">Backend</text>
-  <text class="s" x="565" y="160" text-anchor="middle">Python 3.11 · FastAPI</text>
-  <text class="s" x="565" y="176" text-anchor="middle">SQLAlchemy 2 · Alembic · JWT</text>
+  <text class="s" x="565" y="162" text-anchor="middle">Python · FastAPI</text>
   <text class="s" x="488" y="214">• interview engine + judge</text>
   <text class="s" x="488" y="238">• scoring + report</text>
   <text class="s" x="488" y="262">• SOP pipeline</text>
@@ -60,7 +58,7 @@
   <text class="l" x="565" y="448" text-anchor="middle">internal ingress</text>
 
   <rect class="data" x="700" y="270" width="130" height="90" rx="10"/>
-  <text class="t" x="765" y="300" text-anchor="middle">PostgreSQL 16</text>
+  <text class="t" x="765" y="300" text-anchor="middle">PostgreSQL</text>
   <text class="s" x="765" y="322" text-anchor="middle">private</text>
   <text class="s" x="765" y="338" text-anchor="middle">Entra-only login</text>
 

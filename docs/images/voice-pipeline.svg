@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1196 880" width="1196" height="880"
-     font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', Helvetica, Arial, sans-serif"
-     role="img" aria-label="A voice interview session end to end: browser, backend WS proxy, and the two Azure Voice Live pipelines (cascaded for chat models, speech-to-speech for realtime models), both ending in Azure Speech TTS and the avatar.">
+     font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif"
+     role="img" aria-label="A voice interview session end to end: browser, backend WebSocket proxy, session setup, then either the cascaded pipeline (chat model) or the speech-to-speech pipeline (realtime model); both end in Azure Speech TTS and the avatar. Scoring and the judge run separately, always on a chat model.">
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0 0 L10 5 L0 10 z" fill="#6b5b7b"/>
@@ -21,35 +21,32 @@
   </defs>
 
   <rect x="0" y="0" width="1196" height="880" fill="#faf7f2"/>
-  <text x="32" y="44" class="tt" font-size="20">一次语音面试会话的全链路 · A voice interview session, end to end</text>
-  <text x="32" y="68" class="s">检测器与管线由 admin 里选的语音模型唯一决定（无人工开关）：<tspan class="m">voice_live_probe.uses_realtime_pipeline()</tspan></text>
+  <text x="32" y="44" class="tt" font-size="20">A voice interview session, end to end</text>
+  <text x="32" y="68" class="s">The voice model picked in /admin decides which pipeline runs; there is no other switch.</text>
 
-  <!-- ===== stage 1: browser ===== -->
+  <!-- ===== 1: browser ===== -->
   <rect class="box" x="32" y="96" width="248" height="150"/>
-  <text x="48" y="122" class="tt">① 浏览器 Browser</text>
-  <text x="48" y="146" class="t">React 18 · Fluent UI v9</text>
-  <text x="48" y="168" class="s">麦克风上行 PCM <tspan class="m">16 kHz</tspan> 单声道</text>
-  <text x="48" y="188" class="s">下行：音频 + <tspan class="m">WebRTC</tspan> 视频 + 字幕</text>
-  <text x="48" y="212" class="m">AvatarView · useVoiceLive</text>
-  <text x="48" y="232" class="s">一条 WebSocket 承载全部</text>
+  <text x="48" y="122" class="tt">① Browser</text>
+  <text x="48" y="148" class="s">Microphone audio up (16 kHz)</text>
+  <text x="48" y="170" class="s">Audio and captions back</text>
+  <text x="48" y="192" class="s">Avatar video over WebRTC</text>
+  <text x="48" y="222" class="s">One WebSocket carries it all</text>
 
-  <!-- ===== stage 2: backend proxy ===== -->
+  <!-- ===== 2: backend proxy ===== -->
   <rect class="box" x="328" y="96" width="268" height="150"/>
-  <text x="344" y="122" class="tt">② 后端代理 Backend proxy</text>
-  <text x="344" y="146" class="t">FastAPI · Python 3.11</text>
-  <text x="344" y="168" class="m">/api/voice-live/ws</text>
-  <text x="344" y="188" class="m">services/voice_live_proxy.py</text>
-  <text x="344" y="210" class="s">持有 Azure SDK 连接，双向中继；</text>
-  <text x="344" y="228" class="s">装配 <tspan class="m">session.update</tspan>（见下）</text>
+  <text x="344" y="122" class="tt">② Backend proxy</text>
+  <text x="344" y="148" class="m">/api/voice-live/ws</text>
+  <text x="344" y="172" class="s">Holds the Azure Voice Live</text>
+  <text x="344" y="190" class="s">connection and relays both ways</text>
+  <text x="344" y="222" class="s">Sets up the session (next box)</text>
 
-  <!-- ===== stage 3: session assembly ===== -->
+  <!-- ===== 3: session setup ===== -->
   <rect class="box" x="644" y="96" width="504" height="150"/>
-  <text x="660" y="122" class="tt">③ 会话装配 <tspan class="m" font-size="13px">build_avatar_session()</tspan></text>
-  <text x="660" y="148" class="s">外层 VAD <tspan class="m">azure_semantic_vad_multilingual</tspan>，静音 <tspan class="m">800 ms</tspan></text>
-  <text x="660" y="170" class="s">音色 <tspan class="m">session.voice = azure-standard</tspan>（人物 × 语言，内置 6 个）</text>
-  <text x="660" y="192" class="s">输入转写 <tspan class="m">azure-speech</tspan> · 数字人 <tspan class="m">session.avatar</tspan></text>
-  <text x="660" y="216" class="s">EoU 检测器按管线二选一 ↓ 这是两条路线唯一的差别</text>
-  <text x="660" y="236" class="s">其余字段两条路线完全相同</text>
+  <text x="660" y="122" class="tt">③ Session setup</text>
+  <text x="660" y="148" class="s">Voice activity detection: 800 ms of silence ends a turn</text>
+  <text x="660" y="170" class="s">Voice: an Azure Speech voice per interviewer and language</text>
+  <text x="660" y="192" class="s">Transcription: Azure Speech · the avatar's look and video</text>
+  <text x="660" y="222" class="s">Only the end-of-turn detector differs between the two pipelines ↓</text>
 
   <path class="edge" d="M280 171 L324 171"/>
   <path class="edge" d="M596 171 L640 171"/>
@@ -60,85 +57,73 @@
 
   <!-- ===== lane A: cascaded ===== -->
   <rect x="32" y="300" width="536" height="268" rx="12" fill="#f1ece3" stroke="#ddd5c9" stroke-width="1.2"/>
-  <text x="52" y="326" class="lane">级联 Cascaded — 选 chat 模型时（今天线上的默认，本次一个字节未动）</text>
-  <text x="52" y="346" class="s">触发条件：<tspan class="m">gpt-5-mini</tspan> 等 chat 部署，或 BYOM 的非 realtime profile</text>
+  <text x="52" y="326" class="lane">Cascaded — with a chat model (the default)</text>
+  <text x="52" y="346" class="s">e.g. gpt-5-mini, or a bring-your-own model that is not realtime</text>
 
   <rect class="box" x="52" y="360" width="150" height="88"/>
-  <text x="66" y="384" class="t">听 Listen</text>
-  <text x="66" y="404" class="s">Azure STT</text>
-  <text x="66" y="422" class="m">azure-speech</text>
-  <text x="66" y="440" class="s">产出识别文本</text>
+  <text x="66" y="384" class="t">Listen</text>
+  <text x="66" y="406" class="s">Azure speech-to-text</text>
+  <text x="66" y="424" class="s">→ text</text>
 
   <rect class="box" x="218" y="360" width="166" height="88"/>
-  <text x="232" y="384" class="t">轮次检测 EoU</text>
-  <text x="232" y="404" class="s">文本型（读 transcript）</text>
-  <text x="232" y="420" class="m">semantic_detection</text>
-  <text x="232" y="434" class="m">_v1_multilingual</text>
-  <text x="232" y="452" class="m" fill="#8a5a2b">timeout_ms = 1500</text>
+  <text x="232" y="384" class="t">End of turn</text>
+  <text x="232" y="406" class="s">reads the transcript</text>
+  <text x="232" y="424" class="s">waits 1.5 s</text>
 
   <rect class="box" x="400" y="360" width="150" height="88"/>
-  <text x="414" y="384" class="t">想 Think</text>
-  <text x="414" y="404" class="s">你的 chat 部署</text>
-  <text x="414" y="422" class="m">gpt-5-mini</text>
-  <text x="414" y="440" class="s">文本进 / 文本出</text>
+  <text x="414" y="384" class="t">Think</text>
+  <text x="414" y="406" class="s">your chat model</text>
+  <text x="414" y="424" class="s">text in, text out</text>
 
   <path class="edge" d="M202 404 L214 404"/>
   <path class="edge" d="M384 404 L396 404"/>
-  <text x="52" y="490" class="s">1500 ms 是它一直在跑的值。音频型检测器在这条路上也被 Azure 接受，</text>
-  <text x="52" y="510" class="s">但 A/B 只证明两者<tspan font-weight="600">等价</tspan>（英文末次 stop 7.57 s vs 7.68 s，中文 8.98 s vs 8.96 s）——</text>
-  <text x="52" y="530" class="s">等价不是更好，所以唯一在线上跑的这条路不动。</text>
-  <text x="52" y="552" class="m" fill="#6b625a">scripts/voice_live_eou_ab.py</text>
+  <text x="52" y="492" class="s">An audio-based detector also works here, but measured</text>
+  <text x="52" y="512" class="s">no better, so this pipeline keeps the text-based one.</text>
 
-  <!-- ===== lane B: realtime ===== -->
+  <!-- ===== lane B: speech-to-speech ===== -->
   <rect x="612" y="300" width="536" height="268" rx="12" fill="#efe9f3" stroke="#d8cde0" stroke-width="1.2"/>
-  <text x="632" y="326" class="lane">语音到语音 Speech-to-speech — 选 realtime 模型时（本次新增可用）</text>
-  <text x="632" y="346" class="s">触发条件：实测 6 个原生 <tspan class="m">gpt-realtime-*</tspan> / <tspan class="m">azure-realtime</tspan>，或 BYOM realtime profile</text>
+  <text x="632" y="326" class="lane">Speech-to-speech — with a realtime model</text>
+  <text x="632" y="346" class="s">e.g. gpt-realtime, or a bring-your-own realtime model</text>
 
   <rect class="box" x="632" y="360" width="150" height="88"/>
-  <text x="646" y="384" class="t">听 Listen</text>
-  <text x="646" y="404" class="s">音频直通模型</text>
-  <text x="646" y="422" class="s">无 Voice Live 识别器</text>
-  <text x="646" y="440" class="s">（转写仍另行开启）</text>
+  <text x="646" y="384" class="t">Listen</text>
+  <text x="646" y="406" class="s">audio goes straight</text>
+  <text x="646" y="424" class="s">to the model</text>
 
   <rect class="box" x="798" y="360" width="166" height="88"/>
-  <text x="812" y="384" class="t">轮次检测 EoU</text>
-  <text x="812" y="404" class="s">音频型（直接读音频）</text>
-  <text x="812" y="420" class="m">smart_end_of_turn</text>
-  <text x="812" y="434" class="m">_detection</text>
-  <text x="812" y="452" class="m" fill="#6b4a8a">timeout_ms = 1000</text>
+  <text x="812" y="384" class="t">End of turn</text>
+  <text x="812" y="406" class="s">reads the audio</text>
+  <text x="812" y="424" class="s">waits 1.0 s</text>
 
   <rect class="box" x="980" y="360" width="150" height="88"/>
-  <text x="994" y="384" class="t">想 Think</text>
-  <text x="994" y="404" class="s">Speech-LLM</text>
-  <text x="994" y="422" class="m">gpt-realtime-2.1</text>
-  <text x="994" y="440" class="s">音频进 / 音频 + 文本出</text>
+  <text x="994" y="384" class="t">Think</text>
+  <text x="994" y="406" class="s">realtime model</text>
+  <text x="994" y="424" class="s">audio in, audio out</text>
 
   <path class="edge" d="M782 404 L794 404"/>
   <path class="edge" d="M964 404 L976 404"/>
-  <text x="632" y="490" class="s">文本型检测器在这条路上会把<tspan font-weight="600">整个会话</tspan>拒掉：“Text-based end-of-utterance</text>
-  <text x="632" y="510" class="s">detection requires a local speech recognizer…” —— 这一行就是 realtime 唯一的拦路石。</text>
-  <text x="632" y="530" class="s">1000 ms 是实测点：1500 ms 晚 0.45–0.6 s，700 ms 行为变质（并段）。</text>
-  <text x="632" y="552" class="m" fill="#6b625a">scripts/voice_live_session_probe.py --matrix</text>
+  <text x="632" y="492" class="s">Azure rejects a text-based detector here: there is no</text>
+  <text x="632" y="512" class="s">transcript to read. 1.0 s measured best (1.5 s lags).</text>
 
   <!-- ===== converge ===== -->
   <path class="edge" d="M300 568 L300 596 L560 596 L560 620"/>
   <path class="edge" d="M880 568 L880 596 L620 596 L620 620"/>
 
-  <!-- ===== stage 4: speak + avatar (shared) ===== -->
+  <!-- ===== 4: speak + avatar (shared) ===== -->
   <rect class="box" x="208" y="620" width="764" height="118" fill="#fdfbf7"/>
-  <text x="228" y="648" class="tt">④ 说 Speak + 数字人 Avatar —— 两条路线<tspan fill="#8a5a2b">完全相同</tspan></text>
-  <text x="228" y="674" class="t">Azure Speech TTS（<tspan class="m">session.voice = azure-standard</tspan>）→ viseme 口型 → 服务端渲染数字人 → <tspan class="m">WebRTC</tspan> 回浏览器</text>
-  <text x="228" y="698" class="s">所以 realtime 走的是产品组图里的<tspan font-weight="600">混合式</tspan>：realtime 当大脑，<tspan font-weight="600">嘴仍然是 Azure TTS</tspan> —— 口型照旧由 TTS 驱动，音色不随模型变。</text>
-  <text x="228" y="720" class="s">逐字念题（<tspan class="m">pre_generated_assistant_message</tspan>）<tspan font-weight="600">绕过大脑</tspan>直接进 TTS，两条路线都保证题目逐字一致。</text>
+  <text x="228" y="648" class="tt">④ Speak + avatar — the same in both pipelines</text>
+  <text x="228" y="674" class="t">Azure Speech TTS → lip-sync → avatar rendered by Azure → WebRTC to the browser</text>
+  <text x="228" y="698" class="s">A realtime model is only the brain: the voice and the lip-sync always come from Azure TTS.</text>
+  <text x="228" y="720" class="s">Questions are read word for word straight to TTS, bypassing the model, in both pipelines.</text>
 
   <path class="edge" d="M208 700 L20 700 L20 171 L30 171"/>
-  <text x="14" y="470" class="s" transform="rotate(-90 14 470)">音视频回传 back to the browser</text>
+  <text x="13" y="520" class="s" transform="rotate(-90 13 520)">audio and video back to the browser</text>
 
   <!-- ===== inference leg ===== -->
   <rect x="32" y="762" width="1116" height="94" rx="12" fill="#f3f1ec" stroke="#ddd5c9" stroke-width="1.2" stroke-dasharray="6 4"/>
-  <text x="52" y="788" class="lane">推理腿 Inference leg —— 不在会话里，<tspan fill="#8a5a2b">永远用 chat 部署</tspan></text>
-  <text x="52" y="812" class="t">judge（<tspan class="m">wait</tspan>/<tspan class="m">nudge</tspan>）· 打分 / checklist / SOP 覆盖 · Foundry agent 的底层模型 → Responses API（HTTP）</text>
-  <text x="52" y="836" class="s">输入是会话的 <tspan class="m">azure-speech</tspan> 转写（候选人答案文本），不是 TTS 音频。realtime 部署在 7 个 HTTP 文本面 + Responses 的 WebSocket 模式上<tspan font-weight="600">全部被拒</tspan>（实测），所以评估必须留在 chat 上。</text>
+  <text x="52" y="788" class="lane">Inference leg — outside the session, always a chat model</text>
+  <text x="52" y="812" class="t">Live judge (wait / nudge) · scoring · rubric drafting · SOP coverage check · Foundry agent</text>
+  <text x="52" y="836" class="s">Its input is the candidate's transcribed answer, not audio. Realtime models are refused on these text APIs, so evaluation stays on a chat model.</text>
   <path class="edge-g" d="M1148 212 L1166 212 L1166 782 L1152 782"/>
-  <text x="1174" y="500" class="s" transform="rotate(-90 1174 500)">候选人答案文本</text>
+  <text x="1189" y="540" class="s" transform="rotate(-90 1189 540)">answer text</text>
 </svg>
