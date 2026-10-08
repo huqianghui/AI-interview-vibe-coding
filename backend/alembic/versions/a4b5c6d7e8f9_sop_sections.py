@@ -52,6 +52,7 @@ def upgrade() -> None:
         sa.Column("text", sa.Text(), nullable=False, server_default=""),
         sa.Column("created_at", sa.DateTime(), server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(), server_default=sa.func.now()),
+        sa.UniqueConstraint("document_id", "order_index", name="uq_sop_sections_order"),
     )
     op.create_index("ix_sop_sections_document_id", "sop_sections", ["document_id"])
 

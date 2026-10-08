@@ -50,6 +50,12 @@ _THROTTLED = {429, 503}
 PAGE_COVERAGE_MIN = 0.95
 # A page with fewer required words than this carries too little text to judge (a cover, a blank).
 PAGE_REQUIRED_MIN_WORDS = 10
+# A page's words are looked for in its own Markdown page and the pages either side: Document
+# Intelligence sometimes places a running header or a table row across the page break. Measured
+# 2026-10-08: the page alone false-fails a complete PDF (94%), ±1 passes every complete page and
+# scores the known-incomplete page lower than the whole document does (87% vs 89%).
+PAGE_WINDOW = 1
+_PAGE_BREAK = "<!-- PageBreak -->"
 
 _PDF = "application/pdf"
 
@@ -71,8 +77,17 @@ def _extension(filename: str) -> str:
     return filename[dot:].lower() if dot != -1 else ""
 
 
+_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+_CJK_RUN = re.compile(r"[\u4e00-\u9fff]{2,}")
+
+
 def _tokens(text: str) -> list[str]:
-    return [w.lower() for w in re.findall(r"[A-Za-z][A-Za-z\-]{3,}|VV-[A-Z]+-\d+", text)]
+    """Latin words of 4+ letters, document ids, and every two-character pair of a Chinese run
+    (Chinese has no spaces, so pairs are the unit both readers agree on)."""
+    words = [w.lower() for w in re.findall(r"[A-Za-z][A-Za-z\-]{3,}|VV-[A-Z]+-\d+", text)]
+    for run in _CJK_RUN.findall(text):
+        words.extend(run[i : i + 2] for i in range(len(run) - 1))
+    return words
 
 
 def page_gaps(page_texts: list[str], markdown: str) -> list[tuple[int, float, list[str]]]:
@@ -83,15 +98,20 @@ def page_gaps(page_texts: list[str], markdown: str) -> list[tuple[int, float, li
     ("reganaM", "zsyastteimo"); a real omission — a table Document Intelligence did not read —
     loses words and ids that recur. A word counts as covered when the Markdown has it as is,
     reversed (rotated text), or with spaces and hyphens removed (the text layer merges words).
+    Each page is checked against its own Markdown page and its neighbours (:data:`PAGE_WINDOW`),
+    so a word read elsewhere in the document does not cover a page that lost it. The caller has
+    already checked the page counts match.
     """
     counts = Counter(w for text in page_texts for w in _tokens(text))
-    flat = markdown.lower()
-    squashed = re.sub(r"[\s\-]", "", flat)
+    md_pages = markdown.split(_PAGE_BREAK)
     gaps = []
     for page, text in enumerate(page_texts, start=1):
         required = {w for w in _tokens(text) if counts[w] >= 2 or w.startswith("vv-")}
         if len(required) < PAGE_REQUIRED_MIN_WORDS:
             continue
+        lo, hi = max(0, page - 1 - PAGE_WINDOW), page + PAGE_WINDOW
+        flat = "".join(md_pages[lo:hi]).lower()
+        squashed = re.sub(r"[\s\-]", "", flat)
         missing = sorted(
             w
             for w in required
@@ -170,16 +190,25 @@ async def _pdf_via_document_intelligence(content: bytes, endpoint: str) -> str:
 
 
 async def to_markdown(content: bytes, filename: str) -> MarkdownResult:
-    """The whole document as Markdown, or a failure with its reason. Never partial, never raises."""
+    """The whole document as Markdown, or a failure with its reason. Never partial, never raises.
+    A conversion with no text at all (a scanned PDF without Document Intelligence, an empty file)
+    is a failure too: nothing to cite is not a converted document."""
+    result = await _convert(content, filename)
+    if result.source != "failed" and not _COMMENT.sub("", result.markdown).strip():
+        return MarkdownResult("", "failed", "the conversion produced no text")
+    return result
+
+
+async def _convert(content: bytes, filename: str) -> MarkdownResult:
     ext = _extension(filename)
     try:
         if ext == ".pdf":
             endpoint = get_settings().azure_foundry_endpoint
             if endpoint:
-                return MarkdownResult(
-                    await _pdf_via_document_intelligence(content, endpoint),
-                    "document_intelligence",
-                )
+                # A hard bound on the whole call: throttled retries sleep outside the poll loop.
+                async with asyncio.timeout(DI_TIMEOUT_SECONDS):
+                    markdown = await _pdf_via_document_intelligence(content, endpoint)
+                return MarkdownResult(markdown, "document_intelligence")
             # Dev / CI only: no Document Intelligence configured. Labelled, never silent.
             texts = await asyncio.to_thread(_pdf_page_texts, content)
             return MarkdownResult("\n\n<!-- PageBreak -->\n\n".join(texts), "pdf_text")

@@ -3,9 +3,11 @@ this repo is public, the real client SOPs never appear here."""
 
 import io
 
+import httpx
 import pytest
 
 from app.services import sop_markdown
+from app.services.sop_markdown import _analyze as real_analyze
 from app.sop.docx_markdown import docx_to_markdown
 from app.sop.sections import full_text, parse_sections
 
@@ -226,3 +228,115 @@ async def test_without_document_intelligence_the_text_layer_is_used_and_labelled
     assert (result.source, result.markdown) == ("pdf_text", "p1\n\n<!-- PageBreak -->\n\np2")
     unsupported = await sop_markdown.to_markdown(b"x", "x.xyz")
     assert unsupported.source == "failed" and "unsupported" in unsupported.error
+
+
+def test_a_page_is_not_covered_by_its_words_appearing_on_a_distant_page():
+    words = "Widget inspection record checklist release batch quality signed dated archive "
+    pages = _pages(words * 2, "filler " * 30, "padding " * 30, words * 2)
+    br = "\n<!-- PageBreak -->\n"
+    whole = br.join([words, "filler", "padding", words])
+    assert sop_markdown.page_gaps(pages, whole) == []
+    # Page 4 lost its content; the same words on page 1 (three pages away) do not cover it.
+    lost = br.join([words, "filler", "padding", ""])
+    assert [g[0] for g in sop_markdown.page_gaps(pages, lost)] == [4]
+
+
+def test_chinese_pages_are_checked_by_character_pairs():
+    page = "监查访视报告必须在访视后五个工作日内完成并提交审核" * 2
+    assert sop_markdown.page_gaps(_pages(page), page) == []
+    assert [g[0] for g in sop_markdown.page_gaps(_pages(page), "监查访视")] == [1]
+
+
+def test_word_auto_numbering_becomes_the_clause_number():
+    import docx
+
+    d = docx.Document()
+    for title in ("PURPOSE", "SCOPE", "RESPONSIBILITIES"):
+        d.add_paragraph(title, style="List Number")
+        d.add_paragraph(f"Body text for {title.lower()}, long enough to read as a paragraph.")
+    buf = io.BytesIO()
+    d.save(buf)
+    sections = parse_sections(docx_to_markdown(buf.getvalue()))
+    assert [(s.number, s.title) for s in sections] == [
+        ("1", "PURPOSE"),
+        ("2", "SCOPE"),
+        ("3", "RESPONSIBILITIES"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_conversion_with_no_text_is_a_failure(monkeypatch):
+    monkeypatch.setattr(sop_markdown.get_settings(), "azure_foundry_endpoint", "")
+    monkeypatch.setattr(sop_markdown, "_pdf_page_texts", lambda _c: ["", ""])
+    scanned = await sop_markdown.to_markdown(b"%PDF", "scan.pdf")
+    assert (scanned.source, scanned.error) == ("failed", "the conversion produced no text")
+    empty = await sop_markdown.to_markdown(b"  \n", "empty.md")
+    assert empty.source == "failed"
+
+
+@pytest.mark.asyncio
+async def test_an_unexpected_converter_error_is_a_failed_conversion(monkeypatch):
+    monkeypatch.setattr(sop_markdown.get_settings(), "azure_foundry_endpoint", "https://di.example")
+
+    def broken(_content):
+        raise ValueError("not a PDF")
+
+    monkeypatch.setattr(sop_markdown, "_pdf_page_texts", broken)
+    result = await sop_markdown.to_markdown(b"junk", "x.pdf")
+    assert (result.source, result.error) == ("failed", "ValueError: not a PDF")
+
+
+def _di_client(monkeypatch, handler):
+    real_client = httpx.AsyncClient
+
+    def client(**kwargs):
+        return real_client(transport=httpx.MockTransport(handler), **kwargs)
+
+    async def token(_scope):
+        return "tok"
+
+    monkeypatch.setattr(sop_markdown.httpx, "AsyncClient", client)
+    monkeypatch.setattr(sop_markdown, "get_bearer_token", token)
+    monkeypatch.setattr(sop_markdown, "DI_POLL_SECONDS", 0)
+
+
+@pytest.mark.asyncio
+async def test_document_intelligence_is_asked_for_every_page_and_throttling_is_waited_out(
+    monkeypatch,
+):
+    calls: list[str] = []
+    polls = iter(["running", "succeeded"])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(f"{request.method} {request.url}")
+        if request.method == "POST":
+            if len(calls) == 1:
+                return httpx.Response(429, headers={"retry-after": "0"})
+            return httpx.Response(202, headers={"operation-location": "https://di.example/op/1"})
+        body = {"status": next(polls), "analyzeResult": {"content": "md", "pages": [{}, {}, {}]}}
+        return httpx.Response(200, json=body)
+
+    _di_client(monkeypatch, handler)
+    result = await real_analyze(b"%PDF", "https://di.example/", 3)
+    assert result["content"] == "md"
+    assert "pages=1-3" in calls[0] and "features=ocrHighResolution" in calls[0]
+    assert [c.split()[0] for c in calls] == ["POST", "POST", "GET", "GET"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_analysis_and_a_missing_token_raise(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(202, headers={"operation-location": "https://di.example/op/1"})
+        return httpx.Response(200, json={"status": "failed", "error": {"code": "BadPdf"}})
+
+    _di_client(monkeypatch, handler)
+    with pytest.raises(RuntimeError, match="BadPdf"):
+        await real_analyze(b"%PDF", "https://di.example", 1)
+
+    async def no_token(_scope):
+        return ""
+
+    monkeypatch.setattr(sop_markdown, "get_bearer_token", no_token)
+    with pytest.raises(RuntimeError, match="No Entra token"):
+        await real_analyze(b"%PDF", "https://di.example", 1)

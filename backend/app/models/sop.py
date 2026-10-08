@@ -8,7 +8,7 @@ leads with). ``sop_chunk`` mirrors the reference's ``material_chunks`` shape
 PUBLIC repo: no real SOP content is stored in this repo — these are schema definitions only.
 """
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -62,6 +62,9 @@ class SopSection(TimestampMixin, Base):
     """
 
     __tablename__ = "sop_sections"
+    # A document's sections are numbered once: a second concurrent build fails instead of
+    # interleaving a duplicate set.
+    __table_args__ = (UniqueConstraint("document_id", "order_index", name="uq_sop_sections_order"),)
 
     document_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("sop_documents.id", ondelete="CASCADE"), nullable=False, index=True

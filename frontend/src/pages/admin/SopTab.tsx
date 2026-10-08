@@ -23,7 +23,7 @@ import type { SopTabState } from "./useSopTab";
 
 function ConversionBadge({ doc }: { doc: SopDocument }) {
   const { t } = useTranslation();
-  if (doc.markdown_source === "") {
+  if (doc.converting || doc.markdown_source === "") {
     return <Badge appearance="tint" color="informative">{t("admin.sop.pending")}</Badge>;
   }
   if (doc.markdown_source === "failed") {

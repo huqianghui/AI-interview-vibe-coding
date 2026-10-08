@@ -410,7 +410,10 @@ export interface SopDocument {
   // document_intelligence | pdf_text | docx | text | failed; "" = not converted yet.
   markdown_source: string;
   section_count: number;
+  // Why the conversion failed, or why converting again failed while the previous one was kept.
   markdown_error: string;
+  // Queued for or in conversion right now.
+  converting: boolean;
 }
 
 export interface SopSection {

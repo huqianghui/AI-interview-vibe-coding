@@ -21,7 +21,8 @@ from app.dependencies import require_role
 from app.models.sop import SopDocument
 from app.services import sop_document_service, sop_ingestion, sop_section_service
 
-# Background section builds started by uploads; held so they are not garbage-collected mid-run.
+# Background section builds started by uploads and "Convert again"; held so they are not
+# garbage-collected mid-run, and cancelled at shutdown (app.main).
 _BUILDS: set[asyncio.Task] = set()
 
 router = APIRouter(
@@ -39,8 +40,11 @@ class SopDocumentOut(BaseModel):
     # ("" = not yet: conversion runs in the background) and how many sections it split into.
     markdown_source: str = ""
     section_count: int = 0
-    # Why the conversion failed (all or nothing: a failed document has no sections).
+    # Why the conversion failed (all or nothing: a failed document has no sections), or why
+    # converting again failed while the previous complete conversion was kept.
     markdown_error: str = ""
+    # Queued for or in conversion right now (background).
+    converting: bool = False
 
 
 class SopSectionOut(BaseModel):
@@ -63,10 +67,14 @@ class SopSectionTextOut(BaseModel):
     full_text: str
 
 
-def _start_build(session_factory: async_sessionmaker) -> None:
-    task = asyncio.create_task(sop_section_service.build_missing(session_factory))
+def _start(coro) -> None:  # noqa: ANN001 — a coroutine
+    task = asyncio.create_task(coro)
     _BUILDS.add(task)
     task.add_done_callback(_BUILDS.discard)
+
+
+def _start_build(session_factory: async_sessionmaker) -> None:
+    _start(sop_section_service.build_missing(session_factory))
 
 
 @router.post("/documents", response_model=SopDocumentOut, status_code=status.HTTP_201_CREATED)
@@ -117,6 +125,7 @@ async def list_documents(db: AsyncSession = Depends(get_db)) -> list[SopDocument
             markdown_source=d.markdown_source,
             section_count=sections.get(d.id, 0),
             markdown_error=d.markdown_error,
+            converting=sop_section_service.converting(d.id),
         )
         for d, chunk_count in rows
     ]
@@ -136,6 +145,7 @@ async def list_sections(
     """The document's sections in order, each with the length of its full passage."""
     await _document(db, document_id)
     rows = await sop_section_service.list_sections(db, document_id)
+    lengths = sop_section_service.full_lengths(rows)
     return [
         SopSectionOut(
             order_index=s.order_index,
@@ -145,7 +155,7 @@ async def list_sections(
             parent_index=s.parent_index,
             page_start=s.page_start,
             page_end=s.page_end,
-            full_length=sop_section_service.full_length(rows, s.order_index),
+            full_length=lengths[s.order_index],
         )
         for s in rows
     ]
@@ -170,21 +180,36 @@ async def section_text(
     )
 
 
-@router.post("/documents/{document_id}/rebuild", response_model=SopDocumentOut)
-async def rebuild_sections(document_id: str, db: AsyncSession = Depends(get_db)) -> SopDocumentOut:
-    """Convert the document again and replace its sections (after a converter improvement)."""
+@router.post(
+    "/documents/{document_id}/rebuild",
+    response_model=SopDocumentOut,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def rebuild_sections(
+    document_id: str,
+    db: AsyncSession = Depends(get_db),
+    session_factory: async_sessionmaker = Depends(get_session_factory),
+) -> SopDocumentOut:
+    """Convert the document again in the background (after a converter improvement, or a failed
+    conversion). Returns at once with ``converting`` set; the list shows the result when done. A
+    failure keeps the previous complete conversion, if there is one."""
     document = await _document(db, document_id)
-    result = await sop_section_service.build(db, document)
     counts = dict(
         (d.id, n) for d, n in await sop_document_service.list_documents_with_chunk_counts(db)
     )
-    return SopDocumentOut(
+    sections = await sop_section_service.section_counts(db)
+    # The state BEFORE the rebuild: the task starts only after these reads.
+    out = SopDocumentOut(
         document_id=document.id,
         name=document.name,
         status=document.status,
         size=document.size,
         chunk_count=counts.get(document.id, 0),
-        markdown_source=result.source,
-        section_count=result.section_count,
-        markdown_error=result.error,
+        markdown_source=document.markdown_source,
+        section_count=sections.get(document.id, 0),
+        markdown_error=document.markdown_error,
+        converting=True,
     )
+    sop_section_service.mark_converting(document.id)
+    _start(sop_section_service.rebuild(session_factory, document.id))
+    return out

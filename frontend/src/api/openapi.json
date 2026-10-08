@@ -2707,6 +2707,11 @@
             "title": "Chunk Count",
             "type": "integer"
           },
+          "converting": {
+            "default": false,
+            "title": "Converting",
+            "type": "boolean"
+          },
           "document_id": {
             "title": "Document Id",
             "type": "string"
@@ -5220,7 +5225,7 @@
     },
     "/admin/sop/documents/{document_id}/rebuild": {
       "post": {
-        "description": "Convert the document again and replace its sections (after a converter improvement).",
+        "description": "Convert the document again in the background (after a converter improvement, or a failed\nconversion). Returns at once with ``converting`` set; the list shows the result when done. A\nfailure keeps the previous complete conversion, if there is one.",
         "operationId": "rebuild_sections_admin_sop_documents__document_id__rebuild_post",
         "parameters": [
           {
@@ -5234,7 +5239,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {

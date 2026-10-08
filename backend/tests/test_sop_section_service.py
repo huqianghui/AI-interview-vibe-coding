@@ -3,8 +3,11 @@
 Spec: docs/planning/spec-sop-section-grounding.md.
 """
 
+import asyncio
+
 import pytest
 
+from app.api import admin_sop
 from app.models.sop import SopDocument
 from app.services import sop_ingestion, sop_markdown, sop_section_service, storage
 
@@ -50,18 +53,33 @@ async def test_build_stores_the_markdown_and_every_section(db_session):
     assert doc.markdown.startswith("# Widget SOP")
 
 
-async def test_a_failed_conversion_keeps_no_sections_and_says_why(db_session, monkeypatch):
-    doc = await _ingest(db_session)
-    await sop_section_service.build(db_session, doc)
-
+async def _fail(monkeypatch, reason="page 3: 34%"):
     async def failed(_content, _name):
-        return sop_markdown.MarkdownResult("", "failed", "page 3: 34%")
+        return sop_markdown.MarkdownResult("", "failed", reason)
 
     monkeypatch.setattr(sop_section_service, "to_markdown", failed)
+
+
+async def test_a_failed_conversion_keeps_no_sections_and_says_why(db_session, monkeypatch):
+    doc = await _ingest(db_session)
+    await _fail(monkeypatch)
     result = await sop_section_service.build(db_session, doc)
     assert (result.source, result.section_count, result.error) == ("failed", 0, "page 3: 34%")
     assert list(await sop_section_service.list_sections(db_session, doc.id)) == []
     assert (doc.markdown, doc.markdown_error) == ("", "page 3: 34%")
+
+
+async def test_converting_again_and_failing_keeps_the_previous_complete_conversion(
+    db_session, monkeypatch
+):
+    doc = await _ingest(db_session)
+    await sop_section_service.build(db_session, doc)
+    await _fail(monkeypatch, "TimeoutError")
+    result = await sop_section_service.build(db_session, doc)
+    assert (result.source, result.section_count) == ("text", 5)
+    assert result.error == "converting again failed, the previous conversion is kept: TimeoutError"
+    assert len(await sop_section_service.list_sections(db_session, doc.id)) == 5
+    assert doc.markdown.startswith("# Widget SOP")
 
 
 async def test_a_document_without_stored_bytes_fails_cleanly(db_session):
@@ -82,6 +100,41 @@ async def test_build_missing_converts_only_unconverted_documents(db_session):
     assert await sop_section_service.build_missing(db_session._test_factory) == 0
 
 
+async def test_build_missing_retries_a_failed_conversion(db_session, monkeypatch):
+    doc = await _ingest(db_session)
+    real = sop_section_service.to_markdown
+    await _fail(monkeypatch, "429")
+    await sop_section_service.build(db_session, doc)
+    assert doc.markdown_source == "failed"
+    monkeypatch.setattr(sop_section_service, "to_markdown", real)
+    assert await sop_section_service.build_missing(db_session._test_factory) == 1
+    await db_session.refresh(doc)
+    assert (doc.markdown_source, doc.markdown_error) == ("text", "")
+
+
+async def test_build_missing_never_raises(caplog):
+    def broken_factory():
+        raise ConnectionError("database is stopped")
+
+    assert await sop_section_service.build_missing(broken_factory) == 0
+    assert "Converting SOP documents to sections failed" in caplog.text
+
+
+async def test_full_lengths_match_each_full_text():
+    from types import SimpleNamespace as S
+
+    rows = [
+        S(order_index=0, number="§0", title="", text="Intro.", parent_index=None),
+        S(order_index=1, number="1", title="SCOPE", text="", parent_index=None),
+        S(order_index=2, number="1.1", title="Sites", text="All sites.", parent_index=1),
+        S(order_index=3, number="1.1.1", title="", text="", parent_index=2),
+        S(order_index=4, number="§1", title="", text="", parent_index=None),
+    ]
+    assert sop_section_service.full_lengths(rows) == {
+        r.order_index: len(sop_section_service.full_text(rows, r.order_index)) for r in rows
+    }
+
+
 async def test_admin_section_api(client, db_session, admin_auth):
     doc = await _ingest(db_session)
     await sop_section_service.build(db_session, doc)
@@ -100,10 +153,13 @@ async def test_admin_section_api(client, db_session, admin_auth):
         )
     ).json()
     assert "2.2 Supervisor" in text["full_text"]
-    rebuilt = (
-        await client.post(f"/admin/sop/documents/{doc.id}/rebuild", headers=admin_auth)
-    ).json()
-    assert rebuilt["section_count"] == 5
+    rebuilt = await client.post(f"/admin/sop/documents/{doc.id}/rebuild", headers=admin_auth)
+    assert rebuilt.status_code == 202
+    assert (rebuilt.json()["converting"], rebuilt.json()["section_count"]) == (True, 5)
+    await asyncio.gather(*admin_sop._BUILDS)
+    listed = (await client.get("/admin/sop/documents", headers=admin_auth)).json()
+    row = next(d for d in listed if d["document_id"] == doc.id)
+    assert (row["converting"], row["section_count"]) == (False, 5)
 
     missing = await client.get("/admin/sop/documents/nope/sections", headers=admin_auth)
     assert missing.status_code == 404
@@ -115,3 +171,16 @@ async def test_the_section_api_is_admin_only(client, db_session, candidate_auth)
     doc = await _ingest(db_session)
     resp = await client.get(f"/admin/sop/documents/{doc.id}/sections", headers=candidate_auth)
     assert resp.status_code == 403
+
+
+async def test_an_upload_is_converted_to_sections_in_the_background(client, admin_auth):
+    resp = await client.post(
+        "/admin/sop/documents",
+        headers=admin_auth,
+        files={"file": ("widget.md", SOP_MD, "text/markdown")},
+    )
+    assert resp.status_code == 201
+    await asyncio.gather(*admin_sop._BUILDS)
+    listed = (await client.get("/admin/sop/documents", headers=admin_auth)).json()
+    row = next(d for d in listed if d["document_id"] == resp.json()["document_id"])
+    assert (row["markdown_source"], row["section_count"]) == ("text", 5)

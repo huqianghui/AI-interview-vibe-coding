@@ -127,7 +127,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         # Don't leave dangling tasks on shutdown; cancel any that haven't finished.
-        for task in (prewarm_task, persona_sync_task, judge_warm_task, sections_task):
+        # Section builds started by uploads or "Convert again" too: a build is one transaction, so a
+        # cancelled one leaves the document as it was and the next boot converts it.
+        boot = (prewarm_task, persona_sync_task, judge_warm_task, sections_task)
+        for task in (*boot, *admin_sop._BUILDS):
             if not task.done():
                 task.cancel()
 

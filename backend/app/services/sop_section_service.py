@@ -24,9 +24,24 @@ from app.sop.sections import parse_sections
 
 logger = logging.getLogger(__name__)
 
-# One build at a time per process: two overlapping runs (boot + an upload) would convert the same
-# document twice and race on its section rows.
+# One build at a time per process: two overlapping runs (boot, an upload, an admin's "Convert
+# again") would convert the same document twice and race on its section rows. Every build goes
+# through :func:`build_missing` or :func:`rebuild`, both of which hold this lock.
 _BUILD_LOCK = asyncio.Lock()
+# Documents queued for or in conversion right now, so the admin list can say so.
+_CONVERTING: set[str] = set()
+# Sources a document still needs converting from: never tried, or tried and failed (a throttled or
+# timed-out call at boot must not stay failed until someone notices).
+_NEEDS_CONVERTING = ("", "failed")
+
+
+def converting(document_id: str) -> bool:
+    return document_id in _CONVERTING
+
+
+def mark_converting(document_id: str) -> None:
+    """Show a document as converting as soon as a rebuild is asked for, before its task runs."""
+    _CONVERTING.add(document_id)
 
 
 @dataclass(frozen=True)
@@ -51,6 +66,25 @@ async def build(
         converted = await to_markdown(content, document.name)
     else:
         converted = MarkdownResult("", "failed", "no stored file to convert")
+    if converted.source == "failed" and document.markdown_source not in _NEEDS_CONVERTING:
+        # Converting again failed, but the document already has a complete conversion: keep it.
+        # One transient error must not leave a document that was fine with no sections.
+        document.markdown_error = (
+            "converting again failed, the previous conversion is kept: " + converted.error
+        )[:1000]
+        await db.commit()
+        logger.warning("SOP %r: %s", document.name, document.markdown_error)
+        kept = (
+            await db.execute(
+                select(func.count(SopSection.id)).where(SopSection.document_id == document.id)
+            )
+        ).scalar_one()
+        return BuildResult(
+            document_id=document.id,
+            source=document.markdown_source,
+            section_count=int(kept),
+            error=document.markdown_error,
+        )
     # All or nothing: a failed conversion leaves NO sections (never a partial set) and says why.
     parsed = parse_sections(converted.markdown) if converted.source != "failed" else []
     await db.execute(delete(SopSection).where(SopSection.document_id == document.id))
@@ -84,27 +118,62 @@ async def build(
     )
 
 
-async def build_missing(session_factory) -> int:  # noqa: ANN001 — async_sessionmaker
-    """Convert every document not converted yet. Each in its own session, failures logged and
-    skipped, so one bad file cannot stop the rest. Returns how many were converted."""
-    async with _BUILD_LOCK:
+async def _build_one(session_factory, doc_id: str, *, only_if_needed: bool) -> bool:  # noqa: ANN001
+    _CONVERTING.add(doc_id)
+    try:
         async with session_factory() as db:
-            ids = (
-                (await db.execute(select(SopDocument.id).where(SopDocument.markdown_source == "")))
-                .scalars()
-                .all()
-            )
-        done = 0
-        for doc_id in ids:
-            try:
-                async with session_factory() as db:
-                    document = await db.get(SopDocument, doc_id)
-                    if document is not None and document.markdown_source == "":
-                        await build(db, document)
-                        done += 1
-            except Exception:  # noqa: BLE001 — background work: log, keep going
-                logger.exception("Converting SOP %s to sections failed", doc_id)
-        return done
+            document = await db.get(SopDocument, doc_id)
+            if document is None:
+                return False
+            if only_if_needed and document.markdown_source not in _NEEDS_CONVERTING:
+                return False
+            await build(db, document)
+            return True
+    except Exception:  # noqa: BLE001 — background work: log, keep going
+        logger.exception("Converting SOP %s to sections failed", doc_id)
+        return False
+    finally:
+        _CONVERTING.discard(doc_id)
+
+
+async def build_missing(session_factory) -> int:  # noqa: ANN001 — async_sessionmaker
+    """Convert every document not converted yet, or whose last conversion failed. Each in its own
+    session, failures logged and skipped, so one bad file cannot stop the rest; never raises (it
+    runs as a fire-and-forget task). Returns how many were converted."""
+    try:
+        async with _BUILD_LOCK:
+            async with session_factory() as db:
+                ids = (
+                    (
+                        await db.execute(
+                            select(SopDocument.id).where(
+                                SopDocument.markdown_source.in_(_NEEDS_CONVERTING)
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+            done = 0
+            for doc_id in ids:
+                done += await _build_one(session_factory, doc_id, only_if_needed=True)
+            return done
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 — e.g. the database is down at boot; the next run retries
+        logger.exception("Converting SOP documents to sections failed")
+        return 0
+
+
+async def rebuild(session_factory, document_id: str) -> None:  # noqa: ANN001
+    """An admin's "Convert again": convert one document whatever its state, in the background,
+    after any build already running. Never raises."""
+    _CONVERTING.add(document_id)
+    try:
+        async with _BUILD_LOCK:
+            await _build_one(session_factory, document_id, only_if_needed=False)
+    finally:
+        _CONVERTING.discard(document_id)
 
 
 async def list_sections(db: AsyncSession, document_id: str) -> Sequence[SopSection]:
@@ -175,5 +244,21 @@ def page_end(sections: Sequence[SopSection], order_index: int) -> int:
     return max([own, *(d.page_end for d in _descendants(sections, order_index))])
 
 
-def full_length(sections: Sequence[SopSection], order_index: int) -> int:
-    return len(full_text(sections, order_index))
+def full_lengths(sections: Sequence[SopSection]) -> dict[int, int]:
+    """``len(full_text(sections, i))`` for every section, in one bottom-up pass (the section list
+    asks for all of them; calling :func:`full_text` per row is quadratic)."""
+    children: dict[int, list[SopSection]] = {}
+    for s in sections:
+        if s.parent_index is not None:
+            children.setdefault(s.parent_index, []).append(s)
+    texts: dict[int, str] = {}
+    for section in sorted(sections, key=lambda s: s.order_index, reverse=True):
+        head = (
+            section.title if section.number.startswith("§") else f"{section.number} {section.title}"
+        )
+        block = "\n".join(part for part in (head.strip(), section.text) if part)
+        kids = sorted(children.get(section.order_index, []), key=lambda c: c.order_index)
+        texts[section.order_index] = "\n\n".join(
+            part for part in [block, *(texts[c.order_index] for c in kids)] if part
+        )
+    return {index: len(text) for index, text in texts.items()}

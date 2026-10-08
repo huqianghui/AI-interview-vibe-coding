@@ -783,7 +783,9 @@ export interface paths {
         put?: never;
         /**
          * Rebuild Sections
-         * @description Convert the document again and replace its sections (after a converter improvement).
+         * @description Convert the document again in the background (after a converter improvement, or a failed
+         *     conversion). Returns at once with ``converting`` set; the list shows the result when done. A
+         *     failure keeps the previous complete conversion, if there is one.
          */
         post: operations["rebuild_sections_admin_sop_documents__document_id__rebuild_post"];
         delete?: never;
@@ -2392,6 +2394,11 @@ export interface components {
         SopDocumentOut: {
             /** Chunk Count */
             chunk_count: number;
+            /**
+             * Converting
+             * @default false
+             */
+            converting: boolean;
             /** Document Id */
             document_id: string;
             /**
@@ -3853,7 +3860,7 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Successful Response */
-            200: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };

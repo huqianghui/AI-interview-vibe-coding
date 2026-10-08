@@ -16,7 +16,13 @@
 - **SOP documents tab** in the admin page: each document's conversion, its sections with pages and
   length, any section's full text, and "Convert again".
 - Conversion runs in the background after startup and after each upload, retrying when Document
-  Intelligence throttles.
+  Intelligence throttles, and never longer than 10 minutes per document. A document whose
+  conversion failed is tried again on the next startup or upload. "Convert again" runs in the
+  background too, after any conversion already running; if it fails, the document keeps its
+  previous complete conversion and shows why.
+- Each page is checked against its own Markdown page and the pages either side, so words read
+  elsewhere in the document cannot cover a page that lost them; Chinese text is checked too. A
+  conversion that yields no text at all (a scanned PDF without Document Intelligence) is a failure.
 
 ### Fixed
 - Running page headers and footers (company name, "Company Confidential", the per-page download
