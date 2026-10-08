@@ -102,7 +102,7 @@ jobs:
         # The scheduled job that starts PostgreSQL when it is stopped runs a script from the backend
         # image (infra/azure/modules/db-autostart-job.bicep); keep it on the image just deployed.
         run: |
-          job="caj-${NAME_PREFIX:-aiinterview-public}-db-autostart"
+          job="caj-${NAME_PREFIX:-aiinterview-public}-dbstart"
           if az containerapp job show --name "$job" --resource-group "$AZURE_RESOURCE_GROUP" \
               --query name --output tsv >/dev/null 2>&1; then
             az containerapp job update \

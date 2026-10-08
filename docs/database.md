@@ -124,7 +124,7 @@ SQLite 同一时刻只允许一个写操作，很多「先查再写」的代码�
 | 连接 | 超时 10 秒（`CONNECT_TIMEOUT_S`）；连不上抛 `DatabaseUnavailableError`，返回 **503** 并给出原因 |
 | `/health` | 只看进程是否存活，**不碰数据库**，所以数据库停机不会让部署失败 |
 | `/health/db` | 单独检查数据库：执行一次 `SELECT 1`（8 秒超时）。正常时返回 200 和往返耗时；失败时返回 **503** 和失败类型（只报类型，不暴露主机名） |
-| **自动启动任务**（主要手段） | Azure Container Apps 定时任务 `caj-aiinterview-public-db-autostart`，**每 5 分钟**由 Azure 自己的调度器运行一次 `backend/scripts/db_autostart.py`：服务器是 Stopped 就启动它并等到 Ready。用后端的托管身份，只授予自定义角色「AI Interview PostgreSQL Starter」（只能读取和启动这台服务器，不能停止或修改）。基础设施：`infra/azure/modules/db-autostart-job.bicep`；每次部署都把任务更新到最新的后端镜像 |
+| **自动启动任务**（主要手段） | Azure Container Apps 定时任务 `caj-aiinterview-public-dbstart`，**每 5 分钟**由 Azure 自己的调度器运行一次 `backend/scripts/db_autostart.py`：服务器是 Stopped 就启动它并等到 Ready。用后端的托管身份，只授予自定义角色「AI Interview PostgreSQL Starter」（只能读取和启动这台服务器，不能停止或修改）。基础设施：`infra/azure/modules/db-autostart-job.bicep`；每次部署都把任务更新到最新的后端镜像 |
 | `db-keepalive.yml`（备用） | GitHub 定时任务，每 10 分钟一次：服务器是 Stopped 就启动它，再通过 `/api/health/db` 端到端确认。GitHub 的定时任务不保证准时（实测曾 12 小时以上没有运行），所以只作备用 |
 | `deploy-app.yml` | 部署完成后检查一次 `/api/health/db`，连不上时给出警告，但不让部署失败 |
 
