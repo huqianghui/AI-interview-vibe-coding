@@ -207,6 +207,30 @@ async def test_the_relocation_api_runs_in_the_background_and_reports(
     ).status_code == 404
 
 
+async def test_a_run_counts_as_published_once_a_version_is_published_after_it(
+    client, db_session, admin_auth
+):
+    from datetime import UTC, datetime, timedelta
+
+    await _corpus(db_session)
+    bank, _ = await _bank(
+        db_session, [("Gets sign-off", 100, "Widget Release Procedure SOP section 4.2")]
+    )
+    bank_id = bank.id
+    base = f"/admin/question-banks/{bank_id}/relocate-citations"
+    run_id = (await client.post(base, headers=admin_auth)).json()["run_id"]
+    await asyncio.gather(*sop_citation_service.RUNS)
+    assert (await client.get(base, headers=admin_auth)).json()["published"] is False
+
+    # SQLite keeps whole seconds (in UTC): put the run's finish clearly before the publish.
+    run = await db_session.get(CitationRun, run_id)
+    run.updated_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=5)
+    await db_session.commit()
+    published = await client.post(f"/admin/question-banks/{bank_id}/publish", headers=admin_auth)
+    assert published.json()["published"] is True
+    assert (await client.get(base, headers=admin_auth)).json()["published"] is True
+
+
 async def test_a_run_interrupted_by_a_restart_does_not_block_the_next(db_session):
     bank, _ = await _bank(db_session, [("x", 100, "")])
     stale = CitationRun(bank_id=bank.id, status="running")

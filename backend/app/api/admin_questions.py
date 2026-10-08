@@ -289,10 +289,13 @@ class CitationRunOut(BaseModel):
     total: int
     error: str
     created_at: datetime | None
+    # A version was published after the run finished: its results are live, so the page stops
+    # showing the "publish to use them" summary (owner, 2026-10-09).
+    published: bool = False
     rows: list[dict]
 
 
-def _run_out(run) -> CitationRunOut:
+def _run_out(run, published: bool = False) -> CitationRunOut:
     return CitationRunOut(
         run_id=run.id,
         status=run.status,
@@ -300,8 +303,17 @@ def _run_out(run) -> CitationRunOut:
         total=run.total,
         error=run.error,
         created_at=run.created_at,
+        published=published,
         rows=json.loads(run.report_json or "[]") if run.status == "done" else [],
     )
+
+
+async def _published_since(db: AsyncSession, run) -> bool:
+    if run.status != "done":
+        return False
+    version = await bank_version_service.latest(db, run.bank_id)
+    finished = run.updated_at or run.created_at
+    return bool(version and version.created_at and finished and version.created_at > finished)
 
 
 @router.post(
@@ -333,7 +345,7 @@ async def latest_relocation(
 ) -> CitationRunOut | None:
     """The bank's latest relocation run, or null if it never had one."""
     run = await sop_citation_service.latest_run(db, bank_id)
-    return _run_out(run) if run is not None else None
+    return _run_out(run, await _published_since(db, run)) if run is not None else None
 
 
 @router.get("/{bank_id}/questions", response_model=list[AdminQuestionOut])
