@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.58.1.0 (2026-10-09)
+
+### Added
+- **The database starts itself again within minutes of being stopped.** The subscription's
+  governance automation stops the PostgreSQL server every night at 16:05 UTC, and the
+  GitHub-scheduled keepalive is best effort: it once went 12+ hours without running. A new
+  Azure Container Apps scheduled job runs every 5 minutes on Azure's own scheduler and starts the
+  server when it is stopped. It uses the backend's managed identity, with a custom role that can
+  only read and start that one server. Every deploy keeps the job on the current backend image.
+  The GitHub keepalive stays as a backup.
 ## 0.58.0.1 (2026-10-09)
 
 ### Fixed
