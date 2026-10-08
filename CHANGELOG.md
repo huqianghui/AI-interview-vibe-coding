@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.56.1.2 (2026-10-08)
+
+### Fixed
+- Relocating citations on a bank about another subject now cites nothing. A software-deployment
+  question's "safety check" had still been cited to the clinical safety-management section. A
+  question that names no SOP is first checked, once, for whether the SOP library covers its
+  subject; and if most of a bank's such questions are not covered, none of them is cited.
+  Measured on the live banks with the real model:
+
+  | Bank | Unlabelled questions judged on-topic |
+  |---|---|
+  | Software deployment | 1/3 |
+  | Behavioural demo | 2/10 |
+  | Small talk | 0/3 |
+  | Clinical demo | 1/1 |
+
+  Questions whose rubric names its SOPs, as in the rf-CSM bank, skip the check.
+
 ## 0.56.1.1 (2026-10-08)
 
 ### Fixed
