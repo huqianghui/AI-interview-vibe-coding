@@ -16,7 +16,11 @@
   | Small talk | 0/3 |
   | Clinical demo | 1/1 |
 
-  Questions whose rubric names its SOPs, as in the rf-CSM bank, skip the check.
+  Questions whose rubric names its SOPs, as in the rf-CSM bank, skip the check. A topic check
+  that fails or gives no usable answer counts as unknown: that question is located item by item
+  as before, and is left out of the bank vote, so a model error never wipes a citation. The
+  report marks such items "Not an SOP subject". Wrong citations from an earlier run stay until
+  the bank is rerun with "Start from the original labels".
 
 ## 0.56.1.1 (2026-10-08)
 

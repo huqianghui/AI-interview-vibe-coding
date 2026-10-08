@@ -27,6 +27,7 @@ const HOW_COLOR = {
   label: "brand",
   search: "success",
   none: "warning",
+  off_topic: "subtle",
   error: "danger",
   edited: "informative",
 } as const;
@@ -81,7 +82,7 @@ export function RelocateCitations({ bankId, onDone }: { bankId: string; onDone: 
     }
   };
 
-  const counts = { label: 0, search: 0, none: 0, error: 0, edited: 0 };
+  const counts = { label: 0, search: 0, none: 0, off_topic: 0, error: 0, edited: 0 };
   for (const row of run?.rows ?? []) counts[row.how] += 1;
 
   return (

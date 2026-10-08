@@ -575,7 +575,7 @@ async def test_a_question_the_library_does_not_cover_cites_nothing(db_session):
     (item,) = await checklist_service.list_items(db_session, checklist_id)
     assert item.source_refs == "[]"
     (row,) = json.loads((await db_session.get(CitationRun, run_id)).report_json)
-    assert row["how"] == "none"
+    assert row["how"] == "off_topic"
 
 
 async def test_a_bank_mostly_about_another_subject_cites_none_of_its_unlabelled_questions(
@@ -623,3 +623,28 @@ async def test_a_bank_mostly_about_another_subject_cites_none_of_its_unlabelled_
     for checklist_id in lists:
         (item,) = await checklist_service.list_items(db_session, checklist_id)
         assert item.source_refs == "[]"  # even the one judged on-topic: the bank is not
+
+
+async def test_an_unanswered_topic_check_is_unknown_and_never_wipes(db_session):
+    """A failed or unparseable topic answer is unknown: left out of the bank vote, and that
+    question is located item by item instead of being declared off-topic."""
+    await _corpus(db_session)
+    bank, checklist_id = await _bank(db_session, [("Escalates a failed batch", 100, "")])
+
+    class Broken(ScriptedJudgeAdapter):
+        name = "scripted"
+
+        async def complete(self, prompt, *, json_mode=False, fast=False):
+            if sop_citation_service.TOPIC_PROMPT_MARKER in prompt:
+                raise RuntimeError("model unavailable")
+            cid = next(line.split('"')[1] for line in prompt.splitlines() if "ESCALATION" in line)
+            quote = "A failed batch is escalated to the site lead the same day."
+            return json.dumps({"cite": [cid], "quote": quote})
+
+    run = CitationRun(bank_id=bank.id)
+    db_session.add(run)
+    await db_session.commit()
+    await sop_citation_service.relocate(db_session, run, Broken())
+    db_session.expire_all()
+    (item,) = await checklist_service.list_items(db_session, checklist_id)
+    assert json.loads(item.source_refs)[0]["section"] == "5"

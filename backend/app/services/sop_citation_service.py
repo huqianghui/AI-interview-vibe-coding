@@ -183,8 +183,9 @@ async def _question_is_about_the_sops(
     index: SectionIndex,
     question: str,
     sem: asyncio.Semaphore,
-) -> bool:
-    """For a question that names no SOP: whether the library covers its subject at all. Measured
+) -> bool | None:
+    """For a question that names no SOP: whether the library covers its subject at all; None when
+    the model gave no usable answer (that question is then located item by item as usual). Measured
     2026-10-08: keyword scores cannot tell (software-deployment questions 6.9-9.6, clinical ones
     9.0-17.2), and per-item checks still cited clinical "safety management" for a deployment
     "safety check"; asked once per question, the model can."""
@@ -192,9 +193,16 @@ async def _question_is_about_the_sops(
         candidates = await candidates_for(db, index, question)
     if not candidates:
         return False
-    async with sem:
-        raw = await _ask(llm, _topic_prompt(question, candidates))
-    return isinstance(raw, dict) and raw.get("about") is True
+    try:
+        async with sem:
+            raw = await _ask(llm, _topic_prompt(question, candidates))
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 — unknown, not "off-topic": never wipe on a failed call
+        logger.exception("Checking the SOP topic of a question failed")
+        return None
+    about = raw.get("about") if isinstance(raw, dict) else None
+    return about if isinstance(about, bool) else None
 
 
 async def candidates_for(
@@ -205,7 +213,7 @@ async def candidates_for(
     return await sop_citation.resolve(db, [SectionRef(c.document_id, c.number) for c in found])
 
 
-_HOWS = ("label", "search", "none", "error", "edited")
+_HOWS = ("label", "search", "none", "off_topic", "error", "edited")
 
 
 @dataclass(frozen=True)
@@ -226,7 +234,7 @@ class _Item:
 class _Located:
     item_id: str
     choice: Choice
-    how: str  # label | search | none | error | edited
+    how: str  # label | search | none | off_topic | error | edited
 
 
 def _label_sources(
@@ -460,21 +468,35 @@ async def relocate(
     # is about one subject: its questions' answers together are clear — software-deployment
     # bank 1/3 on-topic, behavioural demo 2/10, small-talk 0/3, the clinical demo 1/1. So a bank
     # whose unlabelled questions are mostly off-topic cites nothing for any of them.
-    unscoped = {it.question_no: it.question for it in work if not hints[it.question_no].documents}
-    on_topic = {
-        number
-        for number, question in unscoped.items()
-        if await _question_is_about_the_sops(db_lock, db, llm, index, question, sem)
+    unscoped = {
+        it.question_no: it.question
+        for it in work
+        if not hints[it.question_no].documents and not it.refs
     }
-    bank_on_topic = len(on_topic) * 2 > len(unscoped)
-    off_topic = set(unscoped) - (on_topic if bank_on_topic else set())
+    answers = dict(
+        zip(
+            unscoped,
+            await asyncio.gather(
+                *(
+                    _question_is_about_the_sops(db_lock, db, llm, index, question, sem)
+                    for question in unscoped.values()
+                )
+            ),
+            strict=True,
+        )
+    )
+    on_topic = {n for n, about in answers.items() if about is True}
+    known = [n for n, about in answers.items() if about is not None]
+    bank_on_topic = len(on_topic) * 2 > len(known)
+    # Unknown answers stay out of both: those questions are located item by item.
+    off_topic = {n for n in known if not bank_on_topic or n not in on_topic}
     done = 0
 
     async def one(it: _Item) -> tuple[_Item, _Located]:
         nonlocal done
         if it.question_no in off_topic and not it.refs:
             done += 1
-            return it, _Located(it.id, Choice((), ""), "none")
+            return it, _Located(it.id, Choice((), ""), "off_topic")
         try:
             located = await _locate(
                 db_lock, db, llm, index, documents, numbers, it, hints[it.question_no], sem
