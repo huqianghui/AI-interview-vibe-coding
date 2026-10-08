@@ -13,6 +13,9 @@
   reading the current rubric, as before.
 - The rubric editor shows the version its last save produced, the SOP document each item cites, and
   which forbidden items are disclosure-only. Interview results show the rubric version.
+- **Re-importing a bank moves its assigned users to the new version.** A re-import replaces every
+  question, so an older version describes questions that no longer exist; an interview pinned to one
+  would have found no rubric for any question and been scored as if none were written.
 
 ### Fixed
 - **Saving a rubric in the editor no longer removes its SOP links or changes scores.** The editor
