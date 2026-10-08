@@ -36,6 +36,7 @@ from app.models.persona import (
 )
 from app.services.agents.voice_live_metadata import build_avatar_config, resolve_voice
 from app.services.azure_auth import COGNITIVE_SERVICES_SCOPE, get_azure_credential_cached
+from app.services.recording_service import MARKER_TYPE
 
 logger = logging.getLogger(__name__)
 
@@ -568,6 +569,7 @@ async def run_proxy(
     realtime_pipeline: bool = False,
     playground: bool = False,
     avatar_background: str | None = None,
+    recorder: Any = None,
 ) -> None:  # pragma: no cover — live Azure connect + relay, no Azure in CI
     """Hold the Azure Voice Live SDK connection and relay browser <-> Azure.
 
@@ -690,7 +692,7 @@ async def run_proxy(
                 )
             )
 
-            await _relay(ws, conn, ConnectionClosed, session.get("voice"))
+            await _relay(ws, conn, ConnectionClosed, session.get("voice"), recorder)
     except ConnectionClosed:
         logger.info("Voice Live proxy: Azure connection closed")
     except WebSocketDisconnect:
@@ -698,11 +700,11 @@ async def run_proxy(
 
 
 async def _relay(
-    ws: WebSocket, conn: Any, connection_closed: type, sent_voice: Any = None
+    ws: WebSocket, conn: Any, connection_closed: type, sent_voice: Any = None, recorder: Any = None
 ) -> None:  # pragma: no cover — live relay
     """Run the two forwarding loops; return as soon as either side ends."""
     tasks = [
-        asyncio.create_task(_forward_client_to_azure(ws, conn, connection_closed)),
+        asyncio.create_task(_forward_client_to_azure(ws, conn, connection_closed, recorder)),
         asyncio.create_task(_forward_azure_to_client(conn, ws, connection_closed, sent_voice)),
     ]
     _, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
@@ -712,6 +714,17 @@ async def _relay(
             await task
         except (asyncio.CancelledError, Exception):
             pass
+
+
+async def handle_recording_marker(event: Any, recorder: Any) -> bool:
+    """Whether ``event`` is the interview page's "a question starts" recording marker (consumed
+    here, never sent to Azure); starts that question's recording when there is a recorder."""
+    if not isinstance(event, dict) or event.get("type") != MARKER_TYPE:
+        return False
+    index = event.get("question_index")
+    if recorder is not None and isinstance(index, int) and index >= 0:
+        await recorder.start_question(index)
+    return True
 
 
 def build_audio_append(pcm: bytes) -> dict[str, str]:
@@ -731,7 +744,7 @@ def build_audio_append(pcm: bytes) -> dict[str, str]:
 
 
 async def _forward_client_to_azure(
-    ws: WebSocket, conn: Any, connection_closed: type
+    ws: WebSocket, conn: Any, connection_closed: type, recorder: Any = None
 ) -> None:  # pragma: no cover — live relay
     """Browser -> Azure: forward each client frame as a Voice Live client event.
 
@@ -749,15 +762,23 @@ async def _forward_client_to_azure(
                 break
             text = message.get("text")
             if text is not None:
-                await conn.send(json.loads(text))
+                event = json.loads(text)
+                if await handle_recording_marker(event, recorder):
+                    continue  # ours, never forwarded to Azure
+                await conn.send(event)
                 continue
             data = message.get("bytes")
             if data:
+                if recorder is not None:
+                    recorder.append(data)
                 await conn.send(build_audio_append(data))
     except (WebSocketDisconnect, connection_closed):
         logger.debug("Voice Live proxy: client->Azure forwarding stopped")
     except Exception as exc:
         logger.warning("Voice Live proxy: client->Azure forwarding error: %s", exc)
+    finally:
+        if recorder is not None:
+            await recorder.close()
 
 
 def _record_azure_error(event: dict) -> None:

@@ -129,3 +129,23 @@ class InterviewTurn(TimestampMixin, Base):
     source: Mapped[str] = mapped_column(String(16), default="text", nullable=False)
     content: Mapped[str] = mapped_column(Text, default="", nullable=False)
     audio_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+
+class InterviewRecording(TimestampMixin, Base):
+    """One question's recorded candidate audio (the microphone only), as a WAV in the private
+    recordings container. Deleted by the container's 90-day lifecycle rule; the row then points at
+    nothing, and the admin view says the recording has expired."""
+
+    __tablename__ = "interview_recordings"
+
+    interview_session_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("interview_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # 0-based ask-order index of the question being answered; -1 = before the first question.
+    question_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    blob_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

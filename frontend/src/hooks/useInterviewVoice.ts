@@ -396,6 +396,13 @@ export function useInterviewVoice(
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data));
   }, []);
 
+  /** Tell the backend a question starts: it keeps this marker (Azure never sees it) and records
+   * the candidate's microphone for that question into its own file (recording_service). */
+  const markQuestion = useCallback(
+    (questionIndex: number) => send({ type: "x.recording.question", question_index: questionIndex }),
+    [send],
+  );
+
   /** Send raw mic PCM as a BINARY frame; the backend wraps it into `input_audio_buffer.append`.
    * Only used when the backend advertised `binary_audio` — see `binaryAudioRef`. */
   const sendPcm = useCallback((pcm: ArrayBuffer) => {
@@ -1480,6 +1487,7 @@ export function useInterviewVoice(
   }, [avatarStream.isMediaReady, firstReadGate]);
 
   return {
+    markQuestion,
     connect,
     disconnect,
     toggleMute,

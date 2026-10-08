@@ -320,6 +320,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/interviews/{interview_id}/recordings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Interview Recordings
+         * @description The candidate's recorded answers, one per question (the microphone only, kept
+         *     ``recording_retention_days``). Admin-only, like every route here.
+         */
+        get: operations["interview_recordings_admin_interviews__interview_id__recordings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/interviews/{interview_id}/recordings/{recording_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Interview Recording Audio
+         * @description One recording's WAV, streamed through the backend (the container is private). 410 once the
+         *     retention period has deleted it.
+         */
+        get: operations["interview_recording_audio_admin_interviews__interview_id__recordings__recording_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/interviews/{interview_id}/report": {
         parameters: {
             query?: never;
@@ -1886,11 +1928,21 @@ export interface components {
         };
         /** InterviewOut */
         InterviewOut: {
+            /**
+             * Audio Recorded
+             * @default false
+             */
+            audio_recorded: boolean;
             current_question: components["schemas"]["CurrentQuestionOut"] | null;
             /** External Phase */
             external_phase?: string | null;
             /** Interview Session Id */
             interview_session_id: string;
+            /**
+             * Recording Retention Days
+             * @default 0
+             */
+            recording_retention_days: number;
             /** Speech Text */
             speech_text?: string | null;
             /** Status */
@@ -2405,6 +2457,19 @@ export interface components {
             max_follow_ups?: number | null;
             /** Text */
             text?: string | null;
+        };
+        /** RecordingOut */
+        RecordingOut: {
+            /** Created At */
+            created_at: string | null;
+            /** Duration Ms */
+            duration_ms: number;
+            /** Question Index */
+            question_index: number;
+            /** Recording Id */
+            recording_id: string;
+            /** Size Bytes */
+            size_bytes: number;
         };
         /** ReorderIn */
         ReorderIn: {
@@ -3109,6 +3174,69 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InterviewDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    interview_recordings_admin_interviews__interview_id__recordings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                interview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordingOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    interview_recording_audio_admin_interviews__interview_id__recordings__recording_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                interview_id: string;
+                recording_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

@@ -18,6 +18,7 @@ place (and fail as ``FileNotFoundError`` when that place is gone, which callers 
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -159,10 +160,32 @@ def get_storage(name: str | None = None) -> BlobStore:
     return _local()
 
 
+def container_store(container: str) -> BlobStore:
+    """A store for another private container of the same account (candidate recordings), or a
+    local directory beside the SOP storage when Azure is not configured (dev, CI)."""
+    settings = get_settings()
+    provider = getattr(settings, "default_storage_provider", "") or "local"
+    account_url = getattr(settings, "azure_storage_account_url", "")
+    if provider == "azure" and account_url:
+        key = f"azure:{container}"
+        if key not in _STORES:
+            _STORES[key] = AzureBlobStore(account_url, container)
+        return _STORES[key]
+    key = f"local:{container}"
+    if key not in _STORES:
+        _STORES[key] = LocalBlobStore(os.path.join(_default_root(), container))
+    return _STORES[key]
+
+
 def load(blob_path: str) -> bytes:
     """Read ``blob_path`` from whichever store wrote it (see the module note on blob_path)."""
     if blob_path.startswith(BLOB_SCHEME):
-        store = get_storage("azure")
+        container = blob_path[len(BLOB_SCHEME) :].split("/", 1)[0]
+        store = (
+            get_storage("azure")
+            if container == get_settings().material_blob_container
+            else container_store(container)
+        )
         if store.name != "azure":
             raise FileNotFoundError(blob_path)
         return store.load(blob_path)

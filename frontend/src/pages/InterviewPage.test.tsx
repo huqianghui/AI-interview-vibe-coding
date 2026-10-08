@@ -368,6 +368,7 @@ describe("InterviewPage", () => {
       toggleMute: () => undefined,
       setMuted: () => undefined,
       commitAnswer: () => Promise.resolve("   "), // whitespace-only → still empty after trim
+      markQuestion: () => undefined,
       speakQuestion: () => true,
       isMuted: false,
       connectionState: "connected" as const,
@@ -424,6 +425,7 @@ describe("InterviewPage", () => {
         mutedCalls.push(m);
       },
       commitAnswer: () => Promise.resolve(""),
+      markQuestion: () => undefined,
       speakQuestion: () => {
         speakCalls += 1;
         return true;
@@ -484,6 +486,7 @@ describe("InterviewPage", () => {
       toggleMute: () => undefined,
       setMuted: () => undefined,
       commitAnswer: () => Promise.resolve(""),
+      markQuestion: () => undefined,
       speakQuestion: () => true,
       isMuted: false,
       connectionState: "disconnected" as const,
@@ -543,6 +546,7 @@ describe("InterviewPage", () => {
         commitCalls += 1;
         return Promise.resolve("my spoken answer");
       },
+      markQuestion: () => undefined,
       speakQuestion: () => true,
       isMuted: false,
       connectionState: "connected" as const,
@@ -604,6 +608,7 @@ describe("InterviewPage", () => {
       toggleMute: () => undefined,
       setMuted: () => undefined,
       commitAnswer: () => Promise.resolve(""),
+      markQuestion: () => undefined,
       speakQuestion: () => true,
       isMuted: false,
       connectionState: "disconnected" as const,
@@ -646,6 +651,7 @@ describe("InterviewPage", () => {
       toggleMute: () => undefined,
       setMuted: () => undefined,
       commitAnswer: () => Promise.resolve(""),
+      markQuestion: () => undefined,
       speakQuestion: () => true,
       isMuted: false,
       connectionState: "disconnected" as const,
@@ -694,6 +700,7 @@ describe("InterviewPage", () => {
       toggleMute: () => undefined,
       setMuted: () => undefined,
       commitAnswer: () => new Promise<string>((res) => { resolveCommit = res; }),
+      markQuestion: () => undefined,
       speakQuestion: () => true,
       isMuted: false,
       connectionState: "connected" as const,
@@ -761,6 +768,7 @@ describe("InterviewPage", () => {
       toggleMute: () => undefined,
       setMuted: () => undefined,
       commitAnswer: () => Promise.resolve("my main answer, long enough"),
+      markQuestion: () => undefined,
       speakQuestion: (text: string) => {
         spoken.push(text);
         return true;
@@ -828,6 +836,7 @@ describe("InterviewPage", () => {
       toggleMute: () => undefined,
       setMuted: () => undefined,
       commitAnswer: () => Promise.resolve("my main answer, long enough"),
+      markQuestion: () => undefined,
       speakQuestion: (text: string) => {
         spoken.push(text);
         return true;
@@ -917,6 +926,7 @@ describe("InterviewPage", () => {
       toggleMute: () => undefined,
       setMuted: () => undefined,
       commitAnswer: () => Promise.resolve(""),
+      markQuestion: () => undefined,
       speakQuestion: () => true,
       isMuted: false,
       connectionState: "connected" as const,
@@ -1261,6 +1271,7 @@ describe("InterviewPage restart (start over, v0.38.3.0)", () => {
       toggleMute: () => undefined,
       setMuted: () => undefined,
       commitAnswer: () => Promise.resolve(""),
+      markQuestion: () => undefined,
       speakQuestion: () => true,
       isMuted: false,
       connectionState: "disconnected" as const,
@@ -1344,6 +1355,7 @@ describe("InterviewPage judged turns (issue #114)", () => {
       toggleMute: () => undefined,
       setMuted: () => undefined,
       commitAnswer: () => Promise.resolve("my spoken answer, long enough"),
+      markQuestion: () => undefined,
       speakQuestion: vi.fn(() => true),
       speakAside: vi.fn(() => true),
       peekDraft: () => "so the first thing I would do is",

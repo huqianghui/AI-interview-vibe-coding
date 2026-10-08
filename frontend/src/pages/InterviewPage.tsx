@@ -719,6 +719,29 @@ export function InterviewPage() {
     }
   }, [phase, channel, voice, speakText, suppressVerbatimRead]);
 
+  // Recording marker: a voice session records the candidate's microphone per question, and the
+  // backend learns which question from this marker. Re-sent on every (re)connection, because a new
+  // socket is a new recorder.
+  const currentQuestionIndex = interview?.current_question?.index;
+  const currentQuestionKey = interview?.current_question?.question_id;
+  const markedQuestion = useRef<string | null>(null);
+  useEffect(() => {
+    if (voice.connectionState !== "connected") {
+      markedQuestion.current = null;
+      return;
+    }
+    if (
+      phase === "interviewing" &&
+      channel === "voice" &&
+      currentQuestionIndex !== undefined &&
+      currentQuestionKey &&
+      markedQuestion.current !== currentQuestionKey
+    ) {
+      voice.markQuestion(currentQuestionIndex);
+      markedQuestion.current = currentQuestionKey;
+    }
+  }, [phase, channel, voice, currentQuestionIndex, currentQuestionKey]);
+
   // External awaiting/recovery: pause the mic while the turn isn't open, unpause when it reopens.
   // Transition-only (see the hook) so an unrelated re-render never clobbers a manual Mute — issue2.
   useExternalMicAutoPause(voice.setMuted, {
@@ -865,6 +888,7 @@ export function InterviewPage() {
             total={q.total}
             isExternal={isExternal}
             onBegin={() => setPhase("interviewing")}
+            recordingDays={interview?.audio_recorded ? (interview.recording_retention_days ?? 0) : 0}
           />
         </AppShell>
         {errorBanner}

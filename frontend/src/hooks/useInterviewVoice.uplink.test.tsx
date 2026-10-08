@@ -227,3 +227,16 @@ describe("base64 encoding of a mic batch", () => {
     expect([...back]).toEqual([0, 32767, -32768, -1, 1]);
   });
 });
+
+describe("recording marker", () => {
+  it("tells the backend which question starts, as a marker it keeps from Azure", async () => {
+    const { ws, unmount, getHook } = await connect({ binary_audio: true });
+    act(() => getHook().markQuestion(2));
+    const markers = ws.sent
+      .filter((f): f is string => typeof f === "string")
+      .map((f) => JSON.parse(f))
+      .filter((e) => e.type === "x.recording.question");
+    expect(markers).toEqual([{ type: "x.recording.question", question_index: 2 }]);
+    unmount();
+  });
+});

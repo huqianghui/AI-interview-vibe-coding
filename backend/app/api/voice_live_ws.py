@@ -124,7 +124,8 @@ async def _authenticate(ws: WebSocket, token: str) -> str | None:
 
 
 async def _interview_persona(db, token: str, caller: str):
-    """The persona of the candidate's live interview (#187), else the current default.
+    """The persona of the candidate's live interview (#187), else the current default, and the
+    live interview's id (None when there is none: only a live interview is recorded).
 
     An interview pins the persona it started with (a user's assigned one, or the default then);
     the voice session must speak with that persona even if the default has changed since.
@@ -137,8 +138,8 @@ async def _interview_persona(db, token: str, caller: str):
         if candidate is not None:
             live = await find_resumable_interview(db, candidate.id)
             if live is not None:
-                return await persona_service.get_session_persona(db, live)
-    return await persona_service.get_default_persona(db)
+                return await persona_service.get_session_persona(db, live), live.id
+    return await persona_service.get_default_persona(db), None
 
 
 @router.websocket("/voice-live/ws")
@@ -182,6 +183,7 @@ async def voice_live_websocket(ws: WebSocket) -> None:
         return
 
     async with async_session_factory() as db:
+        interview_id = None
         if persona_id:
             try:
                 persona = await persona_service.get_persona(db, persona_id)
@@ -189,7 +191,7 @@ async def voice_live_websocket(ws: WebSocket) -> None:
                 await _send_error_and_close(ws, "Persona not found", "PERSONA_NOT_FOUND")
                 return
         else:
-            persona = await _interview_persona(db, token, caller)
+            persona, interview_id = await _interview_persona(db, token, caller)
             if persona is None:
                 await _send_error_and_close(
                     ws,

@@ -100,3 +100,15 @@ describe("CandidateOrientation composition", () => {
     expect(onBegin).toHaveBeenCalledOnce();
   });
 });
+
+describe("CandidateOrientation recording notice", () => {
+  it("says answers are recorded, and for how long, only when they are", () => {
+    renderOrientation({ recordingDays: 90 });
+    expect(screen.getByTestId("recording-notice")).toHaveTextContent("deleted after 90 days");
+  });
+
+  it("says nothing about recording when nothing is recorded", () => {
+    renderOrientation();
+    expect(screen.queryByTestId("recording-notice")).toBeNull();
+  });
+});

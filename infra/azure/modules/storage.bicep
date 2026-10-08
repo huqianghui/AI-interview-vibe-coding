@@ -1,14 +1,16 @@
 targetScope = 'resourceGroup'
 
-// Storage account with two private blob containers:
+// Storage account with three private blob containers:
 //   - client-bundle : the gitignored client interview material (importer + source docs, zipped),
 //                     uploaded once and pulled at container boot by fetch_client_bundle.py (MI auth).
 //   - materials     : the durable store for SOP originals (DEFAULT_STORAGE_PROVIDER=azure). The
 //                     Container App's own disk is thrown away on every new revision, so SOP bytes
 //                     kept there were lost while PostgreSQL kept their rows (every citation 404'd).
+//   - recordings    : candidate voice recordings (the microphone only, one WAV per question). A
+//                     lifecycle rule deletes each one `recordingRetentionDays` after it was written.
 // Public blob access is off. The backend MI reads everything via Storage Blob Data Reader (RBAC,
-// keyless, role-assignments.bicep) and WRITES only to `materials` (Contributor scoped to that one
-// container, below), so it still cannot touch the client bundle.
+// keyless, role-assignments.bicep) and WRITES only to `materials` and `recordings` (Contributor
+// scoped to each container, below), so it still cannot touch the client bundle.
 //
 // Reachability: the account is fully private. The MCAPS management-group policy
 // StorageAccount_PublicNetwork_Modify force-disables publicNetworkAccess regardless of what this
@@ -28,6 +30,10 @@ param storageAccountName string
 
 param clientBundleContainerName string = 'client-bundle'
 param materialsContainerName string = 'materials'
+param recordingsContainerName string = 'recordings'
+
+@description('Days a candidate recording is kept before the lifecycle rule deletes it.')
+param recordingRetentionDays int = 90
 
 @description('Backend managed identity granted write access to the materials container only.')
 param backendIdentityPrincipalId string = ''
@@ -101,6 +107,54 @@ resource backendMaterialsWriter 'Microsoft.Authorization/roleAssignments@2022-04
   }
 }
 
+resource recordingsContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  parent: blobService
+  name: recordingsContainerName
+  properties: {
+    publicAccess: 'None'
+  }
+}
+
+resource backendRecordingsWriter 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(backendIdentityPrincipalId)) {
+  name: guid(recordingsContainer.id, backendIdentityPrincipalId, 'storage-blob-data-contributor')
+  scope: recordingsContainer
+  properties: {
+    principalId: backendIdentityPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: storageBlobDataContributorRoleDefinitionId
+  }
+}
+
+// Recordings are personal data: deleted automatically, whatever the app does.
+resource lifecycle 'Microsoft.Storage/storageAccounts/managementPolicies@2023-05-01' = {
+  parent: storageAccount
+  name: 'default'
+  properties: {
+    policy: {
+      rules: [
+        {
+          name: 'delete-recordings'
+          enabled: true
+          type: 'Lifecycle'
+          definition: {
+            filters: {
+              blobTypes: [ 'blockBlob' ]
+              prefixMatch: [ '${recordingsContainerName}/' ]
+            }
+            actions: {
+              baseBlob: {
+                delete: {
+                  daysAfterCreationGreaterThan: recordingRetentionDays
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
+
 output summary object = {
   module: 'storage'
   namePrefix: namePrefix
@@ -110,6 +164,7 @@ output summary object = {
   containers: [
     clientBundleContainer.name
     materialsContainer.name
+    recordingsContainer.name
   ]
   environmentName: environmentName
   location: location

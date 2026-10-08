@@ -3,11 +3,12 @@ interview's detail (saved report + transcript), and scoring one (#187)."""
 
 import asyncio
 import logging
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,9 +17,9 @@ from app.db import get_db, get_session_factory
 from app.dependencies import require_role
 from app.interview import state_machine
 from app.interview.scoring_engine import OUTCOMES
-from app.models.interview import INTERVIEW_STATUSES, InterviewSession
+from app.models.interview import INTERVIEW_STATUSES, InterviewRecording, InterviewSession
 from app.schemas.history import InterviewDetail, InterviewResultsPage
-from app.services import interview_history_service
+from app.services import interview_history_service, recording_service
 
 logger = logging.getLogger(__name__)
 
@@ -161,3 +162,53 @@ async def interview_sop(
     if session is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
     return await serve_cited_document(db, session, document_id)
+
+
+class RecordingOut(BaseModel):
+    recording_id: str
+    question_index: int
+    duration_ms: int
+    size_bytes: int
+    created_at: datetime | None
+
+
+@router.get("/{interview_id}/recordings", response_model=list[RecordingOut])
+async def interview_recordings(
+    interview_id: str, db: AsyncSession = Depends(get_db)
+) -> list[RecordingOut]:
+    """The candidate's recorded answers, one per question (the microphone only, kept
+    ``recording_retention_days``). Admin-only, like every route here."""
+    if await interview_history_service.find_session(db, interview_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Interview not found")
+    return [
+        RecordingOut(
+            recording_id=r.id,
+            question_index=r.question_index,
+            duration_ms=r.duration_ms,
+            size_bytes=r.size_bytes,
+            created_at=r.created_at,
+        )
+        for r in await recording_service.list_recordings(db, interview_id)
+    ]
+
+
+@router.get("/{interview_id}/recordings/{recording_id}")
+async def interview_recording_audio(
+    interview_id: str, recording_id: str, db: AsyncSession = Depends(get_db)
+) -> Response:
+    """One recording's WAV, streamed through the backend (the container is private). 410 once the
+    retention period has deleted it."""
+    recording = await db.get(InterviewRecording, recording_id)
+    if recording is None or recording.interview_session_id != interview_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recording not found")
+    try:
+        audio = await asyncio.to_thread(recording_service.load_audio, recording)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE, detail="The recording has expired"
+        ) from exc
+    return Response(
+        content=audio,
+        media_type="audio/wav",
+        headers={"Cache-Control": "private, no-store"},
+    )

@@ -152,12 +152,15 @@ export interface CandidateOrientationProps {
   total: number;
   isExternal: boolean;
   onBegin: () => void;
+  /** Spoken answers are recorded and kept this many days; 0 or absent = not recorded. */
+  recordingDays?: number;
 }
 
 export function CandidateOrientation({
   total,
   isExternal,
   onBegin,
+  recordingDays = 0,
 }: CandidateOrientationProps) {
   const styles = useStyles();
   const { t } = useTranslation();
@@ -232,6 +235,11 @@ export function CandidateOrientation({
             {t("orientation.begin")}
           </Button>
           <span className={styles.note}>{t("orientation.beginNote")}</span>
+          {recordingDays > 0 && (
+            <span className={styles.note} data-testid="recording-notice" style={{ maxWidth: "60ch" }}>
+              {t("orientation.recordingNote", { days: recordingDays })}
+            </span>
+          )}
         </div>
       </section>
     </div>

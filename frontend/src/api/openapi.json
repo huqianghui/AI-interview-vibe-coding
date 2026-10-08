@@ -1145,6 +1145,11 @@
       },
       "InterviewOut": {
         "properties": {
+          "audio_recorded": {
+            "default": false,
+            "title": "Audio Recorded",
+            "type": "boolean"
+          },
           "current_question": {
             "anyOf": [
               {
@@ -1169,6 +1174,11 @@
           "interview_session_id": {
             "title": "Interview Session Id",
             "type": "string"
+          },
+          "recording_retention_days": {
+            "default": 0,
+            "title": "Recording Retention Days",
+            "type": "integer"
           },
           "speech_text": {
             "anyOf": [
@@ -2570,6 +2580,47 @@
           }
         },
         "title": "QuestionPatch",
+        "type": "object"
+      },
+      "RecordingOut": {
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "question_index": {
+            "title": "Question Index",
+            "type": "integer"
+          },
+          "recording_id": {
+            "title": "Recording Id",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "recording_id",
+          "question_index",
+          "duration_ms",
+          "size_bytes",
+          "created_at"
+        ],
+        "title": "RecordingOut",
         "type": "object"
       },
       "ReorderIn": {
@@ -4064,6 +4115,113 @@
           }
         ],
         "summary": "Interview Detail",
+        "tags": [
+          "admin-interviews"
+        ]
+      }
+    },
+    "/admin/interviews/{interview_id}/recordings": {
+      "get": {
+        "description": "The candidate's recorded answers, one per question (the microphone only, kept\n``recording_retention_days``). Admin-only, like every route here.",
+        "operationId": "interview_recordings_admin_interviews__interview_id__recordings_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "title": "Interview Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RecordingOut"
+                  },
+                  "title": "Response Interview Recordings Admin Interviews  Interview Id  Recordings Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Interview Recordings",
+        "tags": [
+          "admin-interviews"
+        ]
+      }
+    },
+    "/admin/interviews/{interview_id}/recordings/{recording_id}": {
+      "get": {
+        "description": "One recording's WAV, streamed through the backend (the container is private). 410 once the\nretention period has deleted it.",
+        "operationId": "interview_recording_audio_admin_interviews__interview_id__recordings__recording_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interview_id",
+            "required": true,
+            "schema": {
+              "title": "Interview Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "recording_id",
+            "required": true,
+            "schema": {
+              "title": "Recording Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Interview Recording Audio",
         "tags": [
           "admin-interviews"
         ]

@@ -63,6 +63,7 @@ describe("InterviewPage manual video/audio-only toggle", () => {
       toggleMute: () => undefined,
       setMuted: () => undefined,
       commitAnswer: () => Promise.resolve(""),
+      markQuestion: () => undefined,
       speakQuestion: () => true,
       isMuted: false,
       connectionState: "connected" as const,
