@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.58.2.0 (2026-10-09)
+
+### Changed
+- **Relocated SOP citations open in a drawer, not on the page.** The results of "Relocate SOP
+  citations" open in a right-side drawer, like an interview's results, and can be closed and
+  reopened from the summary. The items that need a decision come first: no SOP found, failed, or
+  edited during the run. Each row starts with its question, then the rubric item, and has an
+  "Open in editor" button that closes the drawer and opens that question's rubric. Once a
+  version is published after the run, the summary is no longer shown.
+- **Clicking a question opens its rubric.** A click anywhere on a question's row in the Content
+  tab does what its Rubric button does; the controls on the right keep their own clicks.
+
 ## 0.58.1.1 (2026-10-09)
 
 ### Fixed

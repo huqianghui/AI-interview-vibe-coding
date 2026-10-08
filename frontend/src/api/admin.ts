@@ -506,6 +506,8 @@ export interface CitationRun {
   total: number;
   error: string;
   created_at: string | null;
+  // A version was published after the run finished: the summary is no longer shown.
+  published?: boolean;
   rows: CitationRunRow[];
 }
 

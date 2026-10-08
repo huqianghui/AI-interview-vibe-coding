@@ -267,6 +267,47 @@ describe("AdminPage", () => {
     await waitFor(() => expect(edit).toHaveBeenCalledWith("q1", { max_follow_ups: 3 }));
   });
 
+  it("opens a question's rubric from a click anywhere on its row, but not from its controls", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    vi.spyOn(admin, "getAiFoundryConfig").mockResolvedValue(EMPTY_CFG);
+    vi.spyOn(admin, "listBanks").mockResolvedValue([
+      { bank_id: "b1", name: "Demo Bank", description: "", language: "zh-CN", enabled: true, is_default: true },
+    ]);
+    vi.spyOn(admin, "listBankQuestions").mockResolvedValue([
+      {
+        question_id: "q1",
+        text: "How are you?",
+        language: "zh-CN",
+        order_index: 0,
+        enabled: true,
+        expected_points: [],
+        max_follow_ups: 0,
+        checklist_item_count: 1,
+      },
+    ]);
+    const getChecklist = vi.spyOn(admin, "getChecklist").mockResolvedValue({
+      checklist_id: "c1",
+      question_id: "q1",
+      prompt_version: "v1",
+      weights_sum: 100,
+      items: [
+        { kind: "required", text: "on topic", weight: 100, source_quote: "", source_page: null, order_index: 0 },
+      ],
+    });
+
+    renderPage();
+    await signIn(user);
+    await user.click(await screen.findByText("Demo Bank"));
+
+    await user.click(await screen.findByTestId("max-follow-ups-q1"));
+    expect(getChecklist).not.toHaveBeenCalled();
+
+    await user.click(screen.getByText("How are you?"));
+    await waitFor(() => expect(screen.getByTestId("checklist-text-0")).toHaveValue("on topic"));
+    expect(getChecklist).toHaveBeenCalledWith("q1");
+  });
+
   it("edits and saves a question's checklist (rubric), round-tripping the normalized result", async () => {
     const user = userEvent.setup();
     mockAdminLogin();

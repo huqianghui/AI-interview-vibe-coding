@@ -21,6 +21,8 @@ import { CitationEditor } from "./CitationEditor";
 import { RelocateCitations } from "./RelocateCitations";
 import type { ContentTabState } from "./useContentTab";
 
+const RUBRIC_EDITOR_ID = "rubric-editor";
+
 /** What the last Publish did: the version it made, that nothing changed, or every reason it was
  * refused (an enabled question without a rubric, or weights that do not total 100). */
 function PublishOutcome({ result }: { result: PublishResult }) {
@@ -88,6 +90,11 @@ export function ContentTab({ state, guard }: { state: ContentTabState; guard: Gu
     publishing,
   } = state;
   const currentBank = banks.find((b) => b.bank_id === selectedBank);
+  // Open a question's rubric and bring the editor into view (it renders below the question list).
+  const openRubric = async (questionId: string) => {
+    await loadChecklist(questionId);
+    document.getElementById(RUBRIC_EDITOR_ID)?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  };
 
   return (
     <>
@@ -176,10 +183,27 @@ export function ContentTab({ state, guard }: { state: ContentTabState; guard: Gu
             }
           />
           {publishResult && <PublishOutcome result={publishResult} />}
-          <RelocateCitations bankId={selectedBank} onDone={state.reloadAfterRelocate} />
+          <RelocateCitations
+            bankId={selectedBank}
+            onDone={state.reloadAfterRelocate}
+            onOpenQuestion={(row) => {
+              // Rows name their question by text (and 1-based ask order, the fallback).
+              const q =
+                questions.find((x) => x.text === row.question) ?? questions[row.question_no - 1];
+              if (q) void openRubric(q.question_id);
+            }}
+          />
           <ul className={styles.list} data-testid="question-list">
             {questions.map((q, i) => (
-              <li key={q.question_id} className={styles.row}>
+              // Clicking anywhere on the row opens its rubric, like the Rubric button; the
+              // controls on the right keep their own clicks.
+              <li
+                key={q.question_id}
+                className={styles.row}
+                style={{ cursor: "pointer" }}
+                data-testid={`question-row-${q.question_id}`}
+                onClick={() => void openRubric(q.question_id)}
+              >
                 <div className={styles.rowText}>
                   <Text weight="semibold">{q.order_index + 1}.</Text> <Text>{q.text}</Text>
                   <br />
@@ -193,7 +217,7 @@ export function ContentTab({ state, guard }: { state: ContentTabState; guard: Gu
                       : t("admin.rubricNotConfigured")}
                   </Text>
                 </div>
-                <div className={styles.actions}>
+                <div className={styles.actions} onClick={(e) => e.stopPropagation()}>
                   {/* Max follow-ups (issue #114): RETIRED as a behaviour since 2026-09-28 — the
                       judge only nudges, it never asks a follow-up or redirects, in every turn
                       mode. The field stays (stored per question, no migration) but has no effect;
@@ -217,7 +241,7 @@ export function ContentTab({ state, guard }: { state: ContentTabState; guard: Gu
                   <Button
                     size="small"
                     appearance={selectedQuestion === q.question_id ? "primary" : "secondary"}
-                    onClick={() => loadChecklist(q.question_id)}
+                    onClick={() => void openRubric(q.question_id)}
                     data-testid={`rubric-btn-${q.question_id}`}
                   >
                     {t("admin.rubricBtn")}
@@ -281,7 +305,7 @@ export function ContentTab({ state, guard }: { state: ContentTabState; guard: Gu
 
       {/* Checklist (scoring rubric) for the selected question — editable inline panel (F3b) */}
       {selectedQuestion && (
-        <Card className={styles.card}>
+        <Card className={styles.card} id={RUBRIC_EDITOR_ID}>
           <CardHeader header={<Title3>{t("admin.rubricTitle")}</Title3>} />
           {checklist ? (
             <>

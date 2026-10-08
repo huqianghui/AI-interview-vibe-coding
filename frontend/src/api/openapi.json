@@ -805,6 +805,11 @@
             "title": "Error",
             "type": "string"
           },
+          "published": {
+            "default": false,
+            "title": "Published",
+            "type": "boolean"
+          },
           "rows": {
             "items": {
               "additionalProperties": true,

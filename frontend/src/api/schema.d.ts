@@ -1803,6 +1803,11 @@ export interface components {
             done: number;
             /** Error */
             error: string;
+            /**
+             * Published
+             * @default false
+             */
+            published: boolean;
             /** Rows */
             rows: {
                 [key: string]: unknown;
