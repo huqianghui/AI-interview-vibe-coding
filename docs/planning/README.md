@@ -30,6 +30,9 @@ living specification is [`../../SPEC.md`](../../SPEC.md) at the repo root — st
 
 ## Post-spec feature specs
 
+- [`spec-rubric-versioning.md`](spec-rubric-versioning.md) — immutable rubric versions: chosen at
+  user assignment (default latest), pinned on the interview at start, read by scoring, the coverage
+  audit and the SOP-citation guard; also fixes the editor dropping SOP links and advisory flags.
 - [`spec-real-azure-integration.md`](spec-real-azure-integration.md) — Phase 1 real-Azure integration
   via the `/admin` DB config page (model + Foundry IQ knowledge-base dropdowns from the Foundry API,
   real agent + LLM + retrieval, P1 security fix). Filed as epic #18 with children #19 / #20 / #21.

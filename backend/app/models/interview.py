@@ -100,6 +100,12 @@ class InterviewSession(TimestampMixin, Base):
     bank_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("question_banks.id", ondelete="SET NULL"), nullable=True
     )
+    # The rubric version pinned at start (spec-rubric-versioning): scoring, the coverage audit and
+    # the SOP-citation guard read ONLY this, so a later rubric edit never re-scores this interview.
+    # NULL on rows started before versioning existed; they keep reading the current default.
+    rubric_version_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("rubric_versions.id", ondelete="SET NULL"), nullable=True
+    )
     # The last scoring run's report (the ``ReportOut`` dict as JSON), and its headline numbers for
     # the history list. NULL until the interview is scored, and on rows scored before #187.
     report_json: Mapped[str | None] = mapped_column(Text, nullable=True)
