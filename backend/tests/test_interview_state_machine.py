@@ -357,7 +357,7 @@ async def test_submit_without_provider_advances_even_when_follow_ups_allowed(
         Question(id="tail", prompt="Last question?"),
     )
 
-    async def _fake_resolve(_db, _bank_id=None):
+    async def _fake_resolve(_db, _bank_id=None, _bank_version_id=None):
         return two
 
     monkeypatch.setattr(state_machine, "resolve_questions", _fake_resolve)
@@ -378,7 +378,7 @@ async def test_submit_without_provider_advances_even_when_follow_ups_allowed(
 async def test_empty_question_set_completes_immediately(db_session, monkeypatch):
     """Zero resolved questions → the interview starts completed, not a live session with no Q."""
 
-    async def _no_questions(_db, _bank_id=None):
+    async def _no_questions(_db, _bank_id=None, _bank_version_id=None):
         return ()
 
     monkeypatch.setattr(state_machine, "resolve_questions", _no_questions)

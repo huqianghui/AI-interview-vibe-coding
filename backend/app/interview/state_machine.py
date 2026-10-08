@@ -197,7 +197,7 @@ async def start_interview(
     turn_mode: str = "linear",
     persona_id: str | None = None,
     bank_id: str | None = None,
-    rubric_version_id: str | None = None,
+    bank_version_id: str | None = None,
 ) -> InterviewSession:
     """Start a new interview — or resume the candidate's existing in-progress one.
 
@@ -219,7 +219,7 @@ async def start_interview(
         turn_mode=turn_mode if turn_mode in TURN_MODES else "linear",
         persona_id=persona_id,
         bank_id=bank_id,
-        rubric_version_id=rubric_version_id,
+        bank_version_id=bank_version_id,
     )
     session.started_at = _now()
     db.add(session)
@@ -234,7 +234,7 @@ async def start_interview(
             raise
         return winner
 
-    questions = await resolve_questions(db, session.bank_id)
+    questions = await resolve_questions(db, session.bank_id, session.bank_version_id)
     first = question_at(questions, 0)
     if first is not None:
         db.add(
@@ -305,7 +305,7 @@ async def answer_finalized(
     if session.status != "in_progress":
         raise InterviewStateError(f"Cannot answer in status {session.status!r}")
 
-    questions = await resolve_questions(db, session.bank_id)
+    questions = await resolve_questions(db, session.bank_id, session.bank_version_id)
     current = question_at(questions, session.current_question_index)
     if current is None:
         raise InterviewStateError("No current question to answer")
@@ -433,7 +433,7 @@ async def score_and_finalize_events(
         raise InterviewStateError(f"Cannot score in status {session.status!r}")
 
     # question_id → prompt text, so the scorer can build a cross-language judging prompt.
-    questions = await resolve_questions(db, session.bank_id)
+    questions = await resolve_questions(db, session.bank_id, session.bank_version_id)
     prompt_by_id = {q.id: q.prompt for q in questions}
     # question_id → aggregate weight (default 1). A question weighted 0 or missing still scores per
     # question but contributes nothing to the interview-level mean.
@@ -477,7 +477,7 @@ async def score_and_finalize_events(
                     question_id=question_id,
                     question_text=prompt_by_id.get(question_id, ""),
                     answer_text=answer_text,
-                    rubric_version_id=session.rubric_version_id,
+                    bank_version_id=session.bank_version_id,
                 ),
             )
         )
@@ -584,7 +584,7 @@ async def score_and_finalize_events(
                 db,
                 question_id=question_id,
                 question_text=prompt_by_id.get(question_id, ""),
-                rubric_version_id=session.rubric_version_id,
+                bank_version_id=session.bank_version_id,
             )
             if coverage_task is not None:
                 coverage_tasks.append(coverage_task)
@@ -769,7 +769,7 @@ async def get_current_question(db: AsyncSession, session: InterviewSession) -> d
     Candidate-safe projection (SPEC P3): only ``question_id`` / ``prompt`` / position — never the
     question's ``expected_points`` (those link to the rubric and stay interviewer-internal).
     """
-    questions = await resolve_questions(db, session.bank_id)
+    questions = await resolve_questions(db, session.bank_id, session.bank_version_id)
     q = question_at(questions, session.current_question_index)
     if q is None:
         return None
@@ -884,15 +884,15 @@ async def cited_document_ids(db: AsyncSession, session: InterviewSession) -> set
     answered_qids = {qid for qid, _ in await _candidate_answers(db, session.id)}
     if not answered_qids:
         return set()
-    if session.rubric_version_id:
-        # The pinned version (spec-rubric-versioning): a rubric edited after this interview must
+    if session.bank_version_id:
+        # The pinned version (spec-bank-versioning): a rubric edited after this interview must
         # neither break its report's links nor open documents its report never cited.
-        from app.services import rubric_version_service
+        from app.services import bank_version_service
 
         cited: set[str] = set()
         for qid in answered_qids:
-            pinned = await rubric_version_service.rubric_rows(
-                db, question_id=qid, rubric_version_id=session.rubric_version_id
+            pinned = await bank_version_service.rubric_rows(
+                db, question_id=qid, bank_version_id=session.bank_version_id
             )
             cited.update(r.source_document_id for r in pinned if r.source_document_id)
         return cited
@@ -918,7 +918,7 @@ async def review_answers(db: AsyncSession, session: InterviewSession) -> list[di
     can never disagree with what gets scored, and the order matches the question bank exactly
     (requirement 2). Candidate-safe: only prompt + the grouped answer text, no rubric (P3).
     """
-    questions = await resolve_questions(db, session.bank_id)
+    questions = await resolve_questions(db, session.bank_id, session.bank_version_id)
     answers_by_id = dict(await _candidate_answers(db, session.id))
     out: list[dict] = []
     for index, q in enumerate(questions):

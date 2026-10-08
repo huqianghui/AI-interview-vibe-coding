@@ -33,7 +33,6 @@ from app.interview.questions import parse_points
 from app.models.checklist import CHECKLIST_ITEM_KINDS, Checklist, ChecklistItem
 from app.models.question import Question
 from app.models.sop import SopDocument
-from app.services import rubric_version_service
 from app.services.agents.registry import get_llm_adapter, get_retrieval_adapter
 
 DRAFT_PROMPT_VERSION = "v1"
@@ -151,9 +150,7 @@ async def draft_checklist(
     return await _persist_draft(db, question_id, draft)
 
 
-async def _persist_draft(
-    db: AsyncSession, question_id: str, draft: ChecklistDraft, *, snapshot: bool = True
-) -> Checklist:
+async def _persist_draft(db: AsyncSession, question_id: str, draft: ChecklistDraft) -> Checklist:
     """Persist a draft as the new default checklist for a question; demote prior defaults."""
     for prior in await _default_checklists(db, question_id):
         prior.is_default = False
@@ -180,9 +177,6 @@ async def _persist_draft(
         )
     await db.commit()
     await db.refresh(checklist)
-    # A bank import writes many questions and snapshots once at the end instead (snapshot=False).
-    if snapshot:
-        await rubric_version_service.snapshot_for_question(db, question_id, reason="draft")
     return checklist
 
 
@@ -264,8 +258,6 @@ async def update_items(
     db: AsyncSession,
     checklist_id: str,
     raw_items: list[dict],
-    *,
-    created_by: str | None = None,
 ) -> Checklist:
     """Replace a checklist's items with an edited set (F3b). Weights are re-normalized to 100.
 
@@ -305,10 +297,8 @@ async def update_items(
         )
     await db.commit()
     await db.refresh(checklist)
-    # Every saved rubric becomes an immutable version of its bank (spec-rubric-versioning).
-    await rubric_version_service.snapshot_for_question(
-        db, checklist.question_id, reason="edit", created_by=created_by
-    )
+    # Only the draft changes: an interview reads a published version (spec-bank-versioning), and a
+    # new one exists only when an admin publishes.
     return checklist
 
 

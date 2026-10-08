@@ -1,9 +1,11 @@
-"""Rubric versions: freeze a bank's rubric, pick one for an interview, read rubric items through it.
+"""Bank versions: publish a bank's draft, pick a version for an interview, read through it.
 
-Spec: ``docs/planning/spec-rubric-versioning.md``. The ``checklists`` rows stay the editable
-working copy; a :class:`RubricVersion` is a frozen copy of the whole bank's rubric. Every rubric
-READ that decides a score goes through :func:`rubric_rows`, which serves the interview's pinned
-version, so an edit made after an interview started can never change how it is scored.
+Spec: ``docs/planning/spec-bank-versioning.md``. The ``questions`` / ``checklists`` rows are the
+DRAFT: admins edit it freely and nothing an interview reads changes. Publishing checks the draft
+is complete (every enabled question has a rubric whose weights sum to 100) and freezes it as one
+:class:`BankVersion`: the questions and their rubric together. An interview pins a published
+version at start and every read that decides what is asked or how it is scored goes through
+:func:`interview_questions` / :func:`rubric_rows`, which serve that version.
 """
 
 from __future__ import annotations
@@ -12,19 +14,24 @@ import hashlib
 import json
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.interview.questions import Question, parse_points
+from app.models.bank_version import BANK_VERSION_REASONS, BankVersion
 from app.models.checklist import Checklist, ChecklistItem
-from app.models.question import Question
-from app.models.rubric_version import RUBRIC_VERSION_REASONS, RubricVersion
+from app.models.question import Question as QuestionRow
+from app.models.question import QuestionBank
+from app.models.sop import SopDocument
 
 logger = logging.getLogger(__name__)
 
-# What a frozen item keeps: everything scoring, the coverage audit and the citation guard read.
+# What a frozen rubric item keeps: everything scoring, the coverage audit and the citation guard
+# read, plus the cited document's NAME so an old report can say what it cited even if the document
+# is later replaced (spec: SOP document id AND name).
 ITEM_FIELDS = (
     "id",
     "kind",
@@ -40,7 +47,7 @@ ITEM_FIELDS = (
 
 @dataclass(frozen=True)
 class RubricRow:
-    """One rubric item as a reader sees it, from a version or (legacy) from the live checklist."""
+    """One rubric item as a reader sees it, from a version or (legacy) from the draft."""
 
     item_id: str
     kind: str
@@ -51,6 +58,23 @@ class RubricRow:
     source_document_id: str | None
     source_page: str | None
     order_index: int
+
+
+@dataclass(frozen=True)
+class PublishProblem:
+    """Why a draft cannot be published. ``question_no`` is 1-based in the draft's ask order."""
+
+    code: str  # no_questions | no_rubric | weights
+    question_no: int | None = None
+    question_text: str = ""
+    weights_sum: int | None = None
+
+
+@dataclass
+class PublishResult:
+    version: BankVersion | None
+    created: bool = False
+    problems: list[PublishProblem] = field(default_factory=list)
 
 
 def _row_from(item: dict) -> RubricRow:
@@ -67,107 +91,170 @@ def _row_from(item: dict) -> RubricRow:
     )
 
 
-# A version never changes once written, so its parsed content is cached by id. Scoring, the
-# coverage audit, the citation guard and every judge call read it once per question; without the
-# cache each read re-parsed the whole bank's JSON.
-_PARSED: dict[str, dict[str, list[dict]]] = {}
+# A version never changes once written, so its parsed content is cached by id. Asking, scoring,
+# the coverage audit, the citation guard and every judge call read it; without the cache each read
+# re-parsed the whole bank.
+_PARSED: dict[str, list[dict]] = {}
 _PARSED_MAX = 256
 
 
-def questions_of(version: RubricVersion) -> dict[str, list[dict]]:
-    """The version's ``{question_id: [item, ...]}`` map."""
+def questions_of(version: BankVersion) -> list[dict]:
+    """The version's questions in ask order, each with its ``rubric`` list."""
     key = f"{version.id}:{version.content_hash}"
     parsed = _PARSED.get(key)
     if parsed is None:
         if len(_PARSED) >= _PARSED_MAX:
             _PARSED.clear()
-        parsed = _PARSED[key] = json.loads(version.content_json).get("questions", {})
+        parsed = _PARSED[key] = json.loads(version.content_json).get("questions", [])
     return parsed
 
 
-def _item_dict(row: ChecklistItem) -> dict:
-    return {f: getattr(row, f) for f in ITEM_FIELDS}
+def _question_by_id(version: BankVersion) -> dict[str, dict]:
+    return {q["id"]: q for q in questions_of(version)}
 
 
-async def _bank_content(db: AsyncSession, bank_id: str) -> dict:
-    """The bank's current rubric (each question's default checklist), in a stable order.
+def _item_dict(row: ChecklistItem, document_names: dict[str, str]) -> dict:
+    item = {f: getattr(row, f) for f in ITEM_FIELDS}
+    item["source_document_name"] = document_names.get(row.source_document_id or "")
+    return item
 
-    Two queries for the whole bank, whatever its size: this runs on every rubric save, every
-    interview start and every assignment. Must build exactly what the migration builds
-    (``e2f3a4b5c6d7_rubric_versions._bank_content``), or the first save after it mints a version.
+
+async def draft_content(db: AsyncSession, bank_id: str) -> dict:
+    """The bank's draft as a version's content: every question in ask order with its rubric.
+
+    A handful of queries for the whole bank, whatever its size. Must build exactly what the
+    migration builds (``f3a4b5c6d7e8_bank_versions._draft_content``), or the first publish after
+    the upgrade would mint a version for an unchanged bank.
     """
-    checklists = (
-        await db.execute(
-            select(Checklist.id, Checklist.question_id)
-            .join(Question, Question.id == Checklist.question_id)
-            .where(Question.bank_id == bank_id, Checklist.is_default.is_(True))
-            .order_by(Checklist.created_at.desc())
-        )
-    ).all()
-    # One default per question (uq_one_default_checklist_per_question); the newest wins otherwise,
-    # like the migration's ORDER BY created_at DESC LIMIT 1.
-    checklist_of: dict[str, str] = {}
-    for checklist_id, question_id in checklists:
-        checklist_of.setdefault(question_id, checklist_id)
-    if not checklist_of:
-        return {"questions": {}}
-    rows = (
+    bank = await db.get(QuestionBank, bank_id)
+    bank_language = (bank.language if bank else "") or "en-US"
+    questions = (
         (
             await db.execute(
-                select(ChecklistItem)
-                .where(ChecklistItem.checklist_id.in_(set(checklist_of.values())))
-                .order_by(ChecklistItem.order_index)
+                select(QuestionRow)
+                .where(QuestionRow.bank_id == bank_id)
+                .order_by(QuestionRow.order_index, QuestionRow.id)
             )
         )
         .scalars()
         .all()
     )
+    checklist_of: dict[str, str] = {}
+    if questions:
+        rows = (
+            await db.execute(
+                select(Checklist.id, Checklist.question_id)
+                .where(
+                    Checklist.question_id.in_([q.id for q in questions]),
+                    Checklist.is_default.is_(True),
+                )
+                .order_by(Checklist.created_at.desc())
+            )
+        ).all()
+        # One default per question (uq_one_default_checklist_per_question); newest wins otherwise.
+        for checklist_id, question_id in rows:
+            checklist_of.setdefault(question_id, checklist_id)
+    items: list[ChecklistItem] = []
+    if checklist_of:
+        items = list(
+            (
+                await db.execute(
+                    select(ChecklistItem)
+                    .where(ChecklistItem.checklist_id.in_(set(checklist_of.values())))
+                    .order_by(ChecklistItem.order_index, ChecklistItem.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    doc_ids = {i.source_document_id for i in items if i.source_document_id}
+    names: dict[str, str] = {}
+    if doc_ids:
+        rows = (
+            await db.execute(
+                select(SopDocument.id, SopDocument.name).where(SopDocument.id.in_(doc_ids))
+            )
+        ).all()
+        names = {doc_id: name for doc_id, name in rows}
     by_checklist: dict[str, list[dict]] = {}
-    for row in rows:
-        by_checklist.setdefault(row.checklist_id, []).append(_item_dict(row))
-    questions = {
-        qid: by_checklist[cid] for qid, cid in sorted(checklist_of.items()) if by_checklist.get(cid)
+    for item in items:
+        by_checklist.setdefault(item.checklist_id, []).append(_item_dict(item, names))
+    return {
+        "questions": [
+            {
+                "id": q.id,
+                "text": q.text,
+                "language": q.language or bank_language,
+                "order_index": q.order_index,
+                "enabled": bool(q.enabled),
+                "weight": q.weight,
+                "expected_points": list(parse_points(q.expected_points)),
+                "max_follow_ups": q.max_follow_ups,
+                "follow_up_prompt": q.follow_up_prompt,
+                "rubric": by_checklist.get(checklist_of.get(q.id, ""), []),
+            }
+            for q in questions
+        ]
     }
-    return {"questions": questions}
 
 
-def _hash(content_json: str) -> str:
-    return hashlib.sha256(content_json.encode("utf-8")).hexdigest()
+def _hash(content: dict) -> str:
+    """Hash without rubric-item row ids: the editor replaces every item row on each save, so two
+    identical rubrics would otherwise never hash alike and every unchanged publish would mint one.
+    Question ids stay in: answers are joined to questions by id."""
+    stripped = [
+        {**q, "rubric": [{k: v for k, v in it.items() if k != "id"} for it in q["rubric"]]}
+        for q in content["questions"]
+    ]
+    key = json.dumps(stripped, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
-def _content_key(content: dict) -> str:
-    """The hashed form. Item row ids are left out: the editor replaces every row on each save, so
-    two identical rubrics would otherwise never hash alike and every no-op save would mint one."""
-    stripped = {
-        qid: [{k: v for k, v in it.items() if k != "id"} for it in items]
-        for qid, items in content["questions"].items()
-    }
-    return json.dumps(stripped, sort_keys=True, ensure_ascii=False)
+def publish_problems(content: dict) -> list[PublishProblem]:
+    """Why this content is not a complete interview, or [] when it is.
+
+    Complete = at least one enabled question, and every enabled question has a rubric whose
+    weights sum to 100 (forbidden items carry 0, as the editor normalizes them).
+    """
+    enabled = [q for q in content["questions"] if q["enabled"]]
+    if not enabled:
+        return [PublishProblem(code="no_questions")]
+    problems: list[PublishProblem] = []
+    for no, q in enumerate(enabled, start=1):
+        rubric = q["rubric"]
+        if not rubric:
+            problems.append(PublishProblem("no_rubric", no, q["text"]))
+            continue
+        total = sum(int(it["weight"]) for it in rubric)
+        if total != 100:
+            problems.append(PublishProblem("weights", no, q["text"], weights_sum=total))
+    return problems
 
 
-async def latest(db: AsyncSession, bank_id: str) -> RubricVersion | None:
+async def latest(db: AsyncSession, bank_id: str) -> BankVersion | None:
+    """The bank's latest published version."""
     return (
         await db.execute(
-            select(RubricVersion)
-            .where(RubricVersion.bank_id == bank_id)
-            .order_by(RubricVersion.version_no.desc())
+            select(BankVersion)
+            .where(BankVersion.bank_id == bank_id)
+            .order_by(BankVersion.version_no.desc())
             .limit(1)
         )
     ).scalar_one_or_none()
 
 
-async def get(db: AsyncSession, version_id: str) -> RubricVersion | None:
-    return await db.get(RubricVersion, version_id)
+async def get(db: AsyncSession, version_id: str) -> BankVersion | None:
+    return await db.get(BankVersion, version_id)
 
 
-async def list_versions(db: AsyncSession, bank_id: str) -> Sequence[RubricVersion]:
-    """The bank's versions, newest first."""
+async def list_versions(db: AsyncSession, bank_id: str) -> Sequence[BankVersion]:
+    """The bank's published versions, newest first."""
     return (
         (
             await db.execute(
-                select(RubricVersion)
-                .where(RubricVersion.bank_id == bank_id)
-                .order_by(RubricVersion.version_no.desc())
+                select(BankVersion)
+                .where(BankVersion.bank_id == bank_id)
+                .order_by(BankVersion.version_no.desc())
             )
         )
         .scalars()
@@ -175,24 +262,36 @@ async def list_versions(db: AsyncSession, bank_id: str) -> Sequence[RubricVersio
     )
 
 
-async def snapshot(
-    db: AsyncSession, bank_id: str, *, reason: str, created_by: str | None = None
-) -> RubricVersion:
-    """Freeze the bank's current rubric as a new version, unless it equals the latest one.
+async def has_unpublished_changes(db: AsyncSession, bank_id: str) -> bool:
+    """Whether the draft differs from the latest published version (True when there is none)."""
+    current = await latest(db, bank_id)
+    return current is None or current.content_hash != _hash(await draft_content(db, bank_id))
 
-    Commits. Callers run it after their own rubric write has committed.
+
+async def publish(
+    db: AsyncSession, bank_id: str, *, reason: str = "publish", created_by: str | None = None
+) -> PublishResult:
+    """Freeze the bank's draft as a new version, if it is complete and differs from the latest.
+
+    Returns the problems (and no version) when the draft is incomplete; the latest version with
+    ``created=False`` when the draft is unchanged. Commits.
     """
-    if reason not in RUBRIC_VERSION_REASONS:
-        raise ValueError(f"Unknown rubric version reason: {reason!r}")
-    content = await _bank_content(db, bank_id)
-    content_hash = _hash(_content_key(content))
+    if reason not in BANK_VERSION_REASONS:
+        raise ValueError(f"Unknown bank version reason: {reason!r}")
+    content = await draft_content(db, bank_id)
+    problems = publish_problems(content)
+    if problems:
+        return PublishResult(version=None, problems=problems)
+    content_hash = _hash(content)
+    bank = await db.get(QuestionBank, bank_id)
     for attempt in range(2):
         current = await latest(db, bank_id)
         if current is not None and current.content_hash == content_hash:
-            return current
-        version = RubricVersion(
+            return PublishResult(version=current, created=False)
+        version = BankVersion(
             bank_id=bank_id,
             version_no=(current.version_no if current else 0) + 1,
+            bank_name=bank.name if bank else "",
             content_json=json.dumps(content, ensure_ascii=False),
             content_hash=content_hash,
             reason=reason,
@@ -202,115 +301,84 @@ async def snapshot(
         try:
             await db.commit()
         except IntegrityError:
-            # A concurrent snapshot of this bank took the number first; recompute once from the
-            # new latest (which may already be identical to ours).
+            # A concurrent publish of this bank took the number first; recompute once from the new
+            # latest (which may already be identical to ours).
             await db.rollback()
             if attempt:
                 raise
             continue
         await db.refresh(version)
-        return version
+        return PublishResult(version=version, created=True)
     raise RuntimeError("unreachable")  # pragma: no cover
-
-
-async def snapshot_for_question(
-    db: AsyncSession, question_id: str, *, reason: str, created_by: str | None = None
-) -> RubricVersion | None:
-    """:func:`snapshot` for the bank this question belongs to (None for an unknown question)."""
-    bank_id = (
-        await db.execute(select(Question.bank_id).where(Question.id == question_id))
-    ).scalar_one_or_none()
-    if bank_id is None:
-        return None
-    return await snapshot(db, bank_id, reason=reason, created_by=created_by)
-
-
-async def latest_for_question(db: AsyncSession, question_id: str) -> RubricVersion | None:
-    """The latest version of the bank this question belongs to."""
-    bank_id = (
-        await db.execute(select(Question.bank_id).where(Question.id == question_id))
-    ).scalar_one_or_none()
-    return await latest(db, bank_id) if bank_id else None
-
-
-async def current(db: AsyncSession, bank_id: str) -> RubricVersion:
-    """The version matching the bank's rubric as it is NOW: the latest one when nothing changed,
-    otherwise a new one (``reason='sync'``).
-
-    What assignment and interview start pin. A rubric write commits before its snapshot, so a
-    snapshot that failed (or a writer that never snapshots, such as a question deletion) would
-    otherwise leave "latest" behind the rubric and pin the stale one.
-    """
-    return await snapshot(db, bank_id, reason="sync")
-
-
-async def ensure_latest(db: AsyncSession, bank_id: str) -> RubricVersion:
-    """The bank's latest version, creating the first one if the bank has none yet."""
-    return await latest(db, bank_id) or await snapshot(db, bank_id, reason="initial")
 
 
 async def resolve_for_start(
     db: AsyncSession, bank_id: str | None, assigned_version_id: str | None
 ) -> str | None:
     """Which version a new interview on ``bank_id`` pins: the assigned one when it is a version of
-    this bank that still describes its questions, otherwise the bank's current version. None only
-    when there is no bank at all.
-
-    "Still describes its questions": a bank re-import keeps the bank id but replaces every question
-    (new ids). A version from before it is keyed by ids that no longer exist, so pinning it would
-    find no rubric for any question and silently score the whole interview as unauthored.
-    """
+    this bank, else the bank's latest published one. None when the bank has none (the interview
+    then reads the draft, as before versioning) or there is no bank."""
     if bank_id is None:
         return None
     if assigned_version_id:
         assigned = await get(db, assigned_version_id)
         if assigned is not None and assigned.bank_id == bank_id:
-            frozen = set(questions_of(assigned))
-            if not frozen or frozen & set(await _question_ids(db, bank_id)):
-                return assigned.id
-            logger.warning(
-                "Assigned rubric version %s of bank %s no longer matches its questions (the bank "
-                "was re-imported); pinning the current version instead",
-                assigned.id,
-                bank_id,
-            )
-    return (await current(db, bank_id)).id
+            return assigned.id
+    current = await latest(db, bank_id)
+    if current is None:
+        logger.warning("Bank %s has no published version; the interview reads its draft", bank_id)
+        return None
+    return current.id
 
 
-async def _question_ids(db: AsyncSession, bank_id: str) -> list[str]:
-    return list(
-        (await db.execute(select(Question.id).where(Question.bank_id == bank_id))).scalars().all()
+def interview_questions(version: BankVersion) -> tuple[Question, ...]:
+    """The questions an interview on this version asks, in order (enabled ones only)."""
+    return tuple(
+        Question(
+            id=q["id"],
+            prompt=q["text"],
+            max_follow_ups=int(q.get("max_follow_ups", 0)),
+            follow_up_prompt=q.get("follow_up_prompt") or Question.follow_up_prompt,
+            expected_points=tuple(str(p) for p in q.get("expected_points", [])),
+            weight=int(q.get("weight", 1)),
+            language=q.get("language") or "en-US",
+        )
+        for q in questions_of(version)
+        if q.get("enabled", True)
     )
 
 
 async def rubric_rows(
-    db: AsyncSession, *, question_id: str, rubric_version_id: str | None
+    db: AsyncSession, *, question_id: str, bank_version_id: str | None
 ) -> list[RubricRow]:
-    """One question's rubric items: from the pinned version, or — for an interview started before
-    versioning (no version) — from the current default checklist. Empty when there is none."""
-    if rubric_version_id:
-        version = await get(db, rubric_version_id)
+    """One question's rubric items: from the pinned version, or — for an interview with no version
+    (started before versioning, or on a bank never published) — from the draft."""
+    if bank_version_id:
+        version = await get(db, bank_version_id)
         if version is not None:
-            items = questions_of(version).get(question_id, [])
+            question = _question_by_id(version).get(question_id)
+            items = question["rubric"] if question else []
             if not items:
-                # Legitimate for a question with no rubric, or one added after this version; logged
-                # so a whole interview scored without a rubric is visible rather than silent.
                 logger.info(
-                    "Rubric version %s has no items for question %s", version.id, question_id
+                    "Bank version %s has no rubric for question %s", version.id, question_id
                 )
             return sorted((_row_from(it) for it in items), key=lambda r: r.order_index)
-        logger.warning("Rubric version %s is gone; reading the live checklist", rubric_version_id)
+        logger.warning("Bank version %s is gone; reading the draft rubric", bank_version_id)
 
     from app.services import checklist_service
 
     checklist = await checklist_service.get_default_checklist(db, question_id)
     if checklist is None:
         return []
-    return [_row_from(_item_dict(r)) for r in await checklist_service.list_items(db, checklist.id)]
+    return [
+        _row_from({f: getattr(r, f) for f in ITEM_FIELDS})
+        for r in await checklist_service.list_items(db, checklist.id)
+    ]
 
 
-def question_count(version: RubricVersion) -> int:
-    return len(questions_of(version))
+def question_count(version: BankVersion) -> int:
+    """How many questions an interview on this version asks."""
+    return sum(1 for q in questions_of(version) if q.get("enabled", True))
 
 
 async def version_numbers(db: AsyncSession, version_ids: set[str]) -> dict[str, int]:
@@ -319,9 +387,7 @@ async def version_numbers(db: AsyncSession, version_ids: set[str]) -> dict[str, 
         return {}
     rows = (
         await db.execute(
-            select(RubricVersion.id, RubricVersion.version_no).where(
-                RubricVersion.id.in_(version_ids)
-            )
+            select(BankVersion.id, BankVersion.version_no).where(BankVersion.id.in_(version_ids))
         )
     ).all()
     return {vid: no for vid, no in rows}

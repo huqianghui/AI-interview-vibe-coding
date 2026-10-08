@@ -59,17 +59,26 @@ def parse_points(raw: str | None) -> tuple[str, ...]:
     return tuple(str(p) for p in parsed) if isinstance(parsed, list) else ()
 
 
-async def resolve_questions(db: AsyncSession, bank_id: str | None = None) -> tuple[Question, ...]:
-    """Ordered questions for an interview: the pinned bank's, the default bank's, or the fallback.
+async def resolve_questions(
+    db: AsyncSession, bank_id: str | None = None, bank_version_id: str | None = None
+) -> tuple[Question, ...]:
+    """Ordered questions for an interview: its pinned version's, else the bank's draft.
 
-    ``bank_id`` is the session's pinned bank (#187). A pinned bank is used even if it was disabled
-    after the interview started (an interview never changes question set mid-way); ``None`` (a
-    pre-#187 session, or a pinned bank since deleted) reads the current enabled default.
+    ``bank_version_id`` is the session's pinned published version (spec-bank-versioning): when set,
+    the questions come from that frozen copy only, so editing, disabling, deleting or re-importing
+    the bank's questions afterwards never changes what this interview asks, resumes or reviews.
 
-    Imported lazily to avoid a models/service import cycle at module load. Returns the fallback
-    when no bank resolves or the bank has no enabled questions.
+    Without one (an interview started before versioning, or on a bank never published): ``bank_id``
+    is the session's pinned bank (#187), used even if it was disabled after the interview started;
+    ``None`` reads the current enabled default. Returns the fallback when no bank resolves or the
+    bank has no enabled questions. Imported lazily to avoid a models/service import cycle.
     """
-    from app.services import question_service
+    from app.services import bank_version_service, question_service
+
+    if bank_version_id:
+        version = await bank_version_service.get(db, bank_version_id)
+        if version is not None:
+            return bank_version_service.interview_questions(version) or FALLBACK_QUESTIONS
 
     bank = await question_service.find_bank(db, bank_id) if bank_id else None
     if bank is None:
