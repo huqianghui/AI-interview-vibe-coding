@@ -132,16 +132,10 @@ answer-submission timing (auto-submit on/off + silence window) — synced to a r
 
 ## Architecture
 
-```
-frontend  React 18 + TypeScript + Vite + Fluent UI v9 (own design language, not the
-          factory theme) · TanStack Query · i18next (zh-CN / en-US)
-backend   Python 3.11 + FastAPI + SQLAlchemy 2.0 async + Alembic · JWT auth
-database  PostgreSQL 16 on Azure (private, Entra-only, managed-identity login) · SQLite for dev/tests
-azure     AI Foundry agents (Responses API) · Voice Live (avatar, via a backend WS proxy)
-          · Document Intelligence (SOP → Markdown) · Blob Storage · Foundry IQ (agent
-          knowledge in the editor Playground only; SOP grounding never goes through it)
-infra     Azure Container Apps (Sweden Central) · Bicep · GitHub Actions OIDC (keyless)
-```
+![Architecture: the browser reaches the frontend container (SPA + /api proxy, the only public URL); it proxies /api and the voice WebSocket to the internal backend (FastAPI), which calls PostgreSQL, Blob Storage, Azure AI Foundry, Voice Live and Document Intelligence with its managed identity; the avatar's video and audio reach the browser over WebRTC; GitHub Actions deploys through OIDC to the container registry and Container Apps](docs/images/system-architecture.svg)
+
+Foundry IQ serves only the agent in the editor Playground; SOP grounding never goes through it.
+Dev and tests run on SQLite with mock providers.
 
 ### SOP processing and scoring, end to end
 
