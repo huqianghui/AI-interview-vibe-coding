@@ -3,13 +3,18 @@
 Ingestion (writing them) lives in ``sop_ingestion``.
 """
 
+import asyncio
+import logging
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.interview import state_machine
 from app.models.interview import InterviewSession
 from app.models.sop import SopChunk, SopDocument
-from app.services.storage import get_storage
+from app.services import storage
+
+logger = logging.getLogger(__name__)
 
 
 async def list_documents_with_chunk_counts(db: AsyncSession) -> list[tuple[SopDocument, int]]:
@@ -42,6 +47,9 @@ async def load_cited_document(
     if doc is None or not doc.blob_path:
         return None
     try:
-        return doc, get_storage().load(doc.blob_path)
+        return doc, await asyncio.to_thread(storage.load, doc.blob_path)
     except (FileNotFoundError, OSError):
+        logger.warning(
+            "SOP %s (%r) is cited but its bytes are missing: %s", doc.id, doc.name, doc.blob_path
+        )
         return None

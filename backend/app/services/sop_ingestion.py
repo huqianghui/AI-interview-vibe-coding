@@ -17,12 +17,17 @@ degrade to empty on a missing dep, which this service treats as a graceful ``fai
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import uuid
 from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.sop import SopChunk, SopDocument
 from app.sop.extraction import chunk_text, extract_segments
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -50,14 +55,19 @@ async def ingest_document(
     section label of the segment they came from (AC #1).
     """
     # Lazy import so the storage backend (and its config) is resolved at call time, and tests can
-    # override it. Local filesystem in dev/CI.
+    # override it. Local filesystem in dev/CI, Azure Blob in production.
     from app.services.storage import get_storage
 
     store = get_storage()
-    key = storage_key or f"{filename}"
+    # A per-upload prefix: two uploads of the same file name must not overwrite each other's bytes.
+    key = storage_key or f"{uuid.uuid4().hex}/{filename}"
     try:
-        blob_path = store.save(key, content)
+        # The Azure client is synchronous; keep its network round-trip off the event loop.
+        blob_path = await asyncio.to_thread(store.save, key, content)
     except Exception:  # noqa: BLE001 — storage failure shouldn't lose the document record
+        logger.exception(
+            "Could not store the bytes of SOP %r; the row is kept without them", filename
+        )
         blob_path = ""
 
     document = SopDocument(

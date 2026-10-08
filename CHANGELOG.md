@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.51.1.0 (2026-10-08)
+
+### Fixed
+- **Report SOP citation links open again.** The original SOP files were kept on the backend
+  container's own disk, which every new revision throws away, while PostgreSQL kept their rows. The
+  boot importer saw each document as already imported and never wrote the file again, so every
+  citation link answered 404 (measured live: 26 documents, 0 files).
+- SOP originals are now stored in the private `materials` blob container with the backend's managed
+  identity. Each upload gets its own folder, so two files with the same name no longer overwrite
+  each other.
+- On boot, any SOP whose stored file is missing is restored from its original in the client bundle,
+  matched by file name. Once the files are in blob this finds nothing to do.
+
+### Security
+- The backend identity can write only to the `materials` container. It still only reads the client
+  bundle.
+
 ## 0.51.0.4 (2026-10-08)
 
 ### Security

@@ -71,9 +71,16 @@ class Settings(BaseSettings):
     client_banks_dir: str = "/app/_client_bundle/extra_banks"
 
     # SOP blob storage (F1). Raw uploads live here, never in the DB and never handed to candidates
-    # directly (P4). Local filesystem in dev/CI; a blob backend can be swapped in prod.
+    # directly (P4). "local" (dev/CI) writes under material_storage_path; "azure" writes to the
+    # material_blob_container of azure_storage_account_url with the managed identity. Production
+    # MUST be "azure": a Container App's disk does not survive a new revision (services/storage).
     default_storage_provider: str = "local"
     material_storage_path: str = "./_sop_storage"
+    azure_storage_account_url: str = ""
+    material_blob_container: str = "materials"
+    # Where boot looks for the original of an SOP whose stored bytes are missing (by file name).
+    # The private client bundle extracts here (entrypoint.sh); absent in dev/CI → nothing to repair.
+    sop_repair_source_dir: str = "/app/_client_bundle"
     # Max upload size (MB) accepted by the SOP ingestion endpoint.
     material_max_size_mb: int = 25
 
