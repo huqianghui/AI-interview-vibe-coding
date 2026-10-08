@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.52.0.0 (2026-10-08)
+
+### Added
+- **Rubric versions.** Saving a rubric, generating one with AI, or importing a bank now freezes the
+  bank's whole rubric as an immutable version. A save that changes nothing creates no version.
+- **A rubric version is part of a user's assignment.** Picking a bank for a user selects its latest
+  version by default; the Users tab can pick an older one.
+- **An interview is scored against the version it started with.** Scoring, the SOP coverage audit,
+  the live judge and the report's SOP links all read that version, so editing a rubric no longer
+  changes how an interview that already ran is scored. Interviews started before this release keep
+  reading the current rubric, as before.
+- The rubric editor shows the version its last save produced, the SOP document each item cites, and
+  which forbidden items are disclosure-only. Interview results show the rubric version.
+
+### Fixed
+- **Saving a rubric in the editor no longer removes its SOP links or changes scores.** The editor
+  did not send back each item's SOP document or its disclosure-only flag, so one save unlinked every
+  citation and turned every disclosure-only forbidden item into one that deducts points. A tab still
+  running the old page keeps both values too.
+
 ## 0.51.1.0 (2026-10-08)
 
 ### Fixed
