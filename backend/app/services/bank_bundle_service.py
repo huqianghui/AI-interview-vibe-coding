@@ -36,7 +36,7 @@ from app.interview.checklist_draft import ChecklistDraft, DraftItem, normalize_w
 from app.models.checklist import Checklist, ChecklistItem
 from app.models.question import Question, QuestionBank
 from app.models.sop import SopDocument
-from app.services import checklist_service, question_service
+from app.services import checklist_service, question_service, rubric_version_service
 
 
 @dataclass
@@ -207,10 +207,13 @@ async def import_bank_bundle(db: AsyncSession, bundle: dict) -> ImportResult:
                 prompt_version=str(checklist_spec.get("prompt_version", "imported_v1")),
                 items=items,
             )
-            await checklist_service._persist_draft(db, question.id, draft)
+            await checklist_service._persist_draft(db, question.id, draft, snapshot=False)
             total_items += len(items)
 
     await db.commit()
+    await db.refresh(bank)
+    # One version for the whole import (spec-rubric-versioning); none when nothing changed.
+    await rubric_version_service.snapshot(db, bank.id, reason="import")
     await db.refresh(bank)
     return ImportResult(
         bank_id=bank.id,

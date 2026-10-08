@@ -7,6 +7,7 @@ to the rubric) and are gated by ``require_role("admin")`` (SPEC P3).
 """
 
 import logging
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -14,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.dependencies import require_role
-from app.services import bank_bundle_service, checklist_service
+from app.services import bank_bundle_service, checklist_service, rubric_version_service
 from app.services import question_service as svc
 from app.services.question_service import (
     QuestionBankConflict,
@@ -187,6 +188,40 @@ async def set_default(bank_id: str, db: AsyncSession = Depends(get_db)) -> BankO
         return _bank_out(await svc.set_default_bank(db, bank_id))
     except QuestionBankNotFound as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bank not found") from exc
+
+
+class RubricVersionOut(BaseModel):
+    id: str
+    version_no: int
+    created_at: datetime | None
+    reason: str
+    question_count: int
+    is_latest: bool
+
+
+@router.get("/{bank_id}/rubric-versions", response_model=list[RubricVersionOut])
+async def list_rubric_versions(
+    bank_id: str, db: AsyncSession = Depends(get_db)
+) -> list[RubricVersionOut]:
+    """The bank's rubric versions, newest first (spec-rubric-versioning). A bank that has never had
+    one gets its first here, so the assignment picker always has something to offer."""
+    try:
+        await svc.get_bank(db, bank_id)
+    except QuestionBankNotFound as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bank not found") from exc
+    await rubric_version_service.ensure_latest(db, bank_id)
+    versions = await rubric_version_service.list_versions(db, bank_id)
+    return [
+        RubricVersionOut(
+            id=v.id,
+            version_no=v.version_no,
+            created_at=v.created_at,
+            reason=v.reason,
+            question_count=rubric_version_service.question_count(v),
+            is_latest=i == 0,
+        )
+        for i, v in enumerate(versions)
+    ]
 
 
 @router.get("/{bank_id}/questions", response_model=list[AdminQuestionOut])

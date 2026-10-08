@@ -25,6 +25,7 @@ from app.schemas.history import (
     InterviewResultsPage,
     TranscriptTurn,
 )
+from app.services import rubric_version_service
 
 # ``started_at`` carries microseconds, ``created_at`` may not (two interviews in one second tie).
 # NULLS LAST spelled out: PostgreSQL puts NULLs FIRST on DESC (SQLite last), which would float a
@@ -111,6 +112,11 @@ async def get_detail(
     if row is None:
         return None
     session = row[0]
+    numbers = (
+        await rubric_version_service.version_numbers(db, {session.rubric_version_id})
+        if candidate is None and session.rubric_version_id
+        else {}
+    )
     turns = (
         await db.execute(
             select(InterviewTurn)
@@ -131,6 +137,7 @@ async def get_detail(
             )
             for t in turns
         ],
+        rubric_version_no=numbers.get(session.rubric_version_id or ""),
     )
 
 
@@ -216,6 +223,10 @@ async def search_results(
         .limit(limit)
         .offset(offset)
     )
+    result_rows = rows.all()
+    numbers = await rubric_version_service.version_numbers(
+        db, {r[0].rubric_version_id for r in result_rows if r[0].rubric_version_id}
+    )
     items = [
         InterviewResultItem(
             **_item(session, persona_name, bank_name).model_dump(),
@@ -223,7 +234,8 @@ async def search_results(
             username=username,
             persona_id=session.persona_id,
             bank_id=session.bank_id,
+            rubric_version_no=numbers.get(session.rubric_version_id or ""),
         )
-        for session, persona_name, bank_name, user_id, username in rows.all()
+        for session, persona_name, bank_name, user_id, username in result_rows
     ]
     return InterviewResultsPage(items=items, total=total, limit=limit, offset=offset)

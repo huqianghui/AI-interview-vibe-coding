@@ -3,7 +3,8 @@
 A logged-in candidate's own assignment (``User.assigned_persona_id`` / ``assigned_bank_id``) wins
 when the target still exists and is enabled; otherwise, field by field, the global default. An
 anonymous candidate (no ``user_id``) always gets the default. The result is pinned onto the
-interview at start, so a later change to either never touches a live interview.
+interview at start, so a later change to either never touches a live interview. So is the rubric
+version: the user's assigned one when it belongs to that bank, else the bank's latest.
 """
 
 from dataclasses import dataclass
@@ -12,13 +13,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.anonymous_session import AnonymousCandidateSession
 from app.models.persona import InterviewerPersona
-from app.services import persona_service, question_service, user_service
+from app.services import (
+    persona_service,
+    question_service,
+    rubric_version_service,
+    user_service,
+)
 
 
 @dataclass(frozen=True)
 class StartAssignment:
     persona: InterviewerPersona | None
     bank_id: str | None
+    # The rubric version the interview pins (spec-rubric-versioning).
+    rubric_version_id: str | None = None
 
 
 async def resolve_for_candidate(
@@ -45,4 +53,10 @@ async def resolve_for_candidate(
     if bank is None:
         bank = await question_service.get_default_bank(db)
 
-    return StartAssignment(persona=persona, bank_id=bank.id if bank else None)
+    bank_id = bank.id if bank else None
+    # The user's assigned version when it is a version of THIS bank (the bank may have fallen back
+    # to the default above), else the bank's latest.
+    rubric_version_id = await rubric_version_service.resolve_for_start(
+        db, bank_id, user.assigned_rubric_version_id if user is not None else None
+    )
+    return StartAssignment(persona=persona, bank_id=bank_id, rubric_version_id=rubric_version_id)
