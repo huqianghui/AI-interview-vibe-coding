@@ -30,6 +30,8 @@ living specification is [`../../SPEC.md`](../../SPEC.md) at the repo root — st
 
 ## Post-spec feature specs
 
+- [`spec-bank-versioning.md`](spec-bank-versioning.md) — 题库版本：一套题目 + 一套评分标准作为一个整体冻结，
+  任何修改都生成新版本；取代 spec-rubric-versioning（v0.52.0.0 只冻结了评分标准）。
 - [`spec-rubric-versioning.md`](spec-rubric-versioning.md) — immutable rubric versions: chosen at
   user assignment (default latest), pinned on the interview at start, read by scoring, the coverage
   audit and the SOP-citation guard; also fixes the editor dropping SOP links and advisory flags.
