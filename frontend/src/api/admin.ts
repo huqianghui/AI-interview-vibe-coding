@@ -494,7 +494,8 @@ export interface CitationRunRow {
   item: string;
   old: { document_name: string; quote: string };
   new: { sections: { document_name: string; section: string; title: string }[]; quote: string };
-  how: "label" | "search" | "none" | "error";
+  // edited = the rubric was saved during the run, so this item's result was not written.
+  how: "label" | "search" | "none" | "error" | "edited";
 }
 
 export interface CitationRun {

@@ -91,6 +91,9 @@ export function useContentTab(guard: Guard) {
   // Stable (the panel's effect depends on it); reads the open question through a ref.
   const openQuestion = useRef<string | null>(null);
   openQuestion.current = selectedQuestion;
+  const unsaved = useRef(false);
+  unsaved.current =
+    checklist !== null && JSON.stringify(editItems) !== JSON.stringify(checklist.items);
   const reloadAfterRelocate = useCallback(() => {
     void guard(async () => {
       await loadBanks();
@@ -99,7 +102,8 @@ export function useContentTab(guard: Guard) {
       try {
         const fresh = await admin.getChecklist(questionId);
         setChecklist(fresh);
-        setEditItems(fresh.items.map((it) => ({ ...it })));
+        // Unsaved edits in the open rubric are kept: the admin saves or reloads them knowingly.
+        if (!unsaved.current) setEditItems(fresh.items.map((it) => ({ ...it })));
       } catch {
         // none drafted
       }

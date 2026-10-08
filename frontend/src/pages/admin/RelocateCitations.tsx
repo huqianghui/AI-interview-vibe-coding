@@ -22,7 +22,13 @@ import { useAdminStyles } from "./shared";
 
 export const RELOCATE_POLL_MS = 3000;
 
-const HOW_COLOR = { label: "brand", search: "success", none: "warning", error: "danger" } as const;
+const HOW_COLOR = {
+  label: "brand",
+  search: "success",
+  none: "warning",
+  error: "danger",
+  edited: "informative",
+} as const;
 
 export function RelocateCitations({ bankId, onDone }: { bankId: string; onDone: () => void }) {
   const styles = useAdminStyles();
@@ -39,9 +45,13 @@ export function RelocateCitations({ bankId, onDone }: { bankId: string; onDone: 
     }
   }, [bankId]);
 
+  // A run just finished: the draft rubric changed underneath the editor. Tracked per bank, so
+  // switching banks mid-run is not mistaken for a finish.
+  const [wasRunning, setWasRunning] = useState(false);
   useEffect(() => {
     setRun(null);
     setOpen(false);
+    setWasRunning(false);
     void load();
   }, [load]);
 
@@ -52,15 +62,13 @@ export function RelocateCitations({ bankId, onDone }: { bankId: string; onDone: 
     return () => clearInterval(timer);
   }, [running, load]);
 
-  // A run just finished: the draft rubric changed underneath the editor.
-  const [wasRunning, setWasRunning] = useState(false);
   useEffect(() => {
-    if (wasRunning && !running) {
+    if (wasRunning && !running && run !== null) {
       setOpen(true);
       onDone();
     }
     setWasRunning(running);
-  }, [running, wasRunning, onDone]);
+  }, [running, wasRunning, run, onDone]);
 
   const start = async () => {
     setError(null);
@@ -71,7 +79,7 @@ export function RelocateCitations({ bankId, onDone }: { bankId: string; onDone: 
     }
   };
 
-  const counts = { label: 0, search: 0, none: 0, error: 0 };
+  const counts = { label: 0, search: 0, none: 0, error: 0, edited: 0 };
   for (const row of run?.rows ?? []) counts[row.how] += 1;
 
   return (

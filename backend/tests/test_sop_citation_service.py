@@ -88,11 +88,17 @@ async def test_labels_name_documents_and_sections():
     parts = parse_label(
         "Widget Release Procedure SOP sections 4.1, 4.2 and 5; Release Manager JD; Handbook", docs
     )
-    assert [(p.document_id, p.numbers) for p in parts] == [
-        ("a", ["4.1", "4.2", "5"]),
-        ("b", []),  # the shorter name wins over "Senior Release Manager"
-        (None, []),
+    assert [(p.document_id, p.exact, p.numbers) for p in parts] == [
+        ("a", True, ["4.1", "4.2", "5"]),
+        ("b", True, []),  # "Release Manager" covers the senior name only 2/3
+        (None, False, []),
     ]
+    # Both names fully covered: the longer one explains more of the label.
+    (senior,) = parse_label("Senior Release Manager JD section 3", docs)
+    assert (senior.document_id, senior.exact) == ("c", True)
+    # A partial name narrows the search but its sections are not taken as given.
+    (partial,) = parse_label("Senior Release section 3", docs)  # 2 of 3 name words
+    assert (partial.document_id, partial.exact, partial.numbers) == ("c", False, ["3"])
     (rng,) = parse_label("Widget Release Procedure sections 5.1-5.3", docs)
     assert rng.ranges == [("5.1", "5.3")]
     assert expand_range("5.1", "5.3", ["5", "5.1", "5.1.1", "5.2", "§2", "5.3", "5.4"]) == [
@@ -197,6 +203,8 @@ async def test_a_run_interrupted_by_a_restart_does_not_block_the_next(db_session
     stale = CitationRun(bank_id=bank.id, status="running")
     db_session.add(stale)
     await db_session.commit()
+    stale.updated_at = sop_citation_service._now() - sop_citation_service.STALE_AFTER * 2
+    await db_session.commit()
     run = await sop_citation_service.start_relocation(db_session, db_session._test_factory, bank.id)
     assert run.id != stale.id
     await db_session.refresh(stale)
@@ -237,3 +245,105 @@ async def test_the_real_model_picks_the_section_that_states_the_item(db_session)
     (item,) = await checklist_service.list_items(db_session, checklist)
     assert json.loads(item.source_refs)[0] == {"document_id": widget, "section": "5"}
     assert "escalated to the site lead" in item.source_quote
+
+
+class _Cite1(ScriptedJudgeAdapter):
+    name = "scripted"
+
+    async def complete(self, prompt, *, json_mode=False, fast=False):
+        return json.dumps({"cite": ["C1"], "quote": ""})
+
+
+async def test_an_item_saved_during_the_run_is_reported_not_written(db_session, monkeypatch):
+    await _corpus(db_session)
+    bank, checklist_id = await _bank(db_session, [("Gets sign-off", 100, "")])
+    run = CitationRun(bank_id=bank.id)
+    db_session.add(run)
+    await db_session.commit()
+    run_id = run.id
+    real_locate = sop_citation_service._locate
+
+    async def admin_saves_meanwhile(*args, **kwargs):
+        located = await real_locate(*args, **kwargs)
+        await checklist_service.update_items(
+            db_session, checklist_id, [{"kind": "required", "text": "Gets sign-off", "weight": 100}]
+        )
+        return located
+
+    monkeypatch.setattr(sop_citation_service, "_locate", admin_saves_meanwhile)
+    await sop_citation_service.relocate(db_session, run, _Cite1())
+    db_session.expire_all()
+    (row,) = json.loads((await db_session.get(CitationRun, run_id)).report_json)
+    assert row["how"] == "edited" and row["new"]["sections"] == []
+
+
+async def test_a_second_run_keeps_the_sections_an_item_already_cites(db_session):
+    widget, _ = await _corpus(db_session)
+    bank, checklist_id = await _bank(db_session, [("Gets sign-off", 100, "")])
+    (item,) = await checklist_service.list_items(db_session, checklist_id)
+    item.source_refs = json.dumps([{"document_id": widget, "section": "4.2"}])
+    await db_session.commit()
+
+    class Quote(ScriptedJudgeAdapter):
+        name = "scripted"
+
+        async def complete(self, prompt, *, json_mode=False, fast=False):
+            assert "every candidate id" in prompt  # fixed: the model only finds the quote
+            return json.dumps({"cite": [], "quote": "The Quality Manager signs the release form"})
+
+    run = CitationRun(bank_id=bank.id)
+    db_session.add(run)
+    await db_session.commit()
+    await sop_citation_service.relocate(db_session, run, Quote())
+    db_session.expire_all()
+    (item,) = await checklist_service.list_items(db_session, checklist_id)
+    assert json.loads(item.source_refs) == [{"document_id": widget, "section": "4.2"}]
+    assert item.source_quote == "The Quality Manager signs the release form"
+
+
+async def test_a_failed_lookup_leaves_the_item_as_it_was(db_session, monkeypatch):
+    await _corpus(db_session)
+    bank, checklist_id = await _bank(db_session, [("Gets sign-off", 100, "keep me")])
+
+    async def broken(*_a, **_k):
+        raise RuntimeError("model down")
+
+    monkeypatch.setattr(sop_citation_service, "_locate", broken)
+    run = CitationRun(bank_id=bank.id)
+    db_session.add(run)
+    await db_session.commit()
+    run_id = run.id
+    await sop_citation_service.relocate(db_session, run, _Cite1())
+    db_session.expire_all()
+    (item,) = await checklist_service.list_items(db_session, checklist_id)
+    assert item.source_quote == "keep me"
+    (row,) = json.loads((await db_session.get(CitationRun, run_id)).report_json)
+    assert row["how"] == "error"
+
+
+async def test_the_database_allows_one_running_run_per_bank(db_session):
+    from sqlalchemy.exc import IntegrityError
+
+    bank, _ = await _bank(db_session, [("x", 100, "")])
+    bank_id = bank.id
+    db_session.add(CitationRun(bank_id=bank_id, status="running"))
+    await db_session.commit()
+    db_session.add(CitationRun(bank_id=bank_id, status="running"))
+    with pytest.raises(IntegrityError):
+        await db_session.commit()
+    await db_session.rollback()
+    db_session.add(CitationRun(bank_id=bank_id, status="done"))
+    await db_session.commit()  # finished runs are not limited
+
+
+async def test_a_recent_run_from_another_process_is_not_taken_over(db_session):
+    bank, _ = await _bank(db_session, [("x", 100, "")])
+    other = CitationRun(bank_id=bank.id, status="running")
+    db_session.add(other)
+    await db_session.commit()
+    other.updated_at = sop_citation_service._now()  # heartbeat just now, not in this process
+    await db_session.commit()
+    again = await sop_citation_service.start_relocation(
+        db_session, db_session._test_factory, bank.id
+    )
+    assert again.id == other.id

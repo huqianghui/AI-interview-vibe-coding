@@ -42,14 +42,19 @@ class DocumentName:
 @dataclass
 class LabelPart:
     document_id: str | None
+    # True when the label names every word of the document's name: only then are its listed
+    # sections taken as given. A partial match only narrows the search, which the model checks.
+    exact: bool = False
     numbers: list[str] = field(default_factory=list)
     # (start, end) of each range written as "5.1-5.8".
     ranges: list[tuple[str, str]] = field(default_factory=list)
 
 
-def match_document(text: str, documents: Sequence[DocumentName]) -> str | None:
-    """The document a label part names: the one whose name words it covers best (ties to the
-    shorter name, so "Clinical Study Manager" is not "Senior Clinical Study Manager")."""
+def match_document(text: str, documents: Sequence[DocumentName]) -> tuple[str | None, float]:
+    """The document a label part names, and how fully: the one whose name words it covers best.
+    Equal cover goes to the LONGER name, the one that explains more of the label ("Senior Clinical
+    Study Manager JD" is the senior role's document; "Clinical Study Manager JD" covers the senior
+    name only 3/4 and so already prefers the other)."""
     label = _words(text)
     best: tuple[float, int, str] | None = None
     for doc in documents:
@@ -57,10 +62,10 @@ def match_document(text: str, documents: Sequence[DocumentName]) -> str | None:
         if not words:
             continue
         cover = len(label & words) / len(words)
-        key = (cover, -len(words), doc.document_id)
+        key = (cover, len(words), doc.document_id)
         if cover >= MATCH_MIN and (best is None or key > best):
             best = key
-    return best[2] if best else None
+    return (best[2], best[0]) if best else (None, 0.0)
 
 
 def parse_label(label: str, documents: Sequence[DocumentName]) -> list[LabelPart]:
@@ -78,8 +83,8 @@ def parse_label(label: str, documents: Sequence[DocumentName]) -> list[LabelPart
                 ranges.append((start, end))
             singles = _RANGE.sub(" ", listed)
             numbers.extend(_NUMBER.findall(singles))
-        name_text = _SECTIONS.sub(" ", raw)
-        parts.append(LabelPart(match_document(name_text, documents), numbers, ranges))
+        document_id, cover = match_document(_SECTIONS.sub(" ", raw), documents)
+        parts.append(LabelPart(document_id, cover == 1.0, numbers, ranges))
     return parts
 
 

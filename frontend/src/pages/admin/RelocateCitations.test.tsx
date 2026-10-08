@@ -49,7 +49,7 @@ describe("RelocateCitations", () => {
       await vi.advanceTimersByTimeAsync(RELOCATE_POLL_MS);
       await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
       expect(screen.getByTestId("relocate-summary")).toHaveTextContent(
-        "2 items: 1 from their label, 0 found by search, 1 with no SOP found, 0 failed.",
+        "2 items: 1 from their label, 0 found by search, 1 with no SOP found, 0 failed, 0 edited",
       );
       const rows = screen.getByTestId("relocate-rows");
       expect(rows).toHaveTextContent("Widget SOP.pdf · 4.2 Approval — “Sign within 24 hours.”");

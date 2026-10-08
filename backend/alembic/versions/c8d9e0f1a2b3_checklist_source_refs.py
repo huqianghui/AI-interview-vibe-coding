@@ -45,9 +45,18 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(), server_default=sa.func.now()),
     )
     op.create_index("ix_citation_runs_bank_id", "citation_runs", ["bank_id"])
+    op.create_index(
+        "uq_citation_runs_one_running",
+        "citation_runs",
+        ["bank_id"],
+        unique=True,
+        sqlite_where=sa.text("status = 'running'"),
+        postgresql_where=sa.text("status = 'running'"),
+    )
 
 
 def downgrade() -> None:
+    op.drop_index("uq_citation_runs_one_running", table_name="citation_runs")
     op.drop_index("ix_citation_runs_bank_id", table_name="citation_runs")
     op.drop_table("citation_runs")
     if op.get_bind().dialect.name == "sqlite":

@@ -24,8 +24,10 @@ import json
 import logging
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.checklist import Checklist, ChecklistItem
@@ -58,10 +60,22 @@ def _flat(text: str) -> str:
     return re.sub(r"\s+", " ", _MARKS.sub(" ", text)).strip().lower()
 
 
+# A quote shorter than this is a fragment, not a supporting sentence.
+MIN_QUOTE_CHARS = 20
+
+
 def verbatim_in(quote: str, text: str) -> bool:
     """Whether ``quote`` is copied from ``text`` (whitespace, case and Markdown marks aside)."""
     q = _flat(quote)
-    return len(q) >= 12 and q in _flat(text)
+    return len(q) >= MIN_QUOTE_CHARS and q in _flat(text)
+
+
+# The section text cannot close its own candidate tag, whatever its case or spacing.
+_CLOSE = re.compile(r"(?i)</\s*candidate\s*>")
+
+
+def _attr(value: str) -> str:
+    return value.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")
 
 
 @dataclass(frozen=True)
@@ -74,8 +88,8 @@ def _choose_prompt(
     question: str, item: str, candidates: list[CitedSection], *, fixed: bool, preview: int
 ) -> str:
     blocks = "\n\n".join(
-        f'<candidate id="C{i + 1}" document="{c.document_name}" section="{c.label}">\n'
-        f"{c.text[:preview].replace('</candidate>', '')}\n</candidate>"
+        f'<candidate id="C{i + 1}" document="{_attr(c.document_name)}" '
+        f'section="{_attr(c.label)}">\n{_CLOSE.sub("", c.text[:preview])}\n</candidate>'
         for i, c in enumerate(candidates)
     )
     cite_rule = (
@@ -133,6 +147,9 @@ async def candidates_for(
     return await sop_citation.resolve(db, [SectionRef(c.document_id, c.number) for c in found])
 
 
+_HOWS = ("label", "search", "none", "error", "edited")
+
+
 @dataclass(frozen=True)
 class _Item:
     """One rubric item as plain values: the ORM rows expire at every commit of a long run."""
@@ -143,13 +160,15 @@ class _Item:
     document_id: str | None
     question_no: int
     question: str
+    # Sections the item already cites (an earlier run, or an admin): kept, only the quote is found.
+    refs: tuple[SectionRef, ...] = ()
 
 
 @dataclass
 class _Located:
     item_id: str
     choice: Choice
-    how: str  # label | search | none
+    how: str  # label | search | none | error | edited
 
 
 async def _locate(
@@ -163,12 +182,14 @@ async def _locate(
     sem: asyncio.Semaphore,
 ) -> _Located:
     question = item.question
-    label_refs: list[SectionRef] = []
+    label_refs: list[SectionRef] = list(item.refs)
     label_docs: list[str] = []
-    for part in parse_label(item.label, documents):
+    for part in [] if item.refs else parse_label(item.label, documents):
         if part.document_id is None:
             continue
         label_docs.append(part.document_id)
+        if not part.exact:
+            continue  # a partial name narrows the search; its sections are not taken as given
         listed = list(part.numbers)
         for start, end in part.ranges:
             listed += expand_range(start, end, numbers.get(part.document_id, []))
@@ -242,7 +263,15 @@ async def relocate(db: AsyncSession, run: CitationRun, llm: LLMAdapter | None = 
             .all()
         )
         work += [
-            _Item(it.id, it.text, it.source_quote, it.source_document_id, number, q.text)
+            _Item(
+                it.id,
+                it.text,
+                it.source_quote,
+                it.source_document_id,
+                number,
+                q.text,
+                tuple(sop_citation.parse_refs(it.source_refs)),
+            )
             for it in items
         ]
     run.total = len(work)
@@ -280,10 +309,9 @@ async def relocate(db: AsyncSession, run: CitationRun, llm: LLMAdapter | None = 
             logger.exception("Locating the citation of rubric item %s failed", it.id)
             located = _Located(it.id, Choice((), ""), "error")
         done += 1
-        if done % 10 == 0 or done == len(work):
-            async with db_lock:
-                run.done = done
-                await db.commit()
+        async with db_lock:  # every item: `updated_at` is the run's heartbeat
+            run.done = done
+            await db.commit()
         return it, located
 
     results = await asyncio.gather(*(one(it) for it in work))
@@ -312,12 +340,17 @@ async def relocate(db: AsyncSession, run: CitationRun, llm: LLMAdapter | None = 
                 "source_quote": "",
             }
         if values is not None:
-            await db.execute(
+            written = await db.execute(
                 update(ChecklistItem)
                 .where(ChecklistItem.id == it.id)
                 .values(**values)
                 .execution_options(synchronize_session=False)
             )
+            if written.rowcount == 0:
+                # The admin saved the rubric during the run (a save replaces every row): this
+                # result was not written, and the report says so.
+                located = _Located(it.id, Choice((), ""), "edited")
+                choice = located.choice
         rows.append(
             {
                 "question_no": it.question_no,
@@ -337,12 +370,25 @@ async def relocate(db: AsyncSession, run: CitationRun, llm: LLMAdapter | None = 
         "Relocated %d citation(s) in bank %s: %s",
         len(rows),
         run.bank_id,
-        {how: sum(r["how"] == how for r in rows) for how in ("label", "search", "none", "error")},
+        {
+            h: sum(r["how"] == h for r in rows)
+            for h in ("label", "search", "none", "error", "edited")
+        },
     )
 
 
 # Runs started by the admin API; held so they are not garbage-collected, cancelled at shutdown.
 RUNS: set[asyncio.Task] = set()
+# A running row whose heartbeat (``updated_at``, touched after every item) is older than this, and
+# that this process is not executing, was interrupted. Items take ~10 s; a model call is bounded at
+# 90 s with up to 3 attempts.
+STALE_AFTER = timedelta(minutes=10)
+
+
+def _now() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
 # Ids of the runs this process is executing: a "running" row not among them was interrupted (a
 # restart or a deploy) and must not block the next run.
 _LIVE: set[str] = set()
@@ -385,13 +431,27 @@ async def start_relocation(db: AsyncSession, session_factory, bank_id: str) -> C
         )
     ).scalar_one_or_none()
     if running is not None:
-        if running.id in _LIVE:
+        heartbeat = running.updated_at or running.created_at
+        alive = running.id in _LIVE or (heartbeat is not None and _now() - heartbeat < STALE_AFTER)
+        if alive:
             return running
         running.status = "failed"
         running.error = "interrupted (the server restarted); run it again"
+        await db.commit()
     run = CitationRun(bank_id=bank_id, status="running")
     db.add(run)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Another request (or another replica) started one first: at most one per bank, in the DB.
+        await db.rollback()
+        return (
+            await db.execute(
+                select(CitationRun).where(
+                    CitationRun.bank_id == bank_id, CitationRun.status == "running"
+                )
+            )
+        ).scalar_one()
     _LIVE.add(run.id)
     task = asyncio.create_task(_run(session_factory, run.id))
     RUNS.add(task)

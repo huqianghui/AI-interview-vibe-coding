@@ -10,7 +10,7 @@ PUBLIC repo: no real SOP content is stored in this repo — these are schema def
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -100,6 +100,16 @@ class CitationRun(TimestampMixin, Base):
     """
 
     __tablename__ = "citation_runs"
+    # At most one running run per bank, in the database (two replicas, two quick clicks).
+    __table_args__ = (
+        Index(
+            "uq_citation_runs_one_running",
+            "bank_id",
+            unique=True,
+            sqlite_where=text("status = 'running'"),
+            postgresql_where=text("status = 'running'"),
+        ),
+    )
 
     bank_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("question_banks.id", ondelete="CASCADE"), nullable=False, index=True
