@@ -2707,13 +2707,33 @@
             "title": "Chunk Count",
             "type": "integer"
           },
+          "converting": {
+            "default": false,
+            "title": "Converting",
+            "type": "boolean"
+          },
           "document_id": {
             "title": "Document Id",
+            "type": "string"
+          },
+          "markdown_error": {
+            "default": "",
+            "title": "Markdown Error",
+            "type": "string"
+          },
+          "markdown_source": {
+            "default": "",
+            "title": "Markdown Source",
             "type": "string"
           },
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "section_count": {
+            "default": 0,
+            "title": "Section Count",
+            "type": "integer"
           },
           "size": {
             "title": "Size",
@@ -2732,6 +2752,94 @@
           "chunk_count"
         ],
         "title": "SopDocumentOut",
+        "type": "object"
+      },
+      "SopSectionOut": {
+        "properties": {
+          "full_length": {
+            "title": "Full Length",
+            "type": "integer"
+          },
+          "level": {
+            "title": "Level",
+            "type": "integer"
+          },
+          "number": {
+            "title": "Number",
+            "type": "string"
+          },
+          "order_index": {
+            "title": "Order Index",
+            "type": "integer"
+          },
+          "page_end": {
+            "title": "Page End",
+            "type": "integer"
+          },
+          "page_start": {
+            "title": "Page Start",
+            "type": "integer"
+          },
+          "parent_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Index"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "order_index",
+          "number",
+          "title",
+          "level",
+          "parent_index",
+          "page_start",
+          "page_end",
+          "full_length"
+        ],
+        "title": "SopSectionOut",
+        "type": "object"
+      },
+      "SopSectionTextOut": {
+        "properties": {
+          "full_text": {
+            "title": "Full Text",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "string"
+          },
+          "page_end": {
+            "title": "Page End",
+            "type": "integer"
+          },
+          "page_start": {
+            "title": "Page Start",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "number",
+          "title",
+          "page_start",
+          "page_end",
+          "full_text"
+        ],
+        "title": "SopSectionTextOut",
         "type": "object"
       },
       "TestChatIn": {
@@ -5110,6 +5218,163 @@
           }
         ],
         "summary": "Upload Document",
+        "tags": [
+          "admin-sop"
+        ]
+      }
+    },
+    "/admin/sop/documents/{document_id}/rebuild": {
+      "post": {
+        "description": "Convert the document again in the background (after a converter improvement, or a failed\nconversion). Returns at once with ``converting`` set; the list shows the result when done. A\nfailure keeps the previous complete conversion, if there is one.",
+        "operationId": "rebuild_sections_admin_sop_documents__document_id__rebuild_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SopDocumentOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Rebuild Sections",
+        "tags": [
+          "admin-sop"
+        ]
+      }
+    },
+    "/admin/sop/documents/{document_id}/sections": {
+      "get": {
+        "description": "The document's sections in order, each with the length of its full passage.",
+        "operationId": "list_sections_admin_sop_documents__document_id__sections_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SopSectionOut"
+                  },
+                  "title": "Response List Sections Admin Sop Documents  Document Id  Sections Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Sections",
+        "tags": [
+          "admin-sop"
+        ]
+      }
+    },
+    "/admin/sop/documents/{document_id}/sections/{order_index}": {
+      "get": {
+        "description": "One section's full passage: its own text and every subsection's, never truncated.",
+        "operationId": "section_text_admin_sop_documents__document_id__sections__order_index__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "order_index",
+            "required": true,
+            "schema": {
+              "title": "Order Index",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SopSectionTextOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Section Text",
         "tags": [
           "admin-sop"
         ]

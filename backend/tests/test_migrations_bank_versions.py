@@ -69,7 +69,7 @@ def test_upgrade_backfills_version_one_with_questions_and_downgrade_removes_it(t
     conn.commit()
     conn.close()
 
-    _alembic(db, "upgrade", "head")
+    _alembic(db, "upgrade", "f3a4b5c6d7e8")
     conn = sqlite3.connect(db)
     version_id, version_no, reason, content_hash, bank_name, content = conn.execute(
         "SELECT id, version_no, reason, content_hash, bank_name, content_json FROM bank_versions"
@@ -101,12 +101,12 @@ def test_upgrade_backfills_version_one_with_questions_and_downgrade_removes_it(t
 
     assert asyncio.run(_service_hash()) == content_hash
 
-    _alembic(db, "downgrade", "-1")
+    _alembic(db, "downgrade", "e2f3a4b5c6d7")
     conn = sqlite3.connect(db)
     (rubric_only,) = conn.execute("SELECT content_json FROM rubric_versions").fetchone()
     assert list(json.loads(rubric_only)["questions"]) == ["q1"]
     conn.close()
-    _alembic(db, "downgrade", "-1")
+    _alembic(db, "downgrade", "d8e9f0a1b2c3")
     conn = sqlite3.connect(db)
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert "rubric_versions" not in tables and "bank_versions" not in tables

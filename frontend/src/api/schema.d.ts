@@ -772,6 +772,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/sop/documents/{document_id}/rebuild": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rebuild Sections
+         * @description Convert the document again in the background (after a converter improvement, or a failed
+         *     conversion). Returns at once with ``converting`` set; the list shows the result when done. A
+         *     failure keeps the previous complete conversion, if there is one.
+         */
+        post: operations["rebuild_sections_admin_sop_documents__document_id__rebuild_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/sop/documents/{document_id}/sections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Sections
+         * @description The document's sections in order, each with the length of its full passage.
+         */
+        get: operations["list_sections_admin_sop_documents__document_id__sections_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/sop/documents/{document_id}/sections/{order_index}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Section Text
+         * @description One section's full passage: its own text and every subsection's, never truncated.
+         */
+        get: operations["section_text_admin_sop_documents__document_id__sections__order_index__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/users": {
         parameters: {
             query?: never;
@@ -2332,14 +2394,66 @@ export interface components {
         SopDocumentOut: {
             /** Chunk Count */
             chunk_count: number;
+            /**
+             * Converting
+             * @default false
+             */
+            converting: boolean;
             /** Document Id */
             document_id: string;
+            /**
+             * Markdown Error
+             * @default
+             */
+            markdown_error: string;
+            /**
+             * Markdown Source
+             * @default
+             */
+            markdown_source: string;
             /** Name */
             name: string;
+            /**
+             * Section Count
+             * @default 0
+             */
+            section_count: number;
             /** Size */
             size: number;
             /** Status */
             status: string;
+        };
+        /** SopSectionOut */
+        SopSectionOut: {
+            /** Full Length */
+            full_length: number;
+            /** Level */
+            level: number;
+            /** Number */
+            number: string;
+            /** Order Index */
+            order_index: number;
+            /** Page End */
+            page_end: number;
+            /** Page Start */
+            page_start: number;
+            /** Parent Index */
+            parent_index: number | null;
+            /** Title */
+            title: string;
+        };
+        /** SopSectionTextOut */
+        SopSectionTextOut: {
+            /** Full Text */
+            full_text: string;
+            /** Number */
+            number: string;
+            /** Page End */
+            page_end: number;
+            /** Page Start */
+            page_start: number;
+            /** Title */
+            title: string;
         };
         /** TestChatIn */
         TestChatIn: {
@@ -3721,6 +3835,100 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SopDocumentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rebuild_sections_admin_sop_documents__document_id__rebuild_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SopDocumentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_sections_admin_sop_documents__document_id__sections_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SopSectionOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    section_text_admin_sop_documents__document_id__sections__order_index__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+                order_index: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SopSectionTextOut"];
                 };
             };
             /** @description Validation Error */

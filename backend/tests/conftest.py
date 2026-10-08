@@ -251,3 +251,16 @@ def judge_llm():
     _judge.set_adapter_override(adapter)
     yield adapter
     _judge.set_adapter_override(None)
+
+
+@pytest.fixture(autouse=True)
+def _no_document_intelligence(monkeypatch):
+    """SOP conversion never calls Azure Document Intelligence from a test (it is slow, billed, and
+    the background build would outlive the test). A test that needs a DI result replaces
+    ``sop_markdown._analyze`` itself; anything else reaching it fails loudly."""
+    from app.services import sop_markdown
+
+    async def _refuse(*_a, **_kw):
+        raise RuntimeError("Azure Document Intelligence is not called from tests")
+
+    monkeypatch.setattr(sop_markdown, "_analyze", _refuse)

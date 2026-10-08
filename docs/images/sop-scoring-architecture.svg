@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 520" width="1200" height="520" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>SOP processing and interview scoring, end to end</title>
+  <desc>Two flows merge at scoring: the SOP flow turns documents into cited sections inside a published bank version; the interview flow collects the candidate's answers on that version. Scoring combines both and the report cites the SOP.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4b4453"/>
+    </marker>
+    <marker id="ap" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6b3fa0"/>
+    </marker>
+    <style>
+      .lane { fill: #faf7f2; stroke: #ddd5c8; stroke-width: 1.5; }
+      .lane-t { font-size: 17px; font-weight: 700; fill: #2d2433; }
+      .box { fill: #fff; stroke: #b9aecb; stroke-width: 1.5; }
+      .key { fill: #f1eafa; stroke: #6b3fa0; stroke-width: 2.2; }
+      .out { fill: #eef5f1; stroke: #4f8a6b; stroke-width: 2; }
+      .t { font-size: 15px; font-weight: 600; fill: #2d2433; }
+      .s { font-size: 12.5px; fill: #5a5160; }
+      .l { font-size: 12px; font-weight: 600; fill: #6b3fa0; }
+      .f { stroke: #4b4453; stroke-width: 2; fill: none; stroke-dasharray: 9 6; animation: flow 1.1s linear infinite; }
+      .pin { stroke: #6b3fa0; stroke-width: 2; fill: none; stroke-dasharray: 4 6; animation: flow 1.8s linear infinite; }
+      @keyframes flow { to { stroke-dashoffset: -30; } }
+      @media (prefers-reduced-motion: reduce) { .f, .pin { animation: none; } }
+    </style>
+  </defs>
+  <rect width="1200" height="520" fill="#fff"/>
+
+  <!-- ============ SOP flow ============ -->
+  <rect class="lane" x="20" y="20" width="760" height="200" rx="14"/>
+  <text class="lane-t" x="40" y="50">SOP flow</text>
+
+  <rect class="box" x="40" y="70" width="165" height="120" rx="10"/>
+  <text class="t" x="122" y="100" text-anchor="middle">SOP document</text>
+  <text class="s" x="122" y="124" text-anchor="middle">PDF / Word;</text>
+  <text class="s" x="122" y="141" text-anchor="middle">original kept in</text>
+  <text class="s" x="122" y="158" text-anchor="middle">private Blob storage</text>
+
+  <rect class="box" x="225" y="70" width="165" height="120" rx="10"/>
+  <text class="t" x="307" y="100" text-anchor="middle">Markdown</text>
+  <text class="s" x="307" y="124" text-anchor="middle">Document Intelligence,</text>
+  <text class="s" x="307" y="141" text-anchor="middle">every page; complete</text>
+  <text class="s" x="307" y="158" text-anchor="middle">or failed, never partial</text>
+
+  <rect class="box" x="410" y="70" width="165" height="120" rx="10"/>
+  <text class="t" x="492" y="100" text-anchor="middle">Sections + summary</text>
+  <text class="s" x="492" y="124" text-anchor="middle">split by clause (4.2.1)</text>
+  <text class="s" x="492" y="141" text-anchor="middle">and heading; summary</text>
+  <text class="s" x="492" y="158" text-anchor="middle">reviewed by an admin</text>
+
+  <rect class="box" x="595" y="70" width="165" height="120" rx="10"/>
+  <text class="t" x="677" y="100" text-anchor="middle">Bank version</text>
+  <text class="s" x="677" y="124" text-anchor="middle">questions + rubric,</text>
+  <text class="s" x="677" y="141" text-anchor="middle">each item citing a</text>
+  <text class="s" x="677" y="158" text-anchor="middle">section; published</text>
+
+  <path class="f" d="M205,130 L225,130" marker-end="url(#a)"/>
+  <path class="f" d="M390,130 L410,130" marker-end="url(#a)"/>
+  <path class="f" d="M575,130 L595,130" marker-end="url(#a)"/>
+
+  <!-- ============ Interview flow ============ -->
+  <rect class="lane" x="20" y="300" width="760" height="200" rx="14"/>
+  <text class="lane-t" x="40" y="330">Interview flow</text>
+
+  <rect class="box" x="40" y="350" width="165" height="120" rx="10"/>
+  <text class="t" x="122" y="380" text-anchor="middle">Candidate</text>
+  <text class="s" x="122" y="404" text-anchor="middle">signs in; assigned</text>
+  <text class="s" x="122" y="421" text-anchor="middle">interviewer, bank</text>
+  <text class="s" x="122" y="438" text-anchor="middle">and bank version</text>
+
+  <rect class="box" x="225" y="350" width="255" height="120" rx="10"/>
+  <text class="t" x="352" y="380" text-anchor="middle">Interview</text>
+  <text class="s" x="352" y="404" text-anchor="middle">pins the version at start; every</text>
+  <text class="s" x="352" y="421" text-anchor="middle">question comes from it; voice</text>
+  <text class="s" x="352" y="438" text-anchor="middle">(digital human) or text</text>
+
+  <rect class="box" x="500" y="350" width="260" height="120" rx="10"/>
+  <text class="t" x="630" y="380" text-anchor="middle">Answers</text>
+  <text class="s" x="630" y="404" text-anchor="middle">transcribed per question;</text>
+  <text class="s" x="630" y="421" text-anchor="middle">reviewed by the candidate,</text>
+  <text class="s" x="630" y="438" text-anchor="middle">then submitted</text>
+
+  <path class="f" d="M205,410 L225,410" marker-end="url(#a)"/>
+  <path class="f" d="M480,410 L500,410" marker-end="url(#a)"/>
+
+  <!-- the published version is what the interview pins -->
+  <path class="pin" d="M677,190 L677,252 L352,252 L352,350" marker-end="url(#ap)"/>
+  <text class="l" x="514" y="244" text-anchor="middle">pinned version</text>
+
+  <!-- ============ the two flows merge at scoring ============ -->
+  <path class="f" d="M760,130 L800,130 L800,225 L935,225" marker-end="url(#a)"/>
+  <text class="l" x="812" y="200">rubric +</text>
+  <text class="l" x="812" y="215">cited sections</text>
+  <path class="f" d="M760,410 L800,410 L800,305 L935,305" marker-end="url(#a)"/>
+  <text class="l" x="812" y="296">answers</text>
+
+  <rect class="key" x="935" y="160" width="250" height="200" rx="12"/>
+  <text class="t" x="1060" y="192" text-anchor="middle">Scoring</text>
+  <text class="s" x="950" y="220">The model reads, per question:</text>
+  <text class="s" x="958" y="242">• the candidate's answer</text>
+  <text class="s" x="958" y="262">• the version's rubric items</text>
+  <text class="s" x="958" y="282">• the full text of each cited section</text>
+  <text class="s" x="958" y="302">• the reviewed document summary</text>
+  <text class="s" x="950" y="330">and judges every rubric item.</text>
+
+  <rect class="out" x="935" y="390" width="250" height="110" rx="12"/>
+  <text class="t" x="1060" y="420" text-anchor="middle">Report</text>
+  <text class="s" x="1060" y="444" text-anchor="middle">rating, per-question score;</text>
+  <text class="s" x="1060" y="461" text-anchor="middle">every judgment cites its SOP</text>
+  <text class="s" x="1060" y="478" text-anchor="middle">section, the link opens it</text>
+  <path class="f" d="M1060,360 L1060,390" marker-end="url(#a)"/>
+</svg>

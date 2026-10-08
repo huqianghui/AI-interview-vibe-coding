@@ -2,7 +2,7 @@
 background warm-ups are cancelled on shutdown.
 
 The server's SQLite is ephemeral, so boot is when banks, accounts and the default persona come to
-exist at all. These run the REAL seeds against an in-memory DB (only the three network-bound
+exist at all. These run the REAL seeds against an in-memory DB (only the four network-bound
 background tasks are stubbed), because the failure that matters — a seed quietly not running — is
 invisible to a test that mocks the seeds out.
 """
@@ -26,6 +26,7 @@ def boot(db_session, monkeypatch):
     """Run the lifespan against the test DB with the background warm-ups stubbed out."""
     import app.db
     import app.interview.judge
+    import app.services.sop_section_service
 
     monkeypatch.setattr(app.db, "async_session_factory", db_session._test_factory)
     started: list[asyncio.Event] = []
@@ -41,6 +42,8 @@ def boot(db_session, monkeypatch):
     monkeypatch.setattr(main, "_prewarm_azure_credential", _forever)
     monkeypatch.setattr(main, "_sync_default_persona", _forever)
     monkeypatch.setattr(app.interview.judge, "warm_adapter", _forever)
+    # SOP conversion calls Azure Document Intelligence: never from a test.
+    monkeypatch.setattr(app.services.sop_section_service, "build_missing", _forever)
     return started
 
 
@@ -107,11 +110,11 @@ async def test_a_failing_seed_is_logged_and_the_rest_still_run(
 async def test_shutdown_cancels_the_background_warmups(db_session, boot):
     async with main.lifespan(main.app):
         await asyncio.sleep(0)  # let the three tasks start
-        assert len(boot) == 3
+        assert len(boot) == 4
         tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
     await asyncio.sleep(0)
     warmups = [t for t in tasks if "_wait" in repr(t.get_coro())]
-    assert len(warmups) == 3
+    assert len(warmups) == 4
     assert all(t.cancelled() for t in warmups)
 
 

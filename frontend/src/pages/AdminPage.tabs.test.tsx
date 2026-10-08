@@ -2,12 +2,13 @@
  * the Content tab, the rubric's add/remove/regenerate, the external interview API card, and the
  * page-level promise that a tab keeps its state across a switch. Admin/auth API mocked. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import { MemoryRouter } from "react-router-dom";
 import "../i18n";
 import { AdminPage } from "./AdminPage";
+import { SOP_POLL_MS } from "./admin/useSopTab";
 import * as admin from "../api/admin";
 import type { AdminQuestion, Bank, Checklist } from "../api/admin";
 import * as auth from "../api/auth";
@@ -382,5 +383,93 @@ describe("tab switching", () => {
     // Nothing was refetched by switching.
     expect(admin.listBankQuestions).toHaveBeenCalledTimes(1);
     expect(admin.getExternalConfig).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("SOP documents tab", () => {
+  const DOCS: admin.SopDocument[] = [
+    {
+      document_id: "d1", name: "Widget SOP.pdf", status: "chunked", size: 10, chunk_count: 3,
+      markdown_source: "document_intelligence", section_count: 3, markdown_error: "", converting: false,
+    },
+    {
+      document_id: "d2", name: "Matrix.pdf", status: "chunked", size: 10, chunk_count: 1,
+      markdown_source: "failed", section_count: 0, markdown_error: "pages not fully read: page 3: 34%",
+      converting: false,
+    },
+  ];
+  const SECTIONS: admin.SopSection[] = [
+    { order_index: 0, number: "1", title: "PURPOSE", level: 1, parent_index: null, page_start: 1, page_end: 1, full_length: 40 },
+    { order_index: 1, number: "2", title: "RESPONSIBILITIES", level: 1, parent_index: null, page_start: 1, page_end: 2, full_length: 90 },
+    { order_index: 2, number: "2.1", title: "Inspector", level: 2, parent_index: 1, page_start: 2, page_end: 2, full_length: 30 },
+  ];
+
+  it("lists conversions with their failure reason, then a document's sections and a full section", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(admin, "listSopDocuments").mockResolvedValue(DOCS);
+    vi.spyOn(admin, "listSopSections").mockResolvedValue(SECTIONS);
+    vi.spyOn(admin, "getSopSection").mockResolvedValue({
+      number: "2", title: "RESPONSIBILITIES", page_start: 1, page_end: 2,
+      full_text: "2 RESPONSIBILITIES\n\n2.1 Inspector checks every widget.",
+    });
+    renderPage();
+    await user.click(await screen.findByTestId("admin-tab-sop"));
+    expect(await screen.findByTestId("sop-doc-d2")).toHaveTextContent("Failed");
+    expect(screen.getByTestId("sop-doc-d2")).toHaveTextContent("page 3: 34%");
+    expect(screen.getByTestId("sop-doc-d1")).toHaveTextContent("Document Intelligence");
+
+    await user.click(screen.getByText("Widget SOP.pdf"));
+    expect(await screen.findByTestId("sop-section-2")).toHaveTextContent("2.1 Inspector");
+    await user.click(screen.getByTestId("sop-section-1"));
+    expect(await screen.findByTestId("sop-section-text")).toHaveTextContent("2.1 Inspector checks every widget.");
+  });
+
+  it("converts again in the background: polls while converting, then shows the new sections", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const list = vi.spyOn(admin, "listSopDocuments").mockResolvedValue(DOCS);
+      const sections = vi.spyOn(admin, "listSopSections").mockResolvedValue(SECTIONS);
+      const rebuild = vi
+        .spyOn(admin, "rebuildSopDocument")
+        .mockResolvedValue({ ...DOCS[0], converting: true });
+      renderPage();
+      await user.click(await screen.findByTestId("admin-tab-sop"));
+      await user.click(await screen.findByText("Widget SOP.pdf"));
+      await screen.findByTestId("sop-section-2");
+
+      await user.click(screen.getByTestId("sop-rebuild"));
+      expect(rebuild).toHaveBeenCalledWith("d1");
+      expect(await screen.findByTestId("sop-doc-d1")).toHaveTextContent("Converting…");
+      expect(screen.getByTestId("sop-rebuild")).toBeDisabled();
+
+      list.mockResolvedValue([{ ...DOCS[0], section_count: 4 }, DOCS[1]]);
+      sections.mockResolvedValue([...SECTIONS, { ...SECTIONS[2], order_index: 3, number: "2.2", title: "Supervisor" }]);
+      await vi.advanceTimersByTimeAsync(SOP_POLL_MS);
+      await waitFor(() => expect(screen.getByTestId("sop-doc-d1")).toHaveTextContent("Document Intelligence"));
+      expect(await screen.findByTestId("sop-section-3")).toHaveTextContent("2.2 Supervisor");
+      expect(screen.getByTestId("sop-rebuild")).toBeEnabled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows the sections of the document clicked last, not of a slower earlier click", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(admin, "listSopDocuments").mockResolvedValue(DOCS);
+    let releaseFirst: (rows: admin.SopSection[]) => void = () => {};
+    vi.spyOn(admin, "listSopSections").mockImplementation((id) =>
+      id === "d1"
+        ? new Promise((resolve) => (releaseFirst = resolve))
+        : Promise.resolve([{ ...SECTIONS[0], title: "MATRIX ONLY" }]),
+    );
+    renderPage();
+    await user.click(await screen.findByTestId("admin-tab-sop"));
+    await user.click(await screen.findByText("Widget SOP.pdf"));
+    await user.click(screen.getByText("Matrix.pdf"));
+    expect(await screen.findByTestId("sop-section-0")).toHaveTextContent("MATRIX ONLY");
+    await act(async () => releaseFirst(SECTIONS));
+    expect(screen.getByTestId("sop-section-0")).toHaveTextContent("MATRIX ONLY");
+    expect(screen.queryByTestId("sop-section-2")).toBeNull();
   });
 });
