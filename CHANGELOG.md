@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.53.0.0 (2026-10-08)
+
+### Changed
+- **A version is now the whole question bank: its questions and their scoring rubric, frozen
+  together.** v0.52.0.0 versioned only the rubric, so rewording or removing a question still
+  changed interviews that had already run, and a re-import could leave a rubric pointing at
+  questions that no longer exist.
+- **Edits are a draft until an admin publishes.** Adding, rewording, disabling, reordering or
+  removing questions, and saving or AI-generating a rubric, no longer create versions. Publish
+  first checks that every enabled question has a rubric whose weights total 100, and lists every
+  question that does not. Publishing an unchanged draft creates nothing.
+- **An interview asks, resumes, reviews and is scored from the version it started on.** The
+  question text, order and rubric all come from that version, so later edits, publishes and
+  re-imports leave it alone.
+- **Importing a bank publishes it**, if it is complete; an incomplete import stays a draft and the
+  import result says why. Users assigned an older version stay on it.
+- The Content tab shows each bank's published version and whether it has unpublished changes,
+  with a Publish button. The Users tab picks a bank version; interview results show it.
+
+### Fixed
+- A bank can no longer be physically deleted while it has versions (banks are only logically
+  deleted), so an interview cannot lose the version it was asked from.
+- Each frozen rubric item also keeps the cited SOP document's name, so an old report can say what
+  it cited even if the document is later replaced.
+
 ## 0.52.0.0 (2026-10-08)
 
 ### Added

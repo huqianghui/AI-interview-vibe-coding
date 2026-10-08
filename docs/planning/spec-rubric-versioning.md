@@ -1,5 +1,8 @@
 # Spec: rubric versioning (pinned at assignment and at interview start)
 
+> **Superseded by [`spec-bank-versioning.md`](spec-bank-versioning.md) (v0.53.0.0):** a version is
+> now the whole bank (questions + rubric), created only on publish. Kept for the record of v0.52.0.0.
+
 Owner decisions, 2026-10-08:
 
 - Every change to a bank's rubric produces an **immutable version**.
