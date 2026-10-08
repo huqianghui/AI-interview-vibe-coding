@@ -130,3 +130,65 @@ async def test_the_interview_tells_the_candidate_whether_answers_are_recorded(mo
     assert recording_service.retention_days() == 90
     monkeypatch.setattr(get_settings(), "candidate_audio_recording", False)
     assert recording_service.recording_enabled() is False
+
+
+async def test_only_a_live_candidate_interview_gets_a_recorder(monkeypatch):
+    from app.api.voice_live_ws import recorder_for
+    from app.config import get_settings
+
+    assert isinstance(recorder_for("iv1", None), recording_service.QuestionRecorder)
+    assert recorder_for(None, None) is None  # no live interview (an admin, a preview)
+    assert recorder_for("iv1", "persona-1") is None  # the editor Playground
+    monkeypatch.setattr(get_settings(), "candidate_audio_recording", False)
+    assert recorder_for("iv1", None) is None
+
+
+async def test_the_proxy_records_the_microphone_and_never_forwards_the_marker(db_session):
+    """Through the real forwarding loop: what the browser sends, what Azure gets, what is stored."""
+    import json
+
+    from fastapi import WebSocketDisconnect
+
+    from app.services import voice_live_proxy
+
+    interview_id = await _interview(db_session)
+    rec = recording_service.QuestionRecorder(db_session._test_factory, interview_id, RATE)
+    frames = [
+        {
+            "type": "websocket.receive",
+            "text": json.dumps({"type": "x.recording.question", "question_index": 0}),
+        },
+        {"type": "websocket.receive", "bytes": _pcm(1)},
+        {"type": "websocket.receive", "text": json.dumps({"type": "response.create"})},
+        {"type": "websocket.disconnect"},
+    ]
+
+    class FakeWs:
+        async def receive(self):
+            return frames.pop(0)
+
+    class FakeConn:
+        sent: list = []
+
+        async def send(self, event):
+            self.sent.append(event)
+
+    conn = FakeConn()
+    await voice_live_proxy._forward_client_to_azure(FakeWs(), conn, WebSocketDisconnect, rec)
+    assert [e["type"] for e in conn.sent] == ["input_audio_buffer.append", "response.create"]
+    rows = await _rows(db_session, interview_id)
+    assert [(r.question_index, r.duration_ms) for r in rows] == [(0, 1000)]
+
+
+async def test_a_repeated_or_impossible_marker_starts_no_new_file(db_session):
+    interview_id = await _interview(db_session)
+    rec = recording_service.QuestionRecorder(db_session._test_factory, interview_id, RATE)
+    await rec.start_question(0)
+    rec.append(_pcm(1))
+    await rec.start_question(0)  # the same question again: one file, not two
+    rec.append(_pcm(1))
+    await rec.start_question(10_000)  # not a question: ignored
+    rec.append(_pcm(1))
+    await rec.close()
+    rows = await _rows(db_session, interview_id)
+    assert [(r.question_index, r.duration_ms) for r in rows] == [(0, 3000)]

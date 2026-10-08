@@ -29,6 +29,7 @@ from app.interview.state_machine import find_resumable_interview
 from app.services import config_service, persona_service, user_service
 from app.services.agents.voice_live_metadata import FALLBACK_LOCALE
 from app.services.anonymous_session_service import AnonymousSessionError, verify_anonymous_token
+from app.services.recording_service import QuestionRecorder, recording_enabled
 from app.services.voice_live_probe import uses_realtime_pipeline
 from app.services.voice_live_proxy import is_mouth_persona, run_proxy
 
@@ -121,6 +122,16 @@ async def _authenticate(ws: WebSocket, token: str) -> str | None:
             return "anon"
         except AnonymousSessionError:
             return None
+
+
+def recorder_for(interview_id: str | None, persona_id: str | None) -> QuestionRecorder | None:
+    """The microphone recorder for this connection: a live candidate interview only, never the
+    editor Playground (``persona_id``) or an admin, and only while recording is switched on."""
+    if not interview_id or persona_id or not recording_enabled():
+        return None
+    return QuestionRecorder(
+        async_session_factory, interview_id, get_settings().voice_live_input_sampling_rate
+    )
 
 
 async def _interview_persona(db, token: str, caller: str):
@@ -271,6 +282,7 @@ async def voice_live_websocket(ws: WebSocket) -> None:
                 # linear_turns_for_persona).
                 playground=bool(persona_id),
                 avatar_background=avatar_background,
+                recorder=recorder_for(interview_id, persona_id),
             )
     except WebSocketDisconnect:
         logger.info("Voice Live WS: client disconnected")

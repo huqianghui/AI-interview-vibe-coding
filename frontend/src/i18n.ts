@@ -57,6 +57,7 @@ export const resources = {
         beginNote: "Question 1 starts as soon as you press this.",
         recordingNote:
           "Spoken answers are recorded so the interview can be reviewed. Only your microphone is recorded, and recordings are deleted after {{days}} days.",
+        recordingIndicator: "● Your microphone is being recorded (deleted after {{days}} days).",
       },
       noQuestions: {
         title: "No questions available",
@@ -492,6 +493,7 @@ export const resources = {
         fact2Body: "每个答案只在你说「答完了」之后才提交。",
         beginNote: "按下之后第 1 题立刻开始。",
         recordingNote: "语音回答会录音，以便复核面试。只录制你的麦克风，录音在 {{days}} 天后删除。",
+        recordingIndicator: "● 正在录制你的麦克风（{{days}} 天后删除）。",
       },
       noQuestions: {
         title: "暂无可用题目",

@@ -34,8 +34,11 @@ logger = logging.getLogger(__name__)
 MARKER_TYPE = "x.recording.question"
 # Shorter than this is a cough or a click, not an answer.
 MIN_RECORDING_MS = 500
-# One question's audio is held in memory until the next one starts: 20 minutes at 16 kHz is 38 MB.
-MAX_RECORDING_SECONDS = 20 * 60
+# One question's audio is held in memory until the next one starts: 10 minutes at 16 kHz is 19 MB.
+# An answer longer than that keeps its first 10 minutes.
+MAX_RECORDING_SECONDS = 10 * 60
+# Markers name a question by its 0-based index; anything above this is not a question.
+MAX_QUESTION_INDEX = 500
 
 
 def wav_bytes(pcm: bytes, sample_rate: int) -> bytes:
@@ -66,7 +69,8 @@ class QuestionRecorder:
         self._question: int | None = None
         self._pcm = bytearray()
         self._max_bytes = MAX_RECORDING_SECONDS * sample_rate * 2
-        self._lock = asyncio.Lock()
+        # Uploads run beside the relay: the next question's audio never waits for the last one's.
+        self._uploads: set[asyncio.Task] = set()
 
     def append(self, pcm: bytes) -> None:
         if self._question is None or len(self._pcm) >= self._max_bytes:
@@ -74,23 +78,29 @@ class QuestionRecorder:
         self._pcm.extend(pcm[: self._max_bytes - len(self._pcm)])
 
     async def start_question(self, question_index: int) -> None:
-        async with self._lock:
-            await self._flush()
-            self._question = question_index
+        if question_index == self._question or not 0 <= question_index <= MAX_QUESTION_INDEX:
+            return  # the same question again (a re-sent marker), or not a question
+        self._hand_off()
+        self._question = question_index
 
     async def close(self) -> None:
-        async with self._lock:
-            await self._flush()
-            self._question = None
+        """Store what is left and wait for every upload (the connection is closing anyway)."""
+        self._hand_off()
+        self._question = None
+        if self._uploads:
+            await asyncio.wait(set(self._uploads), timeout=60)
 
-    async def _flush(self) -> None:
+    def _hand_off(self) -> None:
         pcm, self._pcm = bytes(self._pcm), bytearray()
-        if self._question is None:
+        if self._question is None or len(pcm) * 1000 // (self._rate * 2) < MIN_RECORDING_MS:
             return
+        task = asyncio.create_task(self._store(self._question, pcm))
+        self._uploads.add(task)
+        task.add_done_callback(self._uploads.discard)
+
+    async def _store(self, question_index: int, pcm: bytes) -> None:
         duration_ms = len(pcm) * 1000 // (self._rate * 2)
-        if duration_ms < MIN_RECORDING_MS:
-            return
-        key = f"{self._interview_id}/q{self._question + 1:02d}-{uuid.uuid4().hex[:8]}.wav"
+        key = f"{self._interview_id}/q{question_index + 1:02d}-{uuid.uuid4().hex[:8]}.wav"
         try:
             store = storage.container_store(get_settings().recording_blob_container)
             path = await asyncio.to_thread(store.save, key, wav_bytes(pcm, self._rate))
@@ -98,7 +108,7 @@ class QuestionRecorder:
                 db.add(
                     InterviewRecording(
                         interview_session_id=self._interview_id,
-                        question_index=self._question,
+                        question_index=question_index,
                         blob_path=path,
                         duration_ms=duration_ms,
                         size_bytes=len(pcm) + 44,
