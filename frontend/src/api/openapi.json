@@ -658,6 +658,45 @@
         "title": "CurrentQuestionOut",
         "type": "object"
       },
+      "DatabaseHealth": {
+        "properties": {
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "DatabaseHealth",
+        "type": "object"
+      },
       "ExternalConfigIn": {
         "properties": {
           "api_key": {
@@ -5902,6 +5941,38 @@
           }
         },
         "summary": "Health",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/health/db": {
+      "get": {
+        "description": "Run ``SELECT 1``; 200 with the round-trip time, or 503 with why it failed.",
+        "operationId": "health_db_health_db_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseHealth"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseHealth"
+                }
+              }
+            },
+            "description": "The database is unreachable"
+          }
+        },
+        "summary": "Health Db",
         "tags": [
           "health"
         ]

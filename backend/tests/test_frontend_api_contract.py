@@ -30,6 +30,7 @@ API_FILES = [
 # Routes the SPA never calls, and who does. Keep each reason specific enough to check.
 NOT_CALLED_BY_THE_SPA: dict[str, str] = {
     "/health": "container-app probes, nginx, the deploy workflow's smoke check",
+    "/health/db": "db-keepalive.yml and deploy-app.yml's database check",
     "/candidate/interview/{}/end": "e2e helper candidateLogin.ts finalizes external interviews",
     "/admin/question-banks/import": "scripts/sync_bank_to_server.py",
     "/admin/question-banks/{}/export": "manual bank export for the client hand-off bundle",

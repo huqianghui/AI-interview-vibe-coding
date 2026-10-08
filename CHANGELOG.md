@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.51.0.3 (2026-10-08)
+
+### Added
+- **A separate database health check, `/health/db`.** It runs one query and answers 503 with the
+  reason when the database cannot be reached. `/health` still only says the app is running, so it
+  stayed green while the database was down and every sign-in failed.
+- **The DB keepalive also checks that the app can actually reach the database**, not only that the
+  server is running. The run fails, and GitHub sends an email, when it cannot. Deploys now warn when
+  the new release cannot reach its database.
+
 ## 0.51.0.2 (2026-10-08)
 
 ### Fixed

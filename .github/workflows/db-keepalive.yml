@@ -32,7 +32,8 @@ jobs:
         id: profile
         run: |
           p=infra/azure/environments/public.json
-          for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID AZURE_RESOURCE_GROUP; do
+          for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID AZURE_RESOURCE_GROUP \
+            FRONTEND_APP_NAME; do
             echo "$name=$(jq -r --arg n "$name" '.[$n] // empty' "$p")" >> "$GITHUB_OUTPUT"
           done
 
@@ -45,3 +46,25 @@ jobs:
 
       - name: Ensure PostgreSQL is running
         run: bash infra/azure/scripts/ensure-db-running.sh "${{ steps.profile.outputs.AZURE_RESOURCE_GROUP }}"
+
+      # The server being Ready is not the whole story: the app also has to reach it (network, DNS,
+      # Entra login). /api/health/db runs a real query through the app, so a red run here means
+      # sign-in is broken for users, whatever the cause. GitHub emails the owner on a failed run.
+      - name: Check the app can reach the database
+        env:
+          RG: ${{ steps.profile.outputs.AZURE_RESOURCE_GROUP }}
+          FRONTEND_APP: ${{ steps.profile.outputs.FRONTEND_APP_NAME }}
+        run: |
+          fqdn=$(az containerapp show -g "$RG" -n "$FRONTEND_APP" \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          url="https://$fqdn/api/health/db"
+          # A server that was just started can take a moment before the app's first connect works.
+          for i in $(seq 1 10); do
+            body=$(curl -s -m 20 -w '\n%{http_code}' "$url" || true)
+            code=${body##*$'\n'}
+            echo "attempt $i: HTTP $code ${body%$'\n'*}"
+            [ "$code" = "200" ] && exit 0
+            sleep 30
+          done
+          echo "::error::$url did not answer 200: the app cannot reach its database"
+          exit 1

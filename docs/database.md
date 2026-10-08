@@ -106,3 +106,25 @@ SQLite 同一时刻只允许一个写操作，很多「先查再写」的代码�
 **已知、暂不处理：**
 - **配置写入和启动初始化撞车：** 只会在启动初始化写配置的同一刻，恰好有管理员保存配置时出现。最坏结果是那次保存返回 500，重试即可，不会写坏数据。
 - **候选人提交评分与管理员「生成报告」同时触发：** 会多花一次 LLM 评分费用，最后写入的那份报告生效，不会损坏数据。
+
+## 七、数据库停机：检测与自动拉起（2026-10-08）
+
+**现象**：线上所有登录都要等 60 秒，然后报"登录失败 (500)"，而 `/api/health` 一直返回 200。
+
+**原因**：订阅管理员把 PostgreSQL 服务器停掉了（activity log 里是一个外部应用身份执行的 `stop`）。
+当时后端连接数据库没有设超时，用的是 asyncpg 默认的 60 秒；超时后抛出的 `TimeoutError` 没有被处理，
+于是变成了一个没有任何原因的 500。
+
+**现在的处理**（v0.51.0.2 / v0.51.0.3）：
+
+| 层 | 做什么 |
+|---|---|
+| 连接 | 超时 10 秒（`CONNECT_TIMEOUT_S`）；连不上抛 `DatabaseUnavailableError`，返回 **503** 并给出原因 |
+| `/health` | 只看进程是否存活，**不碰数据库**，所以数据库停机不会让部署失败 |
+| `/health/db` | 单独检查数据库：执行一次 `SELECT 1`（8 秒超时）。正常时返回 200 和往返耗时；失败时返回 **503** 和失败类型（只报类型，不暴露主机名） |
+| `db-keepalive.yml` | 每 10 分钟运行一次：服务器是 Stopped 就启动它，然后通过 `/api/health/db` 端到端确认应用确实连得上。连不上时这次运行会失败，GitHub 会发邮件通知 |
+| `deploy-app.yml` | 部署完成后检查一次 `/api/health/db`，连不上时给出警告，但不让部署失败 |
+
+**排查顺序**：线上登录异常时，先 `curl https://<frontend>/api/health/db`。返回 503 时，再执行
+`az postgres flexible-server show -g rg-aiinterview-public-swedencentral -n psql-aiinterview-public --query state`。
+如果是 `Stopped`，手动启动或运行 `infra/azure/scripts/ensure-db-running.sh <resource-group>` 都可以。

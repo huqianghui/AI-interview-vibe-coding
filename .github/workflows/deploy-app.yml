@@ -151,3 +151,26 @@ jobs:
           done
           echo "::error::Health check failed: $health_url"
           exit 1
+
+      # Liveness above says the new revision serves; this says it can reach its database, which is
+      # how the live app most often breaks (a stopped server). A warning, not a failure: the release
+      # itself is fine, and db-keepalive.yml starts a stopped server again.
+      - name: Check the database
+        run: |
+          frontend_fqdn=$(az containerapp show \
+            --name "$FRONTEND_APP_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query properties.configuration.ingress.fqdn \
+            --output tsv)
+          url="https://$frontend_fqdn/api/health/db"
+          for i in $(seq 1 6); do
+            body=$(curl -s -m 20 -w '\n%{http_code}' "$url" || true)
+            code=${body##*$'\n'}
+            if [ "$code" = "200" ]; then
+              echo "Database check passed: ${body%$'\n'*}"
+              exit 0
+            fi
+            echo "Attempt $i/6 - HTTP $code ${body%$'\n'*}"
+            sleep 10
+          done
+          echo "::warning::The app cannot reach its database ($url). Sign-in will fail until it can."
