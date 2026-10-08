@@ -414,6 +414,18 @@ export interface SopDocument {
   markdown_error: string;
   // Queued for or in conversion right now.
   converting: boolean;
+  // The key-points summary: "" none | draft | reviewed (the only state scoring uses) | failed.
+  summary_status: string;
+  summary_error: string;
+  summarizing: boolean;
+}
+
+export interface SopSummary {
+  summary: string;
+  status: string;
+  error: string;
+  reviewed_at: string | null;
+  summarizing: boolean;
 }
 
 export interface SopSection {
@@ -446,3 +458,16 @@ export const getSopSection = (documentId: string, orderIndex: number) =>
 
 export const rebuildSopDocument = (documentId: string) =>
   adminRequest<SopDocument>(`/admin/sop/documents/${documentId}/rebuild`, { method: "POST" });
+
+export const getSopSummary = (documentId: string) =>
+  adminRequest<SopSummary>(`/admin/sop/documents/${documentId}/summary`);
+
+// approve = true: used in scoring; false: saved as a draft, not used.
+export const saveSopSummary = (documentId: string, summary: string, approve: boolean) =>
+  adminRequest<SopSummary>(`/admin/sop/documents/${documentId}/summary`, {
+    method: "PUT",
+    body: JSON.stringify({ summary, approve }),
+  });
+
+export const redraftSopSummary = (documentId: string) =>
+  adminRequest<SopSummary>(`/admin/sop/documents/${documentId}/summary/draft`, { method: "POST" });

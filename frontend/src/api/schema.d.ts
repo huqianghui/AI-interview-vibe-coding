@@ -834,6 +834,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/sop/documents/{document_id}/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Summary
+         * @description The document's key-points summary and whether it is approved (only then used in scoring).
+         */
+        get: operations["get_summary_admin_sop_documents__document_id__summary_get"];
+        /**
+         * Save Summary
+         * @description Save an admin's edit: approved (used in scoring) or a draft (not used).
+         */
+        put: operations["save_summary_admin_sop_documents__document_id__summary_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/sop/documents/{document_id}/summary/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Redraft Summary
+         * @description Ask the LLM for a new draft, in the background. It replaces the current summary as a DRAFT:
+         *     scoring stops using it until an admin approves again.
+         */
+        post: operations["redraft_summary_admin_sop_documents__document_id__summary_draft_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/users": {
         parameters: {
             query?: never;
@@ -2422,6 +2467,21 @@ export interface components {
             size: number;
             /** Status */
             status: string;
+            /**
+             * Summarizing
+             * @default false
+             */
+            summarizing: boolean;
+            /**
+             * Summary Error
+             * @default
+             */
+            summary_error: string;
+            /**
+             * Summary Status
+             * @default
+             */
+            summary_status: string;
         };
         /** SopSectionOut */
         SopSectionOut: {
@@ -2454,6 +2514,29 @@ export interface components {
             page_start: number;
             /** Title */
             title: string;
+        };
+        /** SopSummaryIn */
+        SopSummaryIn: {
+            /**
+             * Approve
+             * @default false
+             */
+            approve: boolean;
+            /** Summary */
+            summary: string;
+        };
+        /** SopSummaryOut */
+        SopSummaryOut: {
+            /** Error */
+            error: string;
+            /** Reviewed At */
+            reviewed_at: string | null;
+            /** Status */
+            status: string;
+            /** Summarizing */
+            summarizing: boolean;
+            /** Summary */
+            summary: string;
         };
         /** TestChatIn */
         TestChatIn: {
@@ -3929,6 +4012,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SopSectionTextOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_summary_admin_sop_documents__document_id__summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SopSummaryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_summary_admin_sop_documents__document_id__summary_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SopSummaryIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SopSummaryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    redraft_summary_admin_sop_documents__document_id__summary_draft_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SopSummaryOut"];
                 };
             };
             /** @description Validation Error */

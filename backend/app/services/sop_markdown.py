@@ -59,6 +59,11 @@ _PAGE_BREAK = "<!-- PageBreak -->"
 
 _PDF = "application/pdf"
 
+# The current converter for each source. Raise one when its output changes, and every document
+# converted by the older version is converted again by the next background build.
+# docx 2 (v0.55.0.0): merged cells once, form tables as labelled sections.
+CONVERTER_VERSIONS = {"document_intelligence": 1, "pdf_text": 1, "docx": 2, "text": 1}
+
 
 @dataclass(frozen=True)
 class MarkdownResult:

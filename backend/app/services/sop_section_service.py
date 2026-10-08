@@ -14,12 +14,12 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.sop import SopDocument, SopSection
-from app.services import storage
-from app.services.sop_markdown import MarkdownResult, to_markdown
+from app.services import sop_summary_service, storage
+from app.services.sop_markdown import CONVERTER_VERSIONS, MarkdownResult, to_markdown
 from app.sop.sections import parse_sections
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,25 @@ _CONVERTING: set[str] = set()
 # Sources a document still needs converting from: never tried, or tried and failed (a throttled or
 # timed-out call at boot must not stay failed until someone notices).
 _NEEDS_CONVERTING = ("", "failed")
+
+
+def _needs_converting_clause():  # noqa: ANN202 — a SQLAlchemy clause
+    """Never converted, failed, or converted by an older version of its converter."""
+    outdated = [
+        and_(
+            SopDocument.markdown_source == source,
+            SopDocument.markdown_converter_version < version,
+        )
+        for source, version in CONVERTER_VERSIONS.items()
+    ]
+    return or_(SopDocument.markdown_source.in_(_NEEDS_CONVERTING), *outdated)
+
+
+def needs_converting(document: SopDocument) -> bool:
+    if document.markdown_source in _NEEDS_CONVERTING:
+        return True
+    current = CONVERTER_VERSIONS.get(document.markdown_source, 0)
+    return document.markdown_converter_version < current
 
 
 def converting(document_id: str) -> bool:
@@ -67,8 +86,9 @@ async def build(
     else:
         converted = MarkdownResult("", "failed", "no stored file to convert")
     if converted.source == "failed" and document.markdown_source not in _NEEDS_CONVERTING:
-        # Converting again failed, but the document already has a complete conversion: keep it.
-        # One transient error must not leave a document that was fine with no sections.
+        # Converting again failed, but the document already has a complete conversion: keep it
+        # (and its version, so the next build tries again if that version is outdated). One
+        # transient error, or a missing file, must not leave a document that was fine with none.
         document.markdown_error = (
             "converting again failed, the previous conversion is kept: " + converted.error
         )[:1000]
@@ -105,6 +125,10 @@ async def build(
     document.markdown = converted.markdown
     document.markdown_source = converted.source
     document.markdown_error = converted.error
+    document.markdown_converter_version = CONVERTER_VERSIONS.get(converted.source, 0)
+    # An approved summary stays approved: it summarises the document, and an SOP file is never
+    # changed in place (a new version is a new upload), so a re-conversion does not change what
+    # the document says.
     await db.commit()
     if converted.error:
         logger.warning("SOP %r not converted: %s", document.name, converted.error)
@@ -125,7 +149,7 @@ async def _build_one(session_factory, doc_id: str, *, only_if_needed: bool) -> b
             document = await db.get(SopDocument, doc_id)
             if document is None:
                 return False
-            if only_if_needed and document.markdown_source not in _NEEDS_CONVERTING:
+            if only_if_needed and not needs_converting(document):
                 return False
             await build(db, document)
             return True
@@ -137,32 +161,35 @@ async def _build_one(session_factory, doc_id: str, *, only_if_needed: bool) -> b
 
 
 async def build_missing(session_factory) -> int:  # noqa: ANN001 — async_sessionmaker
-    """Convert every document not converted yet, or whose last conversion failed. Each in its own
+    """Convert every document not converted yet, whose last conversion failed, or that an older
+    converter version produced; then draft the missing summaries. Each document in its own
     session, failures logged and skipped, so one bad file cannot stop the rest; never raises (it
     runs as a fire-and-forget task). Returns how many were converted."""
+    queued: list[str] = []
     try:
         async with _BUILD_LOCK:
             async with session_factory() as db:
                 ids = (
-                    (
-                        await db.execute(
-                            select(SopDocument.id).where(
-                                SopDocument.markdown_source.in_(_NEEDS_CONVERTING)
-                            )
-                        )
-                    )
+                    (await db.execute(select(SopDocument.id).where(_needs_converting_clause())))
                     .scalars()
                     .all()
                 )
+            # Shown as "drafting" from now: their summary follows their conversion.
+            queued = sop_summary_service.queue_drafting(ids)
             done = 0
             for doc_id in ids:
                 done += await _build_one(session_factory, doc_id, only_if_needed=True)
-            return done
+        # Then, OUTSIDE the build lock (drafting touches only the summary columns, and takes
+        # ~25 s per document), draft every converted document's missing summary (spec §2).
+        await sop_summary_service.summarize_missing(session_factory)
+        return done
     except asyncio.CancelledError:
         raise
     except Exception:  # noqa: BLE001 — e.g. the database is down at boot; the next run retries
         logger.exception("Converting SOP documents to sections failed")
         return 0
+    finally:
+        sop_summary_service.unqueue_drafting(queued)
 
 
 async def rebuild(session_factory, document_id: str) -> None:  # noqa: ANN001
@@ -174,6 +201,8 @@ async def rebuild(session_factory, document_id: str) -> None:  # noqa: ANN001
             await _build_one(session_factory, document_id, only_if_needed=False)
     finally:
         _CONVERTING.discard(document_id)
+    # A document converted for the first time this way gets its summary drafted too.
+    await sop_summary_service.summarize_missing(session_factory)
 
 
 async def list_sections(db: AsyncSession, document_id: str) -> Sequence[SopSection]:

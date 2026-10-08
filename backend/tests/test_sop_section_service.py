@@ -184,3 +184,31 @@ async def test_an_upload_is_converted_to_sections_in_the_background(client, admi
     listed = (await client.get("/admin/sop/documents", headers=admin_auth)).json()
     row = next(d for d in listed if d["document_id"] == resp.json()["document_id"])
     assert (row["markdown_source"], row["section_count"]) == ("text", 5)
+
+
+async def test_an_outdated_converter_version_is_converted_again(db_session):
+    doc = await _ingest(db_session)
+    await sop_section_service.build(db_session, doc)
+    assert doc.markdown_converter_version == 1
+    assert await sop_section_service.build_missing(db_session._test_factory) == 0
+    monkeypatch_versions = {**sop_section_service.CONVERTER_VERSIONS, "text": 2}
+    sop_section_service.CONVERTER_VERSIONS.update(monkeypatch_versions)
+    try:
+        assert await sop_section_service.build_missing(db_session._test_factory) == 1
+        await db_session.refresh(doc)
+        assert doc.markdown_converter_version == 2
+    finally:
+        sop_section_service.CONVERTER_VERSIONS["text"] = 1
+
+
+async def test_an_outdated_conversion_whose_file_is_gone_keeps_its_sections(db_session):
+    doc = await _ingest(db_session)
+    await sop_section_service.build(db_session, doc)
+    doc.markdown_converter_version = 0  # an older converter produced it
+    doc.blob_path = "/nowhere/widget.md"
+    await db_session.commit()
+    assert await sop_section_service.build_missing(db_session._test_factory) == 1
+    await db_session.refresh(doc)
+    assert (doc.markdown_source, doc.markdown_converter_version) == ("text", 0)
+    assert len(await sop_section_service.list_sections(db_session, doc.id)) == 5
+    assert doc.markdown_error.startswith("converting again failed")

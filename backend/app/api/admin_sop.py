@@ -10,16 +10,22 @@ never 500s the request (F1 AC #4).
 """
 
 import asyncio
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import get_settings
 from app.db import get_db, get_session_factory
 from app.dependencies import require_role
 from app.models.sop import SopDocument
-from app.services import sop_document_service, sop_ingestion, sop_section_service
+from app.services import (
+    sop_document_service,
+    sop_ingestion,
+    sop_section_service,
+    sop_summary_service,
+)
 
 # Background section builds started by uploads and "Convert again"; held so they are not
 # garbage-collected mid-run, and cancelled at shutdown (app.main).
@@ -45,6 +51,25 @@ class SopDocumentOut(BaseModel):
     markdown_error: str = ""
     # Queued for or in conversion right now (background).
     converting: bool = False
+    # The key-points summary's state: "" none | draft | reviewed (used in scoring) | failed.
+    summary_status: str = ""
+    summary_error: str = ""
+    # Being drafted by the LLM right now (background).
+    summarizing: bool = False
+
+
+class SopSummaryOut(BaseModel):
+    summary: str
+    status: str
+    error: str
+    reviewed_at: datetime | None
+    summarizing: bool
+
+
+class SopSummaryIn(BaseModel):
+    summary: str = Field(max_length=sop_summary_service.MAX_SUMMARY_CHARS)
+    # True = approve: the summary is used in scoring. False = save as a draft (not used).
+    approve: bool = False
 
 
 class SopSectionOut(BaseModel):
@@ -126,6 +151,9 @@ async def list_documents(db: AsyncSession = Depends(get_db)) -> list[SopDocument
             section_count=sections.get(d.id, 0),
             markdown_error=d.markdown_error,
             converting=sop_section_service.converting(d.id),
+            summary_status=d.summary_status,
+            summary_error=d.summary_error,
+            summarizing=sop_summary_service.drafting(d.id),
         )
         for d, chunk_count in rows
     ]
@@ -212,4 +240,61 @@ async def rebuild_sections(
     )
     sop_section_service.mark_converting(document.id)
     _start(sop_section_service.rebuild(session_factory, document.id))
+    return out
+
+
+def _summary_out(document: SopDocument) -> SopSummaryOut:
+    return SopSummaryOut(
+        summary=document.summary,
+        status=document.summary_status,
+        error=document.summary_error,
+        reviewed_at=document.summary_reviewed_at,
+        summarizing=sop_summary_service.drafting(document.id),
+    )
+
+
+@router.get("/documents/{document_id}/summary", response_model=SopSummaryOut)
+async def get_summary(document_id: str, db: AsyncSession = Depends(get_db)) -> SopSummaryOut:
+    """The document's key-points summary and whether it is approved (only then used in scoring)."""
+    return _summary_out(await _document(db, document_id))
+
+
+@router.put("/documents/{document_id}/summary", response_model=SopSummaryOut)
+async def save_summary(
+    document_id: str, body: SopSummaryIn, db: AsyncSession = Depends(get_db)
+) -> SopSummaryOut:
+    """Save an admin's edit: approved (used in scoring) or a draft (not used)."""
+    document = await _document(db, document_id)
+    if sop_summary_service.drafting(document.id):
+        raise HTTPException(
+            status_code=409, detail="The summary is being drafted; save once the draft is done"
+        )
+    try:
+        await sop_summary_service.save(db, document, body.summary, approve=body.approve)
+    except sop_summary_service.SummaryNotSaved as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _summary_out(document)
+
+
+@router.post(
+    "/documents/{document_id}/summary/draft",
+    response_model=SopSummaryOut,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def redraft_summary(
+    document_id: str,
+    db: AsyncSession = Depends(get_db),
+    session_factory: async_sessionmaker = Depends(get_session_factory),
+) -> SopSummaryOut:
+    """Ask the LLM for a new draft, in the background. It replaces the current summary as a DRAFT:
+    scoring stops using it until an admin approves again."""
+    document = await _document(db, document_id)
+    if not sop_summary_service.can_draft(document):
+        raise HTTPException(status_code=409, detail="The document is not converted yet")
+    if not sop_summary_service.drafting_available():
+        raise HTTPException(status_code=409, detail="No AI model is configured to draft with")
+    out = _summary_out(document)
+    out.summarizing = True
+    sop_summary_service.mark_drafting(document.id)
+    _start(sop_summary_service.redraft(session_factory, document.id))
     return out
