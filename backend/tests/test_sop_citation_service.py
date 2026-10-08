@@ -129,9 +129,15 @@ async def test_relocation_resolves_labels_searches_the_rest_and_never_invents(db
         if "failed batch" in item:  # search: cite the escalation section, wrong quote
             cid = next(line.split('"')[1] for line in prompt.splitlines() if "ESCALATION" in line)
             return json.dumps({"cite": [cid], "quote": "Escalate within a week."})
-        if "release owner" in item:  # within the JD only
-            assert "Widget Release Procedure" not in prompt.split("CANDIDATES:")[1]
-            return json.dumps({"cite": ["C1"], "quote": "Owns the release calendar"})
+        if "release owner" in item:  # the JD, beside the question's own cited section
+            candidates = prompt.split("CANDIDATES:")[1]
+            assert "Release Manager_Final" in candidates
+            cid = next(
+                line.split('"')[1]
+                for line in candidates.splitlines()
+                if 'document="Release Manager_Final' in line
+            )
+            return json.dumps({"cite": [cid], "quote": "Owns the release calendar"})
         return json.dumps({"cite": [], "quote": ""})  # nothing supports "confidence"
 
     class Llm(ScriptedJudgeAdapter):
@@ -347,3 +353,97 @@ async def test_a_recent_run_from_another_process_is_not_taken_over(db_session):
         db_session, db_session._test_factory, bank.id
     )
     assert again.id == other.id
+
+
+async def test_an_unlabelled_item_is_located_within_its_questions_sources(db_session):
+    widget, jd = await _corpus(db_session)
+    other = await _doc(
+        db_session,
+        "Release Train Safety Handbook.pdf",
+        [("1", "Release safety", None, "Release safety checks are owned by the safety lead.")],
+    )
+    bank, _ = await _bank(
+        db_session,
+        [
+            ("Gets sign-off", 50, "Widget Release Procedure SOP section 4.2"),
+            ("Factual accuracy about the release", 50, ""),
+        ],
+    )
+    seen: list[str] = []
+
+    class Spy(ScriptedJudgeAdapter):
+        name = "scripted"
+
+        async def complete(self, prompt, *, json_mode=False, fast=False):
+            seen.append(prompt)
+            return json.dumps({"cite": ["C1"], "quote": ""})
+
+    run = CitationRun(bank_id=bank.id)
+    db_session.add(run)
+    await db_session.commit()
+    await sop_citation_service.relocate(db_session, run, Spy())
+    unlabelled = next(p for p in seen if "RUBRIC ITEM:\nFactual accuracy" in p)
+    candidates = unlabelled.split("CANDIDATES:")[1]
+    # The question's own cited section comes first; other documents stay out of it.
+    assert candidates.index('section="4.2 Approval"') < 200
+    assert "Release Train Safety Handbook" not in candidates and other
+
+
+async def test_a_fresh_run_starts_again_from_the_original_labels(db_session):
+    widget, _ = await _corpus(db_session)
+    bank, checklist_id = await _bank(
+        db_session, [("Gets sign-off", 100, "Widget Release Procedure SOP section 4.2")]
+    )
+    first = CitationRun(bank_id=bank.id)
+    db_session.add(first)
+    await db_session.commit()
+    await sop_citation_service.relocate(db_session, first, _Cite1())
+    (item,) = await checklist_service.list_items(db_session, checklist_id)
+    # An admin (or a bad run) re-pointed it elsewhere; the label is gone from the draft.
+    item.source_refs = json.dumps([{"document_id": widget, "section": "5"}])
+    item.source_quote = "A failed batch is escalated to the site lead the same day."
+    await db_session.commit()
+
+    second = CitationRun(bank_id=bank.id)
+    db_session.add(second)
+    await db_session.commit()
+    second_id = second.id
+    await sop_citation_service.relocate(db_session, second, _Cite1(), fresh=True)
+    db_session.expire_all()
+    (item,) = await checklist_service.list_items(db_session, checklist_id)
+    assert json.loads(item.source_refs) == [{"document_id": widget, "section": "4.2"}]
+    (row,) = json.loads((await db_session.get(CitationRun, second_id)).report_json)
+    assert row["old"]["quote"] == "Widget Release Procedure SOP section 4.2"
+    assert row["item_id"] == item.id
+
+
+async def test_original_labels_come_from_the_first_run_that_saw_each_item(db_session):
+    bank, _ = await _bank(db_session, [("x", 100, "")])
+    rows1 = [
+        {"question": "Q1", "item": "Accuracy", "old": {"quote": "A SOP section 4.2"}},
+        {"question": "Q2", "item": "Accuracy", "old": {"quote": "B SOP section 5"}},
+        {"question": "Q3", "item": "Dup", "old": {"quote": "label one"}},
+        {"question": "Q3", "item": "Dup", "old": {"quote": "label two"}},
+    ]
+    rows2 = [
+        {"item_id": "new", "question": "Q1", "item": "Added later", "old": {"quote": "C SOP"}},
+        {"question": "Q1", "item": "Accuracy", "old": {"quote": "a quote written by run 1"}},
+    ]
+    from datetime import timedelta
+
+    start = sop_citation_service._now()
+    for n, rows in enumerate((rows1, rows2)):
+        db_session.add(
+            CitationRun(
+                bank_id=bank.id,
+                status="done",
+                report_json=json.dumps(rows),
+                created_at=start + timedelta(seconds=n),
+            )
+        )
+        await db_session.commit()
+    labels = await sop_citation_service._original_labels(db_session, bank.id, before="")
+    assert labels[("Q1", "Accuracy")] == "A SOP section 4.2"  # the first run's, not run 2's quote
+    assert labels[("Q2", "Accuracy")] == "B SOP section 5"  # same text, other question
+    assert ("Q3", "Dup") not in labels  # ambiguous: not guessed
+    assert labels["new"] == "C SOP"  # an item first seen by the second run

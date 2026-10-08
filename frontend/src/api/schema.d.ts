@@ -726,7 +726,8 @@ export interface paths {
         /**
          * Relocate Citations
          * @description Relocate every SOP citation in the bank's draft rubric, in the background. The results go
-         *     into the DRAFT; review them and publish (owner, 2026-10-08).
+         *     into the DRAFT; review them and publish (owner, 2026-10-08). Items already citing sections
+         *     keep them; ``fresh=true`` starts every item again from its original label.
          */
         post: operations["relocate_citations_admin_question_banks__bank_id__relocate_citations_post"];
         delete?: never;
@@ -3927,7 +3928,9 @@ export interface operations {
     };
     relocate_citations_admin_question_banks__bank_id__relocate_citations_post: {
         parameters: {
-            query?: never;
+            query?: {
+                fresh?: boolean;
+            };
             header?: never;
             path: {
                 bank_id: string;

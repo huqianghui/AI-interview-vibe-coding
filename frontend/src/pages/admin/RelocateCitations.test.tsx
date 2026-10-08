@@ -42,7 +42,7 @@ describe("RelocateCitations", () => {
         </FluentProvider>,
       );
       await user.click(await screen.findByTestId("relocate-start"));
-      expect(post).toHaveBeenCalledWith("b1");
+      expect(post).toHaveBeenCalledWith("b1", false);
       expect(screen.getByTestId("relocate-start")).toHaveTextContent("Relocating… 0 / 2");
 
       get.mockResolvedValue(DONE);

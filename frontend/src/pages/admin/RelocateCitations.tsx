@@ -7,6 +7,7 @@ import {
   Badge,
   Body1,
   Button,
+  Checkbox,
   Table,
   TableBody,
   TableCell,
@@ -36,6 +37,7 @@ export function RelocateCitations({ bankId, onDone }: { bankId: string; onDone: 
   const [run, setRun] = useState<CitationRun | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [fresh, setFresh] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -73,7 +75,7 @@ export function RelocateCitations({ bankId, onDone }: { bankId: string; onDone: 
   const start = async () => {
     setError(null);
     try {
-      setRun(await admin.relocateCitations(bankId));
+      setRun(await admin.relocateCitations(bankId, fresh));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -90,6 +92,15 @@ export function RelocateCitations({ bankId, onDone }: { bankId: string; onDone: 
             ? t("admin.relocate.running", { done: run?.done ?? 0, total: run?.total ?? 0 })
             : t("admin.relocate.start")}
         </Button>
+        {run !== null && (
+          <Checkbox
+            data-testid="relocate-fresh"
+            checked={fresh}
+            disabled={running}
+            onChange={(_, d) => setFresh(Boolean(d.checked))}
+            label={t("admin.relocate.fresh")}
+          />
+        )}
         <Text size={200}>{t("admin.relocate.hint")}</Text>
       </div>
       {error && (
