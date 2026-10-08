@@ -132,7 +132,10 @@ def _build_scoring_prompt(
     reference = ""
     if sources.sections:
         blocks = [
-            f"[S{i + 1}] {s.document_name} — {s.label} ({s.pages})\n<section>\n{s.text}\n</section>"
+            f"[S{i + 1}] {s.document_name} — {s.label} ({s.pages})\n<section>\n"
+            # The SOP text cannot close its own fence.
+            + s.text.replace("</section>", "<\\/section>")
+            + "\n</section>"
             for i, s in enumerate(sources.sections)
         ]
         reference += (

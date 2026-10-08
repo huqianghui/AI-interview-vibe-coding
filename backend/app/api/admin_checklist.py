@@ -7,7 +7,7 @@ questions (F2) and, later, scored results with source quotes (F4/F8), never the 
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
@@ -134,7 +134,9 @@ class ChecklistItemIn(BaseModel):
     source_document_id: str | None = None
     advisory: bool = False
     # Omitted = keep the stored ones (an older tab); a section that does not exist is dropped.
-    source_refs: list[SourceRefIn] | None = None
+    source_refs: list[SourceRefIn] | None = Field(
+        default=None, max_length=sop_citation.MAX_REFS_PER_ITEM
+    )
 
 
 class ChecklistEditIn(BaseModel):

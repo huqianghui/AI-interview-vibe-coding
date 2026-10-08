@@ -153,6 +153,7 @@ async def draft_checklist(
 
 async def _persist_draft(db: AsyncSession, question_id: str, draft: ChecklistDraft) -> Checklist:
     """Persist a draft as the new default checklist for a question; demote prior defaults."""
+    await drop_missing_refs(db, draft.items)
     for prior in await _default_checklists(db, question_id):
         prior.is_default = False
 
@@ -219,6 +220,18 @@ async def document_names(db: AsyncSession, document_ids: set[str]) -> dict[str, 
     return {doc_id: name for doc_id, name in rows}
 
 
+async def drop_missing_refs(db: AsyncSession, items: list[DraftItem]) -> None:
+    """Drop each item's citations of sections that do not exist (scoring would read nothing), in
+    one lookup, and make the primary citation's document the item's linked document, so the
+    report's link opens the document its label names."""
+    parsed = [sop_citation.parse_refs(it.source_refs) for it in items]
+    gone = set(await sop_citation.missing(db, [r for refs in parsed for r in refs]))
+    for it, refs in zip(items, parsed, strict=True):
+        it.source_refs = [r.as_dict() for r in refs if r not in gone]
+        if it.source_refs:
+            it.source_document_id = it.source_refs[0]["document_id"]
+
+
 async def _keep_item_sources(
     db: AsyncSession,
     items: list[DraftItem],
@@ -247,13 +260,9 @@ async def _keep_item_sources(
             item.advisory = previous.advisory and item.kind == "forbidden"
         if "source_refs" not in raw and previous is not None:
             item.source_refs = [r.as_dict() for r in sop_citation.parse_refs(previous.source_refs)]
-    # A cited section that does not exist is dropped, not stored: scoring would read nothing.
-    for it in items:
-        refs = sop_citation.parse_refs(it.source_refs)
-        gone = set(await sop_citation.missing(db, refs))
-        it.source_refs = [r.as_dict() for r in refs if r not in gone]
-        if it.source_refs and not it.source_document_id:
-            it.source_document_id = it.source_refs[0]["document_id"]
+    # A cited section that does not exist is dropped, not stored: scoring would read nothing. One
+    # lookup for the whole checklist.
+    await drop_missing_refs(db, items)
     wanted = {it.source_document_id for it in items if it.source_document_id}
     if not wanted:
         return

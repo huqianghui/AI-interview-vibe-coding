@@ -72,7 +72,7 @@ def parse_refs(raw: object) -> list[SectionRef]:
     if not isinstance(raw, list):
         return []
     out: list[SectionRef] = []
-    for entry in raw:
+    for entry in raw[: MAX_REFS_PER_ITEM * 4]:
         if not isinstance(entry, dict):
             continue
         document_id = str(entry.get("document_id") or "").strip()
@@ -80,7 +80,9 @@ def parse_refs(raw: object) -> list[SectionRef]:
         ref = SectionRef(document_id, section)
         if document_id and section and ref not in out:
             out.append(ref)
-    return out[:MAX_REFS_PER_ITEM]
+        if len(out) == MAX_REFS_PER_ITEM:
+            break
+    return out
 
 
 def dump_refs(refs: Iterable[SectionRef]) -> str:
@@ -150,30 +152,49 @@ async def resolve(db: AsyncSession, refs: Iterable[SectionRef]) -> list[CitedSec
     return out
 
 
+async def _section_heads(
+    db: AsyncSession, document_ids: Iterable[str]
+) -> dict[tuple[str, str], tuple[str, int]]:
+    """``(document_id, number) → (title, page_start)`` of the first section with that number, read
+    without any section text (checking a citation must not load whole documents)."""
+    ids = sorted(set(document_ids))
+    if not ids:
+        return {}
+    rows = await db.execute(
+        select(SopSection.document_id, SopSection.number, SopSection.title, SopSection.page_start)
+        .where(SopSection.document_id.in_(ids))
+        .order_by(SopSection.document_id, SopSection.order_index)
+    )
+    out: dict[tuple[str, str], tuple[str, int]] = {}
+    for doc_id, number, title, page in rows.all():
+        out.setdefault((doc_id, number), (title, page))
+    return out
+
+
 async def missing(db: AsyncSession, refs: Iterable[SectionRef]) -> list[SectionRef]:
     """The references that name no existing section."""
     refs = list(refs)
-    by_doc = await _sections_by_document(db, (r.document_id for r in refs))
-    return [r for r in refs if _find(by_doc.get(r.document_id) or [], r.section) is None]
+    heads = await _section_heads(db, (r.document_id for r in refs))
+    return [r for r in refs if (r.document_id, r.section) not in heads]
 
 
 async def describe(db: AsyncSession, refs: Iterable[SectionRef]) -> list[dict]:
     """References as a reader sees them, without the section text: for the editor and the report.
     ``found`` is False when the document or section is gone."""
     refs = list(refs)
-    by_doc = await _sections_by_document(db, (r.document_id for r in refs))
-    names = await _document_names(db, by_doc)
+    heads = await _section_heads(db, (r.document_id for r in refs))
+    names = await _document_names(db, (r.document_id for r in refs))
     out = []
     for ref in refs:
-        row = _find(by_doc.get(ref.document_id) or [], ref.section)
+        head = heads.get((ref.document_id, ref.section))
         out.append(
             {
                 "document_id": ref.document_id,
                 "document_name": names.get(ref.document_id, ""),
                 "section": ref.section,
-                "title": row.title if row is not None else "",
-                "page_start": row.page_start if row is not None else None,
-                "found": row is not None,
+                "title": head[0] if head else "",
+                "page_start": head[1] if head else None,
+                "found": head is not None,
             }
         )
     return out

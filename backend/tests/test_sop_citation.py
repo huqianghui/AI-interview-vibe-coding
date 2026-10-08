@@ -187,3 +187,75 @@ async def test_the_report_names_the_cited_section_and_scoring_reads_it_whole(db_
             "page": 3,
         }
     ]
+
+
+async def test_a_bundle_import_resolves_refs_by_document_name(db_session):
+    doc = await _widget_sop(db_session)
+    items, unresolved = bank_bundle_service._draft_items_from_bundle(
+        [
+            {
+                "kind": "required",
+                "text": "Approve the release",
+                "weight": 100,
+                "source_refs": [
+                    {"document_name": "Widget SOP.pdf", "section": "4.2"},
+                    {"document_name": "Elsewhere.pdf", "section": "1"},
+                    {"document_name": "", "section": "1"},
+                ],
+            }
+        ],
+        {"Widget SOP.pdf": doc},
+    )
+    assert items[0].source_refs == [{"document_id": doc, "section": "4.2"}]
+    assert unresolved == {"Elsewhere.pdf"}
+
+
+async def test_a_vanished_section_is_flagged_in_the_editor_and_left_out_of_scoring(
+    client, db_session, admin_auth
+):
+    doc = await _widget_sop(db_session)
+    _, q, checklist = await _bank_question(db_session)
+    rows = await checklist_service.list_items(db_session, checklist.id)
+    rows[0].source_refs = sop_citation.dump_refs([SectionRef(doc, "4.2"), SectionRef(doc, "8")])
+    await db_session.commit()
+    got = (await client.get(f"/admin/checklists/questions/{q.id}", headers=admin_auth)).json()
+    assert [(r["section"], r["found"]) for r in got["items"][0]["source_refs"]] == [
+        ("4.2", True),
+        ("8", False),
+    ]
+    from app.services import scoring_service
+
+    task = await scoring_service.prepare_scoring(
+        db_session, question_id=q.id, question_text=q.text, answer_text="A"
+    )
+    assert [s.number for s in task.sources.sections] == ["4.2"]
+
+
+async def test_an_item_without_refs_brings_only_its_documents_approved_summary(db_session, caplog):
+    from app.services import scoring_service
+
+    doc = await _widget_sop(db_session)
+    _, q, checklist = await _bank_question(db_session)
+    for row in await checklist_service.list_items(db_session, checklist.id):
+        row.source_document_id = doc
+    document = await db_session.get(SopDocument, doc)
+    await sop_summary_service.save(db_session, document, "Approved.", approve=True)
+    task = await scoring_service.prepare_scoring(
+        db_session, question_id=q.id, question_text=q.text, answer_text="A"
+    )
+    assert task.sources.sections == ()
+    assert task.sources.summaries == (("Widget SOP.pdf", "Approved."),)
+
+    # Over the budget: still sent whole, and a warning says so.
+    big = db_session.add(
+        SopSection(document_id=doc, order_index=9, number="9", title="BIG", text="x" * 60_001)
+    )
+    del big
+    rows = await checklist_service.list_items(db_session, checklist.id)
+    rows[0].source_refs = sop_citation.dump_refs([SectionRef(doc, "9")])
+    await db_session.commit()
+    task = await scoring_service.prepare_scoring(
+        db_session, question_id=q.id, question_text=q.text, answer_text="A"
+    )
+    assert len(task.sources.sections[0].text) > 60_000
+    assert "sent whole" in caplog.text
