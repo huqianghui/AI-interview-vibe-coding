@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.54.0.0 (2026-10-08)
+
+### Added
+- **Every SOP is converted to Markdown and split into its sections.** PDFs go through Azure Document
+  Intelligence, every page named explicitly and read with high-resolution OCR; Word files through
+  our own converter, which reproduces Word's automatic numbering (so "Monitoring Plan section 12"
+  is section 12) and recognises typed headings and tables. Sections follow the clause numbers
+  (4 › 4.2 › 4.2.1) and the document's headings; a full section is its own text plus every
+  subsection, never cut short.
+- **A conversion is complete or it fails.** The page count must match the PDF and every page must
+  hold the words the PDF's own text layer has on it; otherwise the document gets no sections and
+  the reason is shown. Measured on the 26 client SOPs: every page of all 22 PDFs read in full, and
+  100% of the Markdown's text lands in a section, tables included.
+- **SOP documents tab** in the admin page: each document's conversion, its sections with pages and
+  length, any section's full text, and "Convert again".
+- Conversion runs in the background after startup and after each upload, retrying when Document
+  Intelligence throttles.
+
+### Fixed
+- Running page headers and footers (company name, "Company Confidential", the per-page download
+  notice) no longer leak into SOP text; their first occurrence is kept, so a document's number
+  and version survive once.
+
 ## 0.53.0.0 (2026-10-08)
 
 ### Changed

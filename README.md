@@ -138,9 +138,24 @@ frontend  React 18 + TypeScript + Vite + Fluent UI v9 (own design language, not 
 backend   Python 3.11 + FastAPI + SQLAlchemy 2.0 async + Alembic · JWT auth
 database  PostgreSQL 16 on Azure (private, Entra-only, managed-identity login) · SQLite for dev/tests
 azure     AI Foundry agents (Responses API) · Voice Live (avatar, via a backend WS proxy)
-          · Foundry IQ / AI Search (RAG with strict citation gating) · Blob Storage
+          · Document Intelligence (SOP → Markdown) · Blob Storage · Foundry IQ (agent
+          knowledge in the editor Playground only; SOP grounding never goes through it)
 infra     Azure Container Apps (Sweden Central) · Bicep · GitHub Actions OIDC (keyless)
 ```
+
+### SOP processing and scoring, end to end
+
+Two flows meet at scoring. The **SOP flow** turns each document into Markdown (every page, or the
+conversion fails), splits it into numbered sections, and publishes the questions with their rubric
+as one bank version, every rubric item citing a section. The **interview flow** pins that version
+when the interview starts, so the questions and the rubric cannot change underneath it. Scoring
+reads the candidate's answer next to the full text of each cited section and the admin-reviewed
+summary of each cited document, and the report links every judgment back to its source.
+
+![SOP flow and interview flow merging at scoring: SOP document, Markdown, sections and summary, bank version; candidate, interview on the pinned version, answers; scoring combines the rubric, the full cited sections and the summary with the answers, and the report cites the SOP](docs/images/sop-scoring-architecture.svg)
+
+Step-by-step detail, including which steps are still being rolled out:
+[`docs/sop-processing-and-scoring.md`](docs/sop-processing-and-scoring.md).
 
 ### A voice session, stage by stage
 
