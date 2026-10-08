@@ -28,7 +28,7 @@ And the editor round-trip carried neither `source_document_id` nor `advisory`
 
 | Table | Change |
 |---|---|
-| `rubric_versions` (new) | `id`, `bank_id` → `question_banks` (CASCADE), `version_no` (unique per bank), `content_json`, `content_hash`, `reason` (`initial` / `edit` / `draft` / `import`), `created_by`, timestamps |
+| `rubric_versions` (new) | `id`, `bank_id` → `question_banks` (CASCADE), `version_no` (unique per bank), `content_json`, `content_hash`, `reason` (`initial` / `edit` / `draft` / `import` / `sync`), `created_by`, timestamps |
 | `users` | `assigned_rubric_version_id` → `rubric_versions` (SET NULL) |
 | `interview_sessions` | `rubric_version_id` → `rubric_versions` (SET NULL) |
 
@@ -49,7 +49,8 @@ editable working copy. A version is a frozen copy of it.
 
 `rubric_version_service.snapshot(bank_id, reason)` builds the content from the bank's current
 default checklists. **It does not create a version when the content hash equals the latest
-version's**, so an idempotent re-save or re-import adds nothing. Callers:
+version's**, so a re-save that changes nothing adds nothing. (A bank re-import replaces the
+questions, so their ids change and it always adds one version.) Callers:
 
 - the editor saving items (`checklist_service.update_items`) → `edit`
 - an AI draft becoming the default (`checklist_service._persist_draft`) → `draft`
@@ -58,19 +59,28 @@ version's**, so an idempotent re-save or re-import adds nothing. Callers:
 
 A concurrent snapshot that loses the `(bank_id, version_no)` race retries once on the new latest.
 
+A rubric write commits before its snapshot. So assignment and interview start do not trust
+"latest" blindly: they call `current()`, which re-hashes the bank's rubric and mints a `sync`
+version when it is ahead of the latest one. A failed snapshot, or a writer that never snapshots
+(a question deletion, the private client importer), can then never pin a stale rubric.
+
 ## Which version an interview uses
 
 At start (`assignment_service.resolve_for_candidate`):
 
 1. the user's `assigned_rubric_version_id`, **if it belongs to the bank the interview starts on**;
-2. otherwise the latest version of that bank (created on the spot if the bank has none).
+2. otherwise the bank's current version (`current()` above).
 
 The result is written to `interview_sessions.rubric_version_id`. A restart starts a new session and
 resolves again.
 
-Assignment (`PUT /admin/users/{id}/assignment`): a `bank_id` with no `rubric_version_id` stores the
-bank's latest version (the "default" the owner asked for). A `rubric_version_id` must belong to
-that bank, or the request gets a 422. Clearing the bank clears the version.
+Assignment (`PATCH /admin/users/{id}/assignment`): a `bank_id` with `rubric_version_id: null`
+stores the bank's current version (the "default" the owner asked for). The owner confirmed it then
+STAYS pinned: a later rubric edit does not move the user until an admin picks another version. A
+request that does not send `rubric_version_id` at all (a tab running an older page) keeps the
+user's version when the bank is unchanged, so saving their interviewer cannot re-pin them. A
+`rubric_version_id` must belong to that bank (422 otherwise), and one without a bank is a 422.
+Clearing the bank clears the version.
 
 ## Readers
 

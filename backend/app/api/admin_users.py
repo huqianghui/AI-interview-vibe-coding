@@ -66,9 +66,17 @@ async def set_assignment(
                 detail="Unknown or disabled question bank",
             )
     rubric_version_id = None
+    if body.bank_id is None and body.rubric_version_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="A rubric version needs the question bank it belongs to",
+        )
     if body.bank_id is not None:
-        # The rubric version is part of the assignment: the one asked for, which must be a version
-        # of this bank, or by default the bank's latest (spec-rubric-versioning).
+        # The rubric version is part of the assignment (spec-rubric-versioning): the one asked for,
+        # which must be a version of this bank; else, for the same bank, the one already assigned;
+        # else the bank's current version. "Not sent" is told apart from null so a tab running an
+        # older page, which never sends the field, cannot re-pin a user to the latest by saving
+        # their interviewer.
         if body.rubric_version_id is not None:
             version = await rubric_version_service.get(db, body.rubric_version_id)
             if version is None or version.bank_id != body.bank_id:
@@ -77,8 +85,14 @@ async def set_assignment(
                     detail="That rubric version does not belong to this question bank",
                 )
             rubric_version_id = version.id
+        elif (
+            "rubric_version_id" not in body.model_fields_set
+            and body.bank_id == user.assigned_bank_id
+            and user.assigned_rubric_version_id
+        ):
+            rubric_version_id = user.assigned_rubric_version_id
         else:
-            rubric_version_id = (await rubric_version_service.ensure_latest(db, body.bank_id)).id
+            rubric_version_id = (await rubric_version_service.current(db, body.bank_id)).id
     user.assigned_persona_id = body.persona_id
     user.assigned_bank_id = body.bank_id
     user.assigned_rubric_version_id = rubric_version_id

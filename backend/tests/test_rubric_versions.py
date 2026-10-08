@@ -300,3 +300,163 @@ async def test_an_interview_without_a_version_reads_the_live_rubric(db_session):
         db_session, question_id=q.id, rubric_version_id=None
     )
     assert [r.text for r in rows] == ["Escalates within 24 hours", "Known source conflict"]
+
+
+# --- review follow-ups (ship pre-landing review) ---------------------------------------------
+
+
+async def test_an_old_tab_saving_the_interviewer_does_not_repin_the_rubric_version(
+    client, db_session, admin_auth
+):
+    bank, _q, checklist, _doc = await _bank_with_rubric(db_session)
+    v1 = await rubric_version_service.latest(db_session, bank.id)
+    await checklist_service.update_items(
+        db_session, checklist.id, [{"kind": "required", "text": "Changed", "weight": 100}]
+    )
+    user = await _user(db_session)
+    url = f"/admin/users/{user.id}/assignment"
+    await client.patch(
+        url, headers=admin_auth, json={"bank_id": bank.id, "rubric_version_id": v1.id}
+    )
+
+    # A tab running the previous page never sends rubric_version_id at all.
+    resp = await client.patch(
+        url, headers=admin_auth, json={"persona_id": None, "bank_id": bank.id}
+    )
+    assert resp.json()["assigned_rubric_version_id"] == v1.id
+    # A version with no bank is meaningless.
+    bad = await client.patch(
+        url, headers=admin_auth, json={"bank_id": None, "rubric_version_id": v1.id}
+    )
+    assert bad.status_code == 422
+    unknown = await client.patch(
+        url, headers=admin_auth, json={"bank_id": bank.id, "rubric_version_id": "nope"}
+    )
+    assert unknown.status_code == 422
+    listed = {u["id"]: u for u in (await client.get("/admin/users", headers=admin_auth)).json()}
+    assert listed[user.id]["assigned_rubric_version_no"] == 1
+
+
+async def test_start_pins_the_rubric_as_it_is_now_even_if_a_snapshot_was_missed(db_session):
+    """A rubric write commits before its snapshot; a missed one must not pin a stale version."""
+    bank, q, checklist, _doc = await _bank_with_rubric(db_session)
+    # Write the rubric behind the service's back, as a failed snapshot would leave it.
+    (await _items(db_session, checklist.id))[0].text = "Edited without a snapshot"
+    await db_session.commit()
+    pinned = await rubric_version_service.resolve_for_start(db_session, bank.id, None)
+    version = await rubric_version_service.get(db_session, pinned)
+    assert (version.version_no, version.reason) == (2, "sync")
+    rows = await rubric_version_service.rubric_rows(
+        db_session, question_id=q.id, rubric_version_id=pinned
+    )
+    assert rows[0].text == "Edited without a snapshot"
+
+
+async def test_a_bank_import_mints_one_version_for_the_whole_bank(db_session):
+    from app.services import bank_bundle_service
+
+    bank, *_ = await _bank_with_rubric(db_session, name="Imported")
+    bundle = await bank_bundle_service.export_bank_bundle(db_session, bank.id)
+    before = len(await rubric_version_service.list_versions(db_session, bank.id))
+    result = await bank_bundle_service.import_bank_bundle(db_session, bundle)
+    versions = await rubric_version_service.list_versions(db_session, result.bank_id)
+    # Re-import replaces the questions (new ids), so the content differs: exactly one new version.
+    assert len(versions) == before + 1
+    assert versions[0].reason == "import"
+
+
+async def test_the_judge_and_the_coverage_audit_read_the_pinned_version(
+    client, db_session, scripted_judge, monkeypatch
+):
+    from app.interview import judge as judge_mod
+    from app.interview import judge_flow
+    from app.services import sop_coverage
+    from tests.test_interview_api import _judged_setup
+
+    _headers, iv, qid = await _judged_setup(client, db_session)
+    session = await _session_row(db_session, iv)
+    assert session.rubric_version_id is not None
+    checklist = await checklist_service.get_default_checklist(db_session, qid)
+    await checklist_service.update_items(
+        db_session,
+        checklist.id,
+        [{"kind": "required", "text": "Edited after start", "weight": 100}],
+    )
+
+    seen: list = []
+
+    async def capture(inp, _adapter):
+        seen.append([i.text for i in inp.checklist])
+        return await real_run(inp, _adapter)
+
+    real_run = judge_mod.run_judge
+    monkeypatch.setattr(judge_mod, "run_judge", capture)
+    session = await _session_row(db_session, iv)
+    await judge_flow.judge(
+        db_session,
+        session,
+        question_id=qid,
+        follow_ups_asked=0,
+        draft_text="I log them and",
+        trigger="voice_silence",
+        dry_run=True,
+    )
+    assert seen == [["Documented every protocol deviation in the log"]]
+
+    # The coverage audit needs a cited SOP passage; with none it reads the pinned rows and stops.
+    assert (
+        await sop_coverage.prepare_coverage(
+            db_session,
+            question_id=qid,
+            question_text="q",
+            rubric_version_id=session.rubric_version_id,
+        )
+        is None
+    )
+
+
+async def test_snapshot_rejects_an_unknown_reason_and_rows_fall_back_without_a_version(db_session):
+    bank, q, _checklist, _doc = await _bank_with_rubric(db_session)
+    with pytest.raises(ValueError):
+        await rubric_version_service.snapshot(db_session, bank.id, reason="bogus")
+    rows = await rubric_version_service.rubric_rows(
+        db_session, question_id=q.id, rubric_version_id="no-such-version"
+    )
+    assert [r.text for r in rows] == ["Escalates within 24 hours", "Known source conflict"]
+    assert (
+        await rubric_version_service.rubric_rows(
+            db_session, question_id="no-question", rubric_version_id=None
+        )
+        == []
+    )
+
+
+async def test_admin_detail_shows_the_version_and_the_candidate_view_hides_it(
+    client, db_session, admin_auth
+):
+    from app.services import interview_history_service
+
+    bank, *_ = await _bank_with_rubric(db_session)
+    user = await _user(db_session)
+    await client.patch(
+        f"/admin/users/{user.id}/assignment", headers=admin_auth, json={"bank_id": bank.id}
+    )
+    iv = await _start_as(client, user)
+    admin_view = (await client.get(f"/admin/interviews/{iv}", headers=admin_auth)).json()
+    assert admin_view["rubric_version_no"] == 1
+    page = (await client.get("/admin/interviews", headers=admin_auth)).json()
+    assert {i["id"]: i for i in page["items"]}[iv]["rubric_version_no"] == 1
+    session = await _session_row(db_session, iv)
+    from app.models.anonymous_session import AnonymousCandidateSession
+
+    candidate = await db_session.get(AnonymousCandidateSession, session.candidate_session_id)
+    mine = await interview_history_service.get_detail(db_session, iv, candidate=candidate)
+    assert mine is not None and mine.rubric_version_no is None
+
+
+async def test_the_rubric_editor_is_admin_only(client, db_session, candidate_auth):
+    _bank, _q, checklist, _doc = await _bank_with_rubric(db_session)
+    resp = await client.put(
+        f"/admin/checklists/{checklist.id}/items", headers=candidate_auth, json={"items": []}
+    )
+    assert resp.status_code == 403

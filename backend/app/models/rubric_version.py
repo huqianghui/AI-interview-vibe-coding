@@ -15,8 +15,9 @@ from app.db import Base
 from app.models.mixins import TimestampMixin
 
 # Why a version was created: the migration's backfill, an editor save, an AI draft becoming the
-# default, or a bank bundle import.
-RUBRIC_VERSION_REASONS = ("initial", "edit", "draft", "import")
+# default, a bank bundle import, or an assignment / interview start that found the rubric ahead of
+# the latest version (rubric_version_service.current).
+RUBRIC_VERSION_REASONS = ("initial", "edit", "draft", "import", "sync")
 
 
 class RubricVersion(TimestampMixin, Base):

@@ -891,10 +891,10 @@ async def cited_document_ids(db: AsyncSession, session: InterviewSession) -> set
 
         cited: set[str] = set()
         for qid in answered_qids:
-            rows_ = await rubric_version_service.rubric_rows(
+            pinned = await rubric_version_service.rubric_rows(
                 db, question_id=qid, rubric_version_id=session.rubric_version_id
             )
-            cited.update(r.source_document_id for r in rows_ if r.source_document_id)
+            cited.update(r.source_document_id for r in pinned if r.source_document_id)
         return cited
     rows = (
         await db.execute(

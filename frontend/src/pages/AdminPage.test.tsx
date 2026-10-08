@@ -1009,6 +1009,16 @@ describe("AdminPage", () => {
       );
     });
 
+    it("shows the rubric version an interview is scored against, and nothing when unpinned", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(admin, "listInterviewResults").mockResolvedValue(
+        page([{ ...ROW, rubric_version_no: 3 } as typeof ROW, { ...ROW, id: "i2" }]),
+      );
+      await openResultsTab(user);
+      expect(await screen.findByTestId("result-rubric-version-i1")).toHaveTextContent("Rubric v3");
+      expect(screen.queryByTestId("result-rubric-version-i2")).not.toBeInTheDocument();
+    });
+
     it("applies a score bound only when the field is left, and sorts by a header", async () => {
       const user = userEvent.setup();
       const list = vi.spyOn(admin, "listInterviewResults").mockResolvedValue(page([ROW]));

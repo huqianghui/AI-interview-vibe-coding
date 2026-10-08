@@ -81,55 +81,65 @@ function AssignmentCells({ u, state }: { u: AdminUser; state: UsersTabState }) {
         </Select>
       </TableCell>
       <TableCell>
-        <Select
-          size="small"
-          aria-label={t("admin.users.colBank")}
-          data-testid={`user-assign-bank-${u.username}`}
-          value={u.assigned_bank_id ?? ""}
-          onChange={(_, d) => void state.assign(u, { bank_id: d.value || null })}
+        {/* Bank, its rubric version, and the save status stacked: Fluent's Select is inline-flex,
+            so without a column they sat side by side and wrapped unpredictably. */}
+        <div
+          style={{ display: "flex", flexDirection: "column", gap: tokens.spacingVerticalXS }}
         >
-          <option value="">
-            {t("admin.users.useDefault", { name: defaultBank?.name ?? t("admin.users.noDefault") })}
-          </option>
-          {banks.map((b) => (
-            <option key={b.bank_id} value={b.bank_id}>
-              {b.name}
-            </option>
-          ))}
-        </Select>
-        {u.assigned_bank_id && (
           <Select
             size="small"
-            style={{ marginTop: 4 }}
-            aria-label={t("admin.users.rubricVersion")}
-            data-testid={`user-assign-version-${u.username}`}
-            value={u.assigned_rubric_version_id ?? ""}
-            onChange={(_, d) => void state.assign(u, { rubric_version_id: d.value || null })}
+            aria-label={t("admin.users.colBank")}
+            data-testid={`user-assign-bank-${u.username}`}
+            value={u.assigned_bank_id ?? ""}
+            onChange={(_, d) => void state.assign(u, { bank_id: d.value || null })}
           >
-            {(state.versionsByBank[u.assigned_bank_id] ?? []).map((v) => (
-              <option key={v.id} value={v.id}>
-                {t(v.is_latest ? "admin.users.versionLatest" : "admin.users.versionOption", {
-                  no: v.version_no,
-                  date: v.created_at ? v.created_at.slice(0, 10) : "",
-                })}
+            <option value="">
+              {t("admin.users.useDefault", {
+                name: defaultBank?.name ?? t("admin.users.noDefault"),
+              })}
+            </option>
+            {banks.map((b) => (
+              <option key={b.bank_id} value={b.bank_id}>
+                {b.name}
               </option>
             ))}
           </Select>
-        )}
-        {status?.kind === "saved" && (
-          <Text size={200} style={{ marginLeft: 6 }} data-testid={`user-assign-saved-${u.username}`}>
-            {t("admin.users.assignSaved")}
-          </Text>
-        )}
-        {status?.kind === "error" && (
-          <Text
-            size={200}
-            role="alert"
-            style={{ marginLeft: 6, color: tokens.colorPaletteRedForeground1 }}
-          >
-            {t("admin.users.assignError", { message: status.message })}
-          </Text>
-        )}
+          {u.assigned_bank_id && (
+            <Select
+              size="small"
+              aria-label={t("admin.users.rubricVersion")}
+              data-testid={`user-assign-version-${u.username}`}
+              value={u.assigned_rubric_version_id ?? ""}
+              onChange={(_, d) => void state.assign(u, { rubric_version_id: d.value || null })}
+            >
+              {/* Until the bank's versions load (or if loading failed), still name the assigned
+                  version instead of rendering an empty box. */}
+              {!state.versionsByBank[u.assigned_bank_id] && u.assigned_rubric_version_id && (
+                <option value={u.assigned_rubric_version_id}>
+                  {`v${u.assigned_rubric_version_no ?? "?"}`}
+                </option>
+              )}
+              {(state.versionsByBank[u.assigned_bank_id] ?? []).map((v) => (
+                <option key={v.id} value={v.id}>
+                  {t(v.is_latest ? "admin.users.versionLatest" : "admin.users.versionOption", {
+                    no: v.version_no,
+                    date: v.created_at ? v.created_at.slice(0, 10) : "",
+                  })}
+                </option>
+              ))}
+            </Select>
+          )}
+          {status?.kind === "saved" && (
+            <Text size={200} data-testid={`user-assign-saved-${u.username}`}>
+              {t("admin.users.assignSaved")}
+            </Text>
+          )}
+          {status?.kind === "error" && (
+            <Text size={200} role="alert" style={{ color: tokens.colorPaletteRedForeground1 }}>
+              {t("admin.users.assignError", { message: status.message })}
+            </Text>
+          )}
+        </div>
       </TableCell>
     </>
   );

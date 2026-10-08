@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.checklist import Checklist, ChecklistItem
 from app.models.question import Question
 from app.models.rubric_version import RUBRIC_VERSION_REASONS, RubricVersion
 
@@ -66,32 +67,67 @@ def _row_from(item: dict) -> RubricRow:
     )
 
 
+# A version never changes once written, so its parsed content is cached by id. Scoring, the
+# coverage audit, the citation guard and every judge call read it once per question; without the
+# cache each read re-parsed the whole bank's JSON.
+_PARSED: dict[str, dict[str, list[dict]]] = {}
+_PARSED_MAX = 256
+
+
 def questions_of(version: RubricVersion) -> dict[str, list[dict]]:
     """The version's ``{question_id: [item, ...]}`` map."""
-    return json.loads(version.content_json).get("questions", {})
+    key = f"{version.id}:{version.content_hash}"
+    parsed = _PARSED.get(key)
+    if parsed is None:
+        if len(_PARSED) >= _PARSED_MAX:
+            _PARSED.clear()
+        parsed = _PARSED[key] = json.loads(version.content_json).get("questions", {})
+    return parsed
+
+
+def _item_dict(row: ChecklistItem) -> dict:
+    return {f: getattr(row, f) for f in ITEM_FIELDS}
 
 
 async def _bank_content(db: AsyncSession, bank_id: str) -> dict:
-    """The bank's current rubric (each question's default checklist), in a stable order."""
-    from app.services import checklist_service
+    """The bank's current rubric (each question's default checklist), in a stable order.
 
-    question_ids = (
+    Two queries for the whole bank, whatever its size: this runs on every rubric save, every
+    interview start and every assignment. Must build exactly what the migration builds
+    (``e2f3a4b5c6d7_rubric_versions._bank_content``), or the first save after it mints a version.
+    """
+    checklists = (
+        await db.execute(
+            select(Checklist.id, Checklist.question_id)
+            .join(Question, Question.id == Checklist.question_id)
+            .where(Question.bank_id == bank_id, Checklist.is_default.is_(True))
+            .order_by(Checklist.created_at.desc())
+        )
+    ).all()
+    # One default per question (uq_one_default_checklist_per_question); the newest wins otherwise,
+    # like the migration's ORDER BY created_at DESC LIMIT 1.
+    checklist_of: dict[str, str] = {}
+    for checklist_id, question_id in checklists:
+        checklist_of.setdefault(question_id, checklist_id)
+    if not checklist_of:
+        return {"questions": {}}
+    rows = (
         (
             await db.execute(
-                select(Question.id).where(Question.bank_id == bank_id).order_by(Question.id)
+                select(ChecklistItem)
+                .where(ChecklistItem.checklist_id.in_(set(checklist_of.values())))
+                .order_by(ChecklistItem.order_index)
             )
         )
         .scalars()
         .all()
     )
-    questions: dict[str, list[dict]] = {}
-    for qid in question_ids:
-        checklist = await checklist_service.get_default_checklist(db, qid)
-        if checklist is None:
-            continue
-        rows = await checklist_service.list_items(db, checklist.id)
-        if rows:
-            questions[qid] = [{f: getattr(r, f) for f in ITEM_FIELDS} for r in rows]
+    by_checklist: dict[str, list[dict]] = {}
+    for row in rows:
+        by_checklist.setdefault(row.checklist_id, []).append(_item_dict(row))
+    questions = {
+        qid: by_checklist[cid] for qid, cid in sorted(checklist_of.items()) if by_checklist.get(cid)
+    }
     return {"questions": questions}
 
 
@@ -197,6 +233,17 @@ async def latest_for_question(db: AsyncSession, question_id: str) -> RubricVersi
     return await latest(db, bank_id) if bank_id else None
 
 
+async def current(db: AsyncSession, bank_id: str) -> RubricVersion:
+    """The version matching the bank's rubric as it is NOW: the latest one when nothing changed,
+    otherwise a new one (``reason='sync'``).
+
+    What assignment and interview start pin. A rubric write commits before its snapshot, so a
+    snapshot that failed (or a writer that never snapshots, such as a question deletion) would
+    otherwise leave "latest" behind the rubric and pin the stale one.
+    """
+    return await snapshot(db, bank_id, reason="sync")
+
+
 async def ensure_latest(db: AsyncSession, bank_id: str) -> RubricVersion:
     """The bank's latest version, creating the first one if the bank has none yet."""
     return await latest(db, bank_id) or await snapshot(db, bank_id, reason="initial")
@@ -213,7 +260,7 @@ async def resolve_for_start(
         assigned = await get(db, assigned_version_id)
         if assigned is not None and assigned.bank_id == bank_id:
             return assigned.id
-    return (await ensure_latest(db, bank_id)).id
+    return (await current(db, bank_id)).id
 
 
 async def rubric_rows(
@@ -233,10 +280,7 @@ async def rubric_rows(
     checklist = await checklist_service.get_default_checklist(db, question_id)
     if checklist is None:
         return []
-    return [
-        _row_from({f: getattr(r, f) for f in ITEM_FIELDS})
-        for r in await checklist_service.list_items(db, checklist.id)
-    ]
+    return [_row_from(_item_dict(r)) for r in await checklist_service.list_items(db, checklist.id)]
 
 
 def question_count(version: RubricVersion) -> int:
