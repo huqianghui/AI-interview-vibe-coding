@@ -15,7 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.dependencies import require_role
-from app.services import bank_bundle_service, checklist_service, rubric_version_service
+from app.models.user import User
+from app.services import bank_bundle_service, bank_version_service, checklist_service
 from app.services import question_service as svc
 from app.services.question_service import (
     QuestionBankConflict,
@@ -46,6 +47,10 @@ class BankOut(BaseModel):
     language: str
     enabled: bool
     is_default: bool
+    # Publish state (spec-bank-versioning): the latest published version, and whether the draft has
+    # edits not in it yet. Null / True for a bank never published.
+    latest_version_no: int | None = None
+    has_unpublished_changes: bool = False
 
 
 class QuestionIn(BaseModel):
@@ -91,9 +96,13 @@ class BundleImportOut(BaseModel):
     question_count: int
     checklist_item_count: int
     unresolved_sop_names: list[str]
+    # The version this import published, or None with the reason codes it could not (incomplete).
+    published_version_no: int | None = None
+    publish_problems: list[str] = []
 
 
-def _bank_out(bank) -> BankOut:
+async def _bank_out(db: AsyncSession, bank) -> BankOut:
+    latest_no, unpublished = await bank_version_service.publish_state(db, bank.id)
     return BankOut(
         bank_id=bank.id,
         name=bank.name,
@@ -101,6 +110,8 @@ def _bank_out(bank) -> BankOut:
         language=bank.language,
         enabled=bank.enabled,
         is_default=bank.is_default,
+        latest_version_no=latest_no,
+        has_unpublished_changes=unpublished,
     )
 
 
@@ -126,7 +137,7 @@ def _question_out(q, checklist_item_count: int = 0) -> AdminQuestionOut:
 
 @router.get("", response_model=list[BankOut])
 async def list_banks(db: AsyncSession = Depends(get_db)) -> list[BankOut]:
-    return [_bank_out(b) for b in await svc.list_banks(db)]
+    return [await _bank_out(db, b) for b in await svc.list_banks(db)]
 
 
 @router.post("", response_model=BankOut, status_code=status.HTTP_201_CREATED)
@@ -141,7 +152,7 @@ async def create_bank(body: BankIn, db: AsyncSession = Depends(get_db)) -> BankO
         )
     except QuestionBankConflict as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    return _bank_out(bank)
+    return await _bank_out(db, bank)
 
 
 @router.get("/{bank_id}/export")
@@ -179,18 +190,20 @@ async def import_bundle(bundle: dict, db: AsyncSession = Depends(get_db)) -> Bun
         question_count=result.question_count,
         checklist_item_count=result.checklist_item_count,
         unresolved_sop_names=result.unresolved_sop_names,
+        published_version_no=result.published_version_no,
+        publish_problems=result.publish_problems,
     )
 
 
 @router.post("/{bank_id}/default", response_model=BankOut)
 async def set_default(bank_id: str, db: AsyncSession = Depends(get_db)) -> BankOut:
     try:
-        return _bank_out(await svc.set_default_bank(db, bank_id))
+        return await _bank_out(db, await svc.set_default_bank(db, bank_id))
     except QuestionBankNotFound as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bank not found") from exc
 
 
-class RubricVersionOut(BaseModel):
+class BankVersionOut(BaseModel):
     id: str
     version_no: int
     created_at: datetime | None
@@ -199,29 +212,65 @@ class RubricVersionOut(BaseModel):
     is_latest: bool
 
 
-@router.get("/{bank_id}/rubric-versions", response_model=list[RubricVersionOut])
-async def list_rubric_versions(
-    bank_id: str, db: AsyncSession = Depends(get_db)
-) -> list[RubricVersionOut]:
-    """The bank's rubric versions, newest first (spec-rubric-versioning). A bank that has never had
-    one gets its first here, so the assignment picker always has something to offer."""
+@router.get("/{bank_id}/versions", response_model=list[BankVersionOut])
+async def list_versions(bank_id: str, db: AsyncSession = Depends(get_db)) -> list[BankVersionOut]:
+    """The bank's published versions, newest first (spec-bank-versioning). Read-only: a version
+    exists only once an admin publishes (or an import publishes) a complete bank."""
     try:
         await svc.get_bank(db, bank_id)
     except QuestionBankNotFound as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bank not found") from exc
-    await rubric_version_service.ensure_latest(db, bank_id)
-    versions = await rubric_version_service.list_versions(db, bank_id)
+    versions = await bank_version_service.list_versions(db, bank_id)
     return [
-        RubricVersionOut(
+        BankVersionOut(
             id=v.id,
             version_no=v.version_no,
             created_at=v.created_at,
             reason=v.reason,
-            question_count=rubric_version_service.question_count(v),
+            question_count=bank_version_service.question_count(v),
             is_latest=i == 0,
         )
         for i, v in enumerate(versions)
     ]
+
+
+class PublishProblemOut(BaseModel):
+    code: str  # no_questions | no_rubric | weights
+    question_no: int | None = None
+    question_text: str = ""
+    weights_sum: int | None = None
+
+
+class PublishOut(BaseModel):
+    published: bool
+    # True when this publish minted a version; False when the draft equalled the latest one.
+    created: bool = False
+    version_no: int | None = None
+    problems: list[PublishProblemOut] = []
+
+
+@router.post("/{bank_id}/publish", response_model=PublishOut)
+async def publish(
+    bank_id: str,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_role("admin")),
+) -> PublishOut:
+    """Publish the bank's draft as a new version (spec-bank-versioning).
+
+    Refused, with every reason, while the draft is incomplete: an enabled question without a rubric,
+    or a rubric whose weights do not sum to 100. An unchanged draft returns the latest version.
+    """
+    try:
+        await svc.get_bank(db, bank_id)
+    except QuestionBankNotFound as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bank not found") from exc
+    result = await bank_version_service.publish(db, bank_id, created_by=admin.id)
+    return PublishOut(
+        published=result.version is not None,
+        created=result.created,
+        version_no=result.version.version_no if result.version else None,
+        problems=[PublishProblemOut(**vars(p)) for p in result.problems],
+    )
 
 
 @router.get("/{bank_id}/questions", response_model=list[AdminQuestionOut])

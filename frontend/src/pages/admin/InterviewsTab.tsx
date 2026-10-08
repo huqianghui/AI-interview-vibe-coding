@@ -310,10 +310,10 @@ export function InterviewsTab({ state }: { state: InterviewsTabState }) {
                   <TableCell>{it.persona_name ?? t("history.notRecorded")}</TableCell>
                   <TableCell>
                     {it.bank_name ?? t("history.notRecorded")}
-                    {it.rubric_version_no != null && (
-                      <Text size={200} data-testid={`result-rubric-version-${it.id}`}>
+                    {it.bank_version_no != null && (
+                      <Text size={200} data-testid={`result-bank-version-${it.id}`}>
                         {" · "}
-                        {t("admin.results.rubricVersion", { no: it.rubric_version_no })}
+                        {t("admin.results.bankVersion", { no: it.bank_version_no })}
                       </Text>
                     )}
                   </TableCell>
@@ -388,10 +388,10 @@ export function InterviewsTab({ state }: { state: InterviewsTabState }) {
         <DrawerHeader>
           <DrawerHeaderTitle>
             {t("admin.results.detailTitle")}
-            {state.detail?.rubric_version_no != null && (
-              <Text size={300} data-testid="results-drawer-rubric-version">
+            {state.detail?.bank_version_no != null && (
+              <Text size={300} data-testid="results-drawer-bank-version">
                 {" · "}
-                {t("admin.results.rubricVersion", { no: state.detail.rubric_version_no })}
+                {t("admin.results.bankVersion", { no: state.detail.bank_version_no })}
               </Text>
             )}
           </DrawerHeaderTitle>

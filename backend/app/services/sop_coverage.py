@@ -23,7 +23,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services import rubric_version_service, scoring_service, sop_context
+from app.services import bank_version_service, scoring_service, sop_context
 from app.services.agents.registry import get_llm_adapter
 
 logger = logging.getLogger(__name__)
@@ -114,7 +114,7 @@ async def prepare_coverage(
     *,
     question_id: str,
     question_text: str,
-    rubric_version_id: str | None = None,
+    bank_version_id: str | None = None,
 ) -> CoverageTask | None:
     """Every database read for one question's audit, or None when there is nothing to audit.
 
@@ -125,9 +125,9 @@ async def prepare_coverage(
 
     Makes no LLM call itself.
     """
-    # The interview's pinned rubric version, like scoring (spec-rubric-versioning).
-    items = await rubric_version_service.rubric_rows(
-        db, question_id=question_id, rubric_version_id=rubric_version_id
+    # The interview's pinned rubric version, like scoring (spec-bank-versioning).
+    items = await bank_version_service.rubric_rows(
+        db, question_id=question_id, bank_version_id=bank_version_id
     )
     if not items:
         return None

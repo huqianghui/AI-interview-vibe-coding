@@ -1,11 +1,14 @@
-"""The rubric-versions migration (e2f3a4b5c6d7) on a real migration chain, not create_all.
+"""The version migrations on a real migration chain, not create_all.
 
-It runs at container boot against the live database, so its backfill is checked here: version 1
-for a bank with a rubric, the assigned user pinned to it, the hash matching what the service would
-compute (so the first save after the upgrade mints nothing), and a clean downgrade.
+e2f3a4b5c6d7 (rubric versions) then f3a4b5c6d7e8 (bank versions: questions + rubric). They run at
+container boot against the live database, so the backfill is checked here: version 1 for the bank,
+the assigned user pinned to it, the rewritten content carrying the questions, the hash matching
+what the service computes (so publishing an unchanged bank after the upgrade mints nothing), and a
+clean downgrade.
 """
 
 import asyncio
+import json
 import os
 import sqlite3
 import subprocess
@@ -40,7 +43,7 @@ def _alembic(db: Path, *args: str) -> None:
 @pytest.mark.skipif(
     not (BACKEND / "alembic.ini").exists(), reason="alembic.ini missing (not a source checkout)"
 )
-def test_upgrade_backfills_version_one_and_downgrade_removes_it(tmp_path):
+def test_upgrade_backfills_version_one_with_questions_and_downgrade_removes_it(tmp_path):
     db = tmp_path / "mig.db"
     _alembic(db, "upgrade", "d8e9f0a1b2c3")
     conn = sqlite3.connect(db)
@@ -68,11 +71,14 @@ def test_upgrade_backfills_version_one_and_downgrade_removes_it(tmp_path):
 
     _alembic(db, "upgrade", "head")
     conn = sqlite3.connect(db)
-    version_id, version_no, reason, content_hash = conn.execute(
-        "SELECT id, version_no, reason, content_hash FROM rubric_versions WHERE bank_id = 'b1'"
+    version_id, version_no, reason, content_hash, bank_name, content = conn.execute(
+        "SELECT id, version_no, reason, content_hash, bank_name, content_json FROM bank_versions"
+        " WHERE bank_id = 'b1'"
     ).fetchone()
-    assert (version_no, reason) == (1, "initial")
-    assigned = conn.execute("SELECT assigned_rubric_version_id FROM users WHERE id='u1'").fetchone()
+    assert (version_no, reason, bank_name) == (1, "initial", "Bank")
+    (question,) = json.loads(content)["questions"]
+    assert (question["id"], question["text"], len(question["rubric"])) == ("q1", "Q?", 2)
+    assigned = conn.execute("SELECT assigned_bank_version_id FROM users WHERE id='u1'").fetchone()
     assert assigned == (version_id,)
     conn.close()
 
@@ -81,14 +87,15 @@ def test_upgrade_backfills_version_one_and_downgrade_removes_it(tmp_path):
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
     from app.db import make_engine
-    from app.services import rubric_version_service
+    from app.services import bank_version_service
 
     async def _service_hash() -> str:
         engine = make_engine(f"sqlite+aiosqlite:///{db}")
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-                content = await rubric_version_service._bank_content(session, "b1")
-                return rubric_version_service._hash(rubric_version_service._content_key(content))
+                return bank_version_service._hash(
+                    await bank_version_service.draft_content(session, "b1")
+                )
         finally:
             await engine.dispose()
 
@@ -96,8 +103,13 @@ def test_upgrade_backfills_version_one_and_downgrade_removes_it(tmp_path):
 
     _alembic(db, "downgrade", "-1")
     conn = sqlite3.connect(db)
+    (rubric_only,) = conn.execute("SELECT content_json FROM rubric_versions").fetchone()
+    assert list(json.loads(rubric_only)["questions"]) == ["q1"]
+    conn.close()
+    _alembic(db, "downgrade", "-1")
+    conn = sqlite3.connect(db)
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert "rubric_versions" not in tables
+    assert "rubric_versions" not in tables and "bank_versions" not in tables
     user_cols = {r[1] for r in conn.execute("PRAGMA table_info(users)")}
     assert "assigned_rubric_version_id" not in user_cols
     conn.close()

@@ -586,8 +586,8 @@ export interface InterviewDetail {
   transcript: TranscriptTurn[];
   /** Admin read only: an admin-started scoring run is still going. */
   scoring?: boolean;
-  /** Admin read only: the rubric version the interview is scored against. */
-  rubric_version_no?: number | null;
+  /** Admin read only: the bank version the interview was asked and scored from. */
+  bank_version_no?: number | null;
 }
 
 /** The signed-in candidate's interviews, newest first, every status. */

@@ -27,17 +27,19 @@ questions + checklists are deleted first), so re-running converges rather than d
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.interview.checklist_draft import ChecklistDraft, DraftItem, normalize_weights
 from app.models.checklist import Checklist, ChecklistItem
 from app.models.question import Question, QuestionBank
 from app.models.sop import SopDocument
-from app.models.user import User
-from app.services import checklist_service, question_service, rubric_version_service
+from app.services import bank_version_service, checklist_service, question_service
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -52,6 +54,10 @@ class ImportResult:
     # SOP filenames referenced by rubric items that had no matching document on the server. Not an
     # error (the citation link is simply omitted), but reported so the operator can upload the docs.
     unresolved_sop_names: list[str] = field(default_factory=list)
+    # The version this import published (spec-bank-versioning), or None with the reasons it could
+    # not: an incomplete bank stays a draft until an admin completes and publishes it.
+    published_version_no: int | None = None
+    publish_problems: list[str] = field(default_factory=list)
 
 
 async def export_bank_bundle(db: AsyncSession, bank_id: str) -> dict:
@@ -208,23 +214,21 @@ async def import_bank_bundle(db: AsyncSession, bundle: dict) -> ImportResult:
                 prompt_version=str(checklist_spec.get("prompt_version", "imported_v1")),
                 items=items,
             )
-            await checklist_service._persist_draft(db, question.id, draft, snapshot=False)
+            await checklist_service._persist_draft(db, question.id, draft)
             total_items += len(items)
 
     await db.commit()
     await db.refresh(bank)
-    # One version for the whole import (spec-rubric-versioning).
-    version = await rubric_version_service.snapshot(db, bank.id, reason="import")
-    if replaced:
-        # The questions were replaced (new ids), so every older version of this bank names
-        # questions that no longer exist. Users pinned to one move to this import's version;
-        # otherwise their next interview would find no rubric for any question.
-        await db.execute(
-            update(User)
-            .where(User.assigned_bank_id == bank.id)
-            .values(assigned_rubric_version_id=version.id)
+    # An import is a publish (spec-bank-versioning): the whole bank, once, after every question is
+    # written, and only when it is complete. Users already assigned an older version stay on it
+    # (owner decision): that version still carries its own questions and rubric.
+    published = await bank_version_service.publish(db, bank.id, reason="import")
+    if published.problems:
+        logger.warning(
+            "Imported bank %r left unpublished: %s",
+            bank.name,
+            ", ".join(f"{p.code}#{p.question_no}" for p in published.problems),
         )
-        await db.commit()
     await db.refresh(bank)
     return ImportResult(
         bank_id=bank.id,
@@ -235,6 +239,8 @@ async def import_bank_bundle(db: AsyncSession, bundle: dict) -> ImportResult:
         ),
         checklist_item_count=total_items,
         unresolved_sop_names=sorted(unresolved),
+        published_version_no=published.version.version_no if published.version else None,
+        publish_problems=[p.code for p in published.problems],
     )
 
 

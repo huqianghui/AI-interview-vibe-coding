@@ -191,6 +191,7 @@ async def test_boot_steps_run_in_dependency_order(db_session, boot, monkeypatch)
         # After the client banks: their importer is what writes a fresh DB's SOP rows.
         "SOP file repair",
         "default bank",
+        "publish unversioned banks",
         "default admin",
         "candidate accounts",
         "default persona",

@@ -14,9 +14,47 @@ import {
   tokens,
 } from "@fluentui/react-components";
 import * as admin from "../../api/admin";
+import type { PublishResult } from "../../api/admin";
 import { BoundedIntInput } from "../../components/BoundedIntInput";
 import { KIND_COLOR, KINDS, useAdminStyles, type Guard } from "./shared";
 import type { ContentTabState } from "./useContentTab";
+
+/** What the last Publish did: the version it made, that nothing changed, or every reason it was
+ * refused (an enabled question without a rubric, or weights that do not total 100). */
+function PublishOutcome({ result }: { result: PublishResult }) {
+  const { t } = useTranslation();
+  const styles = useAdminStyles();
+  if (result.published) {
+    return (
+      <Text size={200} className={styles.hintOk} data-testid="bank-publish-result">
+        {result.created
+          ? t("admin.publishedAs", { no: result.version_no })
+          : t("admin.publishUnchanged", { no: result.version_no })}
+      </Text>
+    );
+  }
+  return (
+    <div role="alert" data-testid="bank-publish-problems">
+      <Text size={200} className={styles.hintWarn}>
+        {t("admin.publishRefused")}
+      </Text>
+      <ul className={styles.list}>
+        {result.problems.map((p, i) => (
+          <li key={i}>
+            <Text size={200}>
+              {p.code === "no_rubric"
+                ? t("admin.problemNoRubric", { no: p.question_no })
+                : p.code === "weights"
+                  ? t("admin.problemWeights", { no: p.question_no, sum: p.weights_sum })
+                  : t("admin.problemNoQuestions")}
+              {p.question_text ? ` — ${p.question_text}` : ""}
+            </Text>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 export function ContentTab({ state, guard }: { state: ContentTabState; guard: Guard }) {
   const styles = useAdminStyles();
@@ -43,7 +81,11 @@ export function ContentTab({ state, guard }: { state: ContentTabState; guard: Gu
     saveChecklist,
     generateChecklist,
     editWeightsSum,
+    publishResult,
+    publishBank,
+    publishing,
   } = state;
+  const currentBank = banks.find((b) => b.bank_id === selectedBank);
 
   return (
     <>
@@ -107,7 +149,31 @@ export function ContentTab({ state, guard }: { state: ContentTabState; guard: Gu
       {/* Questions in the selected bank */}
       {selectedBank ? (
         <Card className={styles.card}>
-          <CardHeader header={<Title3>{t("admin.questionsTitle")}</Title3>} />
+          <CardHeader
+            header={<Title3>{t("admin.questionsTitle")}</Title3>}
+            description={
+              <Text size={200} data-testid="bank-version-status" title={t("admin.versionHint")}>
+                {currentBank?.latest_version_no != null
+                  ? t("admin.versionPublished", { no: currentBank.latest_version_no })
+                  : t("admin.versionNeverPublished")}
+                {currentBank?.has_unpublished_changes && (
+                  <span className={styles.hintWarn}> · {t("admin.versionUnpublished")}</span>
+                )}
+              </Text>
+            }
+            action={
+              <Button
+                appearance="primary"
+                size="small"
+                data-testid="bank-publish"
+                disabled={!currentBank?.has_unpublished_changes || publishing}
+                onClick={publishBank}
+              >
+                {t("admin.publish")}
+              </Button>
+            }
+          />
+          {publishResult && <PublishOutcome result={publishResult} />}
           <ul className={styles.list} data-testid="question-list">
             {questions.map((q, i) => (
               <li key={q.question_id} className={styles.row}>
@@ -213,16 +279,7 @@ export function ContentTab({ state, guard }: { state: ContentTabState; guard: Gu
       {/* Checklist (scoring rubric) for the selected question — editable inline panel (F3b) */}
       {selectedQuestion && (
         <Card className={styles.card}>
-          <CardHeader
-            header={<Title3>{t("admin.rubricTitle")}</Title3>}
-            description={
-              checklist?.rubric_version_no != null ? (
-                <Text size={200} data-testid="checklist-version" title={t("admin.rubricVersionHint")}>
-                  {t("admin.rubricVersion", { no: checklist.rubric_version_no })}
-                </Text>
-              ) : undefined
-            }
-          />
+          <CardHeader header={<Title3>{t("admin.rubricTitle")}</Title3>} />
           {checklist ? (
             <>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

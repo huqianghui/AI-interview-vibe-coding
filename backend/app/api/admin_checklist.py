@@ -12,8 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.dependencies import require_role
-from app.models.user import User
-from app.services import checklist_service, rubric_version_service
+from app.services import checklist_service
 from app.services.checklist_service import ChecklistNotFound, QuestionNotFound
 
 router = APIRouter(
@@ -43,8 +42,6 @@ class ChecklistOut(BaseModel):
     prompt_version: str
     weights_sum: int
     items: list[ChecklistItemOut]
-    # The bank's latest rubric version (spec-rubric-versioning); after a save, the one it produced.
-    rubric_version_no: int | None = None
 
 
 async def _checklist_out(db: AsyncSession, checklist) -> ChecklistOut:
@@ -52,7 +49,6 @@ async def _checklist_out(db: AsyncSession, checklist) -> ChecklistOut:
     names = await checklist_service.document_names(
         db, {i.source_document_id for i in items if i.source_document_id}
     )
-    version = await rubric_version_service.latest_for_question(db, checklist.question_id)
     return ChecklistOut(
         checklist_id=checklist.id,
         question_id=checklist.question_id,
@@ -72,7 +68,6 @@ async def _checklist_out(db: AsyncSession, checklist) -> ChecklistOut:
             )
             for i in items
         ],
-        rubric_version_no=version.version_no if version else None,
     )
 
 
@@ -129,7 +124,6 @@ async def edit_items(
     checklist_id: str,
     body: ChecklistEditIn,
     db: AsyncSession = Depends(get_db),
-    admin: User = Depends(require_role("admin")),
 ) -> ChecklistOut:
     """Replace a checklist's items with an edited set (F3b / F3 AC #4).
 
@@ -138,7 +132,7 @@ async def edit_items(
     """
     raw = [it.model_dump(include=it.model_fields_set | _ALWAYS_SENT) for it in body.items]
     try:
-        checklist = await checklist_service.update_items(db, checklist_id, raw, created_by=admin.id)
+        checklist = await checklist_service.update_items(db, checklist_id, raw)
     except ChecklistNotFound as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Checklist not found"

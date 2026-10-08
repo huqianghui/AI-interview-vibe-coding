@@ -14,9 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.anonymous_session import AnonymousCandidateSession
 from app.models.persona import InterviewerPersona
 from app.services import (
+    bank_version_service,
     persona_service,
     question_service,
-    rubric_version_service,
     user_service,
 )
 
@@ -25,8 +25,8 @@ from app.services import (
 class StartAssignment:
     persona: InterviewerPersona | None
     bank_id: str | None
-    # The rubric version the interview pins (spec-rubric-versioning).
-    rubric_version_id: str | None = None
+    # The published bank version the interview pins (spec-bank-versioning).
+    bank_version_id: str | None = None
 
 
 async def resolve_for_candidate(
@@ -56,7 +56,7 @@ async def resolve_for_candidate(
     bank_id = bank.id if bank else None
     # The user's assigned version when it is a version of THIS bank (the bank may have fallen back
     # to the default above), else the bank's latest.
-    rubric_version_id = await rubric_version_service.resolve_for_start(
-        db, bank_id, user.assigned_rubric_version_id if user is not None else None
+    bank_version_id = await bank_version_service.resolve_for_start(
+        db, bank_id, user.assigned_bank_version_id if user is not None else None
     )
-    return StartAssignment(persona=persona, bank_id=bank_id, rubric_version_id=rubric_version_id)
+    return StartAssignment(persona=persona, bank_id=bank_id, bank_version_id=bank_version_id)

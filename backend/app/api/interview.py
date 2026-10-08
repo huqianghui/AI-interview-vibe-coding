@@ -344,7 +344,7 @@ async def _start_fresh(db: AsyncSession, candidate: AnonymousCandidateSession) -
         turn_mode=turn_mode,
         persona_id=persona_id,
         bank_id=assigned.bank_id,
-        rubric_version_id=assigned.rubric_version_id,
+        bank_version_id=assigned.bank_version_id,
     )
 
 

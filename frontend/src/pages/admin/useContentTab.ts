@@ -1,9 +1,15 @@
 /** State and actions of the admin page's Content tab: banks, their questions, and the selected
  * question's scoring rubric (F2b/F3b). Called by AdminPage, so the state outlives tab switches. */
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import * as admin from "../../api/admin";
-import type { AdminQuestion, Bank, Checklist, ChecklistItem } from "../../api/admin";
+import type {
+  AdminQuestion,
+  Bank,
+  Checklist,
+  ChecklistItem,
+  PublishResult,
+} from "../../api/admin";
 import type { Guard } from "./shared";
 
 export function useContentTab(guard: Guard) {
@@ -21,10 +27,38 @@ export function useContentTab(guard: Guard) {
   const [newBankName, setNewBankName] = useState("");
   const [newQuestionText, setNewQuestionText] = useState("");
 
-  const refreshBanks = useCallback(
-    () => guard(async () => setBanks(await admin.listBanks())),
-    [guard],
-  );
+  // Every draft edit reloads the banks' publish state, so reloads can overlap; only the newest
+  // one's answer is kept, or a slow older reply could disable Publish on a stale "no changes".
+  const banksRequest = useRef(0);
+  const loadBanks = useCallback(async () => {
+    const mine = ++banksRequest.current;
+    const next = await admin.listBanks();
+    if (mine === banksRequest.current) setBanks(next);
+  }, []);
+  const refreshBanks = useCallback(() => guard(loadBanks), [guard, loadBanks]);
+  // The outcome of the last publish of the selected bank (version, or why it was refused).
+  const [publishResult, setPublishResult] = useState<PublishResult | null>(null);
+  const [publishing, setPublishing] = useState(false);
+
+  // Every draft edit (question or rubric) can change whether the bank has unpublished changes,
+  // so the banks' publish state is reloaded with it.
+  const setQuestionsAndStatus = (next: AdminQuestion[]) => {
+    setQuestions(next);
+    setPublishResult(null);
+    void refreshBanks();
+  };
+
+  const publishBank = () =>
+    guard(async () => {
+      if (!selectedBank || publishing) return;
+      setPublishing(true);
+      try {
+        setPublishResult(await admin.publishBank(selectedBank));
+        await loadBanks();
+      } finally {
+        setPublishing(false);
+      }
+    });
 
   // Adopt a freshly loaded/generated/saved checklist as both the display + edit state.
   const adoptChecklist = (c: Checklist | null) => {
@@ -35,6 +69,7 @@ export function useContentTab(guard: Guard) {
   const loadQuestions = (bankId: string) =>
     guard(async () => {
       setSelectedBank(bankId);
+      setPublishResult(null);
       setSelectedQuestion(null);
       adoptChecklist(null);
       setChecklistStatus(null);
@@ -91,6 +126,8 @@ export function useContentTab(guard: Guard) {
       }));
       adoptChecklist(await admin.editChecklistItems(checklist.checklist_id, payload));
       setChecklistStatus(t("admin.saved"));
+      setPublishResult(null);
+      await loadBanks();
     });
 
   // (Re)generate a checklist from the question via AI, then refresh the question list so the
@@ -100,7 +137,7 @@ export function useContentTab(guard: Guard) {
       if (!selectedQuestion) return;
       adoptChecklist(await admin.draftChecklist(selectedQuestion));
       setChecklistStatus(t("admin.generated"));
-      if (selectedBank) setQuestions(await admin.listBankQuestions(selectedBank));
+      if (selectedBank) setQuestionsAndStatus(await admin.listBankQuestions(selectedBank));
     });
 
   // Live weight total of the working copy (forbidden items count as their entered weight in the
@@ -111,7 +148,7 @@ export function useContentTab(guard: Guard) {
     banks,
     selectedBank,
     questions,
-    setQuestions,
+    setQuestions: setQuestionsAndStatus,
     selectedQuestion,
     checklist,
     editItems,
@@ -129,6 +166,9 @@ export function useContentTab(guard: Guard) {
     saveChecklist,
     generateChecklist,
     editWeightsSum,
+    publishResult,
+    publishBank,
+    publishing,
   };
 }
 

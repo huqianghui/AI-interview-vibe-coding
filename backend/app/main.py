@@ -52,6 +52,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     import asyncio
 
     from app.db import async_session_factory
+    from app.services.bank_version_service import publish_unversioned_banks
     from app.services.config_overlay import apply_master_config_to_settings
     from app.services.config_service import seed_master_config_from_env
     from app.services.external_config_service import seed_external_config_from_env
@@ -95,6 +96,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # get them back from the originals in the client bundle. No-op once they live in blob.
         ("SOP file repair", repair_missing_sop_files),
         ("default bank", seed_default_bank),
+        # After every bank writer above: a complete bank that has never been published gets v1, so
+        # interviews on banks written straight to the draft (seeds, the client importer) are pinned.
+        ("publish unversioned banks", publish_unversioned_banks),
         ("default admin", seed_default_admin),
         # #102: under the read-only Users tab this is the ONLY way candidate accounts come to exist,
         # so a failure here means nobody can take an interview until the next restart.

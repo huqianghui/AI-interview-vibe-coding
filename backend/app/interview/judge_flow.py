@@ -20,7 +20,7 @@ from app.interview import state_machine
 from app.interview.state_machine import InterviewStateError
 from app.models.interview import InterviewSession
 from app.models.judge_event import JudgeEvent
-from app.services import persona_service, rubric_version_service
+from app.services import bank_version_service, persona_service
 
 # Raw LLM calls allowed per question = applied budget × this factor (speculative prefetches that get
 # discarded because the candidate kept talking still cost a call; this bounds a very chatty answer).
@@ -114,7 +114,7 @@ async def judge(
     if not draft_text.strip():
         return WAIT
 
-    questions = await state_machine.resolve_questions(db, session.bank_id)
+    questions = await state_machine.resolve_questions(db, session.bank_id, session.bank_version_id)
     current = state_machine.question_at(questions, session.current_question_index)
     if current is None or current.id != question_id:
         return WAIT  # stale: the question advanced
@@ -134,8 +134,8 @@ async def judge(
         raise JudgeInFlight("A judge call is already in flight")
     _JUDGE_IN_FLIGHT.add(session.id)
     try:
-        items = await rubric_version_service.rubric_rows(
-            db, question_id=current.id, rubric_version_id=session.rubric_version_id
+        items = await bank_version_service.rubric_rows(
+            db, question_id=current.id, bank_version_id=session.bank_version_id
         )
         prior = await state_machine.follow_up_texts(db, session.id, current.id)
         inp = judge_mod.JudgeInput(
@@ -211,7 +211,7 @@ async def apply(
     if event is None or event.applied or event.verdict != "nudge":
         return JudgeOutcome(verdict="wait", event_id=event_id)
     waited = JudgeOutcome(verdict="wait", event_id=event.id)
-    questions = await state_machine.resolve_questions(db, session.bank_id)
+    questions = await state_machine.resolve_questions(db, session.bank_id, session.bank_version_id)
     current = state_machine.question_at(questions, session.current_question_index)
     if current is None or current.id != question_id or event.question_id != current.id:
         return waited

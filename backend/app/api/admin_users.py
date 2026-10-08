@@ -10,7 +10,7 @@ from app.dependencies import require_role
 from app.models.user import User
 from app.schemas.auth import AdminUserResponse
 from app.schemas.history import AssignmentIn
-from app.services import persona_service, question_service, rubric_version_service, user_service
+from app.services import bank_version_service, persona_service, question_service, user_service
 from app.services.auth_service import derive_candidate_password, verify_password
 
 router = APIRouter(
@@ -27,8 +27,8 @@ async def list_users(
 ) -> list[AdminUserResponse]:
     """List users with optional search (name/username/email), role, and active filters."""
     rows = await user_service.list_users(db, search=search, role=role, is_active=is_active)
-    numbers = await rubric_version_service.version_numbers(
-        db, {u.assigned_rubric_version_id for u in rows if u.assigned_rubric_version_id}
+    numbers = await bank_version_service.version_numbers(
+        db, {u.assigned_bank_version_id for u in rows if u.assigned_bank_version_id}
     )
     return [await _with_derived_password(u, numbers) for u in rows]
 
@@ -37,10 +37,10 @@ async def list_users(
 async def set_assignment(
     user_id: str, body: AssignmentIn, db: AsyncSession = Depends(get_db)
 ) -> AdminUserResponse:
-    """Set the interviewer, bank and rubric version this user's NEXT interview starts with.
+    """Set the interviewer, bank and bank version this user's NEXT interview starts with.
 
-    #187 + spec-rubric-versioning. A null persona or bank means the global default; a bank with no
-    rubric version means that bank's latest version.
+    #187 + spec-bank-versioning. A null persona or bank means the global default; a bank with no
+    version means that bank's latest published version.
 
     A live interview keeps what it started with. 404 unknown user; 422 an unknown or disabled
     persona/bank (a disabled one would silently fall back to the default at start).
@@ -65,41 +65,42 @@ async def set_assignment(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Unknown or disabled question bank",
             )
-    rubric_version_id = None
-    if body.bank_id is None and body.rubric_version_id is not None:
+    bank_version_id = None
+    if body.bank_id is None and body.bank_version_id is not None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="A rubric version needs the question bank it belongs to",
+            detail="A bank version needs the question bank it belongs to",
         )
     if body.bank_id is not None:
-        # The rubric version is part of the assignment (spec-rubric-versioning): the one asked for,
-        # which must be a version of this bank; else, for the same bank, the one already assigned;
-        # else the bank's current version. "Not sent" is told apart from null so a tab running an
-        # older page, which never sends the field, cannot re-pin a user to the latest by saving
-        # their interviewer.
-        if body.rubric_version_id is not None:
-            version = await rubric_version_service.get(db, body.rubric_version_id)
+        # The published version is part of the assignment (spec-bank-versioning): the one asked
+        # for, which must be a version of this bank; else, for the same bank, the one already
+        # assigned; else the bank's latest published version (none yet: the draft at start).
+        # "Not sent" is told apart from null so a tab running an older page, which never sends the
+        # field, cannot re-pin a user to the latest by saving their interviewer.
+        if body.bank_version_id is not None:
+            version = await bank_version_service.get(db, body.bank_version_id)
             if version is None or version.bank_id != body.bank_id:
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="That rubric version does not belong to this question bank",
+                    detail="That version does not belong to this question bank",
                 )
-            rubric_version_id = version.id
+            bank_version_id = version.id
         elif (
-            "rubric_version_id" not in body.model_fields_set
+            "bank_version_id" not in body.model_fields_set
             and body.bank_id == user.assigned_bank_id
-            and user.assigned_rubric_version_id
+            and user.assigned_bank_version_id
         ):
-            rubric_version_id = user.assigned_rubric_version_id
+            bank_version_id = user.assigned_bank_version_id
         else:
-            rubric_version_id = (await rubric_version_service.current(db, body.bank_id)).id
+            latest = await bank_version_service.latest(db, body.bank_id)
+            bank_version_id = latest.id if latest else None
     user.assigned_persona_id = body.persona_id
     user.assigned_bank_id = body.bank_id
-    user.assigned_rubric_version_id = rubric_version_id
+    user.assigned_bank_version_id = bank_version_id
     await db.commit()
     await db.refresh(user)
-    numbers = await rubric_version_service.version_numbers(
-        db, {rubric_version_id} if rubric_version_id else set()
+    numbers = await bank_version_service.version_numbers(
+        db, {bank_version_id} if bank_version_id else set()
     )
     return await _with_derived_password(user, numbers)
 
@@ -115,9 +116,7 @@ async def _with_derived_password(
     live interview / voice traffic.
     """
     out = AdminUserResponse.model_validate(user)
-    out.assigned_rubric_version_no = (version_numbers or {}).get(
-        user.assigned_rubric_version_id or ""
-    )
+    out.assigned_bank_version_no = (version_numbers or {}).get(user.assigned_bank_version_id or "")
     if user.password_generation is None:
         return out
     derived = derive_candidate_password(user.username, user.password_generation)

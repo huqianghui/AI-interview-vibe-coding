@@ -6,13 +6,13 @@ Alembic autogenerate runs.
 
 from app.db import Base
 from app.models.anonymous_session import AnonymousCandidateSession
+from app.models.bank_version import BankVersion
 from app.models.checklist import Checklist, ChecklistItem
 from app.models.interview import InterviewSession, InterviewTurn
 from app.models.judge_event import JudgeEvent
 from app.models.persona import InterviewerPersona
 from app.models.persona_knowledge import PersonaKnowledgeConfig
 from app.models.question import Question, QuestionBank
-from app.models.rubric_version import RubricVersion
 from app.models.service_config import ServiceConfig
 from app.models.sop import SopChunk, SopDocument
 from app.models.user import User
@@ -20,6 +20,7 @@ from app.models.user import User
 __all__ = [
     "Base",
     "AnonymousCandidateSession",
+    "BankVersion",
     "Checklist",
     "ChecklistItem",
     "InterviewSession",
@@ -29,7 +30,6 @@ __all__ = [
     "PersonaKnowledgeConfig",
     "Question",
     "QuestionBank",
-    "RubricVersion",
     "ServiceConfig",
     "SopDocument",
     "SopChunk",

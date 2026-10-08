@@ -669,6 +669,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/question-banks/{bank_id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish
+         * @description Publish the bank's draft as a new version (spec-bank-versioning).
+         *
+         *     Refused, with every reason, while the draft is incomplete: an enabled question without a rubric,
+         *     or a rubric whose weights do not sum to 100. An unchanged draft returns the latest version.
+         */
+        post: operations["publish_admin_question_banks__bank_id__publish_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/question-banks/{bank_id}/questions": {
         parameters: {
             query?: never;
@@ -704,7 +727,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/admin/question-banks/{bank_id}/rubric-versions": {
+    "/admin/question-banks/{bank_id}/versions": {
         parameters: {
             query?: never;
             header?: never;
@@ -712,11 +735,11 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List Rubric Versions
-         * @description The bank's rubric versions, newest first (spec-rubric-versioning). A bank that has never had
-         *     one gets its first here, so the assignment picker always has something to offer.
+         * List Versions
+         * @description The bank's published versions, newest first (spec-bank-versioning). Read-only: a version
+         *     exists only once an admin publishes (or an import publishes) a complete bank.
          */
-        get: operations["list_rubric_versions_admin_question_banks__bank_id__rubric_versions_get"];
+        get: operations["list_versions_admin_question_banks__bank_id__versions_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -784,10 +807,10 @@ export interface paths {
         head?: never;
         /**
          * Set Assignment
-         * @description Set the interviewer, bank and rubric version this user's NEXT interview starts with.
+         * @description Set the interviewer, bank and bank version this user's NEXT interview starts with.
          *
-         *     #187 + spec-rubric-versioning. A null persona or bank means the global default; a bank with no
-         *     rubric version means that bank's latest version.
+         *     #187 + spec-bank-versioning. A null persona or bank means the global default; a bank with no
+         *     version means that bank's latest published version.
          *
          *     A live interview keeps what it started with. 404 unknown user; 422 an unknown or disabled
          *     persona/bank (a disabled one would silently fall back to the default at start).
@@ -1280,12 +1303,12 @@ export interface components {
         AdminUserResponse: {
             /** Assigned Bank Id */
             assigned_bank_id?: string | null;
+            /** Assigned Bank Version Id */
+            assigned_bank_version_id?: string | null;
+            /** Assigned Bank Version No */
+            assigned_bank_version_no?: number | null;
             /** Assigned Persona Id */
             assigned_persona_id?: string | null;
-            /** Assigned Rubric Version Id */
-            assigned_rubric_version_id?: string | null;
-            /** Assigned Rubric Version No */
-            assigned_rubric_version_no?: number | null;
             /** Business Unit */
             business_unit: string;
             /** Email */
@@ -1426,10 +1449,10 @@ export interface components {
         AssignmentIn: {
             /** Bank Id */
             bank_id?: string | null;
+            /** Bank Version Id */
+            bank_version_id?: string | null;
             /** Persona Id */
             persona_id?: string | null;
-            /** Rubric Version Id */
-            rubric_version_id?: string | null;
         };
         /** BankIn */
         BankIn: {
@@ -1459,12 +1482,34 @@ export interface components {
             description: string;
             /** Enabled */
             enabled: boolean;
+            /**
+             * Has Unpublished Changes
+             * @default false
+             */
+            has_unpublished_changes: boolean;
             /** Is Default */
             is_default: boolean;
             /** Language */
             language: string;
+            /** Latest Version No */
+            latest_version_no?: number | null;
             /** Name */
             name: string;
+        };
+        /** BankVersionOut */
+        BankVersionOut: {
+            /** Created At */
+            created_at: string | null;
+            /** Id */
+            id: string;
+            /** Is Latest */
+            is_latest: boolean;
+            /** Question Count */
+            question_count: number;
+            /** Reason */
+            reason: string;
+            /** Version No */
+            version_no: number;
         };
         /** Body_upload_document_admin_sop_documents_post */
         Body_upload_document_admin_sop_documents_post: {
@@ -1482,6 +1527,13 @@ export interface components {
             bank_name: string;
             /** Checklist Item Count */
             checklist_item_count: number;
+            /**
+             * Publish Problems
+             * @default []
+             */
+            publish_problems: string[];
+            /** Published Version No */
+            published_version_no?: number | null;
             /** Question Count */
             question_count: number;
             /** Replaced */
@@ -1554,8 +1606,6 @@ export interface components {
             prompt_version: string;
             /** Question Id */
             question_id: string;
-            /** Rubric Version No */
-            rubric_version_no?: number | null;
             /** Weights Sum */
             weights_sum: number;
         };
@@ -1635,13 +1685,13 @@ export interface components {
         };
         /** InterviewDetail */
         InterviewDetail: {
+            /** Bank Version No */
+            bank_version_no?: number | null;
             item: components["schemas"]["InterviewHistoryItem"];
             /** Report */
             report: {
                 [key: string]: unknown;
             } | null;
-            /** Rubric Version No */
-            rubric_version_no?: number | null;
             /**
              * Scoring
              * @default false
@@ -1705,6 +1755,8 @@ export interface components {
             bank_id: string | null;
             /** Bank Name */
             bank_name: string | null;
+            /** Bank Version No */
+            bank_version_no?: number | null;
             /** Completed At */
             completed_at: string | null;
             /** Has Report */
@@ -1717,8 +1769,6 @@ export interface components {
             persona_id: string | null;
             /** Persona Name */
             persona_name: string | null;
-            /** Rubric Version No */
-            rubric_version_no?: number | null;
             /** Started At */
             started_at: string | null;
             /** Status */
@@ -2122,6 +2172,37 @@ export interface components {
             /** Voice Temperature */
             voice_temperature?: number | null;
         };
+        /** PublishOut */
+        PublishOut: {
+            /**
+             * Created
+             * @default false
+             */
+            created: boolean;
+            /**
+             * Problems
+             * @default []
+             */
+            problems: components["schemas"]["PublishProblemOut"][];
+            /** Published */
+            published: boolean;
+            /** Version No */
+            version_no?: number | null;
+        };
+        /** PublishProblemOut */
+        PublishProblemOut: {
+            /** Code */
+            code: string;
+            /** Question No */
+            question_no?: number | null;
+            /**
+             * Question Text
+             * @default
+             */
+            question_text: string;
+            /** Weights Sum */
+            weights_sum?: number | null;
+        };
         /** QuestionIn */
         QuestionIn: {
             /**
@@ -2237,21 +2318,6 @@ export interface components {
             interview_session_id: string;
             /** Status */
             status: string;
-        };
-        /** RubricVersionOut */
-        RubricVersionOut: {
-            /** Created At */
-            created_at: string | null;
-            /** Id */
-            id: string;
-            /** Is Latest */
-            is_latest: boolean;
-            /** Question Count */
-            question_count: number;
-            /** Reason */
-            reason: string;
-            /** Version No */
-            version_no: number;
         };
         /** SessionCreateResponse */
         SessionCreateResponse: {
@@ -3454,6 +3520,37 @@ export interface operations {
             };
         };
     };
+    publish_admin_question_banks__bank_id__publish_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bank_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublishOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_questions_admin_question_banks__bank_id__questions_get: {
         parameters: {
             query?: never;
@@ -3553,7 +3650,7 @@ export interface operations {
             };
         };
     };
-    list_rubric_versions_admin_question_banks__bank_id__rubric_versions_get: {
+    list_versions_admin_question_banks__bank_id__versions_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3570,7 +3667,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RubricVersionOut"][];
+                    "application/json": components["schemas"]["BankVersionOut"][];
                 };
             };
             /** @description Validation Error */
