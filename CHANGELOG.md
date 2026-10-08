@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.56.1.1 (2026-10-08)
+
+### Fixed
+- Relocating citations no longer cites an unrelated SOP for a question that names none. On the
+  generic demo banks, "explains the reasoning" had been cited to a signature page and a privacy
+  definition. When the question names no SOP and the whole library is searched, a citation is
+  kept only if the model copies a sentence from the section that states the requirement. A
+  general criterion cites nothing.
+
 ## 0.56.1.0 (2026-10-08)
 
 ### Fixed

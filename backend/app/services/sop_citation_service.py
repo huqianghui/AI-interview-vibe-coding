@@ -85,7 +85,13 @@ class Choice:
 
 
 def _choose_prompt(
-    question: str, item: str, candidates: list[CitedSection], *, fixed: bool, preview: int
+    question: str,
+    item: str,
+    candidates: list[CitedSection],
+    *,
+    fixed: bool,
+    preview: int,
+    scoped: bool = True,
 ) -> str:
     blocks = "\n\n".join(
         f'<candidate id="C{i + 1}" document="{_attr(c.document_name)}" '
@@ -96,10 +102,17 @@ def _choose_prompt(
         "cite: return every candidate id (the rubric author already chose these sections)."
         if fixed
         else f"cite: the candidate ids whose text states what this rubric item checks, most "
-        f"relevant first, at most {MAX_CHOSEN}; [] if none of them does. A general quality "
-        "criterion (accuracy, completeness, evidence, escalation, role boundary, a critical "
-        "error) cites the sections that state the facts or duties THIS QUESTION is about. Do "
-        "not cite a section only because it shares words with the item."
+        f"relevant first, at most {MAX_CHOSEN}; [] if none of them does. "
+        + (
+            "A general quality criterion (accuracy, completeness, evidence, escalation, role "
+            "boundary, a critical error) cites the sections that state the facts or duties THIS "
+            "QUESTION is about. "
+            if scoped
+            else "These candidates were found by searching every SOP: the question names no SOP "
+            "of its own. Cite one only if it states this specific requirement; a general "
+            "criterion (reasoning, clarity, tone, answering the question) cites nothing. "
+        )
+        + "Do not cite a section only because it shares words with the item."
     )
     return (
         f"You are {CHOOSE_PROMPT_MARKER} for one rubric item of an interview scoring checklist.\n"
@@ -224,13 +237,14 @@ async def _locate(
             candidates = await sop_citation.resolve(
                 db, sop_citation.parse_refs([r.as_dict() for r in label_refs])
             )
-            fixed, how = True, "label"
+            fixed, how, scoped = True, "label", True
         else:
             # No sections of its own: the sections its question cites, then the best matches in
             # the documents the item or its question names; the whole library only when neither
             # names any. A generic criterion ("factual accuracy") searched alone across 26 SOPs
             # matches its own wording, not the question's subject.
             scope = sorted(set(label_docs) | set(hints.documents)) or None
+            scoped = scope is not None or bool(hints.refs)
             hinted = await sop_citation.resolve(
                 db, sop_citation.parse_refs([r.as_dict() for r in hints.refs])
             )
@@ -242,9 +256,17 @@ async def _locate(
     preview = FIXED_PREVIEW_CHARS if fixed else CANDIDATE_PREVIEW_CHARS
     async with sem:
         raw = await _ask(
-            llm, _choose_prompt(question, item.text, candidates, fixed=fixed, preview=preview)
+            llm,
+            _choose_prompt(
+                question, item.text, candidates, fixed=fixed, preview=preview, scoped=scoped
+            ),
         )
     choice = checked_citation(raw, candidates, fixed=fixed)
+    if not scoped and not choice.quote:
+        # A library-wide match the model cannot back with a sentence copied from the section is
+        # a guess: on generic banks (no SOP of their own) it cited signature pages and privacy
+        # definitions for "explains the reasoning" (measured on live, 2026-10-08).
+        return _Located(item.id, Choice((), ""), "none")
     return _Located(item.id, choice, how if choice.sections else "none")
 
 
