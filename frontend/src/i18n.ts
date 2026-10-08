@@ -252,6 +252,7 @@ export const resources = {
           "No rubric for this question yet — generate one from the question, or add items manually.",
         relocate: {
           start: "Relocate SOP citations",
+          fresh: "Start from the original labels (discard earlier relocations)",
           running: "Relocating… {{done}} / {{total}}",
           hint: "Finds the SOP section each rubric item rests on and writes it to the draft. Review below, then publish.",
           failed: "Relocation failed: {{error}}",
@@ -652,6 +653,7 @@ export const resources = {
         noRubric: "这道题还没有评分标准。点「重新生成 (AI)」从题目自动起草,或手动添加条目。",
         relocate: {
           start: "重新定位 SOP 引用",
+          fresh: "从原始标签重新开始（放弃之前的定位结果）",
           running: "定位中… {{done}} / {{total}}",
           hint: "为每条评分条目找到对应的 SOP 章节，写入草稿。下方检查后再发布。",
           failed: "重新定位失败：{{error}}",

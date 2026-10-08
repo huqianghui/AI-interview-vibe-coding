@@ -508,10 +508,12 @@ export interface CitationRun {
   rows: CitationRunRow[];
 }
 
-export const relocateCitations = (bankId: string) =>
-  adminRequest<CitationRun>(`/admin/question-banks/${bankId}/relocate-citations`, {
-    method: "POST",
-  });
+// fresh = start every item again from its original label, discarding earlier relocations.
+export const relocateCitations = (bankId: string, fresh = false) =>
+  adminRequest<CitationRun>(
+    `/admin/question-banks/${bankId}/relocate-citations${fresh ? "?fresh=true" : ""}`,
+    { method: "POST" },
+  );
 
 export const getCitationRun = (bankId: string) =>
   adminRequest<CitationRun | null>(`/admin/question-banks/${bankId}/relocate-citations`);

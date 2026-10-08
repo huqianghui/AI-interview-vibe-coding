@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.56.1.0 (2026-10-08)
+
+### Fixed
+- **Relocating citations: an item without a label of its own is located within its question's
+  sources.** On the live rf-CSM bank, items with labels were cited correctly. Items without one
+  (generic criteria such as "factual accuracy" or "critical error — role overreach") were matched
+  across all 26 SOPs by their own wording and sometimes landed in unrelated documents. They now
+  choose first among the sections their question cites, then within the documents it names, and
+  search the whole library only when the question names nothing.
+- A rerun reads each item's original label from the bank's first relocation report: a
+  relocation writes a quote over the label, and a quote is never read as a label.
+- "Start from the original labels" reruns a relocation from scratch.
+
 ## 0.56.0.0 (2026-10-08)
 
 ### Changed

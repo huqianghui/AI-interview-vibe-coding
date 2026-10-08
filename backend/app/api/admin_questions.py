@@ -311,16 +311,20 @@ def _run_out(run) -> CitationRunOut:
 )
 async def relocate_citations(
     bank_id: str,
+    fresh: bool = False,
     db: AsyncSession = Depends(get_db),
     session_factory=Depends(get_session_factory),  # noqa: ANN001
 ) -> CitationRunOut:
     """Relocate every SOP citation in the bank's draft rubric, in the background. The results go
-    into the DRAFT; review them and publish (owner, 2026-10-08)."""
+    into the DRAFT; review them and publish (owner, 2026-10-08). Items already citing sections
+    keep them; ``fresh=true`` starts every item again from its original label."""
     try:
         await svc.get_bank(db, bank_id)
     except QuestionBankNotFound as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bank not found") from exc
-    return _run_out(await sop_citation_service.start_relocation(db, session_factory, bank_id))
+    return _run_out(
+        await sop_citation_service.start_relocation(db, session_factory, bank_id, fresh=fresh)
+    )
 
 
 @router.get("/{bank_id}/relocate-citations", response_model=CitationRunOut | None)
