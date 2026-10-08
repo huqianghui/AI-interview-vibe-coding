@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.58.0.1 (2026-10-09)
+
+### Fixed
+- AI-drafted rubrics for a bank that is not about the SOP library's subject no longer pull in
+  SOP sections. On the live Demo bank (behavioural questions), drafts had come out clinical,
+  e.g. "states that an SAE was identified" for "tell me about a time you caught a mistake".
+  Drafting now asks the same once-per-bank question as relocation. If the bank is not about the
+  library's subject, the rubric is drafted from the question alone.
+
 ## 0.58.0.0 (2026-10-09)
 
 ### Added

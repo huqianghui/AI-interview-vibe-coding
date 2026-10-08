@@ -206,3 +206,47 @@ async def test_a_drafted_citation_survives_only_if_it_can_be_checked(db_session,
     # A section it was never shown: nothing kept.
     assert items["invented section"].source_refs == "[]"
     assert items["invented section"].source_document_id is None
+
+
+@pytest.mark.asyncio
+async def test_a_bank_about_another_subject_is_drafted_without_sop_sections(
+    db_session, monkeypatch
+):
+    """A behavioural bank grounded in clinical SOPs got clinical rubric items (live Demo bank,
+    2026-10-09): when the bank is judged off the library's subject, the model sees no sections."""
+    from app.models.sop import SopDocument, SopSection
+
+    doc = SopDocument(name="Safety SOP.pdf", status="chunked", markdown_source="text")
+    db_session.add(doc)
+    await db_session.flush()
+    db_session.add(
+        SopSection(
+            document_id=doc.id,
+            order_index=0,
+            number="5",
+            title="SAE reporting",
+            text="Every serious adverse event is reported to safety within 24 hours.",
+        )
+    )
+    await db_session.commit()
+    prompts: list[str] = []
+
+    class OffTopicLLM:
+        name = "scripted"
+
+        async def complete(self, prompt, *, json_mode=False, fast=False):
+            prompts.append(prompt)
+            if "deciding whether a question bank" in prompt:
+                return '{"about": false}'
+            item = '{"kind": "required", "text": "Gives a concrete example", "weight": 100}'
+            return '{"items": [' + item + "]}"
+
+        async def stream(self, prompt):
+            yield ""
+
+    monkeypatch.setattr(svc, "get_llm_adapter", lambda name=None: OffTopicLLM())
+    q = await _question(db_session, text="Tell me about a time you caught a serious mistake.")
+    await svc.draft_checklist(db_session, q.id)
+    draft_prompt = next(p for p in prompts if "drafting a scoring checklist" in p)
+    assert "(no SOP section found for this question)" in draft_prompt
+    assert "SAE reporting" not in draft_prompt
