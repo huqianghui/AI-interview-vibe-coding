@@ -22,6 +22,7 @@ import re
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from jose import JWTError, jwt
 
+from app import telemetry
 from app.config import get_settings
 from app.db import async_session_factory
 from app.interview.state_machine import find_resumable_interview
@@ -242,23 +243,33 @@ async def voice_live_websocket(ws: WebSocket) -> None:
         resolved_profile or None,
     )
     try:
-        await run_proxy(
-            ws,
-            persona=persona,
-            locale=locale,
-            endpoint=settings.azure_foundry_endpoint,
-            project=settings.azure_foundry_default_project,
-            api_key=settings.azure_foundry_api_key,
-            api_version=settings.voice_live_api_version,
-            default_model=resolved_model,
-            byom_profile=resolved_profile,
-            realtime_pipeline=realtime_pipeline,
-            # Editor Playground (pinned persona_id) is a free conversation with the agent, so a
-            # linear-turn BANK persona keeps its model turn THERE only (see
-            # linear_turns_for_persona).
-            playground=bool(persona_id),
-            avatar_background=avatar_background,
-        )
+        # One span per voice session, from connect to close: its duration is the session length.
+        with telemetry.span(
+            "voice.session",
+            **{
+                "voice.realtime": realtime_pipeline,
+                "voice.playground": bool(persona_id),
+                "voice.mode": _voice_mode or "native",
+                "voice.persona_id": getattr(persona, "id", None),
+            },
+        ):
+            await run_proxy(
+                ws,
+                persona=persona,
+                locale=locale,
+                endpoint=settings.azure_foundry_endpoint,
+                project=settings.azure_foundry_default_project,
+                api_key=settings.azure_foundry_api_key,
+                api_version=settings.voice_live_api_version,
+                default_model=resolved_model,
+                byom_profile=resolved_profile,
+                realtime_pipeline=realtime_pipeline,
+                # Editor Playground (pinned persona_id) is a free conversation with the agent, so a
+                # linear-turn BANK persona keeps its model turn THERE only (see
+                # linear_turns_for_persona).
+                playground=bool(persona_id),
+                avatar_background=avatar_background,
+            )
     except WebSocketDisconnect:
         logger.info("Voice Live WS: client disconnected")
     except Exception as exc:  # noqa: BLE001 — surface as a typed frame, never a raw 500 stack

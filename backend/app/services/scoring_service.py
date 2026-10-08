@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import telemetry
 from app.interview.scoring import score_answer  # stub fallback for un-authored questions
 from app.interview.scoring_engine import (
     QuestionResult,
@@ -418,6 +419,10 @@ async def complete_with_retry(llm, prompt: str) -> str:
     raise last
 
 
+@telemetry.traced(
+    "scoring.question",
+    result=lambda r: {"scoring.items": len(r.items), "scoring.outcome": r.outcome},
+)
 async def judge_prepared(task: ScoringTask, *, llm_provider: str | None = None) -> QuestionResult:
     """Grade one prepared question. Touches no database, so it is safe to run concurrently."""
     question_id = task.question_id

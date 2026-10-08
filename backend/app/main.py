@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from app import telemetry
 from app.api import (
     admin_checklist,
     admin_config,
@@ -24,7 +25,7 @@ from app.api import (
     voice_live_ws,
 )
 from app.config import get_settings
-from app.db import DatabaseUnavailableError
+from app.db import DatabaseUnavailableError, engine
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -182,6 +183,10 @@ async def _sync_default_persona() -> None:
     except Exception:  # noqa: BLE001 — background sync is best-effort; never surface at startup
         pass
 
+
+# Application Insights, before the app exists so FastAPI is instrumented (app/telemetry.py). A no-op
+# without a connection string (dev, CI) or without the SDK.
+telemetry.configure(engine)
 
 app = FastAPI(title=settings.app_name, debug=settings.debug, lifespan=lifespan)
 

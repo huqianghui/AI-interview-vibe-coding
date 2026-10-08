@@ -41,6 +41,10 @@ azure = [
     "pdfplumber>=0.11",
     "python-docx>=1.1",
     "python-pptx>=1.0",
+    # Application Insights (app/telemetry.py): the Azure Monitor OpenTelemetry distro (FastAPI,
+    # httpx, Azure SDK, logging) plus SQLAlchemy, which the distro does not instrument.
+    "azure-monitor-opentelemetry>=1.6",
+    "opentelemetry-instrumentation-sqlalchemy>=0.48b0",
 ]
 dev = [
     "pytest>=8.3",

@@ -34,6 +34,7 @@ import time
 import unicodedata
 from dataclasses import dataclass
 
+from app import telemetry
 from app.services.agents.base import LLMAdapter
 
 logger = logging.getLogger(__name__)
@@ -330,6 +331,9 @@ def parse_result(raw: str, inp: JudgeInput) -> JudgeResult:
     return JudgeResult(verdict, speech_text=speech, reason=reason)
 
 
+@telemetry.traced(
+    "judge.call", result=lambda r: {"judge.verdict": r.event_verdict, "judge.error": r.error}
+)
 async def run_judge(
     inp: JudgeInput, adapter: LLMAdapter, *, timeout_s: float = JUDGE_TIMEOUT_SECONDS
 ) -> JudgeResult:

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.57.0.0 (2026-10-09)
+
+### Added
+- **Application Insights telemetry.** The deployment already had Application Insights and passed
+  its connection string to the backend, but the backend sent nothing. It now uses the Azure
+  Monitor OpenTelemetry distro: requests, outgoing HTTP and Azure SDK calls, logs, and database
+  queries (SQLAlchemy). Health probes and the voice WebSocket are left out of the request traces.
+  Five business spans:
+  - `voice.session`: one per voice session; its duration is the session length.
+  - `voice.azure_error`: an event on that span, with `avatar_rate_limited` set when the error is
+    the avatar connection limit.
+  - `scoring.question`: one per graded question, with the item count and outcome.
+  - `judge.call`: one per live-judge call, with the verdict or error.
+  - `external_brain.turn`: one per call to the external interview brain.
+
+  Spans carry ids, counts, durations and outcomes, never a transcript, an answer or SOP text.
+  Without a connection string (dev, CI) telemetry is off.
+
 ## 0.56.2.0 (2026-10-09)
 
 ### Changed
