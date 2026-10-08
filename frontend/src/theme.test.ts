@@ -82,8 +82,9 @@ describe("theme contracts", () => {
   });
 
   it("keeps global.css in agreement with the palette it duplicates", () => {
-    // global.css has to hard-code three values because CSS cannot import TypeScript: the page
-    // ground on html/body, and the surface + text colours inside the Chrome autofill override.
+    // global.css has to hard-code four values because CSS cannot import TypeScript: the page
+    // ground on html/body, the surface + text colours inside the Chrome autofill override, and the
+    // table stripe.
     // The duplication is structural, so the drift is what gets guarded. It matters more than it
     // looks: if the ground in global.css drifts from palette.ground, the page is painted one
     // colour while `avatar_bg` tells Azure to paint another, and a visible rectangle reappears
@@ -91,7 +92,7 @@ describe("theme contracts", () => {
     // Resolved from the vitest root (frontend/), not import.meta.url — under the jsdom
     // environment import.meta.url is not a file: URL and readFileSync rejects it.
     const css = readFileSync(resolve(process.cwd(), "src/styles/global.css"), "utf8");
-    for (const value of [palette.ground, palette.surface, palette.text]) {
+    for (const value of [palette.ground, palette.surface, palette.text, palette.stripe]) {
       expect(
         css.toLowerCase(),
         `global.css should contain ${value} from the palette`,

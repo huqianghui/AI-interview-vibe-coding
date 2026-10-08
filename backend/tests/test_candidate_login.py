@@ -301,3 +301,28 @@ async def test_revoking_releases_the_seat(db_session):
 
     second, _ = await create_anonymous_session(db_session, user_id=user.id)
     assert second.id != first.id and second.active_user_id == user.id
+
+
+async def test_the_users_list_checks_each_password_once(
+    client, admin_auth, db_session, monkeypatch
+):
+    """A Users tab reload costs no bcrypt: each (derived password, stored hash) is checked once.
+    Measured on live before: the three checks were the whole 1-3 s the tab took over the others."""
+    from app.api import admin_users
+
+    await seed_default_candidates(db_session)
+    monkeypatch.setattr(admin_users, "_VERIFIED", {})
+    calls = []
+    real = admin_users.verify_password
+
+    def counting(plain, hashed):
+        calls.append(plain)
+        return real(plain, hashed)
+
+    monkeypatch.setattr(admin_users, "verify_password", counting)
+    for _ in range(3):
+        resp = await client.get("/admin/users", headers=admin_auth)
+        assert resp.status_code == 200
+    assert len(calls) == len(CANDIDATE_USERNAMES)  # the first load only
+    shown = {u["username"]: u["generated_password"] for u in resp.json()}
+    assert all(shown[name] == derive_candidate_password(name, 1) for name in CANDIDATE_USERNAMES)

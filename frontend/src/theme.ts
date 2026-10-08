@@ -26,6 +26,9 @@ export const palette = {
   surface: "#FFFDF9",
   /** Recessed fill: segmented-control track, muted rows. */
   inset: "#EBE5DA",
+  /** Every other table row: a step between the surface and the ground, so a long row of cells
+   *  can be followed across the table. Also hard-coded in styles/global.css. */
+  stripe: "#F8F3EB",
 
   /** Authority colour: headings and the wordmark. Darker than the action colour on purpose. */
   ink: "#4A2680",

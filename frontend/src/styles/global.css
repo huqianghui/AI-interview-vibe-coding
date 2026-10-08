@@ -96,6 +96,14 @@ body::before {
     repeating-linear-gradient(-54deg, rgba(36, 31, 26, 0.01) 0 1px, transparent 1px 6px);
 }
 
+/* Every table, one style (owner, 2026-10-08: "所有的table都统一样式，奇数行，偶数行使用不同的浅色
+   区分开来"): alternate body rows take palette.stripe. Written once here against Fluent's stable
+   class names, so a table added later is striped without anyone remembering to. A hovered row keeps
+   Fluent's own hover colour. */
+.fui-TableBody > .fui-TableRow:nth-child(even):not(:hover) {
+  background-color: #f8f3eb;
+}
+
 /* Respect a reduced-motion preference for the pulsing live indicators added with this theme. */
 @media (prefers-reduced-motion: reduce) {
   *,

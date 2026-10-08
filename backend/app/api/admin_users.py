@@ -1,6 +1,7 @@
 """Admin user listing (admin-only, read-only: accounts come from the boot seed, see user_seed)."""
 
 import asyncio
+import hashlib
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,7 +31,7 @@ async def list_users(
     numbers = await bank_version_service.version_numbers(
         db, {u.assigned_bank_version_id for u in rows if u.assigned_bank_version_id}
     )
-    return [await _with_derived_password(u, numbers) for u in rows]
+    return list(await asyncio.gather(*(_with_derived_password(u, numbers) for u in rows)))
 
 
 @router.patch("/{user_id}/assignment", response_model=AdminUserResponse)
@@ -120,6 +121,27 @@ async def _with_derived_password(
     if user.password_generation is None:
         return out
     derived = derive_candidate_password(user.username, user.password_generation)
-    if await asyncio.to_thread(verify_password, derived, user.hashed_password):
+    if await _derived_matches(derived, user.hashed_password):
         return out.model_copy(update={"generated_password": derived})
     return out.model_copy(update={"password_stale": True})
+
+
+# The Users tab's load time, measured on live 2026-10-08: /admin/users 1.7-3.6 s against 0.8-1.1 s
+# for every other admin list, and the whole difference is the bcrypt checks above — three seeded
+# candidates × ~230 ms each (cost 12), one after another on a single vCPU. The answer only changes
+# when the stored hash does, so it is kept per (derived password digest, hash): a password change
+# or a reseed is a new key, never a stale answer. Process memory only; a restart checks again.
+_VERIFIED: dict[tuple[str, str], bool] = {}
+_VERIFIED_MAX = 1024
+
+
+async def _derived_matches(derived: str, hashed_password: str) -> bool:
+    # Keyed by a digest, so no candidate password is held in memory as a key.
+    key = (hashlib.sha256(derived.encode()).hexdigest(), hashed_password)
+    cached = _VERIFIED.get(key)
+    if cached is None:
+        cached = await asyncio.to_thread(verify_password, derived, hashed_password)
+        if len(_VERIFIED) >= _VERIFIED_MAX:
+            _VERIFIED.clear()
+        _VERIFIED[key] = cached
+    return cached
