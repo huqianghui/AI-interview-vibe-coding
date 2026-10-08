@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.56.1.2 (2026-10-08)
+
+### Fixed
+- Relocating citations on a bank about another subject now cites nothing. A software-deployment
+  question's "safety check" had still been cited to the clinical safety-management section. A
+  question that names no SOP is first checked, once, for whether the SOP library covers its
+  subject; and if most of a bank's such questions are not covered, none of them is cited.
+  Measured on the live banks with the real model:
+
+  | Bank | Unlabelled questions judged on-topic |
+  |---|---|
+  | Software deployment | 1/3 |
+  | Behavioural demo | 2/10 |
+  | Small talk | 0/3 |
+  | Clinical demo | 1/1 |
+
+  Questions whose rubric names its SOPs, as in the rf-CSM bank, skip the check. A topic check
+  that fails or gives no usable answer counts as unknown: that question is located item by item
+  as before, and is left out of the bank vote, so a model error never wipes a citation. The
+  report marks such items "Not an SOP subject". Wrong citations from an earlier run stay until
+  the bank is rerun with "Start from the original labels".
+
 ## 0.56.1.1 (2026-10-08)
 
 ### Fixed

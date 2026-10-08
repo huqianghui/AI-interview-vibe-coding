@@ -495,7 +495,8 @@ export interface CitationRunRow {
   old: { document_name: string; quote: string };
   new: { sections: { document_name: string; section: string; title: string }[]; quote: string };
   // edited = the rubric was saved during the run, so this item's result was not written.
-  how: "label" | "search" | "none" | "error" | "edited";
+  // off_topic = the question names no SOP and the library does not cover its subject.
+  how: "label" | "search" | "none" | "off_topic" | "error" | "edited";
 }
 
 export interface CitationRun {

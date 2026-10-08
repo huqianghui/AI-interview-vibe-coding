@@ -144,6 +144,9 @@ async def test_relocation_resolves_labels_searches_the_rest_and_never_invents(db
         name = "scripted"
 
         async def complete(self, prompt, *, json_mode=False, fast=False):
+
+            if sop_citation_service.TOPIC_PROMPT_MARKER in prompt:
+                return json.dumps({"about": True})
             return await choose(prompt)
 
     run = CitationRun(bank_id=bank.id)
@@ -257,6 +260,9 @@ class _Cite1(ScriptedJudgeAdapter):
     name = "scripted"
 
     async def complete(self, prompt, *, json_mode=False, fast=False):
+
+        if sop_citation_service.TOPIC_PROMPT_MARKER in prompt:
+            return json.dumps({"about": True})
         return json.dumps({"cite": ["C1"], "quote": ""})
 
 
@@ -294,6 +300,9 @@ async def test_a_second_run_keeps_the_sections_an_item_already_cites(db_session)
         name = "scripted"
 
         async def complete(self, prompt, *, json_mode=False, fast=False):
+
+            if sop_citation_service.TOPIC_PROMPT_MARKER in prompt:
+                return json.dumps({"about": True})
             assert "every candidate id" in prompt  # fixed: the model only finds the quote
             return json.dumps({"cite": [], "quote": "The Quality Manager signs the release form"})
 
@@ -375,6 +384,9 @@ async def test_an_unlabelled_item_is_located_within_its_questions_sources(db_ses
         name = "scripted"
 
         async def complete(self, prompt, *, json_mode=False, fast=False):
+
+            if sop_citation_service.TOPIC_PROMPT_MARKER in prompt:
+                return json.dumps({"about": True})
             seen.append(prompt)
             return json.dumps({"cite": ["C1"], "quote": ""})
 
@@ -461,6 +473,9 @@ async def test_a_library_wide_match_needs_a_verbatim_sentence(db_session):
         name = "scripted"
 
         async def complete(self, prompt, *, json_mode=False, fast=False):
+
+            if sop_citation_service.TOPIC_PROMPT_MARKER in prompt:
+                return json.dumps({"about": True})
             prompts.append(prompt)
             item = prompt.split("RUBRIC ITEM:\n")[1].split("\n")[0]
             quote = (
@@ -511,6 +526,9 @@ async def test_an_invented_quote_drops_a_library_wide_match_but_not_a_scoped_one
         name = "scripted"
 
         async def complete(self, prompt, *, json_mode=False, fast=False):
+
+            if sop_citation_service.TOPIC_PROMPT_MARKER in prompt:
+                return json.dumps({"about": True})
             return json.dumps({"cite": ["C1"], "quote": "A sentence that is in no section at all."})
 
     for bank_id in (unscoped.id, scoped_bank.id):
@@ -528,3 +546,105 @@ async def test_an_invented_quote_drops_a_library_wide_match_but_not_a_scoped_one
     assert json.loads(scoped["Gets sign-off"].source_refs) == [
         {"document_id": widget, "section": "4.2"}
     ]
+
+
+async def test_a_question_the_library_does_not_cover_cites_nothing(db_session):
+    """Asked once per question that names no SOP: off-topic means no item is cited."""
+    await _corpus(db_session)
+    bank, checklist_id = await _bank(db_session, [("Skips the safety check", 100, "")])
+    asked: list[str] = []
+
+    class OffTopic(ScriptedJudgeAdapter):
+        name = "scripted"
+
+        async def complete(self, prompt, *, json_mode=False, fast=False):
+            asked.append(prompt)
+            if sop_citation_service.TOPIC_PROMPT_MARKER in prompt:
+                return json.dumps({"about": False})
+            return json.dumps(
+                {"cite": ["C1"], "quote": "Every widget is inspected before it is packed."}
+            )
+
+    run = CitationRun(bank_id=bank.id)
+    db_session.add(run)
+    await db_session.commit()
+    run_id = run.id
+    await sop_citation_service.relocate(db_session, run, OffTopic())
+    assert len(asked) == 1  # the topic question only: no per-item call
+    db_session.expire_all()
+    (item,) = await checklist_service.list_items(db_session, checklist_id)
+    assert item.source_refs == "[]"
+    (row,) = json.loads((await db_session.get(CitationRun, run_id)).report_json)
+    assert row["how"] == "off_topic"
+
+
+async def test_a_bank_mostly_about_another_subject_cites_none_of_its_unlabelled_questions(
+    db_session,
+):
+    await _corpus(db_session)
+    bank = await question_service.create_bank(db_session, name="Deploys")
+    lists = []
+    for n, text in enumerate(
+        ["Walk me through your pre-deploy checks.", "A deploy fails.", "Rollback?"]
+    ):
+        q = await question_service.add_question(
+            db_session, bank_id=bank.id, text=text, order_index=n
+        )
+        lists.append(
+            (
+                await checklist_service._persist_draft(
+                    db_session,
+                    q.id,
+                    checklist_service.ChecklistDraft(
+                        prompt_version="t",
+                        items=[
+                            checklist_service.DraftItem(kind="required", text="Checks", weight=100)
+                        ],
+                    ),
+                )
+            ).id
+        )
+
+    class OneOfThree(ScriptedJudgeAdapter):
+        name = "scripted"
+
+        async def complete(self, prompt, *, json_mode=False, fast=False):
+            if sop_citation_service.TOPIC_PROMPT_MARKER in prompt:
+                return json.dumps({"about": "pre-deploy" in prompt})
+            return json.dumps(
+                {"cite": ["C1"], "quote": "Every widget is inspected before it is packed."}
+            )
+
+    run = CitationRun(bank_id=bank.id)
+    db_session.add(run)
+    await db_session.commit()
+    await sop_citation_service.relocate(db_session, run, OneOfThree())
+    db_session.expire_all()
+    for checklist_id in lists:
+        (item,) = await checklist_service.list_items(db_session, checklist_id)
+        assert item.source_refs == "[]"  # even the one judged on-topic: the bank is not
+
+
+async def test_an_unanswered_topic_check_is_unknown_and_never_wipes(db_session):
+    """A failed or unparseable topic answer is unknown: left out of the bank vote, and that
+    question is located item by item instead of being declared off-topic."""
+    await _corpus(db_session)
+    bank, checklist_id = await _bank(db_session, [("Escalates a failed batch", 100, "")])
+
+    class Broken(ScriptedJudgeAdapter):
+        name = "scripted"
+
+        async def complete(self, prompt, *, json_mode=False, fast=False):
+            if sop_citation_service.TOPIC_PROMPT_MARKER in prompt:
+                raise RuntimeError("model unavailable")
+            cid = next(line.split('"')[1] for line in prompt.splitlines() if "ESCALATION" in line)
+            quote = "A failed batch is escalated to the site lead the same day."
+            return json.dumps({"cite": [cid], "quote": quote})
+
+    run = CitationRun(bank_id=bank.id)
+    db_session.add(run)
+    await db_session.commit()
+    await sop_citation_service.relocate(db_session, run, Broken())
+    db_session.expire_all()
+    (item,) = await checklist_service.list_items(db_session, checklist_id)
+    assert json.loads(item.source_refs)[0]["section"] == "5"
