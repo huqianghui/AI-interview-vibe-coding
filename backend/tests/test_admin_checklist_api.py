@@ -54,7 +54,8 @@ async def test_draft_then_get_checklist(client, db_session):
     for item in body["items"]:
         assert item["kind"] in ("required", "recommended", "forbidden")
         assert "weight" in item
-    assert any(i["source_quote"] for i in body["items"])
+    # No SOP corpus in this test: the draft cites nothing rather than an invented source.
+    assert not any(i["source_quote"] for i in body["items"])
 
     # Read it back.
     got = await client.get(f"/admin/checklists/questions/{question_id}", headers=AUTH)

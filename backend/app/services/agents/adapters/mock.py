@@ -67,6 +67,9 @@ class MockLLMAdapter(LLMAdapter):
                     '{"missing": [{"point": "mock uncovered SOP point", '
                     '"sop_evidence": "mock SOP evidence"}]}'
                 )
+            if "locating the sop citation" in lowered:
+                # Cite the first candidate, no quote: exercises the checked path deterministically.
+                return '{"cite": ["C1"], "quote": ""}'
             if "scoring checklist" in lowered:
                 return _mock_checklist_draft()
             if "scoring one interview answer" in lowered:

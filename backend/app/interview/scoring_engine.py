@@ -69,6 +69,8 @@ class RubricItem:
     # Advisory forbidden item: fires "violated" + a warning (disclosure) but does NOT cap the
     # outcome. Carries a known, unvalidated source conflict. Ignored for non-forbidden items.
     advisory: bool = False
+    # The cited SOP sections, ``({"document_id", "section"}, ...)``: carried to the report.
+    source_refs: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -87,6 +89,7 @@ class ItemJudgment:
     source_document_id: str | None = None
     # Mirrors RubricItem.advisory: a fired advisory forbidden discloses but doesn't cap the outcome.
     advisory: bool = False
+    source_refs: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -170,6 +173,7 @@ def enforce_and_score(
                 source_page=it.source_page,
                 source_document_id=it.source_document_id,
                 advisory=it.advisory,
+                source_refs=it.source_refs,
             )
         )
 

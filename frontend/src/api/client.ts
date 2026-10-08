@@ -99,6 +99,42 @@ export interface ScoredItem {
   // null/absent it shows plain source text. source_document_name is a display label for the link.
   source_document_id?: string | null;
   source_document_name?: string | null;
+  // The SOP sections the item cites, primary first: what the judgment rests on.
+  source_sections?: CitedSection[];
+}
+
+export interface CitedSection {
+  document_id: string;
+  document_name: string;
+  section: string;
+  title: string;
+  page: number | null;
+}
+
+/** "4.2 Approval" — or the title alone for an unnumbered section ("§3"). */
+export function sectionName(s: { section: string; title?: string }): string {
+  if (s.section.startsWith("§")) return s.title || s.section;
+  return `${s.section} ${s.title ?? ""}`.trim();
+}
+
+/** The report's citation text: each cited section with its document, the document named once per
+ *  run ("Widget SOP.pdf · 4.2 Approval, 5 Records"); without sections, the legacy page label. */
+export function citationText(item: {
+  source_sections?: CitedSection[];
+  source_page: string | null;
+}): string {
+  const sections = item.source_sections ?? [];
+  if (!sections.length) return item.source_page ?? "";
+  const runs: string[] = [];
+  let last = "";
+  for (const s of sections) {
+    const name = sectionName(s);
+    if (s.document_name === last) runs[runs.length - 1] += `, ${name}`;
+    else runs.push(`${s.document_name} · ${name}`);
+    last = s.document_name;
+  }
+  const page = sections[0].page ? ` · p. ${sections[0].page}` : "";
+  return `${runs.join("; ")}${page}`;
 }
 
 /**

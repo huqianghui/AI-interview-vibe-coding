@@ -14,7 +14,7 @@ from app.models.persona import InterviewerPersona
 from app.models.persona_knowledge import PersonaKnowledgeConfig
 from app.models.question import Question, QuestionBank
 from app.models.service_config import ServiceConfig
-from app.models.sop import SopChunk, SopDocument, SopSection
+from app.models.sop import CitationRun, SopChunk, SopDocument, SopSection
 from app.models.user import User
 
 __all__ = [
@@ -34,5 +34,6 @@ __all__ = [
     "SopDocument",
     "SopChunk",
     "SopSection",
+    "CitationRun",
     "User",
 ]

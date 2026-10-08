@@ -73,5 +73,10 @@ class ChecklistItem(TimestampMixin, Base):
         String(36), ForeignKey("sop_documents.id"), nullable=True
     )
     source_page: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # The SOP SECTIONS the item cites (spec-sop-section-grounding §3), as JSON:
+    # ``[{"document_id": ..., "section": "4.2"}, ...]``, most important first. Bound to the section
+    # NUMBER, never to a row id or position: re-converting a document rebuilds its section rows.
+    # Scoring reads each cited section's full text. "[]" = cites no section.
+    source_refs: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     # Position within the checklist for stable display order.
     order_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

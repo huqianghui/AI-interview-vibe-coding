@@ -98,6 +98,17 @@ export const reorderQuestions = (bankId: string, orderedIds: string[]) =>
 
 // ── Checklists (F3b) ───────────────────────────────────────────────────
 
+// One SOP section a rubric item cites (spec-sop-section-grounding §3). Bound to the section NUMBER;
+// scoring reads the section's full text. `found` is false when the document or section is gone.
+export interface SourceRef {
+  document_id: string;
+  section: string;
+  document_name?: string;
+  title?: string;
+  page_start?: number | null;
+  found?: boolean;
+}
+
 export interface ChecklistItem {
   kind: string;
   text: string;
@@ -111,6 +122,8 @@ export interface ChecklistItem {
   source_document_id?: string | null;
   source_document_name?: string | null;
   advisory?: boolean;
+  // The SOP sections cited, primary first.
+  source_refs?: SourceRef[];
 }
 
 export interface Checklist {
@@ -471,3 +484,34 @@ export const saveSopSummary = (documentId: string, summary: string, approve: boo
 
 export const redraftSopSummary = (documentId: string) =>
   adminRequest<SopSummary>(`/admin/sop/documents/${documentId}/summary/draft`, { method: "POST" });
+
+// ── Relocating a bank's SOP citations (spec-sop-section-grounding §4) ──────
+// Runs in the background over the bank's DRAFT; each row is one rubric item, old → new.
+
+export interface CitationRunRow {
+  question_no: number;
+  question: string;
+  item: string;
+  old: { document_name: string; quote: string };
+  new: { sections: { document_name: string; section: string; title: string }[]; quote: string };
+  // edited = the rubric was saved during the run, so this item's result was not written.
+  how: "label" | "search" | "none" | "error" | "edited";
+}
+
+export interface CitationRun {
+  run_id: string;
+  status: "running" | "done" | "failed";
+  done: number;
+  total: number;
+  error: string;
+  created_at: string | null;
+  rows: CitationRunRow[];
+}
+
+export const relocateCitations = (bankId: string) =>
+  adminRequest<CitationRun>(`/admin/question-banks/${bankId}/relocate-citations`, {
+    method: "POST",
+  });
+
+export const getCitationRun = (bankId: string) =>
+  adminRequest<CitationRun | null>(`/admin/question-banks/${bankId}/relocate-citations`);

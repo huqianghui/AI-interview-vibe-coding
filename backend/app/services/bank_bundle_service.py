@@ -37,7 +37,7 @@ from app.interview.checklist_draft import ChecklistDraft, DraftItem, normalize_w
 from app.models.checklist import Checklist, ChecklistItem
 from app.models.question import Question, QuestionBank
 from app.models.sop import SopDocument
-from app.services import bank_version_service, checklist_service, question_service
+from app.services import bank_version_service, checklist_service, question_service, sop_citation
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +105,12 @@ async def export_bank_bundle(db: AsyncSession, bank_id: str) -> dict:
                         "source_document_name": (
                             doc_names.get(it.source_document_id) if it.source_document_id else None
                         ),
+                        # Cited sections by document NAME: ids differ between servers.
+                        "source_refs": [
+                            {"document_name": doc_names[r.document_id], "section": r.section}
+                            for r in sop_citation.parse_refs(it.source_refs)
+                            if r.document_id in doc_names
+                        ],
                         "order_index": it.order_index,
                     }
                 )
@@ -271,6 +277,15 @@ def _draft_items_from_bundle(
             doc_id = doc_ids.get(doc_name)
             if doc_id is None:
                 unresolved.add(str(doc_name))
+        refs = []
+        for ref in raw.get("source_refs") or []:
+            if not isinstance(ref, dict):
+                continue
+            ref_doc = doc_ids.get(str(ref.get("document_name") or ""))
+            if ref_doc is None:
+                unresolved.add(str(ref.get("document_name") or ""))
+                continue
+            refs.append({"document_id": ref_doc, "section": str(ref.get("section") or "")})
         items.append(
             DraftItem(
                 kind=kind,
@@ -281,8 +296,10 @@ def _draft_items_from_bundle(
                 source_page=(str(raw["source_page"]) if raw.get("source_page") else None),
                 order_index=len(items),
                 advisory=bool(raw.get("advisory", False)) and kind == "forbidden",
+                source_refs=[r.as_dict() for r in sop_citation.parse_refs(refs)],
             )
         )
+    unresolved.discard("")
     return items, unresolved
 
 

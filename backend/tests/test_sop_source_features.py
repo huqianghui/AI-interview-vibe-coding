@@ -1,7 +1,8 @@
 """Features C (SOP source-context injection into scoring) and D (opt-in SOP coverage check).
 
-C is default-on prompt enrichment: each rubric item that links a source document gets a fuller SOP
-passage appended to the judging prompt. It must NOT change the score for a given set of judgments —
+C is default-on prompt enrichment: the full text of every SOP section the rubric cites, and the
+approved summaries of the cited documents, are added to the judging prompt
+(spec-sop-section-grounding §3). It must NOT change the score for a given set of judgments —
 the pure engine never sees it. D is an opt-in advisory audit: off by default (no extra LLM call, no
 report field), on it appends "SOP points the rubric may not cover" to the report WITHOUT touching a
 single score.
@@ -15,21 +16,40 @@ import pytest
 
 from app.interview import state_machine
 from app.interview.scoring_engine import RubricItem
-from app.models.sop import SopChunk, SopDocument
+from app.models.sop import SopChunk, SopDocument, SopSection
 from app.services import checklist_service, question_service, scoring_service, sop_coverage
 from app.services.anonymous_session_service import create_anonymous_session
+from app.services.sop_citation import CitedSection
 
 
-async def _doc_with_text(db, text: str, *, page: str = "p.1") -> str:
-    """Persist a one-chunk SOP document and return its id."""
-    doc = SopDocument(name="sop.txt", status="chunked", size=len(text))
+async def _doc_with_sections(db, sections: list[tuple[str, str]], *, name="sop.txt") -> str:
+    """Persist an SOP document split into the given ``(number, text)`` top-level sections."""
+    doc = SopDocument(
+        name=name, status="chunked", size=sum(len(t) for _, t in sections), markdown_source="text"
+    )
     db.add(doc)
     await db.flush()
-    db.add(
-        SopChunk(document_id=doc.id, chunk_index=0, content=text, page_label=page, token_count=5)
-    )
+    for i, (number, text) in enumerate(sections):
+        db.add(
+            SopSection(
+                document_id=doc.id,
+                order_index=i,
+                number=number,
+                title=f"Clause {number}",
+                text=text,
+            )
+        )
+        db.add(
+            SopChunk(
+                document_id=doc.id, chunk_index=i, content=text, page_label="p.1", token_count=5
+            )
+        )
     await db.commit()
     return doc.id
+
+
+def _cites(doc_id: str, *sections: str) -> str:
+    return json.dumps([{"document_id": doc_id, "section": n} for n in sections])
 
 
 async def _question_with_sourced_checklist(db, *, text="Describe the safety procedure."):
@@ -39,16 +59,21 @@ async def _question_with_sourced_checklist(db, *, text="Describe the safety proc
         db, bank_id=bank.id, text=text, order_index=0, expected_points=json.dumps([])
     )
     await checklist_service.draft_checklist(db, q.id)  # mock drafts a 3-item checklist
-    doc_id = await _doc_with_text(
+    doc_id = await _doc_with_sections(
         db,
-        "Always verify the guard is engaged before starting. Log the result and never bypass the "
-        "safety check under any circumstances.",
+        [
+            (
+                "1",
+                "Always verify the guard is engaged before starting. Log the result and never "
+                "bypass the safety check under any circumstances.",
+            )
+        ],
     )
     checklist = await checklist_service.get_default_checklist(db, q.id)
     items = await checklist_service.list_items(db, checklist.id)
     for it in items:
         it.source_document_id = doc_id
-        it.source_page = "p.1"
+        it.source_refs = _cites(doc_id, "1")
     await db.commit()
     return q
 
@@ -56,15 +81,24 @@ async def _question_with_sourced_checklist(db, *, text="Describe the safety proc
 # --- C: prompt enrichment, no score impact ---------------------------------
 
 
-def test_build_prompt_appends_source_passage_when_present():
-    rubric = [RubricItem(item_id="i1", kind="required", text="Do the thing", weight=100)]
-    without = scoring_service._build_scoring_prompt("Q?", "A", rubric)
-    withctx = scoring_service._build_scoring_prompt(
-        "Q?", "A", rubric, {"i1": "the fuller original SOP passage"}
+def test_build_prompt_carries_each_cited_section_once_and_the_approved_summaries():
+    rubric = [
+        RubricItem(item_id="i1", kind="required", text="Do the thing", weight=50),
+        RubricItem(item_id="i2", kind="required", text="Do the other", weight=50),
+    ]
+    section = CitedSection("d1", "Widget SOP.pdf", "4.2", "Release", 5, 7, "4.2 Release\nFULL TEXT")
+    sources = scoring_service.ScoringSources(
+        sections=(section,),
+        item_sections={"i1": (0,), "i2": (0,)},
+        summaries=(("Widget SOP.pdf", "**Purpose:** Release widgets."),),
     )
-    assert "原文依据" not in without
-    assert "原文依据" in withctx
-    assert "the fuller original SOP passage" in withctx
+    without = scoring_service._build_scoring_prompt("Q?", "A", rubric)
+    withctx = scoring_service._build_scoring_prompt("Q?", "A", rubric, sources)
+    assert "SOP SECTIONS" not in without and "SUMMARIES" not in without
+    assert withctx.count("FULL TEXT") == 1  # cited twice, sent once
+    assert "[1] (required) Do the thing  — cites [S1]" in withctx
+    assert "[S1] Widget SOP.pdf — 4.2 Release (pp. 5-7)" in withctx
+    assert "**Purpose:** Release widgets." in withctx
 
 
 @pytest.mark.asyncio
@@ -102,13 +136,15 @@ async def test_source_context_collected_for_sourced_items(db_session):
             text=it.text,
             weight=it.weight,
             source_document_id=it.source_document_id,
-            source_page=it.source_page,
+            source_refs=tuple(json.loads(it.source_refs)),
         )
         for it in items
     ]
-    ctx = await scoring_service._collect_source_context(db_session, rubric)
-    assert ctx  # at least one item resolved a passage
-    assert any("verify the guard" in passage for passage in ctx.values())
+    sources = await scoring_service.collect_sources(db_session, rubric)
+    assert len(sources.sections) == 1  # every item cites the same section: once
+    assert "verify the guard" in sources.sections[0].text
+    assert set(sources.item_sections) == {it.id for it in items}
+    assert sources.summaries == ()  # no summary approved yet
 
 
 # --- D: opt-in, advisory, never affects a score ----------------------------
@@ -197,8 +233,8 @@ async def _bank_with_mixed_checklists(db) -> tuple[list[str], list[str]]:
     of 2 is also what a hard-coded pair would produce.
     """
     bank = await question_service.create_bank(db, name="Mixed", is_default=True)
-    doc_id = await _doc_with_text(
-        db, "Always verify the guard is engaged before starting. Never bypass the safety check."
+    doc_id = await _doc_with_sections(
+        db, [("1", "Always verify the guard is engaged before starting. Never bypass the check.")]
     )
     sourced: list[str] = []
     unsourced: list[str] = []
@@ -215,7 +251,7 @@ async def _bank_with_mixed_checklists(db) -> tuple[list[str], list[str]]:
             checklist = await checklist_service.get_default_checklist(db, q.id)
             for it in await checklist_service.list_items(db, checklist.id):
                 it.source_document_id = doc_id
-                it.source_page = "p.1"
+                it.source_refs = _cites(doc_id, "1")
             sourced.append(q.id)
         else:
             unsourced.append(q.id)
@@ -330,39 +366,10 @@ async def test_a_failing_audit_never_costs_the_report(db_session, monkeypatch):
 # --- D: which SOP text the audit actually reads (v0.45.0.0) ----------------
 
 
-async def _doc_with_pages(db, pages: list[tuple[str, str]]) -> str:
-    """Persist a multi-chunk SOP document whose chunks carry the given (page_label, text) pairs."""
-    doc = SopDocument(name="multi.txt", status="chunked", size=sum(len(t) for _, t in pages))
-    db.add(doc)
-    await db.flush()
-    for i, (page, text) in enumerate(pages):
-        db.add(
-            SopChunk(
-                document_id=doc.id,
-                chunk_index=i,
-                content=text,
-                page_label=page,
-                token_count=5,
-            )
-        )
-    await db.commit()
-    return doc.id
-
-
 @pytest.mark.asyncio
-async def test_the_audit_reads_every_cited_document_and_pairs_each_page_with_its_own(db_session):
-    """Two bugs, one fixture.
-
-    (1) Only the FIRST cited document was read. Measured on the default bank, 7 of the 9 checklists
-        that cite a source cite two, so for most questions half the SOP was invisible to the audit
-        and a requirement living only there could never be reported as uncovered.
-    (2) ``document_id`` and ``page_label`` were two separate ``next()`` calls over the items, so the
-        page could come from a DIFFERENT item than the document and locate a section that item never
-        cited.
-
-    Here item 1 cites document A with no page and item 2 cites document B at "p.9". The old code
-    paired A with B's "p.9" — document A happens to have a p.9 of its own — and never opened B.
-    """
+async def test_the_audit_reads_every_cited_section_and_nothing_uncited(db_session):
+    """Each item's own cited sections, from every cited document, and no other text: item 1 cites
+    document A §1, item 2 cites document B §2. A's §9 is an appendix nobody cited."""
     bank = await question_service.create_bank(db_session, name="Multi", is_default=True)
     q = await question_service.add_question(
         db_session, bank_id=bank.id, text="Q?", order_index=0, expected_points=json.dumps([])
@@ -372,37 +379,29 @@ async def test_the_audit_reads_every_cited_document_and_pairs_each_page_with_its
     items = await checklist_service.list_items(db_session, checklist.id)
     assert len(items) >= 2, "fixture needs two items to cite two documents"
 
-    doc_a = await _doc_with_pages(
+    doc_a = await _doc_with_sections(
         db_session,
         [
-            ("p.1", "ALPHA-LEADING: always verify the guard is engaged before starting."),
-            ("p.9", "ALPHA-NINE: an appendix no checklist item cited."),
+            ("1", "ALPHA-ONE: always verify the guard is engaged before starting."),
+            ("9", "ALPHA-NINE: an appendix no checklist item cited."),
         ],
     )
-    doc_b = await _doc_with_pages(
-        db_session,
-        [("p.9", "BRAVO-NINE: escalate country-level divergence to the regional lead.")],
+    doc_b = await _doc_with_sections(
+        db_session, [("2", "BRAVO-TWO: escalate country-level divergence to the regional lead.")]
     )
-
-    items[0].source_document_id = doc_a
-    items[0].source_page = None
-    items[1].source_document_id = doc_b
-    items[1].source_page = "p.9"
+    items[0].source_refs = _cites(doc_a, "1")
+    items[1].source_refs = _cites(doc_b, "2")
     await db_session.commit()
 
     task = await sop_coverage.prepare_coverage(db_session, question_id=q.id, question_text="Q?")
     assert task is not None
-    # The second document is audited at all (bug 1).
-    assert "BRAVO-NINE" in task.prompt
-    # And document A was not narrowed by a page label belonging to document B's item (bug 2): the
-    # old pairing filtered A down to its own p.9 and lost its leading text entirely.
-    assert "ALPHA-LEADING" in task.prompt
+    assert "ALPHA-ONE" in task.prompt and "BRAVO-TWO" in task.prompt
+    assert "ALPHA-NINE" not in task.prompt
 
 
 @pytest.mark.asyncio
-async def test_many_cited_documents_stay_inside_the_passage_budget(db_session):
-    """A question citing more documents than the budget can serve stops, rather than handing the
-    model a sliver of each that cannot support "this requirement is missing"."""
+async def test_cited_sections_are_never_cut(db_session):
+    """Owner, 2026-10-08: the full cited section, never a slice. Long sections arrive whole."""
     bank = await question_service.create_bank(db_session, name="Many", is_default=True)
     q = await question_service.add_question(
         db_session, bank_id=bank.id, text="Q?", order_index=0, expected_points=json.dumps([])
@@ -410,22 +409,14 @@ async def test_many_cited_documents_stay_inside_the_passage_budget(db_session):
     await checklist_service.draft_checklist(db_session, q.id)
     checklist = await checklist_service.get_default_checklist(db_session, q.id)
     items = await checklist_service.list_items(db_session, checklist.id)
-
-    # One distinct document per item, each long enough to consume a whole share.
-    for n, it in enumerate(items):
-        it.source_document_id = await _doc_with_pages(
-            db_session, [("p.1", f"DOC{n} " + "x" * sop_coverage.COVERAGE_CONTEXT_CHARS)]
-        )
-        it.source_page = "p.1"
+    texts = [f"DOC{n} " + "x" * 5000 + f" END{n}" for n in range(len(items))]
+    for it, text in zip(items, texts, strict=True):
+        it.source_refs = _cites(await _doc_with_sections(db_session, [("1", text)]), "1")
     await db_session.commit()
 
     task = await sop_coverage.prepare_coverage(db_session, question_id=q.id, question_text="Q?")
     assert task is not None
-    audited = [n for n in range(len(items)) if f"DOC{n} " in task.prompt]
-    # At least one, never more than the floor allows, and in rubric order from the first.
-    ceiling = sop_coverage.COVERAGE_CONTEXT_CHARS // sop_coverage.COVERAGE_MIN_PASSAGE_CHARS
-    assert 1 <= len(audited) <= ceiling
-    assert audited == list(range(len(audited)))
+    assert all(text in task.prompt for text in texts)
 
 
 @pytest.mark.asyncio

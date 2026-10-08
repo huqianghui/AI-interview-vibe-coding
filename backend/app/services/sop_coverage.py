@@ -23,23 +23,15 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services import bank_version_service, scoring_service, sop_context
+from app.services import bank_version_service, scoring_service
 from app.services.agents.registry import get_llm_adapter
 
 logger = logging.getLogger(__name__)
 
-# TOTAL passage budget for one question's audit, across every SOP document its rubric cites. Larger
-# than the per-item scoring budget because here we compare the WHOLE rubric against the WHOLE
-# relevant passage, not one item.
-COVERAGE_CONTEXT_CHARS = 2400
-
-# Floor for ONE document's slice of that budget, matching `scoring_service`'s per-item budget. A
-# question citing several SOPs splits the total evenly, but a sliver of a long document cannot
-# support the judgement "this requirement is missing from the rubric", so sources past what the
-# budget can serve at this floor are left unaudited rather than audited badly. With the two values
-# above that is at most four documents per question — measured on the default bank, the busiest
-# checklist cites two.
-COVERAGE_MIN_PASSAGE_CHARS = 600
+# The audit reads the same thing scoring does (spec-sop-section-grounding §3): the FULL text of
+# every SOP section the question's rubric cites, each once, never cut. It used to read a 2,400-char
+# slice from the START of each cited document, which is a cover page and a table of contents, not
+# the requirements.
 
 # Marker string the mock LLM adapter keys on to return a deterministic coverage payload in CI.
 COVERAGE_PROMPT_MARKER = "auditing SOP coverage"
@@ -50,8 +42,8 @@ def _build_coverage_prompt(
 ) -> str:
     """Ask the LLM which SOP points are NOT covered by the checklist. JSON-only output.
 
-    ``passages`` is one ``(page_label, text)`` per cited SOP document, labelled and separated so two
-    documents' requirements are not read as one run-on passage.
+    ``passages`` is one ``(label, text)`` per cited SOP section, labelled and separated so two
+    sections' requirements are not read as one run-on passage.
     """
     rubric_block = "\n".join(rubric_lines)
     passage_block = "\n\n".join(
@@ -132,51 +124,22 @@ async def prepare_coverage(
     if not items:
         return None
 
-    # (document, page) PAIRED per item, deduplicated in rubric order. The pairing is half the fix:
-    # the old code took the first linked document and, separately, the first non-empty page label —
-    # two `next()` calls over the same items, so the pair could come from DIFFERENT items and point
-    # the lookup at a section that item never cited.
-    sources: list[tuple[str, str | None]] = []
-    for it in items:
-        if not it.source_document_id:
-            continue
-        pair = (it.source_document_id, it.source_page)
-        if pair not in sources:
-            sources.append(pair)
-    if not sources:
-        # No original SOP text to compare against (e.g. a hand-authored rubric) — nothing to audit.
-        return None
-
-    # EVERY cited document, not just the first — the other half. Measured on the default bank: 7 of
-    # the 9 checklists that cite a source cite TWO distinct documents, so for most questions the
-    # audit was asking "does the rubric cover this SOP?" while silently ignoring the other one, and
-    # a requirement living only in the ignored document could never be reported as uncovered.
-    #
-    # The total budget is split across them, never below the per-source floor: stop rather than hand
-    # the model a sliver too small to support "this requirement is missing from the rubric".
-    passages: list[tuple[str | None, str]] = []
-    budget = COVERAGE_CONTEXT_CHARS
-    remaining = len(sources)
-    for document_id, page_label in sources:
-        if budget < COVERAGE_MIN_PASSAGE_CHARS:
-            logger.info(
-                "Question %s cites %d SOP sources; audited the first %d within the passage budget",
-                question_id,
-                len(sources),
-                len(passages),
-            )
-            break
-        share = max(COVERAGE_MIN_PASSAGE_CHARS, budget // remaining)
-        remaining -= 1
-        text = await sop_context.get_source_context(
-            db, document_id=document_id, page_label=page_label, max_chars=share
+    rubric = [
+        scoring_service.RubricItem(
+            item_id=it.item_id,
+            kind=it.kind,
+            text=it.text,
+            weight=it.weight,
+            source_document_id=it.source_document_id,
+            source_refs=it.source_refs,
         )
-        if not text:
-            continue
-        passages.append((page_label, text))
-        budget -= len(text)
-    if not passages:
+        for it in items
+    ]
+    sources = await scoring_service.collect_sources(db, rubric, question_id=question_id)
+    if not sources.sections:
+        # The rubric cites no SOP section (e.g. hand-authored): nothing to compare it against.
         return None
+    passages = [(f"{s.document_name} — {s.label}, {s.pages}", s.text) for s in sources.sections]
 
     rubric_lines = [f"({it.kind}) {it.text}" for it in items]
     return CoverageTask(

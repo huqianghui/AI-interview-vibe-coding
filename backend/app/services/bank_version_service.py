@@ -26,6 +26,7 @@ from app.models.checklist import Checklist, ChecklistItem
 from app.models.question import Question as QuestionRow
 from app.models.question import QuestionBank
 from app.models.sop import SopDocument
+from app.services import sop_citation
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,8 @@ class RubricRow:
     source_document_id: str | None
     source_page: str | None
     order_index: int
+    # The cited SOP sections, ``({"document_id", "section"}, ...)`` (spec-sop-section-grounding).
+    source_refs: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -88,6 +91,7 @@ def _row_from(item: dict) -> RubricRow:
         source_document_id=item.get("source_document_id") or None,
         source_page=item.get("source_page") or None,
         order_index=int(item.get("order_index", 0)),
+        source_refs=tuple(r.as_dict() for r in sop_citation.parse_refs(item.get("source_refs"))),
     )
 
 
@@ -116,6 +120,11 @@ def _question_by_id(version: BankVersion) -> dict[str, dict]:
 def _item_dict(row: ChecklistItem, document_names: dict[str, str]) -> dict:
     item = {f: getattr(row, f) for f in ITEM_FIELDS}
     item["source_document_name"] = document_names.get(row.source_document_id or "")
+    # Only when there are any: an item citing no section keeps the content (and hash) it had
+    # before sections existed, so an untouched bank does not look changed.
+    refs = sop_citation.parse_refs(row.source_refs)
+    if refs:
+        item["source_refs"] = [r.as_dict() for r in refs]
     return item
 
 
@@ -416,7 +425,7 @@ async def rubric_rows(
     if checklist is None:
         return []
     return [
-        _row_from({f: getattr(r, f) for f in ITEM_FIELDS})
+        _row_from({**{f: getattr(r, f) for f in ITEM_FIELDS}, "source_refs": r.source_refs})
         for r in await checklist_service.list_items(db, checklist.id)
     ]
 

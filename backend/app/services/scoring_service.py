@@ -25,7 +25,7 @@ import json
 import logging
 import random
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,9 +36,10 @@ from app.interview.scoring_engine import (
     ScoringIncomplete,
     enforce_and_score,
 )
-from app.services import bank_version_service, sop_context
+from app.services import bank_version_service, checklist_service, sop_citation, sop_summary_service
 from app.services.agents.adapters.foundry_llm import LLMAdapterError
 from app.services.agents.registry import get_llm_adapter
+from app.services.sop_citation import CitedSection
 
 logger = logging.getLogger(__name__)
 
@@ -68,19 +69,36 @@ SCORING_CALL_TIMEOUT_SECONDS = 90.0
 TRANSPORT_ATTEMPTS = 3
 TRANSPORT_BACKOFF_BASE_SECONDS = 2.0
 
-# Feature C — SOP source-context injection. Each rubric item can carry, beyond its one-line
-# ``source_quote``, a fuller slice of the original SOP passage it was drawn from so the judge reads
-# the item in context rather than from a single quote. Bounded per item AND per question so a long
-# SOP can't blow up the prompt.
-SOURCE_CONTEXT_PER_ITEM_CHARS = 600
-SOURCE_CONTEXT_TOTAL_CHARS = 3000
+# SOP grounding (spec-sop-section-grounding §3). Each rubric item cites SOP sections; the scoring
+# prompt carries the FULL text of every cited section, once per question, plus the admin-approved
+# summary of each cited document. Never truncated (owner, 2026-10-08). Size is controlled by citing
+# the most specific subsection, not by cutting: above this many characters per question the
+# prompt is still sent whole and a warning is logged so the rubric can cite narrower sections.
+# Measured 2026-10-08 (gpt-5-mini, 5 items, real SOP text, 2 runs each): 15k chars 12-20 s, 30k
+# 11-13 s, 60k 12-14 s, every item judged — the cited text does not move the latency, and 60k
+# stays far inside SCORING_CALL_TIMEOUT_SECONDS.
+SECTION_BUDGET_CHARS = 60_000
+
+
+@dataclass(frozen=True)
+class ScoringSources:
+    """What one question's scoring prompt cites: sections numbered [S1].. in first-cited order,
+    which of them each item cites, and the approved summaries of the cited documents."""
+
+    sections: tuple[CitedSection, ...] = ()
+    item_sections: dict[str, tuple[int, ...]] = field(default_factory=dict)
+    summaries: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def chars(self) -> int:
+        return sum(len(s.text) for s in self.sections) + sum(len(t) for _, t in self.summaries)
 
 
 def _build_scoring_prompt(
     question_text: str,
     answer_text: str,
     rubric: list[RubricItem],
-    source_context: dict[str, str] | None = None,
+    sources: ScoringSources | None = None,
 ) -> str:
     """Cross-language per-item judging prompt; JSON-only output keyed by the item's ORDINAL.
 
@@ -96,22 +114,40 @@ def _build_scoring_prompt(
         Scoring attempt 1 incomplete: 1 item(s) still unjudged
         Dropping 1 invented scoring item(s) not in the checklist
 
-    ``source_context`` (feature C) maps the real ``item_id`` → a fuller SOP passage for that item.
-    When present it is appended after the item's short quote as supporting reference text. It is
-    reference-only — the judge still decides per item against the checklist ``text``; the rubric,
-    weighting, and rails are unchanged.
+    ``sources`` carries the full text of the SOP sections the items cite, each once, as [S1]..,
+    and the approved document summaries. Reference only: the judge still decides each item
+    against the checklist ``text``; the rubric, weighting and rails are unchanged.
     """
-    source_context = source_context or {}
+    sources = sources or ScoringSources()
     lines = []
     for ordinal, it in enumerate(rubric, start=1):
         line = f"[{ordinal}] ({it.kind}) {it.text}"
         if it.source_quote:
             line += f'  — SOP: "{it.source_quote}"'
-        passage = source_context.get(it.item_id)
-        if passage:
-            line += f"\n    原文依据 / SOP source passage: {passage}"
+        cited = sources.item_sections.get(it.item_id)
+        if cited:
+            line += "  — cites " + ", ".join(f"[S{i + 1}]" for i in cited)
         lines.append(line)
     rubric_block = "\n".join(lines)
+    reference = ""
+    if sources.sections:
+        blocks = [
+            f"[S{i + 1}] {s.document_name} — {s.label} ({s.pages})\n<section>\n"
+            # The SOP text cannot close its own fence.
+            + s.text.replace("</section>", "<\\/section>")
+            + "\n</section>"
+            for i, s in enumerate(sources.sections)
+        ]
+        reference += (
+            "\nSOP SECTIONS (the full text of each section the checklist cites; reference for "
+            "what the SOP requires — the checklist items are what you judge):\n"
+            + "\n\n".join(blocks)
+            + "\n"
+        )
+    if sources.summaries:
+        reference += "\nSOP DOCUMENT SUMMARIES (approved key points of each cited document):\n" + (
+            "\n\n".join(f"{name}:\n{text}" for name, text in sources.summaries) + "\n"
+        )
     return (
         "You are scoring one interview answer against a fixed checklist derived from an SOP.\n"
         "The SOP, the answer, and your rationale may be in different languages — compare across "
@@ -123,32 +159,60 @@ def _build_scoring_prompt(
         "it exactly, and do not invent numbers that are not listed.\n"
         "answer_quote is a short verbatim span from the candidate's answer for the judgment.\n"
         "Judge every item — do not omit any.\n\n"
-        f"QUESTION:\n{question_text}\n\nCHECKLIST:\n{rubric_block}\n\nANSWER:\n{answer_text}\n"
+        f"QUESTION:\n{question_text}\n\nCHECKLIST:\n{rubric_block}\n{reference}\n"
+        f"ANSWER:\n{answer_text}\n"
     )
 
 
-async def _collect_source_context(db: AsyncSession, rubric: list[RubricItem]) -> dict[str, str]:
-    """Map item_id → fuller SOP passage for items that link a source document (feature C).
-
-    Bounded twice: each item gets at most ``SOURCE_CONTEXT_PER_ITEM_CHARS``, and once the running
-    total reaches ``SOURCE_CONTEXT_TOTAL_CHARS`` no further passages are added (later items simply
-    keep their one-line quote). Items with no ``source_document_id`` are skipped.
-    """
-    out: dict[str, str] = {}
-    budget = SOURCE_CONTEXT_TOTAL_CHARS
+async def collect_sources(
+    db: AsyncSession, rubric: list[RubricItem], *, question_id: str = ""
+) -> ScoringSources:
+    """The full text of every SOP section the rubric cites (each once, in first-cited order) and
+    the approved summary of every cited document. An item citing no section adds only its
+    document's approved summary. Logs a warning above :data:`SECTION_BUDGET_CHARS`; never cuts."""
+    order: list[sop_citation.SectionRef] = []
     for it in rubric:
-        if budget <= 0 or not it.source_document_id:
-            continue
-        passage = await sop_context.get_source_context(
-            db,
-            document_id=it.source_document_id,
-            page_label=it.source_page,
-            max_chars=min(SOURCE_CONTEXT_PER_ITEM_CHARS, budget),
+        for ref in sop_citation.parse_refs(list(it.source_refs)):
+            if ref not in order:
+                order.append(ref)
+    resolved = {
+        sop_citation.SectionRef(c.document_id, c.number): c
+        for c in await sop_citation.resolve(db, order)
+    }
+    found = [r for r in order if r in resolved]
+    index = {ref: i for i, ref in enumerate(found)}
+    item_sections = {
+        it.item_id: tuple(
+            index[r] for r in sop_citation.parse_refs(list(it.source_refs)) if r in index
         )
-        if passage:
-            out[it.item_id] = passage
-            budget -= len(passage)
-    return out
+        for it in rubric
+    }
+    doc_ids = [r.document_id for r in found] + [
+        it.source_document_id for it in rubric if it.source_document_id
+    ]
+    approved = await sop_summary_service.reviewed_summaries(db, doc_ids)
+    names = {c.document_id: c.document_name for c in resolved.values()}
+    if approved:
+        names |= await checklist_service.document_names(db, set(approved) - set(names))
+    summaries = tuple(
+        (names.get(doc_id, ""), approved[doc_id])
+        for doc_id in dict.fromkeys(doc_ids)
+        if doc_id in approved
+    )
+    sources = ScoringSources(
+        sections=tuple(resolved[r] for r in found),
+        item_sections={k: v for k, v in item_sections.items() if v},
+        summaries=summaries,
+    )
+    if sources.chars > SECTION_BUDGET_CHARS:
+        logger.warning(
+            "Question %s cites %d chars of SOP text (budget %d): sent whole; cite narrower "
+            "subsections to shrink it",
+            question_id,
+            sources.chars,
+            SECTION_BUDGET_CHARS,
+        )
+    return sources
 
 
 # What a model actually returns for the item printed as "[3]". MEASURED, not guessed, and the reason
@@ -182,7 +246,7 @@ def _resolve_item_id(raw_id: object, asked: list[RubricItem]) -> str | None:
 
     An ordinal wins over an id match, which is unambiguous in practice because real ids are UUIDs
     and can never be a bare integer. The id branch exists only so that a model which echoes the real
-    id anyway — it is still in ``source_context`` keys, never in the prompt text — is not discarded.
+    id anyway — it is a key of the rubric, never in the prompt text — is not discarded.
     """
     key = str(raw_id).strip()
     if not key:
@@ -219,10 +283,10 @@ async def score_answer_against_checklist(
     Returns None when the question has no checklist (caller falls back to the stub). Retries once
     on an incomplete LLM judgment set before surfacing the failure.
 
-    ``include_source_context`` (feature C, default on) attaches each item's fuller SOP passage to
-    the prompt as reference. It is a pure prompt enrichment — the pure scoring engine
-    (:func:`enforce_and_score`) never sees it, so the weighted score for a given set of judgments is
-    identical whether or not it is on. Set False to fall back to the historical quote-only prompt.
+    ``include_source_context`` (default on) attaches the full text of each cited SOP section and
+    the approved document summaries to the prompt as reference. It is a pure prompt enrichment —
+    the pure scoring engine (:func:`enforce_and_score`) never sees it, so the weighted score for a
+    given set of judgments is identical whether or not it is on. False sends the checklist alone.
     """
     task = await prepare_scoring(
         db,
@@ -250,7 +314,7 @@ class ScoringTask:
     question_text: str
     answer_text: str
     rubric: list[RubricItem]
-    source_context: dict[str, str]
+    sources: ScoringSources
 
 
 async def prepare_scoring(
@@ -284,22 +348,23 @@ async def prepare_scoring(
             source_page=row.source_page,
             source_document_id=row.source_document_id,
             advisory=row.advisory,
+            source_refs=row.source_refs,
         )
         for row in item_rows
     ]
 
-    # Feature C: reassemble each item's fuller SOP passage (bounded per item and in total). Purely
-    # for the prompt; not passed to the scoring engine, so scores stay reproducible.
-    source_context: dict[str, str] = {}
+    # The cited sections' full text and the approved summaries. Purely for the prompt; not passed
+    # to the scoring engine, so scores stay reproducible.
+    sources = ScoringSources()
     if include_source_context:
-        source_context = await _collect_source_context(db, rubric)
+        sources = await collect_sources(db, rubric, question_id=question_id)
 
     return ScoringTask(
         question_id=question_id,
         question_text=question_text,
         answer_text=answer_text,
         rubric=rubric,
-        source_context=source_context,
+        sources=sources,
     )
 
 
@@ -359,7 +424,7 @@ async def judge_prepared(task: ScoringTask, *, llm_provider: str | None = None) 
     question_text = task.question_text
     answer_text = task.answer_text
     rubric = task.rubric
-    source_context = task.source_context
+    sources = task.sources
 
     llm = get_llm_adapter(llm_provider)
 
@@ -376,7 +441,7 @@ async def judge_prepared(task: ScoringTask, *, llm_provider: str | None = None) 
         # Bound to its own name: `pending` is reassigned below, and the ordinals in the prompt only
         # mean anything against the exact list that produced them.
         asked = pending
-        prompt = _build_scoring_prompt(question_text, answer_text, asked, source_context)
+        prompt = _build_scoring_prompt(question_text, answer_text, asked, sources)
         if attempt:
             # Say the numbers RESTART. The ordinal scheme introduced a failure mode the UUID scheme
             # could not have: this retry lists only the still-pending items, so they are numbered

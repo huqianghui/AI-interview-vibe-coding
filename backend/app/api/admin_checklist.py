@@ -7,12 +7,12 @@ questions (F2) and, later, scored results with source quotes (F4/F8), never the 
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.dependencies import require_role
-from app.services import checklist_service
+from app.services import checklist_service, sop_citation
 from app.services.checklist_service import ChecklistNotFound, QuestionNotFound
 
 router = APIRouter(
@@ -20,6 +20,23 @@ router = APIRouter(
     tags=["admin-checklists"],
     dependencies=[Depends(require_role("admin"))],
 )
+
+
+class SourceRefOut(BaseModel):
+    """One cited SOP section (spec-sop-section-grounding §3)."""
+
+    document_id: str
+    document_name: str
+    section: str
+    title: str
+    page_start: int | None
+    # False when the document or the section no longer exists.
+    found: bool
+
+
+class SourceRefIn(BaseModel):
+    document_id: str
+    section: str
 
 
 class ChecklistItemOut(BaseModel):
@@ -34,6 +51,8 @@ class ChecklistItemOut(BaseModel):
     source_document_id: str | None = None
     source_document_name: str | None = None
     advisory: bool = False
+    # The SOP sections the item cites, primary first; scoring reads each one's full text.
+    source_refs: list[SourceRefOut] = []
 
 
 class ChecklistOut(BaseModel):
@@ -49,6 +68,9 @@ async def _checklist_out(db: AsyncSession, checklist) -> ChecklistOut:
     names = await checklist_service.document_names(
         db, {i.source_document_id for i in items if i.source_document_id}
     )
+    refs = {i.id: sop_citation.parse_refs(i.source_refs) for i in items}
+    described = await sop_citation.describe(db, [r for rs in refs.values() for r in rs])
+    by_ref = {(d["document_id"], d["section"]): d for d in described}
     return ChecklistOut(
         checklist_id=checklist.id,
         question_id=checklist.question_id,
@@ -65,6 +87,9 @@ async def _checklist_out(db: AsyncSession, checklist) -> ChecklistOut:
                 source_document_id=i.source_document_id,
                 source_document_name=names.get(i.source_document_id or ""),
                 advisory=i.advisory,
+                source_refs=[
+                    SourceRefOut(**by_ref[(r.document_id, r.section)]) for r in refs[i.id]
+                ],
             )
             for i in items
         ],
@@ -108,6 +133,10 @@ class ChecklistItemIn(BaseModel):
     # instead of clearing them: an omitted field is carried over, an explicit one is used.
     source_document_id: str | None = None
     advisory: bool = False
+    # Omitted = keep the stored ones (an older tab); a section that does not exist is dropped.
+    source_refs: list[SourceRefIn] | None = Field(
+        default=None, max_length=sop_citation.MAX_REFS_PER_ITEM
+    )
 
 
 class ChecklistEditIn(BaseModel):

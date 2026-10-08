@@ -51,7 +51,7 @@ from app.interview.verbal_cue import strip_verbal_cue
 from app.models.checklist import Checklist, ChecklistItem
 from app.models.interview import InterviewSession, InterviewTurn
 from app.models.sop import SopDocument
-from app.services import scoring_service, sop_coverage
+from app.services import scoring_service, sop_citation, sop_coverage
 
 logger = logging.getLogger(__name__)
 
@@ -629,6 +629,22 @@ async def score_and_finalize_events(
                         "question_id": audited_id,
                     }
 
+    # Each cited SOP section's number and title, so a judgment names the section it rests on
+    # ("4.2 Regional CSM"), not only the document. One lookup for the whole report.
+    cited_refs = {
+        ref
+        for result in results.values()
+        for it in result.items
+        for ref in sop_citation.parse_refs(list(it.source_refs))
+    }
+    cited = {
+        (d["document_id"], d["section"]): d
+        for d in await sop_citation.describe(
+            db, sorted(cited_refs, key=lambda r: (r.document_id, r.section))
+        )
+        if d["found"]
+    }
+
     # ── Phase 4: aggregate in BANK ORDER ──────────────────────────────────────────────────────
     # Not completion order: the report reads top to bottom as the candidate answered (req. 2),
     # and concurrency finishes questions in whatever order the model returns them.
@@ -706,6 +722,20 @@ async def score_and_finalize_events(
                         # linked SOP document (the report then shows plain source text, no link).
                         "source_document_id": it.source_document_id,
                         "source_document_name": doc_names.get(it.source_document_id),
+                        # The cited SOP sections, primary first: document, number, title, page.
+                        "source_sections": [
+                            {
+                                "document_id": ref.document_id,
+                                "document_name": cited[(ref.document_id, ref.section)][
+                                    "document_name"
+                                ],
+                                "section": ref.section,
+                                "title": cited[(ref.document_id, ref.section)]["title"],
+                                "page": cited[(ref.document_id, ref.section)]["page_start"],
+                            }
+                            for ref in sop_citation.parse_refs(list(it.source_refs))
+                            if (ref.document_id, ref.section) in cited
+                        ],
                     }
                     for it in result.items
                 ],

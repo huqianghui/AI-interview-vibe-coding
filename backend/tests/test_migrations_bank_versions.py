@@ -83,7 +83,9 @@ def test_upgrade_backfills_version_one_with_questions_and_downgrade_removes_it(t
     conn.close()
 
     # The service must hash the same rubric to the same value, or the first save after the upgrade
-    # would mint a version for a rubric nobody changed.
+    # would mint a version for a rubric nobody changed — including after every later migration
+    # (the ORM reads today's columns; an item citing no SOP section adds nothing to the content).
+    _alembic(db, "upgrade", "head")
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
     from app.db import make_engine

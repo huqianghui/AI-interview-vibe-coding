@@ -87,6 +87,29 @@ export function useContentTab(guard: Guard) {
       }
     });
 
+  // A citation relocation rewrote the draft: refresh the banks' publish state and the open rubric.
+  // Stable (the panel's effect depends on it); reads the open question through a ref.
+  const openQuestion = useRef<string | null>(null);
+  openQuestion.current = selectedQuestion;
+  const unsaved = useRef(false);
+  unsaved.current =
+    checklist !== null && JSON.stringify(editItems) !== JSON.stringify(checklist.items);
+  const reloadAfterRelocate = useCallback(() => {
+    void guard(async () => {
+      await loadBanks();
+      const questionId = openQuestion.current;
+      if (!questionId) return;
+      try {
+        const fresh = await admin.getChecklist(questionId);
+        setChecklist(fresh);
+        // Unsaved edits in the open rubric are kept: the admin saves or reloads them knowingly.
+        if (!unsaved.current) setEditItems(fresh.items.map((it) => ({ ...it })));
+      } catch {
+        // none drafted
+      }
+    });
+  }, [guard, loadBanks]);
+
   const setItem = (idx: number, patch: Partial<ChecklistItem>) =>
     setEditItems((items) => items.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
 
@@ -104,6 +127,7 @@ export function useContentTab(guard: Guard) {
         source_page: null,
         source_document_id: null,
         advisory: false,
+        source_refs: [],
         order_index: items.length,
       },
     ]);
@@ -123,6 +147,10 @@ export function useContentTab(guard: Guard) {
         source_page: it.source_page,
         source_document_id: it.source_document_id ?? null,
         advisory: it.advisory ?? false,
+        source_refs: (it.source_refs ?? []).map((r) => ({
+          document_id: r.document_id,
+          section: r.section,
+        })),
       }));
       adoptChecklist(await admin.editChecklistItems(checklist.checklist_id, payload));
       setChecklistStatus(t("admin.saved"));
@@ -169,6 +197,7 @@ export function useContentTab(guard: Guard) {
     publishResult,
     publishBank,
     publishing,
+    reloadAfterRelocate,
   };
 }
 

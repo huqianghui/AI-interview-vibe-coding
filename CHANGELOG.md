@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.56.0.0 (2026-10-08)
+
+### Changed
+- **Scoring reads the SOP sections a rubric item cites, in full.** Each rubric item now cites one
+  or more SOP sections by number ("4.2"). The scoring prompt carries the full text of every cited
+  section, once per question, plus the admin-approved summary of each cited document. It used to
+  carry the first 600 characters of the document, usually its cover page. Never truncated; above
+  60,000 characters per question a warning is logged. Measured on the real model: 60,000
+  characters score in 12-14 s, the same as 15,000.
+- The SOP coverage check reads the same cited sections instead of the start of each document.
+- The report names the cited sections next to each judgment ("Widget SOP.pdf · 4.2 Approval").
+- In the rubric editor each item shows its cited sections; "+ Cite a section" picks a document,
+  then one of its sections. A citation of a section that no longer exists is shown and dropped
+  on save.
+- Bank bundles carry the cited sections by document name; bank versions keep them.
+
+### Added
+- **"Relocate SOP citations"** on each bank. For every rubric item in the bank's draft:
+  - Sections an imported label names ("…SOP section 4.2", "sections 5.1-5.8") are cited as named.
+  - A label that names only a document is searched within that document.
+  - Everything else (no label, or the made-up "SOP Handbook") is searched across all SOPs.
+
+  The model picks among the candidate sections and copies one supporting sentence. The sentence
+  is kept only if it appears word for word in the cited section, and an item with no match says
+  "no SOP found". Results go into the draft with an old → new table to review before publishing.
+  Checked on every label in the live banks: each names the right document and section, except
+  "Country Quality Plan", which is not in the SOP library.
+- **AI-drafted rubrics cite our own SOP sections.** Drafting searches the converted sections for
+  the question; a citation is kept only if it names a section the model was shown and quotes it
+  verbatim. It no longer falls back to a built-in placeholder source ("SOP Handbook").
+
+### Removed
+- The 600-character SOP slice scoring used (`sop_context`).
+
 ## 0.55.0.0 (2026-10-08)
 
 ### Added

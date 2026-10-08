@@ -50,8 +50,9 @@ async def test_draft_items_carry_kind_weight_and_source(db_session):
     assert items
     for i in items:
         assert i.kind in ("required", "recommended", "forbidden")
-    # At least one item is source-attributed (the mock draft quotes the SOP).
-    assert any(i.source_quote for i in items)
+    # No SOP corpus here: nothing may be attributed (the mock's own quote cannot be checked
+    # against any section, so it is dropped — the old "SOP Handbook" bug).
+    assert not any(i.source_quote or i.source_document_id for i in items)
 
 
 @pytest.mark.asyncio
@@ -92,20 +93,10 @@ async def test_draft_unknown_question_raises(db_session):
         await svc.draft_checklist(db_session, "no-such-question")
 
 
-class _NoSopRetrieval:
-    """A retrieval adapter that finds no SOP passages (no SOP corpus configured)."""
-
-    name = "empty-sop"
-
-    async def retrieve_citations(self, query, *, max_citations=3):
-        return []
-
-
 @pytest.mark.asyncio
 async def test_draft_without_sop_is_non_empty(db_session, monkeypatch):
-    # Design B P2: with NO SOP passages, the LLM still drafts a rubric from the question text; the
+    # Design B P2: with NO SOP sections, the LLM still drafts a rubric from the question text; the
     # checklist must be non-empty with weights summing to 100.
-    monkeypatch.setattr(svc, "get_retrieval_adapter", lambda name=None: _NoSopRetrieval())
 
     q = await _question(db_session)
     checklist = await svc.draft_checklist(db_session, q.id)
@@ -128,7 +119,6 @@ async def test_draft_generic_fallback_when_llm_and_points_empty(db_session, monk
             yield ""
 
     monkeypatch.setattr(svc, "get_llm_adapter", lambda name=None: _EmptyLLM())
-    monkeypatch.setattr(svc, "get_retrieval_adapter", lambda name=None: _NoSopRetrieval())
 
     q = await _question(db_session, points=[])
     checklist = await svc.draft_checklist(db_session, q.id)
@@ -157,39 +147,62 @@ async def test_default_item_counts(db_session):
 
 
 @pytest.mark.asyncio
-async def test_draft_gates_partial_llm_citation(db_session, monkeypatch):
-    """A drafted item whose LLM citation is half-present (quote, no page) keeps the item but strips
-    the attribution (Phase 5) — no partial SOP citation reaches the report."""
+async def test_a_drafted_citation_survives_only_if_it_can_be_checked(db_session, monkeypatch):
+    """The model sees our own SOP sections as C1..; a citation it gives is kept only when it names
+    a section it was shown and its quote is copied verbatim from that section."""
+    from app.models.sop import SopDocument, SopSection
 
-    class _PartialCiteLLM:
-        name = "partial"
+    doc = SopDocument(name="Deploy SOP.pdf", status="chunked", markdown_source="text")
+    db_session.add(doc)
+    await db_session.flush()
+    db_session.add(
+        SopSection(
+            document_id=doc.id,
+            order_index=0,
+            number="3",
+            title="Deployment steps",
+            page_start=2,
+            page_end=2,
+            text="Follow the documented deployment steps in order. Never bypass the safety check.",
+        )
+    )
+    await db_session.commit()
+
+    class _CitingLLM:
+        name = "citing"
 
         async def complete(self, prompt, *, json_mode=False):
-            # One complete citation + one partial (quote, no page) + one fully unsourced.
+            assert (
+                '<section id="C1" document="Deploy SOP.pdf" title="3 Deployment steps">' in prompt
+            )
             return (
                 '{"items": ['
-                '{"kind": "required", "text": "grounded item", "weight": 40,'
-                ' "source_quote": "Follow the documented steps.", "source_page": "p.1"},'
-                '{"kind": "required", "text": "hallucinated cite", "weight": 30,'
-                ' "source_quote": "This quote has no page."},'
-                '{"kind": "recommended", "text": "unsourced point", "weight": 30}'
+                '{"kind": "required", "text": "grounded item", "weight": 40, "cite": ["C1"],'
+                ' "source_quote": "Follow the documented deployment steps in order."},'
+                '{"kind": "required", "text": "invented quote", "weight": 30, "cite": ["C1"],'
+                ' "source_quote": "Deployments need two approvers."},'
+                '{"kind": "recommended", "text": "invented section", "weight": 30, "cite": ["C9"]}'
                 "]}"
             )
 
         async def stream(self, prompt):
             yield ""
 
-    monkeypatch.setattr(svc, "get_llm_adapter", lambda name=None: _PartialCiteLLM())
-
-    q = await _question(db_session)
+    monkeypatch.setattr(svc, "get_llm_adapter", lambda name=None: _CitingLLM())
+    q = await _question(db_session, text="How do you follow the deployment steps safely?")
     checklist = await svc.draft_checklist(db_session, q.id)
     items = {i.text: i for i in await svc.list_items(db_session, checklist.id)}
 
-    # All three items kept (never dropped for a bad citation).
-    assert set(items) == {"grounded item", "hallucinated cite", "unsourced point"}
-    # Complete citation survives.
-    assert items["grounded item"].source_quote == "Follow the documented steps."
-    assert items["grounded item"].source_page == "p.1"
-    # Partial citation stripped.
-    assert items["hallucinated cite"].source_quote == ""
-    assert items["hallucinated cite"].source_page is None
+    assert set(items) == {"grounded item", "invented quote", "invented section"}
+    grounded = items["grounded item"]
+    assert grounded.source_quote == "Follow the documented deployment steps in order."
+    assert (grounded.source_document_id, grounded.source_page) == (doc.id, "p. 2")
+    assert json.loads(grounded.source_refs) == [{"document_id": doc.id, "section": "3"}]
+    # The section is real but the quote is not in it: cited, quote dropped.
+    assert items["invented quote"].source_quote == ""
+    assert json.loads(items["invented quote"].source_refs) == [
+        {"document_id": doc.id, "section": "3"}
+    ]
+    # A section it was never shown: nothing kept.
+    assert items["invented section"].source_refs == "[]"
+    assert items["invented section"].source_document_id is None

@@ -48,9 +48,8 @@ async def test_score_answer_against_checklist_via_mock_llm(db_session):
     assert result is not None
     # Mock judges required/recommended met, forbidden not_met → weighted score 100.
     assert result.score == 100.0
-    # Every checklist item got a judgment with the SOP source carried through.
+    # Every checklist item got a judgment.
     assert len(result.items) == 3
-    assert any(it.source_quote for it in result.items)
 
 
 @pytest.mark.asyncio
