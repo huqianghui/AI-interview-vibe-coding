@@ -213,7 +213,16 @@ export function ContentTab({ state, guard }: { state: ContentTabState; guard: Gu
       {/* Checklist (scoring rubric) for the selected question — editable inline panel (F3b) */}
       {selectedQuestion && (
         <Card className={styles.card}>
-          <CardHeader header={<Title3>{t("admin.rubricTitle")}</Title3>} />
+          <CardHeader
+            header={<Title3>{t("admin.rubricTitle")}</Title3>}
+            description={
+              checklist?.rubric_version_no != null ? (
+                <Text size={200} data-testid="checklist-version" title={t("admin.rubricVersionHint")}>
+                  {t("admin.rubricVersion", { no: checklist.rubric_version_no })}
+                </Text>
+              ) : undefined
+            }
+          />
           {checklist ? (
             <>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -284,10 +293,17 @@ export function ContentTab({ state, guard }: { state: ContentTabState; guard: Gu
                         {t("admin.delete")}
                       </Button>
                     </div>
+                    {it.advisory && (
+                      <Text size={200} data-testid={`checklist-advisory-${i}`}>
+                        {t("admin.advisory")}
+                      </Text>
+                    )}
                     {it.source_quote && (
                       <Text size={200} className={styles.sourceQuote}>
                         “{it.source_quote}”
-                        {it.source_page ? ` — ${it.source_page}` : ""}
+                        {[it.source_document_name, it.source_page].some(Boolean)
+                          ? ` — ${[it.source_document_name, it.source_page].filter(Boolean).join(" · ")}`
+                          : ""}
                       </Text>
                     )}
                   </li>

@@ -860,7 +860,8 @@ describe("AdminPage", () => {
       const bankSelect = await screen.findByTestId("user-assign-bank-user1");
       await waitFor(() => expect(bankSelect).toHaveTextContent("Default (Default bank)"));
       await user.selectOptions(bankSelect, "b2");
-      expect(save).toHaveBeenCalledWith("u1", { persona_id: null, bank_id: "b2" });
+      // A new bank starts on its latest rubric version: null asks the backend to pick it.
+      expect(save).toHaveBeenCalledWith("u1", { persona_id: null, bank_id: "b2", rubric_version_id: null });
       expect(await screen.findByTestId("user-assign-saved-user1")).toBeInTheDocument();
       // Admin accounts are not interviewed: no assignment. Interview results have their own tab.
       expect(screen.queryByTestId("user-assign-bank-test-admin")).not.toBeInTheDocument();
@@ -887,8 +888,47 @@ describe("AdminPage", () => {
       await openUsersTab(user);
       await user.selectOptions(await screen.findByTestId("user-assign-persona-user1"), "p2");
       await user.selectOptions(screen.getByTestId("user-assign-bank-user1"), "b2"); // first still in flight
-      expect(save).toHaveBeenLastCalledWith("u1", { persona_id: "p2", bank_id: "b2" });
+      expect(save).toHaveBeenLastCalledWith("u1", {
+        persona_id: "p2",
+        bank_id: "b2",
+        rubric_version_id: null,
+      });
       release();
+    });
+
+    it("picks a rubric version of the assigned bank, defaulting to its latest", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(admin, "listRubricVersions").mockResolvedValue([
+        { id: "v2", version_no: 2, created_at: "2026-10-08T05:00:00", reason: "edit", question_count: 3, is_latest: true },
+        { id: "v1", version_no: 1, created_at: "2026-10-01T05:00:00", reason: "initial", question_count: 3, is_latest: false },
+      ]);
+      const save = vi.spyOn(admin, "setUserAssignment").mockResolvedValue({
+        ...CANDIDATE,
+        assigned_bank_id: "b2",
+        assigned_rubric_version_id: "v1",
+        assigned_rubric_version_no: 1,
+      });
+      await openUsersTab(user, [
+        {
+          ...CANDIDATE,
+          id: "u2",
+          username: "user2",
+          assigned_bank_id: "b2",
+          assigned_rubric_version_id: "v2",
+          assigned_rubric_version_no: 2,
+        },
+      ]);
+      // No bank assigned → no version picker (the interview uses the default bank's latest).
+      expect(screen.queryByTestId("user-assign-version-user1")).not.toBeInTheDocument();
+      const picker = await screen.findByTestId("user-assign-version-user2");
+      await waitFor(() => expect(picker).toHaveTextContent("v2 · 2026-10-08 (latest)"));
+      await user.selectOptions(picker, "v1");
+      expect(save).toHaveBeenLastCalledWith("u2", {
+        persona_id: null,
+        bank_id: "b2",
+        rubric_version_id: "v1",
+      });
+      await waitFor(() => expect(picker).toHaveValue("v1"));
     });
 
   });

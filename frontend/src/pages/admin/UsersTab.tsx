@@ -97,6 +97,25 @@ function AssignmentCells({ u, state }: { u: AdminUser; state: UsersTabState }) {
             </option>
           ))}
         </Select>
+        {u.assigned_bank_id && (
+          <Select
+            size="small"
+            style={{ marginTop: 4 }}
+            aria-label={t("admin.users.rubricVersion")}
+            data-testid={`user-assign-version-${u.username}`}
+            value={u.assigned_rubric_version_id ?? ""}
+            onChange={(_, d) => void state.assign(u, { rubric_version_id: d.value || null })}
+          >
+            {(state.versionsByBank[u.assigned_bank_id] ?? []).map((v) => (
+              <option key={v.id} value={v.id}>
+                {t(v.is_latest ? "admin.users.versionLatest" : "admin.users.versionOption", {
+                  no: v.version_no,
+                  date: v.created_at ? v.created_at.slice(0, 10) : "",
+                })}
+              </option>
+            ))}
+          </Select>
+        )}
         {status?.kind === "saved" && (
           <Text size={200} style={{ marginLeft: 6 }} data-testid={`user-assign-saved-${u.username}`}>
             {t("admin.users.assignSaved")}

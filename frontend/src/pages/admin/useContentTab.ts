@@ -67,6 +67,8 @@ export function useContentTab(guard: Guard) {
         weight: 0,
         source_quote: "",
         source_page: null,
+        source_document_id: null,
+        advisory: false,
         order_index: items.length,
       },
     ]);
@@ -76,12 +78,16 @@ export function useContentTab(guard: Guard) {
   const saveChecklist = () =>
     guard(async () => {
       if (!checklist) return;
-      const payload = editItems.map(({ kind, text, weight, source_quote, source_page }) => ({
-        kind,
-        text,
-        weight,
-        source_quote,
-        source_page,
+      // Every field the backend stores, including the SOP link and the advisory flag: omitting them
+      // is what used to strip both on every save.
+      const payload = editItems.map((it) => ({
+        kind: it.kind,
+        text: it.text,
+        weight: it.weight,
+        source_quote: it.source_quote,
+        source_page: it.source_page,
+        source_document_id: it.source_document_id ?? null,
+        advisory: it.advisory ?? false,
       }));
       adoptChecklist(await admin.editChecklistItems(checklist.checklist_id, payload));
       setChecklistStatus(t("admin.saved"));

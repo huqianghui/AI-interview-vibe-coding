@@ -221,6 +221,35 @@ describe("Content tab: rubric", () => {
   });
 });
 
+describe("Content tab: a rubric save keeps SOP links and disclosure-only flags", () => {
+  it("sends both back, shows the document and the version", async () => {
+    const user = userEvent.setup();
+    const linked: Checklist = {
+      ...CHECKLIST,
+      rubric_version_no: 3,
+      items: [
+        { ...CHECKLIST.items[0], source_document_id: "doc-1", source_document_name: "Monitoring Plan.pdf" },
+        { ...CHECKLIST.items[1], advisory: true },
+      ],
+    };
+    vi.spyOn(admin, "getChecklist").mockResolvedValue(linked);
+    await openDemoBank(user);
+    await user.click(screen.getByTestId("rubric-btn-q1"));
+    expect(await screen.findByText(/SOP 4\.2/)).toHaveTextContent("— Monitoring Plan.pdf · p.3");
+    expect(screen.getByTestId("checklist-advisory-1")).toBeInTheDocument();
+    expect(screen.getByTestId("checklist-version")).toHaveTextContent("Saved as version 3");
+
+    const save = vi.spyOn(admin, "editChecklistItems").mockResolvedValue(linked);
+    await user.click(screen.getByTestId("checklist-save"));
+    await waitFor(() =>
+      expect(save).toHaveBeenCalledWith("c1", [
+        expect.objectContaining({ text: "on topic", source_document_id: "doc-1", advisory: false }),
+        expect.objectContaining({ text: "guessing", source_document_id: null, advisory: true }),
+      ]),
+    );
+  });
+});
+
 describe("Connection tab: external interview API", () => {
   async function openConnection(user: ReturnType<typeof userEvent.setup>) {
     renderPage();
