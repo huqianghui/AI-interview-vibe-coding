@@ -655,3 +655,62 @@ async def test_an_unanswered_topic_check_is_unknown_and_never_wipes(db_session):
     db_session.expire_all()
     (item,) = await checklist_service.list_items(db_session, checklist_id)
     assert json.loads(item.source_refs)[0]["section"] == "5"
+
+
+async def test_the_library_lists_each_converted_sop_with_its_purpose(db_session):
+    widget, _ = await _corpus(db_session)
+    document = await db_session.get(SopDocument, widget)
+    document.summary = "**Purpose:** Release widgets\n  safely.\n\n**Scope:** All sites."
+    db_session.add(
+        SopDocument(name="Not converted.pdf", status="chunked", markdown_source="failed")
+    )
+    await db_session.commit()
+    library = await sop_citation_service._library(db_session)
+    assert "- Widget Release Procedure.pdf: Release widgets" in library
+    assert "- Release Manager_Final (1).docx" in library  # no summary: the name alone
+    assert "Not converted" not in library
+
+
+async def test_only_unlabelled_questions_are_put_to_the_topic_check(db_session):
+    await _corpus(db_session)
+    bank = await question_service.create_bank(db_session, name="Mixed")
+    for n, (text, label) in enumerate(
+        [
+            ("How is a release approved?", "Widget Release Procedure SOP section 4.2"),
+            ("Tell us about yourself.", ""),
+        ]
+    ):
+        q = await question_service.add_question(
+            db_session, bank_id=bank.id, text=text, order_index=n
+        )
+        await checklist_service._persist_draft(
+            db_session,
+            q.id,
+            checklist_service.ChecklistDraft(
+                prompt_version="t",
+                items=[
+                    checklist_service.DraftItem(
+                        kind="required", text="x", weight=100, source_quote=label
+                    )
+                ],
+            ),
+        )
+    asked: list[str] = []
+
+    class Llm(ScriptedJudgeAdapter):
+        name = "scripted"
+
+        async def complete(self, prompt, *, json_mode=False, fast=False):
+            if sop_citation_service.TOPIC_PROMPT_MARKER in prompt:
+                asked.append(prompt)
+                return json.dumps({"about": False})
+            return json.dumps({"cite": [], "quote": ""})
+
+    run = CitationRun(bank_id=bank.id)
+    db_session.add(run)
+    await db_session.commit()
+    await sop_citation_service.relocate(db_session, run, Llm())
+    (prompt,) = asked
+    bank_part = prompt.split("QUESTION BANK:")[1]
+    assert "Tell us about yourself." in bank_part
+    assert "How is a release approved?" not in bank_part
