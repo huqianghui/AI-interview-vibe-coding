@@ -17,6 +17,7 @@ source-attributed) is verified without any Azure call.
 from dataclasses import dataclass, field
 
 from app.models.checklist import CHECKLIST_ITEM_KINDS
+from app.services.sop_citation import parse_refs
 
 
 @dataclass
@@ -28,6 +29,8 @@ class DraftItem:
     source_document_id: str | None = None
     source_page: str | None = None
     order_index: int = 0
+    # The SOP sections cited, ``[{"document_id", "section"}]`` (``sop_citation``), first = primary.
+    source_refs: list[dict] = field(default_factory=list)
     # Advisory forbidden item (known unvalidated source conflict): fires "violated" + a disclosure
     # warning but does
     # NOT cap the outcome. Only meaningful on forbidden items; ignored elsewhere.
@@ -122,6 +125,11 @@ def parse_draft_items(
                 source_page=(str(raw["source_page"]) if raw.get("source_page") else None),
                 order_index=len(items),
                 advisory=bool(raw.get("advisory", False)) and kind == "forbidden",
+                source_refs=(
+                    [r.as_dict() for r in parse_refs(raw.get("source_refs"))]
+                    if trust_item_sources
+                    else []
+                ),
             )
         )
     return items

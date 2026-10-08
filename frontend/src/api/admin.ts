@@ -98,6 +98,17 @@ export const reorderQuestions = (bankId: string, orderedIds: string[]) =>
 
 // ── Checklists (F3b) ───────────────────────────────────────────────────
 
+// One SOP section a rubric item cites (spec-sop-section-grounding §3). Bound to the section NUMBER;
+// scoring reads the section's full text. `found` is false when the document or section is gone.
+export interface SourceRef {
+  document_id: string;
+  section: string;
+  document_name?: string;
+  title?: string;
+  page_start?: number | null;
+  found?: boolean;
+}
+
 export interface ChecklistItem {
   kind: string;
   text: string;
@@ -111,6 +122,8 @@ export interface ChecklistItem {
   source_document_id?: string | null;
   source_document_name?: string | null;
   advisory?: boolean;
+  // The SOP sections cited, primary first.
+  source_refs?: SourceRef[];
 }
 
 export interface Checklist {

@@ -30,6 +30,7 @@ import {
   tokens,
 } from "@fluentui/react-components";
 import type { Report, QuestionScore, ScoredItem } from "../api/client";
+import { citationText } from "../api/client";
 import { SopOpenerContext } from "./sopOpener";
 import { ScoreGauge } from "./ScoreGauge";
 import { downloadReportPdf } from "./reportPdf";
@@ -287,7 +288,9 @@ function SopSourceLink({
   const { t } = useTranslation();
   const openSop = useContext(SopOpenerContext);
   const [state, setState] = useState<"idle" | "opening" | "failed">("idle");
-  const label = `${t("report.sopSource")}${item.source_page ? ` · ${item.source_page}` : ""}`;
+  // The cited sections ("Widget SOP.pdf · 4.2 Approval · p. 4"); without any, the page label.
+  const cited = citationText(item);
+  const label = `${t("report.sopSource")}${cited ? ` · ${cited}` : ""}`;
 
   if (!item.source_document_id) {
     return (

@@ -25,6 +25,7 @@
 import type { TFunction } from "i18next";
 import type { Content, TDocumentDefinitions } from "pdfmake/interfaces";
 import type { QuestionScore, Report, ScoredItem } from "../api/client";
+import { citationText } from "../api/client";
 import { palette } from "../theme";
 import { LATIN_FACE_RUNS, REGULAR_FACE_RUNS } from "./pdfGlyphs";
 import { splitWarnings, unscoredCount } from "./reportModel";
@@ -171,12 +172,16 @@ function questionVerdict(q: QuestionScore, t: TFunction): string {
   return `${verdict ? `${verdict} · ` : ""}${Math.round(q.score)}/100${capped}`;
 }
 
-/** "SOP source · <document> · <page>". Only our own word is bold: the document name and page come
- *  from the client's SOP library and may hold characters outside the bold face's GB2312 subset. */
+/** "SOP source · <document> · <section> · <page>". Only our own word is bold: the document name and
+ *  section title come from the client's SOP library and may hold characters outside the bold
+ *  face's GB2312 subset. */
 function sourceLabel(item: ScoredItem, t: TFunction): Content[] {
-  const doc = item.source_document_name ? ` · ${item.source_document_name}` : "";
-  const page = item.source_page ? ` · ${item.source_page}` : "";
-  return [{ text: t("report.sopSource"), bold: true }, ...(doc || page ? [`${doc}${page}`] : [])];
+  const cited = item.source_sections?.length
+    ? ` · ${citationText(item)}`
+    : `${item.source_document_name ? ` · ${item.source_document_name}` : ""}${
+        item.source_page ? ` · ${item.source_page}` : ""
+      }`;
+  return [{ text: t("report.sopSource"), bold: true }, ...(cited ? [cited] : [])];
 }
 
 /** A tinted panel with a small label over a quoted passage: the SOP source, or the candidate's words. */

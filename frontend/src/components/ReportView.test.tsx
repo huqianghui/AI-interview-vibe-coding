@@ -190,6 +190,32 @@ describe("ReportView", () => {
     openSpy.mockRestore();
   });
 
+  it("names the cited SOP sections next to the source", async () => {
+    await i18n.changeLanguage("en-US");
+    renderReport({
+      ...SCORED,
+      per_question: [
+        {
+          ...SCORED.per_question[0],
+          items: [
+            {
+              ...SCORED.per_question[0].items![0],
+              source_document_id: "doc-1",
+              source_document_name: "Widget SOP.pdf",
+              source_sections: [
+                { document_id: "doc-1", document_name: "Widget SOP.pdf", section: "4.2", title: "Approval", page: 4 },
+                { document_id: "doc-1", document_name: "Widget SOP.pdf", section: "5", title: "RECORDS", page: 5 },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(screen.getAllByTestId("sop-source-link")[0]).toHaveTextContent(
+      "SOP source · Widget SOP.pdf · 4.2 Approval, 5 RECORDS · p. 4",
+    );
+  });
+
   it("renders the SOP source as plain text when the item has no cited document", async () => {
     await i18n.changeLanguage("en-US");
     renderReport(SCORED); // SCORED items carry no source_document_id

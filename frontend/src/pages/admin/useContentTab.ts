@@ -104,6 +104,7 @@ export function useContentTab(guard: Guard) {
         source_page: null,
         source_document_id: null,
         advisory: false,
+        source_refs: [],
         order_index: items.length,
       },
     ]);
@@ -123,6 +124,10 @@ export function useContentTab(guard: Guard) {
         source_page: it.source_page,
         source_document_id: it.source_document_id ?? null,
         advisory: it.advisory ?? false,
+        source_refs: (it.source_refs ?? []).map((r) => ({
+          document_id: r.document_id,
+          section: r.section,
+        })),
       }));
       adoptChecklist(await admin.editChecklistItems(checklist.checklist_id, payload));
       setChecklistStatus(t("admin.saved"));

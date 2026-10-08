@@ -17,6 +17,7 @@ import * as admin from "../../api/admin";
 import type { PublishResult } from "../../api/admin";
 import { BoundedIntInput } from "../../components/BoundedIntInput";
 import { KIND_COLOR, KINDS, useAdminStyles, type Guard } from "./shared";
+import { CitationEditor } from "./CitationEditor";
 import type { ContentTabState } from "./useContentTab";
 
 /** What the last Publish did: the version it made, that nothing changed, or every reason it was
@@ -355,6 +356,11 @@ export function ContentTab({ state, guard }: { state: ContentTabState; guard: Gu
                         {t("admin.advisory")}
                       </Text>
                     )}
+                    <CitationEditor
+                      refs={it.source_refs ?? []}
+                      index={i}
+                      onChange={(refs) => setItem(i, { source_refs: refs })}
+                    />
                     {it.source_quote && (
                       <Text size={200} className={styles.sourceQuote}>
                         “{it.source_quote}”

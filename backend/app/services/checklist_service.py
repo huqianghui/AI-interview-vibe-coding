@@ -33,6 +33,7 @@ from app.interview.questions import parse_points
 from app.models.checklist import CHECKLIST_ITEM_KINDS, Checklist, ChecklistItem
 from app.models.question import Question
 from app.models.sop import SopDocument
+from app.services import sop_citation
 from app.services.agents.registry import get_llm_adapter, get_retrieval_adapter
 
 DRAFT_PROMPT_VERSION = "v1"
@@ -172,6 +173,7 @@ async def _persist_draft(db: AsyncSession, question_id: str, draft: ChecklistDra
                 source_quote=it.source_quote,
                 source_document_id=it.source_document_id,
                 source_page=it.source_page,
+                source_refs=json.dumps(it.source_refs),
                 order_index=it.order_index,
             )
         )
@@ -243,6 +245,15 @@ async def _keep_item_sources(
             item.source_document_id = previous.source_document_id
         if "advisory" not in raw and previous is not None:
             item.advisory = previous.advisory and item.kind == "forbidden"
+        if "source_refs" not in raw and previous is not None:
+            item.source_refs = [r.as_dict() for r in sop_citation.parse_refs(previous.source_refs)]
+    # A cited section that does not exist is dropped, not stored: scoring would read nothing.
+    for it in items:
+        refs = sop_citation.parse_refs(it.source_refs)
+        gone = set(await sop_citation.missing(db, refs))
+        it.source_refs = [r.as_dict() for r in refs if r not in gone]
+        if it.source_refs and not it.source_document_id:
+            it.source_document_id = it.source_refs[0]["document_id"]
     wanted = {it.source_document_id for it in items if it.source_document_id}
     if not wanted:
         return
@@ -292,6 +303,7 @@ async def update_items(
                 source_quote=it.source_quote,
                 source_document_id=it.source_document_id,
                 source_page=it.source_page,
+                source_refs=json.dumps(it.source_refs),
                 order_index=it.order_index,
             )
         )

@@ -634,6 +634,20 @@
             "title": "Source Quote",
             "type": "string"
           },
+          "source_refs": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SourceRefIn"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Refs"
+          },
           "text": {
             "title": "Text",
             "type": "string"
@@ -702,6 +716,14 @@
           "source_quote": {
             "title": "Source Quote",
             "type": "string"
+          },
+          "source_refs": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SourceRefOut"
+            },
+            "title": "Source Refs",
+            "type": "array"
           },
           "text": {
             "title": "Text",
@@ -2915,6 +2937,70 @@
           "summarizing"
         ],
         "title": "SopSummaryOut",
+        "type": "object"
+      },
+      "SourceRefIn": {
+        "properties": {
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "section": {
+            "title": "Section",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id",
+          "section"
+        ],
+        "title": "SourceRefIn",
+        "type": "object"
+      },
+      "SourceRefOut": {
+        "description": "One cited SOP section (spec-sop-section-grounding §3).",
+        "properties": {
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "document_name": {
+            "title": "Document Name",
+            "type": "string"
+          },
+          "found": {
+            "title": "Found",
+            "type": "boolean"
+          },
+          "page_start": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Start"
+          },
+          "section": {
+            "title": "Section",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id",
+          "document_name",
+          "section",
+          "title",
+          "page_start",
+          "found"
+        ],
+        "title": "SourceRefOut",
         "type": "object"
       },
       "TestChatIn": {

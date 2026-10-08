@@ -1671,6 +1671,8 @@ export interface components {
              * @default
              */
             source_quote: string;
+            /** Source Refs */
+            source_refs?: components["schemas"]["SourceRefIn"][] | null;
             /** Text */
             text: string;
             /**
@@ -1698,6 +1700,11 @@ export interface components {
             source_page: string | null;
             /** Source Quote */
             source_quote: string;
+            /**
+             * Source Refs
+             * @default []
+             */
+            source_refs: components["schemas"]["SourceRefOut"][];
             /** Text */
             text: string;
             /** Weight */
@@ -2537,6 +2544,31 @@ export interface components {
             summarizing: boolean;
             /** Summary */
             summary: string;
+        };
+        /** SourceRefIn */
+        SourceRefIn: {
+            /** Document Id */
+            document_id: string;
+            /** Section */
+            section: string;
+        };
+        /**
+         * SourceRefOut
+         * @description One cited SOP section (spec-sop-section-grounding §3).
+         */
+        SourceRefOut: {
+            /** Document Id */
+            document_id: string;
+            /** Document Name */
+            document_name: string;
+            /** Found */
+            found: boolean;
+            /** Page Start */
+            page_start: number | null;
+            /** Section */
+            section: string;
+            /** Title */
+            title: string;
         };
         /** TestChatIn */
         TestChatIn: {

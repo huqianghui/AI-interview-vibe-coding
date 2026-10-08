@@ -1,0 +1,179 @@
+"""Rubric citations as SOP sections (spec-sop-section-grounding §3, PR 3 of 3).
+
+A rubric item cites one or more SOP sections: ``[{"document_id", "section"}, ...]`` in
+``checklist_items.source_refs``, most important first. A reference is bound to the section NUMBER
+("4.2"; "§3" for an unnumbered heading), never to a row id or position, because re-converting a
+document rebuilds its section rows. What scoring reads for a reference is the section's FULL text:
+its own text and every subsection, never cut (owner, 2026-10-08: "要取完整的对应段落").
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Iterable
+from dataclasses import dataclass
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.sop import SopDocument, SopSection
+from app.services import sop_section_service
+
+# The most references one item keeps: a rubric item that "cites" ten sections cites nothing.
+MAX_REFS_PER_ITEM = 5
+
+
+@dataclass(frozen=True)
+class SectionRef:
+    document_id: str
+    section: str
+
+    def as_dict(self) -> dict:
+        return {"document_id": self.document_id, "section": self.section}
+
+
+@dataclass(frozen=True)
+class CitedSection:
+    document_id: str
+    document_name: str
+    number: str
+    title: str
+    page_start: int
+    page_end: int
+    text: str
+
+    @property
+    def label(self) -> str:
+        """How the section is named to a reader: "4.2 Regional CSM", or the title alone."""
+        if self.number.startswith("§"):
+            return self.title or "(before the first heading)"
+        return f"{self.number} {self.title}".strip()
+
+    @property
+    def pages(self) -> str:
+        if self.page_start == self.page_end:
+            return f"p. {self.page_start}"
+        return f"pp. {self.page_start}-{self.page_end}"
+
+
+def normalize_number(raw: object) -> str:
+    """ "4.2." → "4.2", " §3 " → "§3"; anything else stripped."""
+    return str(raw or "").strip().rstrip(".").strip()
+
+
+def parse_refs(raw: object) -> list[SectionRef]:
+    """References from the stored JSON (or an already-decoded list). Invalid entries are dropped,
+    duplicates kept once, at most :data:`MAX_REFS_PER_ITEM`."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw or "[]")
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(raw, list):
+        return []
+    out: list[SectionRef] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        document_id = str(entry.get("document_id") or "").strip()
+        section = normalize_number(entry.get("section"))
+        ref = SectionRef(document_id, section)
+        if document_id and section and ref not in out:
+            out.append(ref)
+    return out[:MAX_REFS_PER_ITEM]
+
+
+def dump_refs(refs: Iterable[SectionRef]) -> str:
+    return json.dumps([r.as_dict() for r in refs])
+
+
+async def _sections_by_document(
+    db: AsyncSession, document_ids: Iterable[str]
+) -> dict[str, list[SopSection]]:
+    ids = sorted(set(document_ids))
+    if not ids:
+        return {}
+    rows = (
+        (
+            await db.execute(
+                select(SopSection)
+                .where(SopSection.document_id.in_(ids))
+                .order_by(SopSection.document_id, SopSection.order_index)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    out: dict[str, list[SopSection]] = {doc_id: [] for doc_id in ids}
+    for row in rows:
+        out[row.document_id].append(row)
+    return out
+
+
+async def _document_names(db: AsyncSession, document_ids: Iterable[str]) -> dict[str, str]:
+    ids = sorted(set(document_ids))
+    if not ids:
+        return {}
+    rows = await db.execute(select(SopDocument.id, SopDocument.name).where(SopDocument.id.in_(ids)))
+    return {doc_id: name for doc_id, name in rows.all()}
+
+
+def _find(sections: list[SopSection], number: str) -> SopSection | None:
+    """The first section with this number (a document numbers each clause once; a repeat is a
+    split artefact, and the first is the clause the text introduces)."""
+    return next((s for s in sections if s.number == number), None)
+
+
+async def resolve(db: AsyncSession, refs: Iterable[SectionRef]) -> list[CitedSection]:
+    """Each reference's section with its FULL text, in reference order. A reference whose document
+    or section no longer exists is skipped (see :func:`missing` to report those)."""
+    refs = list(refs)
+    by_doc = await _sections_by_document(db, (r.document_id for r in refs))
+    names = await _document_names(db, by_doc)
+    out: list[CitedSection] = []
+    for ref in refs:
+        sections = by_doc.get(ref.document_id) or []
+        row = _find(sections, ref.section)
+        if row is None:
+            continue
+        out.append(
+            CitedSection(
+                document_id=ref.document_id,
+                document_name=names.get(ref.document_id, ""),
+                number=row.number,
+                title=row.title,
+                page_start=row.page_start,
+                page_end=sop_section_service.page_end(sections, row.order_index),
+                text=sop_section_service.full_text(sections, row.order_index),
+            )
+        )
+    return out
+
+
+async def missing(db: AsyncSession, refs: Iterable[SectionRef]) -> list[SectionRef]:
+    """The references that name no existing section."""
+    refs = list(refs)
+    by_doc = await _sections_by_document(db, (r.document_id for r in refs))
+    return [r for r in refs if _find(by_doc.get(r.document_id) or [], r.section) is None]
+
+
+async def describe(db: AsyncSession, refs: Iterable[SectionRef]) -> list[dict]:
+    """References as a reader sees them, without the section text: for the editor and the report.
+    ``found`` is False when the document or section is gone."""
+    refs = list(refs)
+    by_doc = await _sections_by_document(db, (r.document_id for r in refs))
+    names = await _document_names(db, by_doc)
+    out = []
+    for ref in refs:
+        row = _find(by_doc.get(ref.document_id) or [], ref.section)
+        out.append(
+            {
+                "document_id": ref.document_id,
+                "document_name": names.get(ref.document_id, ""),
+                "section": ref.section,
+                "title": row.title if row is not None else "",
+                "page_start": row.page_start if row is not None else None,
+                "found": row is not None,
+            }
+        )
+    return out
