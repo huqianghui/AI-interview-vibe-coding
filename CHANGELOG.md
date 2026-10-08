@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.58.3.0 (2026-10-09)
+
+### Changed
+- **Every table is the same table.** Users, SOP documents, Interview results, a candidate's
+  interview history and the relocated-citations drawer now share one component with one look.
+  Each column starts at the width its content needs (short columns such as Role and Status stay
+  narrow), and any column can be made wider or narrower by dragging the edge of its header. Long
+  text (questions, rubric items, citations, conversion errors) stays on one line with an ellipsis
+  and the full text on hover; a click expands it in place and another collapses it. Dragged widths
+  last until the page reloads.
+- **The bank version has its own column.** In the Users tab the assigned bank's version is picked
+  in a "Bank version" column to the right of "Question bank", instead of under it in the same
+  cell; Interview results shows the version in its own column too.
+
 ## 0.58.2.0 (2026-10-09)
 
 ### Changed

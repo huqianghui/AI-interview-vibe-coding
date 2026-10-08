@@ -16,12 +16,6 @@ import {
   OverlayDrawer,
   Select,
   Spinner,
-  Table,
-  TableBody,
-  TableCell,
-  TableHeader,
-  TableHeaderCell,
-  TableRow,
   Text,
   Title3,
   makeStyles,
@@ -31,6 +25,8 @@ import { fetchInterviewSopDocument } from "../../api/admin";
 import type { HistoryStatus } from "../../api/client";
 import { InterviewDetailView, StatusBadge } from "../../components/InterviewHistory";
 import { InterviewRecordings } from "./InterviewRecordings";
+import { DataTable, type DataColumn } from "../../components/DataTable";
+import type { InterviewResultItem } from "../../api/admin";
 import { formatWhen } from "../../components/transcriptText";
 import { useAdminStyles } from "./shared";
 import { PAGE_SIZES, type InterviewsTabState, type SortKey } from "./useInterviewsTab";
@@ -112,26 +108,13 @@ function ScoreInput({
   );
 }
 
-function SortHeader({
-  state,
-  column,
-  children,
-}: {
-  state: InterviewsTabState;
-  column: SortKey;
-  children: React.ReactNode;
-}) {
-  const active = state.sort === column;
-  return (
-    <TableHeaderCell
-      sortable
-      sortDirection={active ? (state.order === "desc" ? "descending" : "ascending") : undefined}
-      onClick={() => state.toggleSort(column)}
-      data-testid={`results-sort-${column}`}
-    >
-      {children}
-    </TableHeaderCell>
-  );
+function sortOf(state: InterviewsTabState, column: SortKey): DataColumn<unknown>["sort"] {
+  return {
+    direction:
+      state.sort === column ? (state.order === "desc" ? "descending" : "ascending") : undefined,
+    onToggle: () => state.toggleSort(column),
+    testId: `results-sort-${column}`,
+  };
 }
 
 export function InterviewsTab({ state }: { state: InterviewsTabState }) {
@@ -143,6 +126,71 @@ export function InterviewsTab({ state }: { state: InterviewsTabState }) {
   const from = state.total === 0 ? 0 : state.page * state.pageSize + 1;
   const to = Math.min(state.total, (state.page + 1) * state.pageSize);
   const hasFilters = Object.keys(filters).length > 0;
+  const when = (v: string | null) => formatWhen(v, i18n.language);
+  const columns: DataColumn<InterviewResultItem>[] = [
+    {
+      id: "candidate",
+      header: t("admin.results.candidate"),
+      text: (it) => it.username ?? t("admin.results.anonymous"),
+      cell: (it) => it.username ?? t("admin.results.anonymous"),
+    },
+    {
+      id: "started",
+      header: t("history.colStarted"),
+      sort: sortOf(state, "started_at"),
+      text: (it) => when(it.started_at),
+      cell: (it) => when(it.started_at),
+    },
+    {
+      id: "completed",
+      header: t("history.colCompleted"),
+      text: (it) => when(it.completed_at),
+      cell: (it) => when(it.completed_at),
+    },
+    {
+      id: "interviewer",
+      header: t("history.colInterviewer"),
+      text: (it) => it.persona_name ?? t("history.notRecorded"),
+      cell: (it) => it.persona_name ?? t("history.notRecorded"),
+    },
+    {
+      id: "bank",
+      header: t("history.colBank"),
+      text: (it) => it.bank_name ?? t("history.notRecorded"),
+      cell: (it) => it.bank_name ?? t("history.notRecorded"),
+    },
+    {
+      // The bank's version in its own column, as in the Users tab (owner, 2026-10-09).
+      id: "version",
+      header: t("admin.users.bankVersion"),
+      text: (it) => (it.bank_version_no != null ? `v${it.bank_version_no}` : "—"),
+      cell: (it) =>
+        it.bank_version_no != null ? (
+          <span data-testid={`result-bank-version-${it.id}`}>{`v${it.bank_version_no}`}</span>
+        ) : (
+          "—"
+        ),
+    },
+    {
+      id: "status",
+      header: t("history.colStatus"),
+      width: 130,
+      cell: (it) => <StatusBadge status={it.status} />,
+    },
+    {
+      id: "score",
+      header: t("history.colScore"),
+      sort: sortOf(state, "total_score"),
+      text: (it) => (it.total_score == null ? "—" : `${it.total_score}/100`),
+      cell: (it) => (it.total_score == null ? "—" : `${it.total_score}/100`),
+    },
+    {
+      id: "outcome",
+      header: t("admin.results.outcome"),
+      text: (it) => (it.outcome ? t(`report.outcome.${it.outcome}`) : "—"),
+      cell: (it) => (it.outcome ? t(`report.outcome.${it.outcome}`) : "—"),
+    },
+  ];
 
   const toggleStatus = (s: HistoryStatus, on: boolean) => {
     const current = filters.status ?? [];
@@ -278,55 +326,20 @@ export function InterviewsTab({ state }: { state: InterviewsTabState }) {
         )}
 
         <div className={local.scroll}>
-          <Table data-testid="results-table" aria-busy={state.loading}>
-            <TableHeader>
-              <TableRow>
-                <TableHeaderCell>{t("admin.results.candidate")}</TableHeaderCell>
-                <SortHeader state={state} column="started_at">
-                  {t("history.colStarted")}
-                </SortHeader>
-                <TableHeaderCell>{t("history.colCompleted")}</TableHeaderCell>
-                <TableHeaderCell>{t("history.colInterviewer")}</TableHeaderCell>
-                <TableHeaderCell>{t("history.colBank")}</TableHeaderCell>
-                <TableHeaderCell>{t("history.colStatus")}</TableHeaderCell>
-                <SortHeader state={state} column="total_score">
-                  {t("history.colScore")}
-                </SortHeader>
-                <TableHeaderCell>{t("admin.results.outcome")}</TableHeaderCell>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {state.items.map((it) => (
-                <TableRow
-                  key={it.id}
-                  className={local.row}
-                  onClick={() => void state.open(it.id)}
-                  onKeyDown={(e) => e.key === "Enter" && void state.open(it.id)}
-                  tabIndex={0}
-                  data-testid={`results-row-${it.id}`}
-                >
-                  <TableCell>{it.username ?? t("admin.results.anonymous")}</TableCell>
-                  <TableCell>{formatWhen(it.started_at, i18n.language)}</TableCell>
-                  <TableCell>{formatWhen(it.completed_at, i18n.language)}</TableCell>
-                  <TableCell>{it.persona_name ?? t("history.notRecorded")}</TableCell>
-                  <TableCell>
-                    {it.bank_name ?? t("history.notRecorded")}
-                    {it.bank_version_no != null && (
-                      <Text size={200} data-testid={`result-bank-version-${it.id}`}>
-                        {" · "}
-                        {t("admin.results.bankVersion", { no: it.bank_version_no })}
-                      </Text>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <StatusBadge status={it.status} />
-                  </TableCell>
-                  <TableCell>{it.total_score == null ? "—" : `${it.total_score}/100`}</TableCell>
-                  <TableCell>{it.outcome ? t(`report.outcome.${it.outcome}`) : "—"}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <DataTable
+            testId="results-table"
+            aria-busy={state.loading}
+            items={state.items}
+            getRowId={(it) => it.id}
+            rowProps={(it) => ({
+              className: local.row,
+              onClick: () => void state.open(it.id),
+              onKeyDown: (e) => e.key === "Enter" && void state.open(it.id),
+              tabIndex: 0,
+              "data-testid": `results-row-${it.id}`,
+            })}
+            columns={columns}
+          />
         </div>
         {!state.loading && state.items.length === 0 && !state.error && (
           <Body1 style={{ display: "block", padding: "16px 0" }} data-testid="results-empty">
