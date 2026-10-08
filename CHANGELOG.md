@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.57.0.1 (2026-10-09)
+
+### Fixed
+- Health probes, and the voice WebSocket (whose URL carries the session token), are now
+  actually left out of the request traces. On live, health requests were still being traced:
+  the distro's FastAPI hook patches the FastAPI class and reads the exclusion list at import, so
+  the result depended on import order. The app is now instrumented directly, with the exclusion
+  list passed in. Verified locally with the real distro: only non-excluded requests produce spans.
+- Removed an httpx instrumentation call that duplicated the distro's own.
+
 ## 0.57.0.0 (2026-10-09)
 
 ### Added
