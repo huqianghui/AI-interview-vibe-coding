@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.61.0.1 (2026-10-09)
+
+### Fixed
+- **SOP-section tags in the rubric editor stay inside the card.** An item citing several
+  sections put all its tags on one line, which ran past the card's right edge, and a long section
+  title was cut off. The tags now wrap onto as many lines as they need; a label too long for one
+  line ends in "…" and shows whole on hover.
+
 ## 0.61.0.0 (2026-10-09)
 
 ### Changed

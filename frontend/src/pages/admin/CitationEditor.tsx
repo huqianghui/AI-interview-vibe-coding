@@ -67,32 +67,42 @@ export function CitationEditor({
   };
 
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", minWidth: 0 }}>
       <Text size={200}>{t("admin.citations")}</Text>
       {refs.length === 0 && (
         <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
           {t("admin.noCitation")}
         </Text>
       )}
+      {/* The tags wrap onto as many lines as they need and never run past the card; a label too
+          long for the line ends in "…" and shows whole on hover. */}
       <TagGroup
         data-testid={`checklist-citations-${index}`}
         onDismiss={(_, d) => onChange(refs.filter((_r, i) => String(i) !== d.value))}
+        style={{ display: "flex", flexWrap: "wrap", gap: 6, minWidth: 0, maxWidth: "100%" }}
       >
-        {refs.map((r, i) => (
-          <Tag
-            key={`${r.document_id}:${r.section}`}
-            value={String(i)}
-            size="small"
-            dismissible
-            dismissIcon={{ "aria-label": t("admin.removeCitation") }}
-            appearance={r.found === false ? "outline" : "brand"}
-            title={r.found === false ? t("admin.citationGone") : r.document_name}
-          >
-            {r.document_name ? `${r.document_name} · ` : ""}
-            {sectionName(r)}
-            {r.found === false ? ` (${t("admin.citationGone")})` : ""}
-          </Tag>
-        ))}
+        {refs.map((r, i) => {
+          const label =
+            (r.document_name ? `${r.document_name} · ` : "") +
+            sectionName(r) +
+            (r.found === false ? ` (${t("admin.citationGone")})` : "");
+          return (
+            <Tag
+              key={`${r.document_id}:${r.section}`}
+              value={String(i)}
+              size="small"
+              dismissible
+              dismissIcon={{ "aria-label": t("admin.removeCitation") }}
+              appearance={r.found === false ? "outline" : "brand"}
+              title={label}
+              style={{ maxWidth: "100%", minWidth: 0 }}
+              primaryText={{
+                children: label,
+                style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+              }}
+            />
+          );
+        })}
       </TagGroup>
       {libraryId === null ? null : !adding ? (
         <Button size="small" appearance="subtle" data-testid={`checklist-cite-${index}`} onClick={() => void startAdding()}>
