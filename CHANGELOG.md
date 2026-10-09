@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.58.3.1 (2026-10-09)
+
+### Fixed
+- **A relocation that changed nothing no longer asks to be published.** Its summary said
+  "publish to use them" for ever, because publishing an unchanged draft makes no new version. A
+  run now records, per item, whether it changed the citation, and a run that changed none has
+  nothing to publish, so its summary is not shown. Runs from before this release count as changes.
+
 ## 0.58.3.0 (2026-10-09)
 
 ### Changed

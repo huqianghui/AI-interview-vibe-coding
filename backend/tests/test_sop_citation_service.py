@@ -231,6 +231,26 @@ async def test_a_run_counts_as_published_once_a_version_is_published_after_it(
     assert (await client.get(base, headers=admin_auth)).json()["published"] is True
 
 
+async def test_a_run_that_changes_nothing_leaves_nothing_to_publish(client, db_session, admin_auth):
+    await _corpus(db_session)
+    bank, _ = await _bank(
+        db_session, [("Gets sign-off", 100, "Widget Release Procedure SOP section 4.2")]
+    )
+    base = f"/admin/question-banks/{bank.id}/relocate-citations"
+    await client.post(base, headers=admin_auth)
+    await asyncio.gather(*sop_citation_service.RUNS)
+    first = (await client.get(base, headers=admin_auth)).json()
+    assert [r["changed"] for r in first["rows"]] == [True]  # the label became a section
+    assert first["published"] is False
+
+    await client.post(base, headers=admin_auth)  # the same result again: nothing new
+    await asyncio.gather(*sop_citation_service.RUNS)
+    second = (await client.get(base, headers=admin_auth)).json()
+    assert second["run_id"] != first["run_id"]
+    assert [r["changed"] for r in second["rows"]] == [False]
+    assert second["published"] is True
+
+
 async def test_a_run_interrupted_by_a_restart_does_not_block_the_next(db_session):
     bank, _ = await _bank(db_session, [("x", 100, "")])
     stale = CitationRun(bank_id=bank.id, status="running")

@@ -544,7 +544,31 @@ async def relocate(
                 "source_page": None,
                 "source_quote": "",
             }
+        changed = False
         if values is not None:
+            # Whether this result changes the item: a run that changes nothing leaves nothing to
+            # publish, so its summary is not shown (see admin_questions._published_since).
+            before = (
+                await db.execute(
+                    select(
+                        ChecklistItem.source_refs,
+                        ChecklistItem.source_document_id,
+                        ChecklistItem.source_page,
+                        ChecklistItem.source_quote,
+                    ).where(ChecklistItem.id == it.id)
+                )
+            ).one_or_none()
+            changed = before is not None and (
+                (before.source_refs or "[]"),
+                before.source_document_id,
+                before.source_page,
+                before.source_quote or "",
+            ) != (
+                values["source_refs"],
+                values["source_document_id"],
+                values["source_page"],
+                values["source_quote"],
+            )
             written = await db.execute(
                 update(ChecklistItem)
                 .where(ChecklistItem.id == it.id)
@@ -556,8 +580,10 @@ async def relocate(
                 # result was not written, and the report says so.
                 located = _Located(it.id, Choice((), ""), "edited")
                 choice = located.choice
+                changed = False
         rows.append(
             {
+                "changed": changed,
                 "item_id": it.id,
                 "question_no": it.question_no,
                 "question": it.question,

@@ -309,8 +309,13 @@ def _run_out(run, published: bool = False) -> CitationRunOut:
 
 
 async def _published_since(db: AsyncSession, run) -> bool:
+    """Whether nothing from this run is left to publish: a version was published after it, or it
+    changed no item. Rows from before runs recorded ``changed`` count as changes."""
     if run.status != "done":
         return False
+    rows = json.loads(run.report_json or "[]")
+    if rows and not any(r.get("changed", True) for r in rows):
+        return True
     version = await bank_version_service.latest(db, run.bank_id)
     finished = run.updated_at or run.created_at
     return bool(version and version.created_at and finished and version.created_at > finished)
