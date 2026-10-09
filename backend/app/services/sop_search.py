@@ -106,10 +106,15 @@ class SectionIndex:
         ]
 
 
-async def load_index(db: AsyncSession) -> SectionIndex:
-    rows = (await db.execute(select(SopSection))).scalars().all()
-    names = {
-        doc_id: name
-        for doc_id, name in (await db.execute(select(SopDocument.id, SopDocument.name))).all()
-    }
+async def load_index(db: AsyncSession, library_id: str | None = None) -> SectionIndex:
+    """Every section, or only those of one SOP library's documents (spec-sop-libraries: a bank
+    looks only in the library it is bound to)."""
+    docs = select(SopDocument.id, SopDocument.name)
+    if library_id is not None:
+        docs = docs.where(SopDocument.library_id == library_id)
+    names = {doc_id: name for doc_id, name in (await db.execute(docs)).all()}
+    sections = select(SopSection)
+    if library_id is not None:
+        sections = sections.where(SopSection.document_id.in_(list(names)))
+    rows = (await db.execute(sections)).scalars().all()
     return SectionIndex(rows, names)

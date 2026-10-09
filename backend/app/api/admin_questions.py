@@ -57,6 +57,18 @@ class BankOut(BaseModel):
     # edits not in it yet. Null / True for a bank never published.
     latest_version_no: int | None = None
     has_unpublished_changes: bool = False
+    # The SOP library the bank draws on (spec-sop-libraries); null = no SOP, general evaluation.
+    sop_library_id: str | None = None
+
+
+class BankLibraryIn(BaseModel):
+    library_id: str | None = None
+
+
+class BankLibraryOut(BaseModel):
+    bank: BankOut
+    # Draft rubric items whose citations of documents outside the new library were cleared.
+    cleared: int
 
 
 class QuestionIn(BaseModel):
@@ -118,6 +130,7 @@ async def _bank_out(db: AsyncSession, bank) -> BankOut:
         is_default=bank.is_default,
         latest_version_no=latest_no,
         has_unpublished_changes=unpublished,
+        sop_library_id=bank.sop_library_id,
     )
 
 
@@ -321,6 +334,26 @@ async def _published_since(db: AsyncSession, run) -> bool:
     return bool(version and version.created_at and finished and version.created_at > finished)
 
 
+@router.put("/{bank_id}/sop-library", response_model=BankLibraryOut)
+async def set_bank_library(
+    bank_id: str, body: BankLibraryIn, db: AsyncSession = Depends(get_db)
+) -> BankLibraryOut:
+    """Bind the bank to an SOP library, or to none (general evaluation). Citations in the DRAFT
+    rubric of documents outside the new library are cleared; publishing makes it reach interviews
+    (spec-sop-libraries §7). 404 for an unknown bank or library."""
+    try:
+        cleared = await sop_citation_service.set_bank_library(db, bank_id, body.library_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except sop_citation_service.RelocationRunning as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="SOP citations are being relocated for this bank: wait for it to finish",
+        ) from exc
+    bank = await svc.get_bank(db, bank_id)
+    return BankLibraryOut(bank=await _bank_out(db, bank), cleared=cleared)
+
+
 @router.post(
     "/{bank_id}/relocate-citations",
     response_model=CitationRunOut,
@@ -339,9 +372,14 @@ async def relocate_citations(
         await svc.get_bank(db, bank_id)
     except QuestionBankNotFound as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bank not found") from exc
-    return _run_out(
-        await sop_citation_service.start_relocation(db, session_factory, bank_id, fresh=fresh)
-    )
+    try:
+        run = await sop_citation_service.start_relocation(db, session_factory, bank_id, fresh=fresh)
+    except sop_citation_service.BankHasNoLibrary as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This bank uses no SOP library: bind one before relocating citations",
+        ) from exc
+    return _run_out(run)
 
 
 @router.get("/{bank_id}/relocate-citations", response_model=CitationRunOut | None)

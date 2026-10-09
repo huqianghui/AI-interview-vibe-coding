@@ -9,6 +9,7 @@ import type {
   Checklist,
   ChecklistItem,
   PublishResult,
+  SopLibrary,
 } from "../../api/admin";
 import type { Guard } from "./shared";
 
@@ -30,12 +31,26 @@ export function useContentTab(guard: Guard) {
   // Every draft edit reloads the banks' publish state, so reloads can overlap; only the newest
   // one's answer is kept, or a slow older reply could disable Publish on a stale "no changes".
   const banksRequest = useRef(0);
+  // The SOP libraries a bank can be bound to load with the banks: after sign-in (this hook mounts
+  // before it), and again on every refresh, so a library made in the SOP tab shows up here.
+  const [libraries, setLibraries] = useState<SopLibrary[]>([]);
   const loadBanks = useCallback(async () => {
     const mine = ++banksRequest.current;
-    const next = await admin.listBanks();
-    if (mine === banksRequest.current) setBanks(next);
+    const [next, libs] = await Promise.all([
+      admin.listBanks(),
+      admin.listSopLibraries().catch((e: unknown) => {
+        console.warn("[content] libraries", e);
+        return null;
+      }),
+    ]);
+    if (mine !== banksRequest.current) return;
+    setBanks(next);
+    if (libs) setLibraries(libs);
   }, []);
   const refreshBanks = useCallback(() => guard(loadBanks), [guard, loadBanks]);
+
+  // What the last rebind of the selected bank to an SOP library did (spec-sop-libraries).
+  const [libraryResult, setLibraryResult] = useState<{ cleared: number } | null>(null);
   // The outcome of the last publish of the selected bank (version, or why it was refused).
   const [publishResult, setPublishResult] = useState<PublishResult | null>(null);
   const [publishing, setPublishing] = useState(false);
@@ -70,6 +85,7 @@ export function useContentTab(guard: Guard) {
     guard(async () => {
       setSelectedBank(bankId);
       setPublishResult(null);
+      setLibraryResult(null);
       setSelectedQuestion(null);
       adoptChecklist(null);
       setChecklistStatus(null);
@@ -168,6 +184,19 @@ export function useContentTab(guard: Guard) {
       if (selectedBank) setQuestionsAndStatus(await admin.listBankQuestions(selectedBank));
     });
 
+  /** Bind the selected bank to an SOP library (or none). Draft citations outside it are cleared,
+   * so the open rubric reloads the way it does after a relocation. */
+  const setBankLibrary = (libraryId: string | null) =>
+    guard(async () => {
+      if (!selectedBank) return;
+      const result = await admin.setBankLibrary(selectedBank, libraryId);
+      // Show the new binding at once; the reload below brings the rest of the bank's state.
+      setBanks((prev) => prev.map((b) => (b.bank_id === result.bank.bank_id ? result.bank : b)));
+      setLibraryResult({ cleared: result.cleared });
+      setPublishResult(null);
+      reloadAfterRelocate();
+    });
+
   // Live weight total of the working copy (forbidden items count as their entered weight in the
   // preview; the backend zeros them on save). Purely informational — save re-normalizes to 100.
   const editWeightsSum = editItems.reduce((sum, it) => sum + (it.weight || 0), 0);
@@ -198,6 +227,9 @@ export function useContentTab(guard: Guard) {
     publishBank,
     publishing,
     reloadAfterRelocate,
+    libraries,
+    libraryResult,
+    setBankLibrary,
   };
 }
 

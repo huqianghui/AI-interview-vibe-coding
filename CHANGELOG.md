@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.60.0.0 (2026-10-09)
+
+### Added
+- **A question bank is scoped to one SOP library** (spec-sop-libraries, PR 2 of 3). The Content
+  tab has an "SOP library" picker beside the bank, with "No SOP (general evaluation)" as the
+  other choice. Drafting a rubric with AI, relocating citations, and citing a section by hand all
+  look only in the bound library; the editor's document list shows only its documents, and a
+  saved citation of a document outside it is dropped. A bank bound to none cites no SOP:
+  "Relocate SOP citations" and "+ Cite a section" are not offered.
+- Rebinding a bank clears every draft citation of a document outside the new library, and the
+  line beside the picker says how many; publishing makes it reach interviews. Published versions
+  keep what they cite.
+- Existing banks whose rubric already cites an SOP are bound to that SOP's library by the
+  migration (live: the two SOP-grounded banks); the others stay unbound. A bank imported from a bundle
+  or by the boot-time importer, whose rubric cites an SOP, is bound the same way.
+- API: `PUT /admin/question-banks/{id}/sop-library` (`{"library_id": ... | null}`, returns the
+  bank and how many items were cleared); banks carry `sop_library_id`; relocating an unbound bank
+  is a 409.
+
+### Removed
+- **The AI "is this bank about the SOPs" check.** The bank's library decides instead: bound means
+  cited within that library, unbound means no SOP. Older relocation reports still show the
+  "Not an SOP subject" rows they recorded.
+
 ## 0.59.0.0 (2026-10-09)
 
 ### Added

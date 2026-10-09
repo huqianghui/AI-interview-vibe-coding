@@ -26,7 +26,16 @@ export interface Bank {
   // Publish state: interviews use the latest PUBLISHED version; edits stay a draft until then.
   latest_version_no?: number | null;
   has_unpublished_changes?: boolean;
+  // The SOP library the bank draws on (spec-sop-libraries); null = no SOP, general evaluation.
+  sop_library_id?: string | null;
 }
+
+/** Bind a bank to an SOP library, or to none. Draft citations outside it are cleared. */
+export const setBankLibrary = (bankId: string, libraryId: string | null) =>
+  adminRequest<{ bank: Bank; cleared: number }>(`/admin/question-banks/${bankId}/sop-library`, {
+    method: "PUT",
+    body: JSON.stringify({ library_id: libraryId }),
+  });
 
 /** Why a draft cannot be published. `question_no` is 1-based in ask order. */
 export interface PublishProblem {

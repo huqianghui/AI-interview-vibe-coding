@@ -133,3 +133,14 @@ async def test_an_upload_into_a_library_deleted_mid_request_is_a_404(
     monkeypatch.setattr(sop_library_service, "get_library", found_then_deleted)
     resp = await _post_upload(client, admin_auth, "a.txt", lib)
     assert resp.status_code == 404
+
+
+async def test_a_library_a_bank_is_bound_to_cannot_be_deleted(client, db_session, admin_auth):
+    from app.services import question_service
+
+    lib = (await client.post(BASE, headers=admin_auth, json={"name": "Bound"})).json()["library_id"]
+    bank = await question_service.create_bank(db_session, name="Uses it")
+    bank.sop_library_id = lib
+    await db_session.commit()
+    held = await client.delete(f"{BASE}/{lib}", headers=admin_auth)
+    assert held.status_code == 409 and "Uses it" in held.json()["detail"]

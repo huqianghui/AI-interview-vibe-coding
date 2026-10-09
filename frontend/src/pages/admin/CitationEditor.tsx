@@ -12,10 +12,13 @@ export function CitationEditor({
   refs,
   index,
   onChange,
+  libraryId,
 }: {
   refs: SourceRef[];
   index: number;
   onChange: (refs: SourceRef[]) => void;
+  /** The bank's SOP library: only its documents can be cited (spec-sop-libraries). */
+  libraryId: string | null;
 }) {
   const { t } = useTranslation();
   const [adding, setAdding] = useState(false);
@@ -29,7 +32,7 @@ export function CitationEditor({
     setError(null);
     try {
       const docs = await admin.listSopDocuments();
-      setDocuments(docs.filter((d) => d.section_count > 0));
+      setDocuments(docs.filter((d) => d.section_count > 0 && d.library_id === libraryId));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -91,7 +94,7 @@ export function CitationEditor({
           </Tag>
         ))}
       </TagGroup>
-      {!adding ? (
+      {libraryId === null ? null : !adding ? (
         <Button size="small" appearance="subtle" data-testid={`checklist-cite-${index}`} onClick={() => void startAdding()}>
           {t("admin.citeSection")}
         </Button>

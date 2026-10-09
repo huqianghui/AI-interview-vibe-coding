@@ -17,7 +17,7 @@ const DOC: admin.SopDocument = {
 function renderEditor(refs: SourceRef[], onChange = vi.fn()) {
   render(
     <FluentProvider theme={webLightTheme}>
-      <CitationEditor refs={refs} index={0} onChange={onChange} />
+      <CitationEditor refs={refs} index={0} onChange={onChange} libraryId="lib1" />
     </FluentProvider>,
   );
   return onChange;
@@ -30,6 +30,7 @@ describe("CitationEditor", () => {
     vi.spyOn(admin, "listSopDocuments").mockResolvedValue([
       DOC,
       { ...DOC, document_id: "d2", name: "Unconverted.pdf", section_count: 0 },
+      { ...DOC, document_id: "d3", name: "Other library.pdf", library_id: "lib2" },
     ]);
     vi.spyOn(admin, "listSopSections").mockResolvedValue([
       { order_index: 0, number: "4", title: "RELEASE", level: 1, parent_index: null, page_start: 3, page_end: 4, full_length: 90 },
@@ -44,6 +45,8 @@ describe("CitationEditor", () => {
     await user.click(screen.getByTestId("checklist-cite-0"));
     await user.click(screen.getByTestId("checklist-cite-doc-0"));
     expect(screen.queryByRole("option", { name: "Unconverted.pdf" })).toBeNull(); // nothing to cite
+    // Only the bank's own SOP library can be cited (spec-sop-libraries).
+    expect(screen.queryByRole("option", { name: "Other library.pdf" })).toBeNull();
     await user.click(screen.getByRole("option", { name: "Widget SOP.pdf" }));
     await user.click(await screen.findByTestId("checklist-cite-section-0"));
     await user.click(screen.getByRole("option", { name: "4.2 Approval" }));

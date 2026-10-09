@@ -9,7 +9,8 @@ import json
 
 import pytest
 
-from app.models.sop import CitationRun, SopDocument, SopSection
+from app.models.checklist import Checklist
+from app.models.sop import DEFAULT_LIBRARY_ID, CitationRun, SopDocument, SopLibrary, SopSection
 from app.services import checklist_service, question_service, sop_citation_service
 from app.services.sop_citation_labels import DocumentName, expand_range, parse_label
 from tests.conftest import ScriptedJudgeAdapter, _real_judge_adapter
@@ -17,8 +18,8 @@ from tests.conftest import ScriptedJudgeAdapter, _real_judge_adapter
 pytestmark = pytest.mark.asyncio
 
 
-async def _doc(db, name, sections) -> str:
-    doc = SopDocument(name=name, status="chunked", markdown_source="text")
+async def _doc(db, name, sections, library_id=DEFAULT_LIBRARY_ID) -> str:
+    doc = SopDocument(name=name, status="chunked", markdown_source="text", library_id=library_id)
     db.add(doc)
     await db.flush()
     for i, (number, title, parent, text) in enumerate(sections):
@@ -58,8 +59,10 @@ async def _corpus(db):
     return widget, jd
 
 
-async def _bank(db, items):
+async def _bank(db, items, library_id=DEFAULT_LIBRARY_ID):
     bank = await question_service.create_bank(db, name="Widgets", is_default=True)
+    bank.sop_library_id = library_id  # spec-sop-libraries: a bank searches only its library
+    await db.commit()
     q = await question_service.add_question(
         db, bank_id=bank.id, text="How do you release a batch of widgets?", order_index=0
     )
@@ -144,9 +147,6 @@ async def test_relocation_resolves_labels_searches_the_rest_and_never_invents(db
         name = "scripted"
 
         async def complete(self, prompt, *, json_mode=False, fast=False):
-
-            if sop_citation_service.TOPIC_PROMPT_MARKER in prompt:
-                return json.dumps({"about": True})
             return await choose(prompt)
 
     run = CitationRun(bank_id=bank.id)
@@ -304,9 +304,6 @@ class _Cite1(ScriptedJudgeAdapter):
     name = "scripted"
 
     async def complete(self, prompt, *, json_mode=False, fast=False):
-
-        if sop_citation_service.TOPIC_PROMPT_MARKER in prompt:
-            return json.dumps({"about": True})
         return json.dumps({"cite": ["C1"], "quote": ""})
 
 
@@ -344,9 +341,6 @@ async def test_a_second_run_keeps_the_sections_an_item_already_cites(db_session)
         name = "scripted"
 
         async def complete(self, prompt, *, json_mode=False, fast=False):
-
-            if sop_citation_service.TOPIC_PROMPT_MARKER in prompt:
-                return json.dumps({"about": True})
             assert "every candidate id" in prompt  # fixed: the model only finds the quote
             return json.dumps({"cite": [], "quote": "The Quality Manager signs the release form"})
 
@@ -428,9 +422,6 @@ async def test_an_unlabelled_item_is_located_within_its_questions_sources(db_ses
         name = "scripted"
 
         async def complete(self, prompt, *, json_mode=False, fast=False):
-
-            if sop_citation_service.TOPIC_PROMPT_MARKER in prompt:
-                return json.dumps({"about": True})
             seen.append(prompt)
             return json.dumps({"cite": ["C1"], "quote": ""})
 
@@ -517,9 +508,6 @@ async def test_a_library_wide_match_needs_a_verbatim_sentence(db_session):
         name = "scripted"
 
         async def complete(self, prompt, *, json_mode=False, fast=False):
-
-            if sop_citation_service.TOPIC_PROMPT_MARKER in prompt:
-                return json.dumps({"about": True})
             prompts.append(prompt)
             item = prompt.split("RUBRIC ITEM:\n")[1].split("\n")[0]
             quote = (
@@ -544,6 +532,7 @@ async def test_an_invented_quote_drops_a_library_wide_match_but_not_a_scoped_one
     widget, _ = await _corpus(db_session)
     unscoped, unscoped_list = await _bank(db_session, [("Escalates a failed batch", 100, "")])
     scoped_bank = await question_service.create_bank(db_session, name="Scoped")
+    scoped_bank.sop_library_id = DEFAULT_LIBRARY_ID
     q = await question_service.add_question(
         db_session, bank_id=scoped_bank.id, text="How do you release a batch?", order_index=0
     )
@@ -570,9 +559,6 @@ async def test_an_invented_quote_drops_a_library_wide_match_but_not_a_scoped_one
         name = "scripted"
 
         async def complete(self, prompt, *, json_mode=False, fast=False):
-
-            if sop_citation_service.TOPIC_PROMPT_MARKER in prompt:
-                return json.dumps({"about": True})
             return json.dumps({"cite": ["C1"], "quote": "A sentence that is in no section at all."})
 
     for bank_id in (unscoped.id, scoped_bank.id):
@@ -592,169 +578,141 @@ async def test_an_invented_quote_drops_a_library_wide_match_but_not_a_scoped_one
     ]
 
 
-async def test_a_question_the_library_does_not_cover_cites_nothing(db_session):
-    """Asked once per question that names no SOP: off-topic means no item is cited."""
+async def test_a_bank_finds_and_resolves_citations_only_in_its_own_library(db_session):
+    """spec-sop-libraries §4: a label naming a document of another library is not resolved, and a
+    search never proposes another library's sections."""
     await _corpus(db_session)
-    bank, checklist_id = await _bank(db_session, [("Skips the safety check", 100, "")])
-    asked: list[str] = []
-
-    class OffTopic(ScriptedJudgeAdapter):
-        name = "scripted"
-
-        async def complete(self, prompt, *, json_mode=False, fast=False):
-            asked.append(prompt)
-            if sop_citation_service.TOPIC_PROMPT_MARKER in prompt:
-                return json.dumps({"about": False})
-            return json.dumps(
-                {"cite": ["C1"], "quote": "Every widget is inspected before it is packed."}
-            )
-
-    run = CitationRun(bank_id=bank.id)
-    db_session.add(run)
+    other = SopLibrary(name="Other SOPs")
+    db_session.add(other)
     await db_session.commit()
-    run_id = run.id
-    await sop_citation_service.relocate(db_session, run, OffTopic())
-    assert len(asked) == 1  # the topic question only: no per-item call
-    db_session.expire_all()
-    (item,) = await checklist_service.list_items(db_session, checklist_id)
-    assert item.source_refs == "[]"
-    (row,) = json.loads((await db_session.get(CitationRun, run_id)).report_json)
-    assert row["how"] == "off_topic"
-
-
-async def test_a_bank_about_another_subject_cites_none_of_its_unlabelled_questions(
-    db_session,
-):
-    await _corpus(db_session)
-    bank = await question_service.create_bank(db_session, name="Deploys")
-    lists = []
-    for n, text in enumerate(
-        ["Walk me through your pre-deploy checks.", "A deploy fails.", "Rollback?"]
-    ):
-        q = await question_service.add_question(
-            db_session, bank_id=bank.id, text=text, order_index=n
-        )
-        lists.append(
-            (
-                await checklist_service._persist_draft(
-                    db_session,
-                    q.id,
-                    checklist_service.ChecklistDraft(
-                        prompt_version="t",
-                        items=[
-                            checklist_service.DraftItem(kind="required", text="Checks", weight=100)
-                        ],
-                    ),
-                )
-            ).id
-        )
-
-    asked: list[str] = []
-
-    class OneOfThree(ScriptedJudgeAdapter):
-        name = "scripted"
-
-        async def complete(self, prompt, *, json_mode=False, fast=False):
-            if sop_citation_service.TOPIC_PROMPT_MARKER in prompt:
-                asked.append(prompt)
-                return json.dumps({"about": False})
-            return json.dumps(
-                {"cite": ["C1"], "quote": "Every widget is inspected before it is packed."}
-            )
-
-    run = CitationRun(bank_id=bank.id)
-    db_session.add(run)
-    await db_session.commit()
-    await sop_citation_service.relocate(db_session, run, OneOfThree())
-    db_session.expire_all()
-    for checklist_id in lists:
-        (item,) = await checklist_service.list_items(db_session, checklist_id)
-        assert item.source_refs == "[]"
-    # One decision for the whole bank: every question listed, beside the library.
-    (prompt,) = asked
-    assert all(q in prompt for q in ("pre-deploy checks", "A deploy fails.", "Rollback?"))
-    assert "- Widget Release Procedure.pdf" in prompt.split("SOP LIBRARY")[1]
-
-
-async def test_an_unanswered_topic_check_is_unknown_and_never_wipes(db_session):
-    """A failed or unparseable topic answer is unknown: left out of the bank vote, and that
-    question is located item by item instead of being declared off-topic."""
-    await _corpus(db_session)
-    bank, checklist_id = await _bank(db_session, [("Escalates a failed batch", 100, "")])
-
-    class Broken(ScriptedJudgeAdapter):
-        name = "scripted"
-
-        async def complete(self, prompt, *, json_mode=False, fast=False):
-            if sop_citation_service.TOPIC_PROMPT_MARKER in prompt:
-                raise RuntimeError("model unavailable")
-            cid = next(line.split('"')[1] for line in prompt.splitlines() if "ESCALATION" in line)
-            quote = "A failed batch is escalated to the site lead the same day."
-            return json.dumps({"cite": [cid], "quote": quote})
-
-    run = CitationRun(bank_id=bank.id)
-    db_session.add(run)
-    await db_session.commit()
-    await sop_citation_service.relocate(db_session, run, Broken())
-    db_session.expire_all()
-    (item,) = await checklist_service.list_items(db_session, checklist_id)
-    assert json.loads(item.source_refs)[0]["section"] == "5"
-
-
-async def test_the_library_lists_each_converted_sop_with_its_purpose(db_session):
-    widget, _ = await _corpus(db_session)
-    document = await db_session.get(SopDocument, widget)
-    document.summary = "**Purpose:** Release widgets\n  safely.\n\n**Scope:** All sites."
-    db_session.add(
-        SopDocument(name="Not converted.pdf", status="chunked", markdown_source="failed")
+    await _doc(
+        db_session,
+        "Gadget Release Procedure SOP.pdf",
+        [("4.2", "Approval", None, "A gadget release is signed off by the Quality Manager.")],
+        library_id=other.id,
     )
-    await db_session.commit()
-    library = await sop_citation_service.library(db_session)
-    assert "- Widget Release Procedure.pdf: Release widgets" in library
-    assert "- Release Manager_Final (1).docx" in library  # no summary: the name alone
-    assert "Not converted" not in library
-
-
-async def test_only_unlabelled_questions_are_put_to_the_topic_check(db_session):
-    await _corpus(db_session)
-    bank = await question_service.create_bank(db_session, name="Mixed")
-    for n, (text, label) in enumerate(
+    bank, checklist_id = await _bank(
+        db_session,
         [
-            ("How is a release approved?", "Widget Release Procedure SOP section 4.2"),
-            ("Tell us about yourself.", ""),
-        ]
-    ):
-        q = await question_service.add_question(
-            db_session, bank_id=bank.id, text=text, order_index=n
-        )
-        await checklist_service._persist_draft(
-            db_session,
-            q.id,
-            checklist_service.ChecklistDraft(
-                prompt_version="t",
-                items=[
-                    checklist_service.DraftItem(
-                        kind="required", text="x", weight=100, source_quote=label
-                    )
-                ],
-            ),
-        )
-    asked: list[str] = []
+            ("Gets gadget sign-off", 50, "Gadget Release Procedure SOP section 4.2"),
+            ("Has the release signed off", 50, ""),
+        ],
+    )
+    shown: list[str] = []
 
-    class Llm(ScriptedJudgeAdapter):
+    class Records(ScriptedJudgeAdapter):
         name = "scripted"
 
         async def complete(self, prompt, *, json_mode=False, fast=False):
-            if sop_citation_service.TOPIC_PROMPT_MARKER in prompt:
-                asked.append(prompt)
-                return json.dumps({"about": False})
+            shown.append(prompt)
             return json.dumps({"cite": [], "quote": ""})
 
     run = CitationRun(bank_id=bank.id)
     db_session.add(run)
     await db_session.commit()
-    await sop_citation_service.relocate(db_session, run, Llm())
-    (prompt,) = asked
-    bank_part = prompt.split("QUESTION BANK:")[1]
-    assert "Tell us about yourself." in bank_part
-    assert "How is a release approved?" not in bank_part
+    await sop_citation_service.relocate(db_session, run, Records())
+    assert shown and not any("Gadget Release Procedure" in p for p in shown)
+    db_session.expire_all()
+    for item in await checklist_service.list_items(db_session, checklist_id):
+        assert "Gadget" not in item.source_refs
+
+
+async def test_a_bank_bound_to_no_library_is_not_relocated(client, db_session, admin_auth):
+    bank, _ = await _bank(db_session, [("Gets sign-off", 100, "")], library_id=None)
+    resp = await client.post(
+        f"/admin/question-banks/{bank.id}/relocate-citations", headers=admin_auth
+    )
+    assert resp.status_code == 409
+
+
+async def test_rebinding_a_bank_clears_citations_outside_the_new_library(
+    client, db_session, admin_auth
+):
+    await _corpus(db_session)
+    bank, checklist_id = await _bank(
+        db_session, [("Gets sign-off", 100, "Widget Release Procedure SOP section 4.2")]
+    )
+    bank_id = bank.id
+    run = CitationRun(bank_id=bank_id)
+    db_session.add(run)
+    await db_session.commit()
+
+    class Cites(ScriptedJudgeAdapter):
+        name = "scripted"
+
+        async def complete(self, prompt, *, json_mode=False, fast=False):
+            return json.dumps({"cite": [], "quote": ""})
+
+    await sop_citation_service.relocate(db_session, run, Cites())
+    db_session.expire_all()
+    (item,) = await checklist_service.list_items(db_session, checklist_id)
+    assert json.loads(item.source_refs)  # cited in the default library
+
+    base = f"/admin/question-banks/{bank_id}/sop-library"
+    other = await client.post("/admin/sop/libraries", headers=admin_auth, json={"name": "B"})
+    moved = await client.put(
+        base, headers=admin_auth, json={"library_id": other.json()["library_id"]}
+    )
+    assert moved.status_code == 200
+    assert moved.json()["cleared"] == 1
+    assert moved.json()["bank"]["sop_library_id"] == other.json()["library_id"]
+    assert moved.json()["bank"]["has_unpublished_changes"] is True
+    db_session.expire_all()
+    (item,) = await checklist_service.list_items(db_session, checklist_id)
+    assert (item.source_refs, item.source_document_id, item.source_quote) == ("[]", None, "")
+
+    unbound = await client.put(base, headers=admin_auth, json={"library_id": None})
+    assert unbound.json()["cleared"] == 0 and unbound.json()["bank"]["sop_library_id"] is None
+    assert (
+        await client.put(base, headers=admin_auth, json={"library_id": "nope"})
+    ).status_code == 404
+    gone = await client.put(
+        "/admin/question-banks/nope/sop-library", headers=admin_auth, json={"library_id": None}
+    )
+    assert gone.status_code == 404
+
+
+async def test_a_bank_cannot_be_rebound_while_its_citations_are_relocated(
+    client, db_session, admin_auth
+):
+    bank, _ = await _bank(db_session, [("Gets sign-off", 100, "")])
+    db_session.add(CitationRun(bank_id=bank.id, status="running"))
+    await db_session.commit()
+    resp = await client.put(
+        f"/admin/question-banks/{bank.id}/sop-library",
+        headers=admin_auth,
+        json={"library_id": None},
+    )
+    assert resp.status_code == 409
+
+
+async def test_a_bound_bank_keeps_only_its_own_librarys_citations_when_a_rubric_is_written(
+    db_session,
+):
+    """A re-import into a bank already bound to a library drops citations of other libraries."""
+    other = SopLibrary(name="Other")
+    db_session.add(other)
+    await db_session.commit()
+    foreign = await _doc(
+        db_session,
+        "Foreign.pdf",
+        [("1", "Scope", None, "Applies to gadgets.")],
+        library_id=other.id,
+    )
+    bank, checklist_id = await _bank(db_session, [("Gets sign-off", 100, "")])
+    q_id = (await db_session.get(Checklist, checklist_id)).question_id
+    draft = checklist_service.ChecklistDraft(
+        prompt_version="import",
+        items=[
+            checklist_service.DraftItem(
+                kind="required",
+                text="Scopes it",
+                weight=100,
+                source_document_id=foreign,
+                source_refs=[{"document_id": foreign, "section": "1"}],
+            )
+        ],
+    )
+    written = await checklist_service._persist_draft(db_session, q_id, draft)
+    (item,) = await checklist_service.list_items(db_session, written.id)
+    assert (item.source_refs, item.source_document_id) == ("[]", None)
