@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.61.0.0 (2026-10-09)
+
+### Changed
+- **The SOP table shows each summary, its status and a note.** The Summary column now holds the
+  key-points summary itself, on one line until clicked; a Status column carries the badge
+  (Approved, Draft, Failed, None, Drafting) and a Notes column says what it means (used in
+  scoring, not used until approved, or why drafting failed). The summary card shows the same note
+  beside its badge.
+
+### Added
+- **An SOP nothing cites can be deleted.** A Delete button appears only on a document that no
+  rubric (current or replaced), no published bank version and no interview report has ever cited;
+  it asks for confirmation, and its sections, chunks and stored file are deleted with it. A cited
+  SOP is never deleted: to replace it, make a new bank or version without it
+  (`DELETE /admin/sop/documents/{id}`: 409 naming where it is cited, 404 when unknown). Documents
+  now carry their `summary` and `cited_in`.
+
 ## 0.60.1.0 (2026-10-09)
 
 ### Changed
