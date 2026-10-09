@@ -11,7 +11,9 @@ import {
   Button,
   Card,
   CardHeader,
+  Field,
   Input,
+  Select,
   Text,
   Textarea,
   Title3,
@@ -19,9 +21,21 @@ import {
 import { ChevronDownRegular, ChevronRightRegular } from "@fluentui/react-icons";
 import type { SopDocument, SopLibrary } from "../../api/admin";
 import { DataTable, type DataColumn } from "../../components/DataTable";
+import { TablePager } from "../../components/TablePager";
+import { PAGE_SIZES, useTableToolbarStyles } from "../../components/tableToolbar";
 import { MarkdownView } from "../../components/MarkdownView";
 import { SopSectionTree } from "./SopSectionTree";
 import { useAdminStyles } from "./shared";
+import {
+  filterDocuments,
+  pageOf,
+  sortDocuments,
+  type SopConversion,
+  type SopFilters,
+  type SopSortKey,
+  type SopSummaryState,
+  type SortOrder,
+} from "./sopTable";
 import type { SopTabState } from "./useSopTab";
 
 type T = ReturnType<typeof useTranslation>["t"];
@@ -163,6 +177,39 @@ function LibrarySection({
   const fileInput = useRef<HTMLInputElement>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const id = library.library_id;
+  // Filters, sort and page, as in Interview results; each library keeps its own.
+  const toolbar = useTableToolbarStyles();
+  const [filters, setFiltersState] = useState<SopFilters>({});
+  const [sort, setSort] = useState<{ key: SopSortKey; order: SortOrder }>({
+    key: "name",
+    order: "asc",
+  });
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSizeState] = useState<number>(PAGE_SIZES[0]);
+  const setFilters = (change: Partial<SopFilters>) => {
+    setFiltersState((prev) => ({ ...prev, ...change }));
+    setPage(0);
+  };
+  const hasFilters = Object.values(filters).some(Boolean);
+  const matching = sortDocuments(filterDocuments(docs, filters), sort.key, sort.order);
+  const shown = pageOf(matching, page, pageSize);
+  // The same column flips its order; a new one starts A to Z for names, largest first otherwise.
+  const sortable = (key: SopSortKey): DataColumn<SopDocument>["sort"] => ({
+    direction: sort.key === key ? (sort.order === "desc" ? "descending" : "ascending") : undefined,
+    onToggle: () => {
+      setSort((prev) =>
+        prev.key === key
+          ? { key, order: prev.order === "desc" ? "asc" : "desc" }
+          : { key, order: key === "name" ? "asc" : "desc" },
+      );
+      setPage(0);
+    },
+    testId: `sop-sort-${key}-${id}`,
+  });
+  const sortKeys: Record<string, SopSortKey> = { name: "name", sections: "sections", status: "status" };
+  const tableColumns = columns.map((c) =>
+    sortKeys[c.id] ? { ...c, sort: sortable(sortKeys[c.id]) } : c,
+  );
   return (
     <section data-testid={`sop-library-${id}`} style={{ borderTop: "1px solid #e8e0d4" }}>
       <Button
@@ -251,17 +298,86 @@ function LibrarySection({
               {t("admin.sop.lib.empty")}
             </Text>
           ) : (
-            <DataTable
-              size="small"
-              testId={`sop-documents-${id}`}
-              items={docs}
-              getRowId={(d) => d.document_id}
-              rowProps={(d) => ({
-                "data-testid": `sop-doc-${d.document_id}`,
-                "aria-selected": d.document_id === state.selected,
-              })}
-              columns={columns}
-            />
+            <>
+              <div className={toolbar.filters} data-testid={`sop-filters-${id}`}>
+                <Field label={t("admin.sop.colName")} className={toolbar.filter}>
+                  <Input
+                    className={toolbar.control}
+                    value={filters.name ?? ""}
+                    placeholder={t("admin.sop.searchName")}
+                    onChange={(_, d) => setFilters({ name: d.value || undefined })}
+                    data-testid={`sop-filter-name-${id}`}
+                  />
+                </Field>
+                <Field label={t("admin.sop.colConversion")} className={toolbar.filter}>
+                  <Select
+                    className={toolbar.control}
+                    value={filters.conversion ?? ""}
+                    onChange={(_, d) =>
+                      setFilters({ conversion: (d.value || undefined) as SopConversion | undefined })
+                    }
+                    data-testid={`sop-filter-conversion-${id}`}
+                  >
+                    <option value="">{t("admin.results.any")}</option>
+                    <option value="converted">{t("admin.sop.converted")}</option>
+                    <option value="pending">{t("admin.sop.pending")}</option>
+                    <option value="failed">{t("admin.sop.failed")}</option>
+                  </Select>
+                </Field>
+                <Field label={t("admin.sop.colStatus")} className={toolbar.filter}>
+                  <Select
+                    className={toolbar.control}
+                    value={filters.status ?? ""}
+                    onChange={(_, d) =>
+                      setFilters({ status: (d.value || undefined) as SopSummaryState | undefined })
+                    }
+                    data-testid={`sop-filter-status-${id}`}
+                  >
+                    <option value="">{t("admin.results.any")}</option>
+                    {(["reviewed", "draft", "none", "failed"] as const).map((s) => (
+                      <option key={s} value={s}>
+                        {t(`admin.sop.summary.state.${s}`)}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Button
+                  appearance="subtle"
+                  disabled={!hasFilters}
+                  onClick={() => setFilters({ name: undefined, conversion: undefined, status: undefined })}
+                  data-testid={`sop-filter-clear-${id}`}
+                >
+                  {t("admin.results.clear")}
+                </Button>
+              </div>
+              <DataTable
+                size="small"
+                testId={`sop-documents-${id}`}
+                items={shown.rows}
+                getRowId={(d) => d.document_id}
+                rowProps={(d) => ({
+                  "data-testid": `sop-doc-${d.document_id}`,
+                  "aria-selected": d.document_id === state.selected,
+                })}
+                columns={tableColumns}
+              />
+              {matching.length === 0 && (
+                <Text size={200} data-testid={`sop-no-match-${id}`}>
+                  {t("admin.sop.noMatch")}
+                </Text>
+              )}
+              <TablePager
+                testId={`sop-${id}`}
+                total={matching.length}
+                page={shown.page}
+                pageSize={pageSize}
+                onPage={setPage}
+                onPageSize={(n) => {
+                  setPageSizeState(n);
+                  setPage(0);
+                }}
+              />
+            </>
           )}
         </div>
       )}

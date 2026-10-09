@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.62.2.0 (2026-10-09)
+
+### Added
+- **Each SOP library's table filters, sorts and pages like Interview results**: search by name,
+  filter by conversion (converted, converting, failed) and summary status, Clear filters; sort by
+  Document, Sections or Status from the column header; 20, 50 or 100 rows per page with Previous
+  and Next. Each library keeps its own filters and page. The pager and filter layout are now one
+  shared component, used by both tables.
+
 ## 0.62.1.0 (2026-10-09)
 
 ### Changed

@@ -439,6 +439,40 @@ describe("SOP documents tab", () => {
     await waitFor(() => expect(del).toHaveBeenCalledWith("d2"));
   });
 
+  it("filters, sorts and pages a library's documents like Interview results", async () => {
+    const user = userEvent.setup();
+    const many = Array.from({ length: 23 }, (_, i) => ({
+      ...DOCS[0],
+      document_id: `m${i}`,
+      name: `SOP ${i + 1}.pdf`,
+      section_count: i,
+    }));
+    vi.spyOn(admin, "listSopDocuments").mockResolvedValue([...many, DOCS[1]]);
+    renderPage();
+    await user.click(await screen.findByTestId("admin-tab-sop"));
+    await user.click(await screen.findByTestId("sop-library-toggle-lib1"));
+    // 24 documents, 20 per page, sorted by name (numbers in names sort as numbers).
+    expect(await screen.findByTestId("sop-lib1-pager")).toHaveTextContent("1–20 of 24");
+    const names = () =>
+      within(screen.getByTestId("sop-documents-lib1"))
+        .getAllByTestId(/^sop-doc-(?!delete)/)
+        .map((r) => r.textContent?.split(".pdf")[0]);
+    expect(names().slice(0, 3)).toEqual(["Matrix", "SOP 1", "SOP 2"]);
+    await user.click(screen.getByTestId("sop-lib1-next"));
+    expect(screen.getByTestId("sop-lib1-pager")).toHaveTextContent("21–24 of 24");
+    // Sorting goes back to page 1; Sections starts largest first.
+    await user.click(screen.getByTestId("sop-sort-sections-lib1"));
+    expect(screen.getByTestId("sop-lib1-page")).toHaveTextContent("Page 1 of 2");
+    expect(names()[0]).toBe("SOP 23");
+    // Filters: a failed conversion, then a name nothing matches.
+    await user.selectOptions(screen.getByTestId("sop-filter-conversion-lib1"), "failed");
+    expect(names()).toEqual(["Matrix"]);
+    await user.click(screen.getByTestId("sop-filter-clear-lib1"));
+    await user.type(screen.getByTestId("sop-filter-name-lib1"), "nothing like this");
+    expect(screen.getByTestId("sop-no-match-lib1")).toBeInTheDocument();
+    expect(screen.getByTestId("sop-lib1-pager")).toHaveTextContent("0–0 of 0");
+  });
+
   it("lists libraries closed; a click opens one to show its documents", async () => {
     const user = userEvent.setup();
     vi.spyOn(admin, "listSopDocuments").mockResolvedValue(DOCS);

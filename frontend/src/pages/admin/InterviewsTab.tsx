@@ -15,7 +15,6 @@ import {
   Input,
   OverlayDrawer,
   Select,
-  Spinner,
   Text,
   Title3,
   makeStyles,
@@ -29,46 +28,21 @@ import { DataTable, type DataColumn } from "../../components/DataTable";
 import type { InterviewResultItem } from "../../api/admin";
 import { formatWhenShort } from "../../components/transcriptText";
 import { useAdminStyles } from "./shared";
-import { PAGE_SIZES, type InterviewsTabState, type SortKey } from "./useInterviewsTab";
+import { TablePager } from "../../components/TablePager";
+import { useTableToolbarStyles } from "../../components/tableToolbar";
+import type { InterviewsTabState, SortKey } from "./useInterviewsTab";
 
 const STATUSES: HistoryStatus[] = ["in_progress", "completed", "scored", "abandoned", "created"];
 const OUTCOMES = ["Meets Expectations", "Needs Improvement", "Does Not Meet"] as const;
 
 const useStyles = makeStyles({
-  filters: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 200px), 1fr))",
-    gap: tokens.spacingHorizontalM,
-    alignItems: "end",
-    marginBottom: tokens.spacingVerticalL,
-  },
-  // A select sizes itself to its longest option by default; a long bank or interviewer name then
-  // spilled over the next filter (seen at 2000px). Each filter fits its grid cell instead.
-  filter: { minWidth: 0 },
-  control: { minWidth: 0, width: "100%" },
   statuses: { display: "flex", flexWrap: "wrap", columnGap: tokens.spacingHorizontalS },
   statusField: { gridColumn: "span 2" },
   scroll: { overflowX: "auto" },
   row: { cursor: "pointer" },
-  pager: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    flexWrap: "wrap",
-    gap: tokens.spacingHorizontalM,
-    marginTop: tokens.spacingVerticalM,
-  },
-  pagerControls: {
-    display: "flex",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalS,
-    whiteSpace: "nowrap",
-  },
   // The app theme's 8px small radius turns a 16px checkbox into a circle, which reads as a radio
   // ("pick one"); these are multi-select, so they keep a square-ish box.
   checkboxBox: { borderRadius: "3px" },
-  // Pager labels keep their full width; the page-size select is what may narrow.
-  pagerText: { flexShrink: 0, overflow: "visible" },
 });
 
 /** A score bound typed as text: applied when the field is left or Enter is pressed, so typing
@@ -119,12 +93,10 @@ function sortOf(state: InterviewsTabState, column: SortKey): DataColumn<unknown>
 
 export function InterviewsTab({ state }: { state: InterviewsTabState }) {
   const styles = useAdminStyles();
-  const local = useStyles();
+  const local = { ...useTableToolbarStyles(), ...useStyles() };
   const { t, i18n } = useTranslation();
   const { filters } = state;
   const candidates = state.users.filter((u) => u.role === "user");
-  const from = state.total === 0 ? 0 : state.page * state.pageSize + 1;
-  const to = Math.min(state.total, (state.page + 1) * state.pageSize);
   const hasFilters = Object.keys(filters).length > 0;
   const when = (v: string | null) => formatWhenShort(v, i18n.language);
   const columns: DataColumn<InterviewResultItem>[] = [
@@ -348,49 +320,15 @@ export function InterviewsTab({ state }: { state: InterviewsTabState }) {
           </Body1>
         )}
 
-        <div className={local.pager} data-testid="results-pager">
-          <Text>
-            {state.loading ? (
-              <Spinner size="tiny" label={t("history.loading")} />
-            ) : (
-              t("admin.results.range", { from, to, total: state.total })
-            )}
-          </Text>
-          <div className={local.pagerControls}>
-            <Text wrap={false} className={local.pagerText}>
-              {t("admin.results.perPage")}
-            </Text>
-            <Select
-              className={local.control}
-              value={String(state.pageSize)}
-              onChange={(_, d) => state.setPageSize(Number(d.value))}
-              data-testid="results-page-size"
-            >
-              {PAGE_SIZES.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </Select>
-            <Button
-              disabled={state.page === 0}
-              onClick={() => state.setPage(state.page - 1)}
-              data-testid="results-prev"
-            >
-              {t("admin.results.prev")}
-            </Button>
-            <Text wrap={false} className={local.pagerText} data-testid="results-page">
-              {t("admin.results.page", { page: state.page + 1, pages: state.pageCount })}
-            </Text>
-            <Button
-              disabled={state.page + 1 >= state.pageCount}
-              onClick={() => state.setPage(state.page + 1)}
-              data-testid="results-next"
-            >
-              {t("admin.results.next")}
-            </Button>
-          </div>
-        </div>
+        <TablePager
+          testId="results"
+          loading={state.loading}
+          total={state.total}
+          page={state.page}
+          pageSize={state.pageSize}
+          onPage={state.setPage}
+          onPageSize={state.setPageSize}
+        />
       </div>
 
       <OverlayDrawer

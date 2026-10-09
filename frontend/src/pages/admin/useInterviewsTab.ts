@@ -13,7 +13,9 @@ import type {
 import type { InterviewDetail } from "../../api/client";
 import { listPersonas, type PersonaOut } from "../../api/personas";
 
-export const PAGE_SIZES = [20, 50, 100] as const;
+import { PAGE_SIZES } from "../../components/tableToolbar";
+
+export { PAGE_SIZES };
 
 // Background scoring is polled at this pace, for at most this long (~18 s per question, measured).
 // Exported so a test can shorten the wait.
