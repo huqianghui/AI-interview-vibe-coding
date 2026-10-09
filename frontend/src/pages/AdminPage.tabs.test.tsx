@@ -390,19 +390,24 @@ describe("SOP documents tab", () => {
   const DOCS: admin.SopDocument[] = [
     {
       document_id: "d1", name: "Widget SOP.pdf", library_id: "lib1", status: "chunked", size: 10, chunk_count: 3,
-      markdown_source: "document_intelligence", section_count: 3, markdown_error: "", converting: false,
+      markdown_source: "document_intelligence", section_count: 3, unit_count: 3, markdown_error: "", converting: false,
       summary_status: "draft", summary_error: "", summarizing: false,
     },
     {
       document_id: "d2", name: "Matrix.pdf", library_id: "lib1", status: "chunked", size: 10, chunk_count: 1,
-      markdown_source: "failed", section_count: 0, markdown_error: "pages not fully read: page 3: 34%",
+      markdown_source: "failed", section_count: 0, unit_count: 0, markdown_error: "pages not fully read: page 3: 34%",
       converting: false, summary_status: "", summary_error: "", summarizing: false,
     },
   ];
-  const SECTIONS: admin.SopSection[] = [
-    { order_index: 0, number: "1", title: "PURPOSE", level: 1, parent_index: null, page_start: 1, page_end: 1, full_length: 40 },
-    { order_index: 1, number: "2", title: "RESPONSIBILITIES", level: 1, parent_index: null, page_start: 1, page_end: 2, full_length: 90 },
-    { order_index: 2, number: "2.1", title: "Inspector", level: 2, parent_index: 1, page_start: 2, page_end: 2, full_length: 30 },
+  // Units: sections merged or opened to 500-4000 characters, what the tab lists (owner, 2026-10-09).
+  const unit = (index: number, label: string, section: string, through = ""): admin.SopUnit => ({
+    index, label, page_start: 1, page_end: 2, length: 800, section, through, own: false,
+    members: through ? [section, through] : [section],
+  });
+  const SECTIONS: admin.SopUnit[] = [
+    unit(0, "1–2 PURPOSE / RESPONSIBILITIES", "1", "2"),
+    unit(1, "3 RECORDS", "3"),
+    unit(2, "4 Inspector", "4"),
   ];
   const DRAFT: admin.SopSummary = {
     summary: "**Purpose:** Inspect widgets.", status: "draft", error: "", reviewed_at: null, summarizing: false,
@@ -446,6 +451,7 @@ describe("SOP documents tab", () => {
       document_id: `m${i}`,
       name: `SOP ${i + 1}.pdf`,
       section_count: i,
+      unit_count: i,
     }));
     vi.spyOn(admin, "listSopDocuments").mockResolvedValue([...many, DOCS[1]]);
     renderPage();
@@ -544,13 +550,13 @@ describe("SOP documents tab", () => {
     expect(rename).toHaveBeenCalledWith("lib1", { name: "Quality SOPs" });
   });
 
-  it("lists conversions with their failure reason, then a document's sections and a full section", async () => {
+  it("lists conversions with their failure reason, then a document's units and a unit's passage", async () => {
     const user = userEvent.setup();
     vi.spyOn(admin, "listSopDocuments").mockResolvedValue(DOCS);
-    vi.spyOn(admin, "listSopSections").mockResolvedValue(SECTIONS);
-    vi.spyOn(admin, "getSopSection").mockResolvedValue({
-      number: "2", title: "RESPONSIBILITIES", page_start: 1, page_end: 2,
-      full_text: "2 RESPONSIBILITIES\n\n2.1 Inspector checks every widget.",
+    vi.spyOn(admin, "listSopUnits").mockResolvedValue(SECTIONS);
+    const read = vi.spyOn(admin, "getSopUnit").mockResolvedValue({
+      ...SECTIONS[0],
+      text: "## 1 PURPOSE\n\nWhy.\n\n## 2 RESPONSIBILITIES\n\n### 2.1 Inspector\n\nChecks every widget.",
     });
     renderPage();
     await user.click(await screen.findByTestId("admin-tab-sop"));
@@ -560,16 +566,15 @@ describe("SOP documents tab", () => {
     expect(screen.getByTestId("sop-doc-d1")).toHaveTextContent("Converted");
 
     await user.click(screen.getByText("Widget SOP.pdf"));
-    // The sections are a tree, closed below the top level: 2.1 shows once its parent opens.
-    await screen.findByTestId("sop-section-1");
-    expect(screen.queryByTestId("sop-section-2")).not.toBeInTheDocument();
-    await user.click(screen.getByTestId("sop-sections-expand"));
-    expect(await screen.findByTestId("sop-section-2")).toHaveTextContent("2.1 Inspector");
-    await user.click(screen.getByTestId("sop-sections-collapse"));
-    await waitFor(() => expect(screen.queryByTestId("sop-section-2")).not.toBeInTheDocument());
-    await user.click(screen.getByTestId("sop-sections-expand"));
-    await user.click(screen.getByTestId("sop-section-1"));
-    expect(await screen.findByTestId("sop-section-text")).toHaveTextContent("2.1 Inspector checks every widget.");
+    // The units, flat and in order; a merged one is named by its range.
+    expect(await screen.findByTestId("sop-unit-0")).toHaveTextContent("1–2 PURPOSE / RESPONSIBILITIES");
+    expect(screen.getByTestId("sop-unit-2")).toHaveTextContent("4 Inspector");
+    await user.click(screen.getByTestId("sop-unit-0"));
+    expect(read).toHaveBeenCalledWith("d1", 0);
+    // Every section in it keeps its own heading.
+    const passage = await screen.findByTestId("sop-section-text");
+    expect(within(passage).getByRole("heading", { name: "2.1 Inspector" })).toBeInTheDocument();
+    expect(passage).toHaveTextContent("Checks every widget.");
   });
 
   it("converts again in the background: polls while converting, then shows the new sections", async () => {
@@ -577,7 +582,7 @@ describe("SOP documents tab", () => {
     try {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       const list = vi.spyOn(admin, "listSopDocuments").mockResolvedValue(DOCS);
-      const sections = vi.spyOn(admin, "listSopSections").mockResolvedValue(SECTIONS);
+      const sections = vi.spyOn(admin, "listSopUnits").mockResolvedValue(SECTIONS);
       const rebuild = vi
         .spyOn(admin, "rebuildSopDocument")
         .mockResolvedValue({ ...DOCS[0], converting: true });
@@ -585,8 +590,7 @@ describe("SOP documents tab", () => {
       await user.click(await screen.findByTestId("admin-tab-sop"));
     await user.click(await screen.findByTestId("sop-library-toggle-lib1"));
       await user.click(await screen.findByText("Widget SOP.pdf"));
-      await user.click(await screen.findByTestId("sop-sections-expand"));
-      await screen.findByTestId("sop-section-2");
+      await screen.findByTestId("sop-unit-2");
 
       await user.click(screen.getByTestId("sop-rebuild"));
       expect(rebuild).toHaveBeenCalledWith("d1");
@@ -594,10 +598,10 @@ describe("SOP documents tab", () => {
       expect(screen.getByTestId("sop-rebuild")).toBeDisabled();
 
       list.mockResolvedValue([{ ...DOCS[0], section_count: 4 }, DOCS[1]]);
-      sections.mockResolvedValue([...SECTIONS, { ...SECTIONS[2], order_index: 3, number: "2.2", title: "Supervisor" }]);
+      sections.mockResolvedValue([...SECTIONS, unit(3, "5 Supervisor", "5")]);
       await vi.advanceTimersByTimeAsync(SOP_POLL_MS);
       await waitFor(() => expect(screen.getByTestId("sop-doc-d1")).toHaveTextContent("Converted"));
-      expect(await screen.findByTestId("sop-section-3")).toHaveTextContent("2.2 Supervisor");
+      expect(await screen.findByTestId("sop-unit-3")).toHaveTextContent("5 Supervisor");
       expect(screen.getByTestId("sop-rebuild")).toBeEnabled();
     } finally {
       vi.useRealTimers();
@@ -607,7 +611,7 @@ describe("SOP documents tab", () => {
   it("shows the AI draft as not used in scoring, and approving it puts it into scoring", async () => {
     const user = userEvent.setup();
     const list = vi.spyOn(admin, "listSopDocuments").mockResolvedValue(DOCS);
-    vi.spyOn(admin, "listSopSections").mockResolvedValue(SECTIONS);
+    vi.spyOn(admin, "listSopUnits").mockResolvedValue(SECTIONS);
     const save = vi
       .spyOn(admin, "saveSopSummary")
       .mockResolvedValue({ ...DRAFT, summary: "**Purpose:** Inspect every widget.", status: "reviewed" });
@@ -635,7 +639,7 @@ describe("SOP documents tab", () => {
     try {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       const list = vi.spyOn(admin, "listSopDocuments").mockResolvedValue(DOCS);
-      vi.spyOn(admin, "listSopSections").mockResolvedValue(SECTIONS);
+      vi.spyOn(admin, "listSopUnits").mockResolvedValue(SECTIONS);
       const redraft = vi.spyOn(admin, "redraftSopSummary").mockResolvedValue({ ...DRAFT, summarizing: true });
       renderPage();
       await user.click(await screen.findByTestId("admin-tab-sop"));
@@ -662,7 +666,7 @@ describe("SOP documents tab", () => {
     try {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       const list = vi.spyOn(admin, "listSopDocuments").mockResolvedValue(DOCS);
-      vi.spyOn(admin, "listSopSections").mockResolvedValue(SECTIONS);
+      vi.spyOn(admin, "listSopUnits").mockResolvedValue(SECTIONS);
       vi.spyOn(admin, "rebuildSopDocument").mockResolvedValue({ ...DOCS[0], converting: true });
       vi.spyOn(admin, "saveSopSummary").mockRejectedValue(new Error("The summary is being drafted"));
       renderPage();
@@ -692,20 +696,20 @@ describe("SOP documents tab", () => {
   it("shows the sections of the document clicked last, not of a slower earlier click", async () => {
     const user = userEvent.setup();
     vi.spyOn(admin, "listSopDocuments").mockResolvedValue(DOCS);
-    let releaseFirst: (rows: admin.SopSection[]) => void = () => {};
-    vi.spyOn(admin, "listSopSections").mockImplementation((id) =>
+    let releaseFirst: (rows: admin.SopUnit[]) => void = () => {};
+    vi.spyOn(admin, "listSopUnits").mockImplementation((id) =>
       id === "d1"
         ? new Promise((resolve) => (releaseFirst = resolve))
-        : Promise.resolve([{ ...SECTIONS[0], title: "MATRIX ONLY" }]),
+        : Promise.resolve([{ ...SECTIONS[0], label: "MATRIX ONLY" }]),
     );
     renderPage();
     await user.click(await screen.findByTestId("admin-tab-sop"));
     await user.click(await screen.findByTestId("sop-library-toggle-lib1"));
     await user.click(await screen.findByText("Widget SOP.pdf"));
     await user.click(screen.getByText("Matrix.pdf"));
-    expect(await screen.findByTestId("sop-section-0")).toHaveTextContent("MATRIX ONLY");
+    expect(await screen.findByTestId("sop-unit-0")).toHaveTextContent("MATRIX ONLY");
     await act(async () => releaseFirst(SECTIONS));
-    expect(screen.getByTestId("sop-section-0")).toHaveTextContent("MATRIX ONLY");
-    expect(screen.queryByTestId("sop-section-2")).toBeNull();
+    expect(screen.getByTestId("sop-unit-0")).toHaveTextContent("MATRIX ONLY");
+    expect(screen.queryByTestId("sop-unit-2")).toBeNull();
   });
 });

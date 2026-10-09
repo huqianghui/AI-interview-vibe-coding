@@ -116,9 +116,12 @@ export interface CitedSection {
 }
 
 /** "4.2 Approval" — or the title alone for an unnumbered section ("§3"). */
-export function sectionName(s: { section: string; title?: string }): string {
-  if (s.section.startsWith("§")) return s.title || s.section;
-  return `${s.section} ${s.title ?? ""}`.trim();
+/** A cited section as a reader sees it: "4.2 Approval", a run of sections (one merged unit)
+ *  "1–3 PURPOSE", or the title alone for an unnumbered heading. */
+export function sectionName(s: { section: string; title?: string; through?: string }): string {
+  const span = s.through ? `${s.section}–${s.through}` : s.section;
+  if (span.startsWith("§") && !s.through) return s.title || s.section;
+  return `${span} ${s.title ?? ""}`.trim();
 }
 
 /** The report's citation text: each cited section with its document, the document named once per

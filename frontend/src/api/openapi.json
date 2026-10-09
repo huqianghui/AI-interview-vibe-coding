@@ -2960,6 +2960,11 @@
             "default": "",
             "title": "Summary Status",
             "type": "string"
+          },
+          "unit_count": {
+            "default": 0,
+            "title": "Unit Count",
+            "type": "integer"
           }
         },
         "required": [
@@ -3198,14 +3203,142 @@
         "title": "SopSummaryOut",
         "type": "object"
       },
+      "SopUnitOut": {
+        "description": "A unit (sections merged or opened to 500-4000 characters): what the SOP tab lists, what\nsearch proposes and what a rubric item cites (spec-sop-conversion-and-sections §2).",
+        "properties": {
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "length": {
+            "title": "Length",
+            "type": "integer"
+          },
+          "members": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "own": {
+            "title": "Own",
+            "type": "boolean"
+          },
+          "page_end": {
+            "title": "Page End",
+            "type": "integer"
+          },
+          "page_start": {
+            "title": "Page Start",
+            "type": "integer"
+          },
+          "section": {
+            "title": "Section",
+            "type": "string"
+          },
+          "through": {
+            "title": "Through",
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "label",
+          "page_start",
+          "page_end",
+          "length",
+          "section",
+          "through",
+          "own",
+          "members"
+        ],
+        "title": "SopUnitOut",
+        "type": "object"
+      },
+      "SopUnitTextOut": {
+        "properties": {
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "length": {
+            "title": "Length",
+            "type": "integer"
+          },
+          "members": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "own": {
+            "title": "Own",
+            "type": "boolean"
+          },
+          "page_end": {
+            "title": "Page End",
+            "type": "integer"
+          },
+          "page_start": {
+            "title": "Page Start",
+            "type": "integer"
+          },
+          "section": {
+            "title": "Section",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "through": {
+            "title": "Through",
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "label",
+          "page_start",
+          "page_end",
+          "length",
+          "section",
+          "through",
+          "own",
+          "members",
+          "text"
+        ],
+        "title": "SopUnitTextOut",
+        "type": "object"
+      },
       "SourceRefIn": {
         "properties": {
           "document_id": {
             "title": "Document Id",
             "type": "string"
           },
+          "part": {
+            "default": "",
+            "title": "Part",
+            "type": "string"
+          },
           "section": {
             "title": "Section",
+            "type": "string"
+          },
+          "through": {
+            "default": "",
+            "title": "Through",
             "type": "string"
           }
         },
@@ -3242,8 +3375,18 @@
             ],
             "title": "Page Start"
           },
+          "part": {
+            "default": "",
+            "title": "Part",
+            "type": "string"
+          },
           "section": {
             "title": "Section",
+            "type": "string"
+          },
+          "through": {
+            "default": "",
+            "title": "Through",
             "type": "string"
           },
           "title": {
@@ -6265,6 +6408,115 @@
           }
         ],
         "summary": "Redraft Summary",
+        "tags": [
+          "admin-sop"
+        ]
+      }
+    },
+    "/admin/sop/documents/{document_id}/units": {
+      "get": {
+        "description": "The document's units in order (no text: :func:`unit_text` reads one).",
+        "operationId": "list_units_admin_sop_documents__document_id__units_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SopUnitOut"
+                  },
+                  "title": "Response List Units Admin Sop Documents  Document Id  Units Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Units",
+        "tags": [
+          "admin-sop"
+        ]
+      }
+    },
+    "/admin/sop/documents/{document_id}/units/{index}": {
+      "get": {
+        "description": "One unit's passage as Markdown: every member section's heading and text, never cut.",
+        "operationId": "unit_text_admin_sop_documents__document_id__units__index__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "index",
+            "required": true,
+            "schema": {
+              "title": "Index",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SopUnitTextOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Unit Text",
         "tags": [
           "admin-sop"
         ]

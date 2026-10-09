@@ -112,6 +112,9 @@ export const reorderQuestions = (bankId: string, orderedIds: string[]) =>
 export interface SourceRef {
   document_id: string;
   section: string;
+  // A run of sections, "section" through "through" (one merged unit); or a section's own text.
+  through?: string;
+  part?: "own";
   document_name?: string;
   title?: string;
   page_start?: number | null;
@@ -477,6 +480,8 @@ export interface SopDocument {
   // document_intelligence | pdf_text | docx | text | failed; "" = not converted yet.
   markdown_source: string;
   section_count: number;
+  // The units it reads as (sections merged or opened to 500-4000 characters): what the tab lists.
+  unit_count: number;
   // Why the conversion failed, or why converting again failed while the previous one was kept.
   markdown_error: string;
   // Queued for or in conversion right now.
@@ -514,6 +519,38 @@ export interface SopSectionText {
   page_end: number;
   full_text: string;
 }
+
+/** A unit: sections merged or opened to 500-4000 characters. What the SOP tab lists, what search
+ * proposes and what a rubric item cites, as one run (section … through) or one section's own text. */
+export interface SopUnit {
+  index: number;
+  label: string; // "4.2 Title", or "1–3 PURPOSE / SCOPE / DEFINITIONS"
+  page_start: number;
+  page_end: number;
+  length: number;
+  section: string;
+  through: string;
+  own: boolean;
+  members: string[];
+}
+
+export interface SopUnitText extends SopUnit {
+  text: string; // Markdown: every member's heading and text
+}
+
+export const listSopUnits = (documentId: string) =>
+  adminRequest<SopUnit[]>(`/admin/sop/documents/${documentId}/units`);
+
+export const getSopUnit = (documentId: string, index: number) =>
+  adminRequest<SopUnitText>(`/admin/sop/documents/${documentId}/units/${index}`);
+
+/** How a rubric item cites a unit. */
+export const unitRef = (documentId: string, u: SopUnit): SourceRef => ({
+  document_id: documentId,
+  section: u.section,
+  ...(u.through ? { through: u.through } : {}),
+  ...(u.own ? { part: "own" as const } : {}),
+});
 
 export const listSopDocuments = () => adminRequest<SopDocument[]>("/admin/sop/documents");
 

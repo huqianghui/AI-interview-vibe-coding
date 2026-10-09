@@ -107,7 +107,10 @@ async def export_bank_bundle(db: AsyncSession, bank_id: str) -> dict:
                         ),
                         # Cited sections by document NAME: ids differ between servers.
                         "source_refs": [
-                            {"document_name": doc_names[r.document_id], "section": r.section}
+                            {
+                                **{k: v for k, v in r.as_dict().items() if k != "document_id"},
+                                "document_name": doc_names[r.document_id],
+                            }
                             for r in sop_citation.parse_refs(it.source_refs)
                             if r.document_id in doc_names
                         ],
@@ -285,7 +288,14 @@ def _draft_items_from_bundle(
             if ref_doc is None:
                 unresolved.add(str(ref.get("document_name") or ""))
                 continue
-            refs.append({"document_id": ref_doc, "section": str(ref.get("section") or "")})
+            # A run ("through") or a section's own text ("part") travels with the reference.
+            refs.append(
+                {
+                    **{k: ref[k] for k in ("through", "part") if ref.get(k)},
+                    "document_id": ref_doc,
+                    "section": str(ref.get("section") or ""),
+                }
+            )
         items.append(
             DraftItem(
                 kind=kind,

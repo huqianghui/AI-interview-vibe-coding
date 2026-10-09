@@ -4,14 +4,14 @@ import { filterDocuments, pageOf, sortDocuments } from "./sopTable";
 
 const doc = (name: string, over: Partial<SopDocument> = {}): SopDocument => ({
   document_id: name, name, library_id: "l", status: "chunked", size: 1, chunk_count: 1,
-  markdown_source: "document_intelligence", section_count: 1, markdown_error: "",
+  markdown_source: "document_intelligence", section_count: 1, unit_count: 1, markdown_error: "",
   converting: false, summary_status: "", summary_error: "", summarizing: false, ...over,
 });
 
 describe("sopTable", () => {
   const docs = [
-    doc("SOP 10.pdf", { section_count: 5, summary_status: "reviewed" }),
-    doc("SOP 2.pdf", { section_count: 5, summary_status: "draft" }),
+    doc("SOP 10.pdf", { section_count: 5, unit_count: 5, summary_status: "reviewed" }),
+    doc("SOP 2.pdf", { section_count: 5, unit_count: 5, summary_status: "draft" }),
     doc("Plan.docx", { markdown_source: "failed", section_count: 0 }),
     doc("New.pdf", { markdown_source: "", converting: true, section_count: 0 }),
   ];

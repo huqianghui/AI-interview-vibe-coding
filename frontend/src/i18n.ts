@@ -358,7 +358,10 @@ export const resources = {
           noSections: "No sections: the document is not converted yet, or the conversion failed.",
           preamble: "(before the first heading)",
           sectionMeta: "p. {{pages}} · {{chars}} chars",
-          fullSectionHint: "The full section, every subsection included ({{chars}} chars): this is what a citation hands to scoring.",
+          fullSectionHint: "The whole passage, every section in it with its own heading ({{chars}} chars): this is what a citation of it hands to scoring.",
+          colSection: "Section",
+          colPages: "Pages",
+          colChars: "Characters",
           summary: {
             title: "Key-points summary",
             hint: "Drafted by AI from the whole document. Only an approved summary is given to scoring, next to the cited sections; a draft is not used.",
@@ -830,7 +833,10 @@ export const resources = {
           noSections: "没有章节：文档尚未转换，或转换失败。",
           preamble: "（第一个标题之前的内容）",
           sectionMeta: "第 {{pages}} 页 · {{chars}} 字",
-          fullSectionHint: "完整章节，包含全部子章节（{{chars}} 字）：引用这一节时，评分拿到的就是这些内容。",
+          fullSectionHint: "完整段落，其中每个章节都保留自己的标题（{{chars}} 字）：引用它时，评分拿到的就是这些内容。",
+          colSection: "章节",
+          colPages: "页码",
+          colChars: "字数",
           summary: {
             title: "要点摘要",
             hint: "由 AI 读取全文起草。只有审核通过的摘要才会和引用的章节一起交给评分；草稿不使用。",

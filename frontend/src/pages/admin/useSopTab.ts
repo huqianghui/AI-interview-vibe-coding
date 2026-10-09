@@ -4,13 +4,7 @@
  * busy the list is polled, and the selected document reloads when its work finishes. */
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as admin from "../../api/admin";
-import type {
-  SopDocument,
-  SopLibrary,
-  SopSection,
-  SopSectionText,
-  SopSummary,
-} from "../../api/admin";
+import type { SopDocument, SopLibrary, SopSummary, SopUnit, SopUnitText } from "../../api/admin";
 
 export const SOP_POLL_MS = 3000;
 
@@ -25,8 +19,10 @@ export function useSopTab(active: boolean) {
   const [documents, setDocuments] = useState<SopDocument[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  const [sections, setSections] = useState<SopSection[]>([]);
-  const [section, setSection] = useState<SopSectionText | null>(null);
+  // The selected document's units (sections merged or opened to 500-4000 characters) and the open
+  // one's passage: the same set the AI searches and cites (owner, 2026-10-09).
+  const [sections, setSections] = useState<SopUnit[]>([]);
+  const [section, setSection] = useState<SopUnitText | null>(null);
   const [summary, setSummary] = useState<SopSummary | null>(null);
   // The admin's edit in the summary box; reset whenever a summary is (re)loaded.
   const [summaryText, setSummaryText] = useState("");
@@ -36,7 +32,7 @@ export function useSopTab(active: boolean) {
 
   const loadSections = useCallback(async (documentId: string) => {
     try {
-      const rows = await admin.listSopSections(documentId);
+      const rows = await admin.listSopUnits(documentId);
       if (wanted.current === documentId) setSections(rows);
     } catch (e) {
       if (wanted.current === documentId) {
@@ -227,11 +223,11 @@ export function useSopTab(active: boolean) {
     }
   };
 
-  const openSection = async (orderIndex: number) => {
+  const openSection = async (index: number) => {
     const documentId = selected;
     if (!documentId) return;
     try {
-      const text = await admin.getSopSection(documentId, orderIndex);
+      const text = await admin.getSopUnit(documentId, index);
       if (wanted.current === documentId) setSection(text);
     } catch (e) {
       setError(message(e));

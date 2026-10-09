@@ -1,12 +1,19 @@
-/** The SOP sections one rubric item cites (spec-sop-section-grounding §3): a chip per section, and
- * "Cite a section" to add one by picking a document, then one of its sections. Scoring reads each
- * cited section's FULL text, so citing the most specific subsection keeps the prompt small. */
+/** The SOP passages one rubric item cites (spec-sop-section-grounding §3): a chip per citation,
+ * and "Cite a section" to add one by picking a document, then one of its units, the same sections
+ * the SOP tab shows and search proposes (500-4000 characters; a merged unit is one run "1–3").
+ * Scoring reads each cited passage in full. */
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Dropdown, Option, Tag, TagGroup, Text, tokens } from "@fluentui/react-components";
 import * as admin from "../../api/admin";
-import type { SopDocument, SopSection, SourceRef } from "../../api/admin";
+import type { SopDocument, SopUnit, SourceRef } from "../../api/admin";
 import { sectionName } from "../../api/client";
+
+/** A unit's titles without its number range: the chip adds the range back ("1–3 …"). */
+function unitTitle(u: SopUnit): string {
+  const span = u.through ? `${u.section}–${u.through}` : u.section;
+  return u.label.startsWith(`${span} `) ? u.label.slice(span.length + 1) : u.label;
+}
 
 export function CitationEditor({
   refs,
@@ -24,7 +31,7 @@ export function CitationEditor({
   const [adding, setAdding] = useState(false);
   const [documents, setDocuments] = useState<SopDocument[]>([]);
   const [documentId, setDocumentId] = useState<string | null>(null);
-  const [sections, setSections] = useState<SopSection[]>([]);
+  const [sections, setSections] = useState<SopUnit[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const startAdding = async () => {
@@ -42,25 +49,30 @@ export function CitationEditor({
     setDocumentId(id);
     setSections([]);
     try {
-      setSections(await admin.listSopSections(id));
+      setSections(await admin.listSopUnits(id));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
   };
 
-  const pickSection = (number: string) => {
+  const pickSection = (value: string) => {
     const doc = documents.find((d) => d.document_id === documentId);
-    const section = sections.find((s) => s.number === number);
-    if (!doc || !section) return;
+    const unit = sections.find((u) => String(u.index) === value);
+    if (!doc || !unit) return;
     const ref: SourceRef = {
-      document_id: doc.document_id,
+      ...admin.unitRef(doc.document_id, unit),
       document_name: doc.name,
-      section: section.number,
-      title: section.title,
-      page_start: section.page_start,
+      title: unitTitle(unit),
+      page_start: unit.page_start,
       found: true,
     };
-    const duplicate = refs.some((r) => r.document_id === ref.document_id && r.section === ref.section);
+    const duplicate = refs.some(
+      (r) =>
+        r.document_id === ref.document_id &&
+        r.section === ref.section &&
+        (r.through ?? "") === (ref.through ?? "") &&
+        (r.part ?? "") === (ref.part ?? ""),
+    );
     if (!duplicate) onChange([...refs, ref]);
     setAdding(false);
     setDocumentId(null);
@@ -88,7 +100,7 @@ export function CitationEditor({
             (r.found === false ? ` (${t("admin.citationGone")})` : "");
           return (
             <Tag
-              key={`${r.document_id}:${r.section}`}
+              key={`${r.document_id}:${r.section}:${r.through ?? ""}:${r.part ?? ""}`}
               value={String(i)}
               size="small"
               dismissible
@@ -131,9 +143,9 @@ export function CitationEditor({
               style={{ minWidth: 260 }}
               onOptionSelect={(_, d) => d.optionValue && pickSection(d.optionValue)}
             >
-              {sections.map((s) => (
-                <Option key={s.order_index} value={s.number} text={sectionName({ section: s.number, title: s.title })}>
-                  {`${"  ".repeat(Math.max(0, s.level - 1))}${sectionName({ section: s.number, title: s.title })}`}
+              {sections.map((u) => (
+                <Option key={u.index} value={String(u.index)} text={u.label}>
+                  {u.label || t("admin.sop.preamble")}
                 </Option>
               ))}
             </Dropdown>

@@ -246,6 +246,49 @@ async def section_counts(db: AsyncSession) -> dict[str, int]:
     return {doc_id: int(n) for doc_id, n in rows}
 
 
+# document_id → ((section count, newest section time), unit count): the documents list is polled
+# while a conversion runs, and units need every section's text. A document is counted again only
+# when its sections change (a build or a re-split replaces every row, so both values move).
+_UNIT_COUNTS: dict[str, tuple[tuple[int, object], int]] = {}
+
+
+async def unit_counts(db: AsyncSession) -> dict[str, int]:
+    """How many units (app.sop.units) each document reads as: what the SOP tab lists."""
+    from app.sop.units import units
+
+    marks = {
+        doc_id: (int(n), newest)
+        for doc_id, n, newest in (
+            await db.execute(
+                select(
+                    SopSection.document_id,
+                    func.count(SopSection.id),
+                    func.max(SopSection.created_at),
+                ).group_by(SopSection.document_id)
+            )
+        ).all()
+    }
+    stale = [d for d, mark in marks.items() if _UNIT_COUNTS.get(d, (None, 0))[0] != mark]
+    if stale:
+        rows = (
+            (
+                await db.execute(
+                    select(SopSection)
+                    .where(SopSection.document_id.in_(stale))
+                    .order_by(SopSection.order_index)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        by_doc: dict[str, list[SopSection]] = {d: [] for d in stale}
+        for row in rows:
+            by_doc[row.document_id].append(row)
+        for doc_id, doc_rows in by_doc.items():
+            _UNIT_COUNTS[doc_id] = (marks[doc_id], len(units(doc_rows)))
+    return {doc_id: _UNIT_COUNTS[doc_id][1] for doc_id in marks}
+
+
 def full_text(sections: Sequence[SopSection], order_index: int) -> str:
     """A section's whole passage: heading, own text, then every descendant in document order."""
     children: dict[int, list[SopSection]] = {}
@@ -271,6 +314,16 @@ def _block(section: SopSection) -> str:
     The heading's level is the section's own (a clause "4" is ##, "4.2" ###, at most ######), so
     a subsection reads the same in any passage that holds it."""
     return heading_block(section.number, section.title, section.level, section.text)
+
+
+def heading_block_of(section: SopSection) -> str:
+    """A section's own part of a passage (its heading and its own text, no subsection)."""
+    return _block(section)
+
+
+def last_descendant(sections: Sequence[SopSection], order_index: int) -> int:
+    """The order_index where a section's passage ends: its last descendant, or itself."""
+    return max([order_index, *(d.order_index for d in _descendants(sections, order_index))])
 
 
 def _descendants(sections: Sequence[SopSection], order_index: int) -> list[SopSection]:

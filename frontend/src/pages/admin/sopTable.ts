@@ -40,7 +40,7 @@ export function filterDocuments(docs: SopDocument[], f: SopFilters): SopDocument
 
 export function sortDocuments(docs: SopDocument[], key: SopSortKey, order: SortOrder) {
   const by = (d: SopDocument): string | number =>
-    key === "sections" ? d.section_count : key === "status" ? STATUS_RANK[summaryStateOf(d)] : "";
+    key === "sections" ? d.unit_count : key === "status" ? STATUS_RANK[summaryStateOf(d)] : "";
   const sign = order === "desc" ? -1 : 1;
   return [...docs].sort((a, b) => {
     const diff =

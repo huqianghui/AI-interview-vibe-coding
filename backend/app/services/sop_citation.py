@@ -26,11 +26,23 @@ MAX_REFS_PER_ITEM = 8
 
 @dataclass(frozen=True)
 class SectionRef:
+    """A cited passage: one section (with its subsections), or a run of sections in document
+    order from ``section`` through ``through`` (a merged unit, app/sop/units.py), or a section's
+    own text only (``own``: its subsections were cited apart). ``own`` on a run applies to its
+    last section: the run ends with ``through``'s own text, not its subsections."""
+
     document_id: str
     section: str
+    through: str = ""
+    own: bool = False
 
     def as_dict(self) -> dict:
-        return {"document_id": self.document_id, "section": self.section}
+        out = {"document_id": self.document_id, "section": self.section}
+        if self.through:
+            out["through"] = self.through
+        if self.own:
+            out["part"] = "own"
+        return out
 
 
 @dataclass(frozen=True)
@@ -42,13 +54,27 @@ class CitedSection:
     page_start: int
     page_end: int
     text: str
+    # The reference this passage was read for (a run, or a section's own text); None = the
+    # section ``number`` as a whole.
+    ref: SectionRef | None = None
+
+    @property
+    def reference(self) -> SectionRef:
+        return self.ref or SectionRef(self.document_id, self.number)
+
+    @property
+    def span(self) -> str:
+        """The section number, or the run it covers ("1–3")."""
+        through = self.ref.through if self.ref else ""
+        return f"{self.number}–{through}" if through else self.number
 
     @property
     def label(self) -> str:
-        """How the section is named to a reader: "4.2 Regional CSM", or the title alone."""
-        if self.number.startswith("§"):
+        """How the passage is named to a reader: "4.2 Regional CSM", "1–3 PURPOSE", or the title
+        alone for an unnumbered heading."""
+        if self.span.startswith("§") and "–" not in self.span:
             return self.title or "(before the first heading)"
-        return f"{self.number} {self.title}".strip()
+        return f"{self.span} {self.title}".strip()
 
     @property
     def pages(self) -> str:
@@ -78,7 +104,9 @@ def parse_refs(raw: object) -> list[SectionRef]:
             continue
         document_id = str(entry.get("document_id") or "").strip()
         section = normalize_number(entry.get("section"))
-        ref = SectionRef(document_id, section)
+        through = normalize_number(entry.get("through")) if entry.get("through") else ""
+        own = entry.get("part") == "own"
+        ref = SectionRef(document_id, section, "" if through == section else through, own)
         if document_id and section and ref not in out:
             out.append(ref)
         if len(out) == MAX_REFS_PER_ITEM:
@@ -127,18 +155,48 @@ def _find(sections: list[SopSection], number: str) -> SopSection | None:
     return next((s for s in sections if s.number == number), None)
 
 
+def _passage(sections: list[SopSection], ref: SectionRef) -> tuple[SopSection, str, int] | None:
+    """The first row, the text and the last page a reference names, or None when it is gone."""
+    row = _find(sections, ref.section)
+    if row is None:
+        return None
+    if ref.own and not ref.through:
+        return row, sop_section_service.heading_block_of(row), row.page_end
+    if not ref.through:
+        return (
+            row,
+            sop_section_service.full_text(sections, row.order_index),
+            sop_section_service.page_end(sections, row.order_index),
+        )
+    last = next(
+        (s for s in sections if s.number == ref.through and s.order_index >= row.order_index), None
+    )
+    if last is None:
+        return None
+    # Document order: a section's subsections follow it, so the run ends with the last
+    # descendant of ``through``, or with ``through`` itself when only its own text is in the run.
+    end = (
+        last.order_index
+        if ref.own
+        else sop_section_service.last_descendant(sections, last.order_index)
+    )
+    run = [s for s in sections if row.order_index <= s.order_index <= end]
+    text = "\n\n".join(b for b in (sop_section_service.heading_block_of(s) for s in run) if b)
+    return row, text, max(s.page_end for s in run)
+
+
 async def resolve(db: AsyncSession, refs: Iterable[SectionRef]) -> list[CitedSection]:
-    """Each reference's section with its FULL text, in reference order. A reference whose document
+    """Each reference's passage with its FULL text, in reference order. A reference whose document
     or section no longer exists is skipped (see :func:`missing` to report those)."""
     refs = list(refs)
     by_doc = await _sections_by_document(db, (r.document_id for r in refs))
     names = await _document_names(db, by_doc)
     out: list[CitedSection] = []
     for ref in refs:
-        sections = by_doc.get(ref.document_id) or []
-        row = _find(sections, ref.section)
-        if row is None:
+        found = _passage(by_doc.get(ref.document_id) or [], ref)
+        if found is None:
             continue
+        row, text, last_page = found
         out.append(
             CitedSection(
                 document_id=ref.document_id,
@@ -146,8 +204,9 @@ async def resolve(db: AsyncSession, refs: Iterable[SectionRef]) -> list[CitedSec
                 number=row.number,
                 title=row.title,
                 page_start=row.page_start,
-                page_end=sop_section_service.page_end(sections, row.order_index),
-                text=sop_section_service.full_text(sections, row.order_index),
+                page_end=last_page,
+                text=text,
+                ref=ref,
             )
         )
     return out
@@ -155,28 +214,46 @@ async def resolve(db: AsyncSession, refs: Iterable[SectionRef]) -> list[CitedSec
 
 async def _section_heads(
     db: AsyncSession, document_ids: Iterable[str]
-) -> dict[tuple[str, str], tuple[str, int]]:
-    """``(document_id, number) → (title, page_start)`` of the first section with that number, read
-    without any section text (checking a citation must not load whole documents)."""
+) -> dict[tuple[str, str], tuple[str, int, int]]:
+    """``(document_id, number) → (title, page_start, order_index)`` of the first section with that
+    number, read without any section text (checking a citation must not load whole documents)."""
     ids = sorted(set(document_ids))
     if not ids:
         return {}
     rows = await db.execute(
-        select(SopSection.document_id, SopSection.number, SopSection.title, SopSection.page_start)
+        select(
+            SopSection.document_id,
+            SopSection.number,
+            SopSection.title,
+            SopSection.page_start,
+            SopSection.order_index,
+        )
         .where(SopSection.document_id.in_(ids))
         .order_by(SopSection.document_id, SopSection.order_index)
     )
-    out: dict[tuple[str, str], tuple[str, int]] = {}
-    for doc_id, number, title, page in rows.all():
-        out.setdefault((doc_id, number), (title, page))
+    out: dict[tuple[str, str], tuple[str, int, int]] = {}
+    for doc_id, number, title, page, order in rows.all():
+        out.setdefault((doc_id, number), (title, page, order))
     return out
 
 
+def _exists(heads: dict, ref: SectionRef) -> bool:
+    """Whether :func:`resolve` would read something: the section exists, and a run's end exists
+    at or after it (the order resolve reads in)."""
+    first = heads.get((ref.document_id, ref.section))
+    if first is None:
+        return False
+    if not ref.through:
+        return True
+    last = heads.get((ref.document_id, ref.through))
+    return last is not None and last[2] >= first[2]
+
+
 async def missing(db: AsyncSession, refs: Iterable[SectionRef]) -> list[SectionRef]:
-    """The references that name no existing section."""
+    """The references that name no existing section (for a run: either end gone)."""
     refs = list(refs)
     heads = await _section_heads(db, (r.document_id for r in refs))
-    return [r for r in refs if (r.document_id, r.section) not in heads]
+    return [r for r in refs if not _exists(heads, r)]
 
 
 async def describe(db: AsyncSession, refs: Iterable[SectionRef]) -> list[dict]:
@@ -190,12 +267,11 @@ async def describe(db: AsyncSession, refs: Iterable[SectionRef]) -> list[dict]:
         head = heads.get((ref.document_id, ref.section))
         out.append(
             {
-                "document_id": ref.document_id,
+                **ref.as_dict(),
                 "document_name": names.get(ref.document_id, ""),
-                "section": ref.section,
                 "title": head[0] if head else "",
                 "page_start": head[1] if head else None,
-                "found": head is not None,
+                "found": _exists(heads, ref),
             }
         )
     return out

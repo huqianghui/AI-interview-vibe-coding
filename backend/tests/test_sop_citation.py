@@ -341,3 +341,53 @@ async def test_an_item_without_refs_brings_only_its_documents_approved_summary(d
     )
     assert len(task.sources.sections[0].text) > 60_000
     assert "sent whole" in caplog.text
+
+
+async def test_a_run_and_an_own_part_resolve_save_and_travel_like_a_section(
+    client, db_session, admin_auth
+):
+    """A merged unit is cited as one run, "4.1" through "5"; an opened section's intro as its own
+    text (app/sop/units.py). Both read their exact passage, survive the editor and a bundle."""
+    doc = await _widget_sop(db_session)
+    run, own = SectionRef(doc, "4.1", "5"), SectionRef(doc, "4", own=True)
+    assert sop_citation.parse_refs([run.as_dict(), own.as_dict()]) == [run, own]
+    passage, intro = await sop_citation.resolve(db_session, [run, own])
+    assert (passage.label, passage.pages) == ("4.1–5 Inspection", "pp. 3-5")
+    assert "every widget is inspected" in passage.text.lower() and "15 years" in passage.text
+    assert "Release follows" not in passage.text  # 4's own text is not in 4.1-5
+    assert intro.text == "## 4 RELEASE\n\nRelease follows these steps."
+    assert await sop_citation.missing(db_session, [SectionRef(doc, "4.1", "9")]) == [
+        SectionRef(doc, "4.1", "9")
+    ]
+
+    bank, q, checklist = await _bank_question(db_session)
+    got = (await client.get(f"/admin/checklists/questions/{q.id}", headers=admin_auth)).json()
+    items = [
+        {k: it[k] for k in ("kind", "text", "weight", "source_quote", "source_page")}
+        for it in got["items"]
+    ]
+    items[0]["source_refs"] = [run.as_dict(), own.as_dict()]
+    saved = await client.put(
+        f"/admin/checklists/{checklist.id}/items", headers=admin_auth, json={"items": items}
+    )
+    refs = saved.json()["items"][0]["source_refs"]
+    assert [(r["section"], r["through"], r["part"], r["found"]) for r in refs] == [
+        ("4.1", "5", "", True),
+        ("4", "", "own", True),
+    ]
+    bundle = await bank_bundle_service.export_bank_bundle(db_session, bank.id)
+    exported = bundle["questions"][0]["checklist"]["items"][0]["source_refs"]
+    assert exported == [
+        {"document_name": "Widget SOP.pdf", "section": "4.1", "through": "5"},
+        {"document_name": "Widget SOP.pdf", "section": "4", "part": "own"},
+    ]
+
+
+async def test_a_run_that_ends_before_it_starts_is_reported_gone(db_session):
+    """Found in the editor means resolve reads something: "5 through 4.1" reads nothing."""
+    doc = await _widget_sop(db_session)
+    backwards = SectionRef(doc, "5", "4.1")
+    assert await sop_citation.resolve(db_session, [backwards]) == []
+    assert await sop_citation.missing(db_session, [backwards]) == [backwards]
+    (described,) = await sop_citation.describe(db_session, [backwards])
+    assert described["found"] is False
