@@ -12,8 +12,9 @@ never 500s the request (F1 AC #4).
 import asyncio
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import get_settings
@@ -23,6 +24,7 @@ from app.models.sop import SopDocument
 from app.services import (
     sop_document_service,
     sop_ingestion,
+    sop_library_service,
     sop_section_service,
     sop_summary_service,
 )
@@ -39,6 +41,8 @@ router = APIRouter(
 class SopDocumentOut(BaseModel):
     document_id: str
     name: str
+    # The library the document belongs to (spec-sop-libraries).
+    library_id: str = ""
     status: str
     size: int
     chunk_count: int
@@ -102,13 +106,105 @@ def _start_build(session_factory: async_sessionmaker) -> None:
     _start(sop_section_service.build_missing(session_factory))
 
 
+class SopLibraryOut(BaseModel):
+    library_id: str
+    name: str
+    description: str
+    document_count: int
+
+
+class SopLibraryIn(BaseModel):
+    name: str = Field(min_length=1, max_length=sop_library_service.MAX_NAME)
+    description: str = ""
+
+
+class SopLibraryPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=sop_library_service.MAX_NAME)
+    description: str | None = None
+
+
+def _library_out(library, document_count: int) -> SopLibraryOut:  # noqa: ANN001
+    return SopLibraryOut(
+        library_id=library.id,
+        name=library.name,
+        description=library.description,
+        document_count=document_count,
+    )
+
+
+@router.get("/libraries", response_model=list[SopLibraryOut])
+async def list_libraries(db: AsyncSession = Depends(get_db)) -> list[SopLibraryOut]:
+    """Every SOP library with its document count, by name."""
+    return [
+        _library_out(r.library, r.document_count)
+        for r in await sop_library_service.list_libraries(db)
+    ]
+
+
+def _library_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, sop_library_service.LibraryNotFound):
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Library not found")
+    if isinstance(exc, sop_library_service.LibraryNameTaken | sop_library_service.LibraryNotEmpty):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    # 422 literal: the constant was renamed across Starlette versions (as for 413 below).
+    return HTTPException(status_code=422, detail=str(exc))
+
+
+_LIBRARY_ERRORS = (
+    sop_library_service.LibraryNotFound,
+    sop_library_service.LibraryNameTaken,
+    sop_library_service.LibraryNotEmpty,
+    sop_library_service.LibraryNameInvalid,
+)
+
+
+@router.post("/libraries", response_model=SopLibraryOut, status_code=status.HTTP_201_CREATED)
+async def create_library(body: SopLibraryIn, db: AsyncSession = Depends(get_db)) -> SopLibraryOut:
+    """A new, empty library. 409 when the name is taken."""
+    try:
+        library = await sop_library_service.create_library(db, body.name, body.description)
+    except _LIBRARY_ERRORS as exc:
+        raise _library_error(exc) from exc
+    return _library_out(library, 0)
+
+
+@router.patch("/libraries/{library_id}", response_model=SopLibraryOut)
+async def update_library(
+    library_id: str, body: SopLibraryPatch, db: AsyncSession = Depends(get_db)
+) -> SopLibraryOut:
+    """Rename a library or change its description."""
+    try:
+        library = await sop_library_service.update_library(
+            db, library_id, name=body.name, description=body.description
+        )
+    except _LIBRARY_ERRORS as exc:
+        raise _library_error(exc) from exc
+    counts = {r.library.id: r.document_count for r in await sop_library_service.list_libraries(db)}
+    return _library_out(library, counts.get(library.id, 0))
+
+
+@router.delete("/libraries/{library_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_library(library_id: str, db: AsyncSession = Depends(get_db)) -> None:
+    """Delete an empty library. 409 while it still holds documents."""
+    try:
+        await sop_library_service.delete_library(db, library_id)
+    except _LIBRARY_ERRORS as exc:
+        raise _library_error(exc) from exc
+
+
 @router.post("/documents", response_model=SopDocumentOut, status_code=status.HTTP_201_CREATED)
 async def upload_document(
     file: UploadFile = File(...),
+    library_id: str = Form(...),
     db: AsyncSession = Depends(get_db),
     session_factory: async_sessionmaker = Depends(get_session_factory),
 ) -> SopDocumentOut:
-    """Upload one SOP file and ingest it. A corrupt/unsupported file → status=failed, not 500."""
+    """Upload one SOP file into a library and ingest it (spec-sop-libraries: the library is chosen
+    first). A corrupt/unsupported file → status=failed, not 500. 404 when the library is unknown."""
+    try:
+        await sop_library_service.get_library(db, library_id)
+    except sop_library_service.LibraryNotFound as exc:
+        raise _library_error(exc) from exc
     content = await file.read()
     max_bytes = get_settings().material_max_size_mb * 1024 * 1024
     if len(content) > max_bytes:
@@ -118,17 +214,24 @@ async def upload_document(
             status_code=413,
             detail=f"File exceeds {get_settings().material_max_size_mb} MB limit",
         )
-    result = await sop_ingestion.ingest_document(
-        db,
-        filename=file.filename or "upload",
-        content=content,
-        content_type=file.content_type or "",
-    )
+    try:
+        result = await sop_ingestion.ingest_document(
+            db,
+            filename=file.filename or "upload",
+            content=content,
+            content_type=file.content_type or "",
+            library_id=library_id,
+        )
+    except IntegrityError as exc:
+        # The library was deleted between the check above and the insert.
+        await db.rollback()
+        raise _library_error(sop_library_service.LibraryNotFound(library_id)) from exc
     # Split into sections in the background (Document Intelligence takes seconds per document).
     _start_build(session_factory)
     return SopDocumentOut(
         document_id=result.document_id,
         name=result.name,
+        library_id=library_id,
         status=result.status,
         size=len(content),
         chunk_count=result.chunk_count,
@@ -144,6 +247,7 @@ async def list_documents(db: AsyncSession = Depends(get_db)) -> list[SopDocument
         SopDocumentOut(
             document_id=d.id,
             name=d.name,
+            library_id=d.library_id,
             status=d.status,
             size=d.size,
             chunk_count=chunk_count,

@@ -389,12 +389,12 @@ describe("tab switching", () => {
 describe("SOP documents tab", () => {
   const DOCS: admin.SopDocument[] = [
     {
-      document_id: "d1", name: "Widget SOP.pdf", status: "chunked", size: 10, chunk_count: 3,
+      document_id: "d1", name: "Widget SOP.pdf", library_id: "lib1", status: "chunked", size: 10, chunk_count: 3,
       markdown_source: "document_intelligence", section_count: 3, markdown_error: "", converting: false,
       summary_status: "draft", summary_error: "", summarizing: false,
     },
     {
-      document_id: "d2", name: "Matrix.pdf", status: "chunked", size: 10, chunk_count: 1,
+      document_id: "d2", name: "Matrix.pdf", library_id: "lib1", status: "chunked", size: 10, chunk_count: 1,
       markdown_source: "failed", section_count: 0, markdown_error: "pages not fully read: page 3: 34%",
       converting: false, summary_status: "", summary_error: "", summarizing: false,
     },
@@ -408,8 +408,82 @@ describe("SOP documents tab", () => {
     summary: "**Purpose:** Inspect widgets.", status: "draft", error: "", reviewed_at: null, summarizing: false,
   };
 
+  const LIBRARY: admin.SopLibrary = { library_id: "lib1", name: "Widget SOPs", description: "", document_count: 2 };
+
   beforeEach(() => {
     vi.spyOn(admin, "getSopSummary").mockResolvedValue(DRAFT);
+    vi.spyOn(admin, "listSopLibraries").mockResolvedValue([LIBRARY]);
+  });
+
+  it("lists libraries closed; a click opens one to show its documents", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(admin, "listSopDocuments").mockResolvedValue(DOCS);
+    vi.spyOn(admin, "listSopLibraries").mockResolvedValue([
+      LIBRARY,
+      { library_id: "lib2", name: "Empty SOPs", description: "", document_count: 0 },
+    ]);
+    renderPage();
+    await user.click(await screen.findByTestId("admin-tab-sop"));
+    const toggle = await screen.findByTestId("sop-library-toggle-lib1");
+    expect(toggle).toHaveTextContent("Widget SOPs2 documents");
+    expect(screen.queryByTestId("sop-doc-d1")).not.toBeInTheDocument(); // closed by default
+    await user.click(toggle);
+    expect(await screen.findByTestId("sop-doc-d1")).toBeInTheDocument();
+    // A library that holds documents cannot be deleted; an empty one can.
+    expect(screen.queryByTestId("sop-library-delete-lib1")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("sop-library-toggle-lib2"));
+    expect(screen.getByTestId("sop-library-empty-lib2")).toBeInTheDocument();
+    expect(screen.getByTestId("sop-library-delete-lib2")).toBeInTheDocument();
+    await user.click(toggle);
+    expect(screen.queryByTestId("sop-doc-d1")).not.toBeInTheDocument(); // closed again
+  });
+
+  it("keeps uploading after one file fails, and names the file that failed", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(admin, "listSopDocuments").mockResolvedValue(DOCS);
+    const upload = vi
+      .spyOn(admin, "uploadSopDocument")
+      .mockRejectedValueOnce(new Error("File exceeds 50 MB limit"))
+      .mockResolvedValueOnce(DOCS[0]);
+    renderPage();
+    await user.click(await screen.findByTestId("admin-tab-sop"));
+    await user.click(await screen.findByTestId("sop-library-toggle-lib1"));
+    const big = new File(["x"], "Huge.pdf", { type: "application/pdf" });
+    const ok = new File(["x"], "Small.pdf", { type: "application/pdf" });
+    await user.upload(screen.getByTestId("sop-library-file-lib1"), [big, ok]);
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(2));
+    const notice = await screen.findByTestId("sop-library-notice");
+    expect(notice).toHaveTextContent("Uploaded 1 document");
+    expect(notice).toHaveTextContent("1 file could not be uploaded: Huge.pdf: File exceeds 50 MB limit");
+  });
+
+  it("uploads into the library it was opened from, and creates and renames libraries", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(admin, "listSopDocuments").mockResolvedValue(DOCS);
+    const upload = vi.spyOn(admin, "uploadSopDocument").mockResolvedValue(DOCS[0]);
+    const create = vi
+      .spyOn(admin, "createSopLibrary")
+      .mockResolvedValue({ library_id: "lib3", name: "New SOPs", description: "", document_count: 0 });
+    const rename = vi.spyOn(admin, "updateSopLibrary").mockResolvedValue({ ...LIBRARY, name: "Quality SOPs" });
+    renderPage();
+    await user.click(await screen.findByTestId("admin-tab-sop"));
+    await user.click(await screen.findByTestId("sop-library-toggle-lib1"));
+
+    const file = new File(["1 PURPOSE"], "Deploy SOP.pdf", { type: "application/pdf" });
+    await user.upload(screen.getByTestId("sop-library-file-lib1"), file);
+    await waitFor(() => expect(upload).toHaveBeenCalledWith("lib1", file));
+    expect(await screen.findByTestId("sop-library-notice")).toHaveTextContent("Uploaded 1 document");
+
+    await user.type(screen.getByTestId("sop-library-new-name"), "New SOPs");
+    await user.click(screen.getByTestId("sop-library-new"));
+    expect(create).toHaveBeenCalledWith("New SOPs");
+
+    await user.click(screen.getByTestId("sop-library-rename-lib1"));
+    const name = screen.getByTestId("sop-library-name-lib1");
+    await user.clear(name);
+    await user.type(name, "Quality SOPs");
+    await user.click(screen.getByTestId("sop-library-rename-save-lib1"));
+    expect(rename).toHaveBeenCalledWith("lib1", { name: "Quality SOPs" });
   });
 
   it("lists conversions with their failure reason, then a document's sections and a full section", async () => {
@@ -422,6 +496,7 @@ describe("SOP documents tab", () => {
     });
     renderPage();
     await user.click(await screen.findByTestId("admin-tab-sop"));
+    await user.click(await screen.findByTestId("sop-library-toggle-lib1"));
     expect(await screen.findByTestId("sop-doc-d2")).toHaveTextContent("Failed");
     expect(screen.getByTestId("sop-doc-d2")).toHaveTextContent("page 3: 34%");
     expect(screen.getByTestId("sop-doc-d1")).toHaveTextContent("Document Intelligence");
@@ -443,6 +518,7 @@ describe("SOP documents tab", () => {
         .mockResolvedValue({ ...DOCS[0], converting: true });
       renderPage();
       await user.click(await screen.findByTestId("admin-tab-sop"));
+    await user.click(await screen.findByTestId("sop-library-toggle-lib1"));
       await user.click(await screen.findByText("Widget SOP.pdf"));
       await screen.findByTestId("sop-section-2");
 
@@ -471,6 +547,7 @@ describe("SOP documents tab", () => {
       .mockResolvedValue({ ...DRAFT, summary: "**Purpose:** Inspect every widget.", status: "reviewed" });
     renderPage();
     await user.click(await screen.findByTestId("admin-tab-sop"));
+    await user.click(await screen.findByTestId("sop-library-toggle-lib1"));
     expect(await screen.findByTestId("sop-doc-d1")).toHaveTextContent("Draft — not used in scoring");
     await user.click(screen.getByText("Widget SOP.pdf"));
     const box = await screen.findByTestId("sop-summary-text");
@@ -496,6 +573,7 @@ describe("SOP documents tab", () => {
       const redraft = vi.spyOn(admin, "redraftSopSummary").mockResolvedValue({ ...DRAFT, summarizing: true });
       renderPage();
       await user.click(await screen.findByTestId("admin-tab-sop"));
+    await user.click(await screen.findByTestId("sop-library-toggle-lib1"));
       await user.click(await screen.findByText("Widget SOP.pdf"));
       await screen.findByTestId("sop-summary-text");
 
@@ -523,6 +601,7 @@ describe("SOP documents tab", () => {
       vi.spyOn(admin, "saveSopSummary").mockRejectedValue(new Error("The summary is being drafted"));
       renderPage();
       await user.click(await screen.findByTestId("admin-tab-sop"));
+    await user.click(await screen.findByTestId("sop-library-toggle-lib1"));
       await user.click(await screen.findByText("Widget SOP.pdf"));
       const box = await screen.findByTestId("sop-summary-text");
 
@@ -555,6 +634,7 @@ describe("SOP documents tab", () => {
     );
     renderPage();
     await user.click(await screen.findByTestId("admin-tab-sop"));
+    await user.click(await screen.findByTestId("sop-library-toggle-lib1"));
     await user.click(await screen.findByText("Widget SOP.pdf"));
     await user.click(screen.getByText("Matrix.pdf"));
     expect(await screen.findByTestId("sop-section-0")).toHaveTextContent("MATRIX ONLY");

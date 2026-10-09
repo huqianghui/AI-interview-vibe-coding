@@ -113,6 +113,12 @@ async def db_session():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    # The migration creates the default SOP library; create_all does not (spec-sop-libraries).
+    async with factory() as seed:
+        from app.models.sop import DEFAULT_LIBRARY_ID, DEFAULT_LIBRARY_NAME, SopLibrary
+
+        seed.add(SopLibrary(id=DEFAULT_LIBRARY_ID, name=DEFAULT_LIBRARY_NAME))
+        await seed.commit()
     async with factory() as session:
         # Streaming endpoints open their own session via the get_session_factory dependency (their
         # generator outlives the request-scoped get_db session) — hang the factory off the session

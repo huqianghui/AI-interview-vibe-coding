@@ -9,7 +9,7 @@ import type { SourceRef } from "../../api/admin";
 import { CitationEditor } from "./CitationEditor";
 
 const DOC: admin.SopDocument = {
-  document_id: "d1", name: "Widget SOP.pdf", status: "chunked", size: 1, chunk_count: 1,
+  document_id: "d1", name: "Widget SOP.pdf", library_id: "lib1", status: "chunked", size: 1, chunk_count: 1,
   markdown_source: "document_intelligence", section_count: 2, markdown_error: "", converting: false,
   summary_status: "", summary_error: "", summarizing: false,
 };

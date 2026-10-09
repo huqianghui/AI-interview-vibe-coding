@@ -8,7 +8,7 @@ import asyncio
 import pytest
 
 from app.api import admin_sop
-from app.models.sop import SopDocument
+from app.models.sop import DEFAULT_LIBRARY_ID, SopDocument
 from app.services import sop_ingestion, sop_markdown, sop_section_service, storage
 
 pytestmark = pytest.mark.asyncio
@@ -178,6 +178,7 @@ async def test_an_upload_is_converted_to_sections_in_the_background(client, admi
         "/admin/sop/documents",
         headers=admin_auth,
         files={"file": ("widget.md", SOP_MD, "text/markdown")},
+        data={"library_id": DEFAULT_LIBRARY_ID},
     )
     assert resp.status_code == 201
     await asyncio.gather(*admin_sop._BUILDS)
