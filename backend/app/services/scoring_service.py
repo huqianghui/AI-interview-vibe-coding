@@ -149,11 +149,25 @@ def _build_scoring_prompt(
         reference += "\nSOP DOCUMENT SUMMARIES (approved key points of each cited document):\n" + (
             "\n\n".join(f"{name}:\n{text}" for name, text in sources.summaries) + "\n"
         )
-    return (
+    # General evaluation (spec-sop-libraries §6): a question with no SOP behind it (its bank uses
+    # no SOP library, or none of its items cites one) is not told its checklist came from an SOP.
+    # Decided per question on purpose, not per bank: a question of a bound bank whose items cite
+    # nothing has no SOP behind it either, and saying otherwise would misinform the judge.
+    grounded = bool(sources.sections or sources.summaries) or any(it.source_quote for it in rubric)
+    opening = (
         "You are scoring one interview answer against a fixed checklist derived from an SOP.\n"
         "The SOP, the answer, and your rationale may be in different languages — compare across "
         "languages by meaning, not by matching words.\n"
-        "For EVERY checklist item return a judgment: met | partially_met | not_met | violated "
+        if grounded
+        else "You are scoring one interview answer against a fixed checklist of interview "
+        "criteria. No SOP applies to this question: judge the answer on its own merits against "
+        "each checklist item.\n"
+        "The checklist, the answer, and your rationale may be in different languages — compare "
+        "across languages by meaning, not by matching words.\n"
+    )
+    return (
+        opening
+        + "For EVERY checklist item return a judgment: met | partially_met | not_met | violated "
         "(violated only for a forbidden item the answer actually triggers).\n"
         'Return ONLY JSON: {"judgments": [{"item_id", "judgment", "rationale", "answer_quote"}]}. '
         "item_id is the NUMBER in square brackets for that checklist item (1, 2, 3, ...) — return "

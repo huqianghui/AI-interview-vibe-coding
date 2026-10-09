@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.60.1.0 (2026-10-09)
+
+### Changed
+- **A bank with no SOP library is drafted and scored on general interview criteria**
+  (spec-sop-libraries, PR 3 of 3). Drafting a rubric with AI for such a bank asks for what a
+  strong answer to the question contains (structure, a specific example, actions and reasoning,
+  result, reflection), tailored to the question, and says not to invent procedures, regulations
+  or SOP requirements; no SOP block is in the prompt at all. Scoring a question that has no SOP
+  behind it (no cited section, summary or quote) no longer tells the model its checklist came
+  from an SOP. Banks bound to a library are drafted and scored exactly as before.
+
 ## 0.60.0.0 (2026-10-09)
 
 ### Added

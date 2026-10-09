@@ -254,5 +254,11 @@ async def test_a_bank_is_drafted_only_from_its_own_sop_library(db_session, monke
     await db_session.commit()
     await svc.draft_checklist(db_session, q.id)
     (draft_prompt,) = prompts  # one call: no topic check any more
-    assert "(no SOP section found for this question)" in draft_prompt
     assert "SAE reporting" not in draft_prompt
+    if bound_to == "none":
+        # General evaluation: no SOP block at all, and told not to invent one.
+        assert "uses no SOP" in draft_prompt and "SOP SECTIONS" not in draft_prompt
+        assert "Do not invent procedures" in draft_prompt
+    else:
+        # Bound to a library with nothing relevant: drafted from the question, cites nothing.
+        assert "(no SOP section found for this question)" in draft_prompt

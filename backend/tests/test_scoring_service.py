@@ -553,6 +553,29 @@ def test_the_prompt_numbers_items_and_never_prints_their_ids():
         assert it.item_id not in prompt
 
 
+def test_a_question_with_no_sop_is_scored_on_general_criteria():
+    """spec-sop-libraries §6: no section, summary or quote behind the checklist, so the prompt does
+    not say it was derived from an SOP; one quote is enough to keep the SOP framing."""
+    plain = [
+        scoring_engine.RubricItem(item_id="a", kind="required", text="Gives an example", weight=100)
+    ]
+    general = scoring_service._build_scoring_prompt("Q?", "A", plain)
+    assert "derived from an SOP" not in general
+    assert "No SOP applies to this question" in general
+    assert "SOP SECTIONS" not in general
+
+    quoted = [
+        scoring_engine.RubricItem(
+            item_id="a",
+            kind="required",
+            text="Gets sign-off",
+            weight=100,
+            source_quote="The Quality Manager signs the release form.",
+        )
+    ]
+    assert "derived from an SOP" in scoring_service._build_scoring_prompt("Q?", "A", quoted)
+
+
 def test_an_ordinal_answer_resolves_to_the_right_item():
     rubric = [
         scoring_engine.RubricItem(item_id="uuid-a", kind="required", text="A", weight=50),
