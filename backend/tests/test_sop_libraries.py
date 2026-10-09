@@ -27,8 +27,8 @@ async def test_libraries_are_created_renamed_and_listed_with_their_counts(client
     assert listed["Clinical SOPs"]["document_count"] == 1
     assert listed["SOP library"]["document_count"] == 0  # the default one, from the migration
 
-    renamed = await client.patch(f"{BASE}/{lib}", headers=admin_auth, json={"name": "GCO SOPs"})
-    assert renamed.json()["name"] == "GCO SOPs" and renamed.json()["document_count"] == 1
+    renamed = await client.patch(f"{BASE}/{lib}", headers=admin_auth, json={"name": "Quality SOPs"})
+    assert renamed.json()["name"] == "Quality SOPs" and renamed.json()["document_count"] == 1
     docs = (await client.get("/admin/sop/documents", headers=admin_auth)).json()
     assert [d["library_id"] for d in docs] == [lib]
 

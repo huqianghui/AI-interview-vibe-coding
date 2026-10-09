@@ -464,7 +464,7 @@ describe("SOP documents tab", () => {
     const create = vi
       .spyOn(admin, "createSopLibrary")
       .mockResolvedValue({ library_id: "lib3", name: "New SOPs", description: "", document_count: 0 });
-    const rename = vi.spyOn(admin, "updateSopLibrary").mockResolvedValue({ ...LIBRARY, name: "GCO SOPs" });
+    const rename = vi.spyOn(admin, "updateSopLibrary").mockResolvedValue({ ...LIBRARY, name: "Quality SOPs" });
     renderPage();
     await user.click(await screen.findByTestId("admin-tab-sop"));
     await user.click(await screen.findByTestId("sop-library-toggle-lib1"));
@@ -481,9 +481,9 @@ describe("SOP documents tab", () => {
     await user.click(screen.getByTestId("sop-library-rename-lib1"));
     const name = screen.getByTestId("sop-library-name-lib1");
     await user.clear(name);
-    await user.type(name, "GCO SOPs");
+    await user.type(name, "Quality SOPs");
     await user.click(screen.getByTestId("sop-library-rename-save-lib1"));
-    expect(rename).toHaveBeenCalledWith("lib1", { name: "GCO SOPs" });
+    expect(rename).toHaveBeenCalledWith("lib1", { name: "Quality SOPs" });
   });
 
   it("lists conversions with their failure reason, then a document's sections and a full section", async () => {
