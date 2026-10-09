@@ -3,6 +3,9 @@
 export function prepareMarkdown(text: string): string {
   return text
     .replace(/^[ \t]*<!--\s*PageBreak\s*-->[ \t]*$/gm, "\n\n---\n\n")
+    // Markdown stops at six levels; DI writes a deeper Word heading with 7+ "#" ("######## 7.
+    // APPENDICES"), which would show as raw text. It is shown as the deepest heading instead.
+    .replace(/^([ \t]*)#{7,}(?=[ \t])/gm, "$1######")
     .replace(/^([ \t]*):selected:[ \t]*/gm, "$1- [x] ")
     .replace(/^([ \t]*):unselected:[ \t]*/gm, "$1- [ ] ")
     .replace(/:unselected:/g, "☐")
