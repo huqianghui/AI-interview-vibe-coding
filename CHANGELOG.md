@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.63.0.0 (2026-10-10)
+
+### Changed
+- **SOP sections are sized for reading and citing: 500 to 4000 characters** (owner rule). The
+  section tree is kept as converted; what a person and the AI both use is the document's *units*:
+  the whole document if it fits, otherwise a section too long is opened into its subsections
+  (its own intro text becomes a part), and sections under 500 characters merge with their
+  neighbours under the same parent while the result fits; only one still too small joins its
+  smaller neighbour across a parent. A section with no subsections stays whole even when longer
+  (most often one big table). On live data: 2,565 sections become 410 units, median 1,389
+  characters, none under 500; 19 single sections stay longer than 4,000.
+- **The SOP tab lists a document's units** instead of the fine section tree: a merged unit is
+  named by its range ("1–3 PURPOSE / SCOPE / DEFINITIONS"), and its passage shows every section
+  in it with its own Markdown heading. The Sections column counts units.
+- **Search, AI drafting, relocation and the citation picker use the same units.** A unit is cited
+  by one reference: a run of sections in document order (`{"section": "1", "through": "3"}`) or
+  one section's own intro text (`{"section": "2", "part": "own"}`). Existing citations of single
+  sections are unchanged and still resolve; runs travel through the editor, bank bundles and
+  bank versions.
+
 ## 0.62.5.0 (2026-10-09)
 
 ### Changed
