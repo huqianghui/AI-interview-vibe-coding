@@ -30,6 +30,8 @@ living specification is [`../../SPEC.md`](../../SPEC.md) at the repo root — st
 
 ## Post-spec feature specs
 
+- [`spec-sop-libraries.md`](spec-sop-libraries.md) — SOP 文档库：每个文档属于一个文档库，上传前选定；题库绑定一个
+  文档库，生成 / 重新定位 / 手动引用都只在该库里进行；没绑定的题库用通用提示词评估；去掉 AI 主题判断。
 - [`spec-sop-section-grounding.md`](spec-sop-section-grounding.md) — 评分标准引用真实的 SOP 章节原文（完整章节，
   不截断）+ 每份 SOP 的要点摘要；替换 AI 生成评分标准时的 mock 检索。
 - [`spec-bank-versioning.md`](spec-bank-versioning.md) — 题库版本：一套题目 + 一套评分标准作为一个整体冻结，
