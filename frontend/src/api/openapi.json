@@ -405,6 +405,40 @@
         "title": "BankIn",
         "type": "object"
       },
+      "BankLibraryIn": {
+        "properties": {
+          "library_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Library Id"
+          }
+        },
+        "title": "BankLibraryIn",
+        "type": "object"
+      },
+      "BankLibraryOut": {
+        "properties": {
+          "bank": {
+            "$ref": "#/components/schemas/BankOut"
+          },
+          "cleared": {
+            "title": "Cleared",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bank",
+          "cleared"
+        ],
+        "title": "BankLibraryOut",
+        "type": "object"
+      },
       "BankOut": {
         "properties": {
           "bank_id": {
@@ -446,6 +480,17 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "sop_library_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sop Library Id"
           }
         },
         "required": [
@@ -5676,6 +5721,64 @@
         ]
       }
     },
+    "/admin/question-banks/{bank_id}/sop-library": {
+      "put": {
+        "description": "Bind the bank to an SOP library, or to none (general evaluation). Citations in the DRAFT\nrubric of documents outside the new library are cleared; publishing makes it reach interviews\n(spec-sop-libraries §7). 404 for an unknown bank or library.",
+        "operationId": "set_bank_library_admin_question_banks__bank_id__sop_library_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bank_id",
+            "required": true,
+            "schema": {
+              "title": "Bank Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BankLibraryIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BankLibraryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Set Bank Library",
+        "tags": [
+          "admin-questions"
+        ]
+      }
+    },
     "/admin/question-banks/{bank_id}/versions": {
       "get": {
         "description": "The bank's published versions, newest first (spec-bank-versioning). Read-only: a version\nexists only once an admin publishes (or an import publishes) a complete bank.",
@@ -6191,7 +6294,7 @@
     },
     "/admin/sop/libraries/{library_id}": {
       "delete": {
-        "description": "Delete an empty library. 409 while it still holds documents.",
+        "description": "Delete an empty library. 409 while it still holds documents or a bank is bound to it.",
         "operationId": "delete_library_admin_sop_libraries__library_id__delete",
         "parameters": [
           {

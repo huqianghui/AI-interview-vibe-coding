@@ -267,6 +267,36 @@ describe("AdminPage", () => {
     await waitFor(() => expect(edit).toHaveBeenCalledWith("q1", { max_follow_ups: 3 }));
   });
 
+  it("binds a bank to an SOP library, says what was cleared, and offers relocation only when bound", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    vi.spyOn(admin, "getAiFoundryConfig").mockResolvedValue(EMPTY_CFG);
+    const bank = { bank_id: "b1", name: "Demo Bank", description: "", language: "zh-CN", enabled: true, is_default: true, sop_library_id: null };
+    const banks = vi.spyOn(admin, "listBanks").mockResolvedValue([bank]);
+    vi.spyOn(admin, "listBankQuestions").mockResolvedValue([]);
+    vi.spyOn(admin, "listSopLibraries").mockResolvedValue([
+      { library_id: "lib1", name: "Widget SOPs", description: "", document_count: 3 },
+    ]);
+    vi.spyOn(admin, "getCitationRun").mockResolvedValue(null);
+    const bind = vi
+      .spyOn(admin, "setBankLibrary")
+      .mockResolvedValue({ bank: { ...bank, sop_library_id: "lib1" }, cleared: 2 });
+
+    renderPage();
+    await signIn(user);
+    await user.click(await screen.findByText("Demo Bank"));
+    const picker = await screen.findByTestId("bank-library");
+    expect(picker).toHaveValue("");
+    expect(screen.getByTestId("bank-library-hint")).toHaveTextContent("uses no SOP");
+    expect(screen.queryByTestId("relocate-citations")).not.toBeInTheDocument();
+
+    banks.mockResolvedValue([{ ...bank, sop_library_id: "lib1" }]);
+    await user.selectOptions(picker, "lib1");
+    expect(bind).toHaveBeenCalledWith("b1", "lib1");
+    expect(await screen.findByTestId("bank-library-hint")).toHaveTextContent("2 rubric items cited documents outside it");
+    expect(await screen.findByTestId("relocate-citations")).toBeInTheDocument();
+  });
+
   it("opens a question's rubric from a click anywhere on its row, but not from its controls", async () => {
     const user = userEvent.setup();
     mockAdminLogin();

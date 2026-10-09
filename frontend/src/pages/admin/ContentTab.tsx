@@ -9,6 +9,7 @@ import {
   Dropdown,
   Input,
   Option,
+  Select,
   Text,
   Title3,
   tokens,
@@ -183,16 +184,51 @@ export function ContentTab({ state, guard }: { state: ContentTabState; guard: Gu
             }
           />
           {publishResult && <PublishOutcome result={publishResult} />}
-          <RelocateCitations
-            bankId={selectedBank}
-            onDone={state.reloadAfterRelocate}
-            onOpenQuestion={(row) => {
-              // Rows name their question by text (and 1-based ask order, the fallback).
-              const q =
-                questions.find((x) => x.text === row.question) ?? questions[row.question_no - 1];
-              if (q) void openRubric(q.question_id);
-            }}
-          />
+          {/* The SOP library the bank draws on (spec-sop-libraries): drafting, relocating and
+              citing a section only ever look in it; none = general evaluation, no SOP. */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <Text size={200} weight="semibold">
+              {t("admin.bankLibrary.label")}
+            </Text>
+            <Select
+              size="small"
+              aria-label={t("admin.bankLibrary.label")}
+              data-testid="bank-library"
+              value={currentBank?.sop_library_id ?? ""}
+              onChange={(_, d) => void state.setBankLibrary(d.value || null)}
+            >
+              <option value="">{t("admin.bankLibrary.none")}</option>
+              {/* Until the libraries load, still name the bound one rather than show "No SOP". */}
+              {currentBank?.sop_library_id &&
+                !state.libraries.some((l) => l.library_id === currentBank.sop_library_id) && (
+                  <option value={currentBank.sop_library_id}>{t("admin.bankLibrary.loading")}</option>
+                )}
+              {state.libraries.map((lib) => (
+                <option key={lib.library_id} value={lib.library_id}>
+                  {lib.name}
+                </option>
+              ))}
+            </Select>
+            <Text size={200} data-testid="bank-library-hint">
+              {state.libraryResult
+                ? t("admin.bankLibrary.cleared", { count: state.libraryResult.cleared })
+                : currentBank?.sop_library_id
+                  ? t("admin.bankLibrary.boundHint")
+                  : t("admin.bankLibrary.noneHint")}
+            </Text>
+          </div>
+          {currentBank?.sop_library_id && (
+            <RelocateCitations
+              bankId={selectedBank}
+              onDone={state.reloadAfterRelocate}
+              onOpenQuestion={(row) => {
+                // Rows name their question by text (and 1-based ask order, the fallback).
+                const q =
+                  questions.find((x) => x.text === row.question) ?? questions[row.question_no - 1];
+                if (q) void openRubric(q.question_id);
+              }}
+            />
+          )}
           <ul className={styles.list} data-testid="question-list">
             {questions.map((q, i) => (
               // Clicking anywhere on the row opens its rubric, like the Rubric button; the
@@ -385,6 +421,7 @@ export function ContentTab({ state, guard }: { state: ContentTabState; guard: Gu
                     <CitationEditor
                       refs={it.source_refs ?? []}
                       index={i}
+                      libraryId={currentBank?.sop_library_id ?? null}
                       onChange={(refs) => setItem(i, { source_refs: refs })}
                     />
                     {it.source_quote && (

@@ -795,6 +795,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/question-banks/{bank_id}/sop-library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Bank Library
+         * @description Bind the bank to an SOP library, or to none (general evaluation). Citations in the DRAFT
+         *     rubric of documents outside the new library are cleared; publishing makes it reach interviews
+         *     (spec-sop-libraries §7). 404 for an unknown bank or library.
+         */
+        put: operations["set_bank_library_admin_question_banks__bank_id__sop_library_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/question-banks/{bank_id}/versions": {
         parameters: {
             query?: never;
@@ -984,7 +1006,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Library
-         * @description Delete an empty library. 409 while it still holds documents.
+         * @description Delete an empty library. 409 while it still holds documents or a bank is bound to it.
          */
         delete: operations["delete_library_admin_sop_libraries__library_id__delete"];
         options?: never;
@@ -1698,6 +1720,17 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** BankLibraryIn */
+        BankLibraryIn: {
+            /** Library Id */
+            library_id?: string | null;
+        };
+        /** BankLibraryOut */
+        BankLibraryOut: {
+            bank: components["schemas"]["BankOut"];
+            /** Cleared */
+            cleared: number;
+        };
         /** BankOut */
         BankOut: {
             /** Bank Id */
@@ -1719,6 +1752,8 @@ export interface components {
             latest_version_no?: number | null;
             /** Name */
             name: string;
+            /** Sop Library Id */
+            sop_library_id?: string | null;
         };
         /** BankVersionOut */
         BankVersionOut: {
@@ -4197,6 +4232,41 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_bank_library_admin_question_banks__bank_id__sop_library_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bank_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BankLibraryIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BankLibraryOut"];
+                };
             };
             /** @description Validation Error */
             422: {
