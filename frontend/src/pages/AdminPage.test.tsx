@@ -901,40 +901,66 @@ describe("AdminPage", () => {
       const bankSelect = await screen.findByTestId("user-assign-bank-user1");
       await waitFor(() => expect(bankSelect).toHaveTextContent("Default (Default bank)"));
       await user.selectOptions(bankSelect, "b2");
+      // A change is staged, not saved: nothing goes out until Save.
+      expect(save).not.toHaveBeenCalled();
+      expect(screen.getByTestId("users-save-status")).toHaveTextContent("1 user changed, not saved yet");
+      await user.click(screen.getByTestId("users-save"));
       // A new bank starts on its latest rubric version: null asks the backend to pick it.
       expect(save).toHaveBeenCalledWith("u1", { persona_id: null, bank_id: "b2", bank_version_id: null });
-      expect(await screen.findByTestId("user-assign-saved-user1")).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByTestId("users-save-status")).toHaveTextContent("Saved 1 user"));
+      // Nothing but the hint above the table says so; the rows hold only data and controls.
+      expect(screen.getByTestId("user-row-user1")).not.toHaveTextContent(/saved/i);
+      expect(screen.getByTestId("users-save")).toBeDisabled();
       // Admin accounts are not interviewed: no assignment. Interview results have their own tab.
       expect(screen.queryByTestId("user-assign-bank-test-admin")).not.toBeInTheDocument();
       expect(screen.queryByTestId("user-interviews-user1")).not.toBeInTheDocument();
     });
 
-    it("shows a failed save next to the row", async () => {
+    it("shows a failed save above the table, naming the user", async () => {
       const user = userEvent.setup();
       vi.spyOn(admin, "setUserAssignment").mockRejectedValue(new Error("Unknown or disabled question bank"));
       await openUsersTab(user);
       await user.selectOptions(await screen.findByTestId("user-assign-persona-user1"), "p2");
-      expect(await screen.findByText(/Unknown or disabled question bank/)).toHaveAttribute("role", "alert");
+      await user.click(screen.getByTestId("users-save"));
+      const alert = await screen.findByTestId("users-save-errors");
+      expect(alert).toHaveTextContent("1 user could not be saved: user1: Unknown or disabled question bank");
+      expect(screen.getByTestId("users-save-bar")).toContainElement(alert); // above the table
+      expect(screen.getByTestId("user-row-user1")).not.toHaveTextContent(/Unknown or disabled/);
+      // The change stays staged, so Save can be tried again.
+      expect(screen.getByTestId("users-save")).toBeEnabled();
+      expect(screen.getByTestId("user-assign-persona-user1")).toHaveValue("p2");
     });
 
-    it("a second quick change on one row keeps the first", async () => {
+    it("discards staged changes", async () => {
       const user = userEvent.setup();
-      let release: () => void = () => {};
-      const save = vi.spyOn(admin, "setUserAssignment").mockImplementation(
-        () =>
-          new Promise((resolve) => {
-            release = () => resolve(CANDIDATE);
-          }),
-      );
+      const save = vi.spyOn(admin, "setUserAssignment");
+      await openUsersTab(user);
+      const persona = await screen.findByTestId("user-assign-persona-user1");
+      await user.selectOptions(persona, "p2");
+      await user.click(screen.getByTestId("users-discard"));
+      expect(persona).toHaveValue("");
+      expect(screen.getByTestId("users-save")).toBeDisabled();
+      expect(save).not.toHaveBeenCalled();
+    });
+
+    it("saves several changes on one row together", async () => {
+      const user = userEvent.setup();
+      const save = vi.spyOn(admin, "setUserAssignment").mockResolvedValue(CANDIDATE);
       await openUsersTab(user);
       await user.selectOptions(await screen.findByTestId("user-assign-persona-user1"), "p2");
-      await user.selectOptions(screen.getByTestId("user-assign-bank-user1"), "b2"); // first still in flight
-      expect(save).toHaveBeenLastCalledWith("u1", {
-        persona_id: "p2",
-        bank_id: "b2",
-        bank_version_id: null,
-      });
-      release();
+      await user.selectOptions(screen.getByTestId("user-assign-bank-user1"), "b2");
+      await user.click(screen.getByTestId("users-save"));
+      expect(save).toHaveBeenCalledTimes(1);
+      expect(save).toHaveBeenCalledWith("u1", { persona_id: "p2", bank_id: "b2", bank_version_id: null });
+    });
+
+    it("a change put back to what was saved is not a change", async () => {
+      const user = userEvent.setup();
+      await openUsersTab(user);
+      const persona = await screen.findByTestId("user-assign-persona-user1");
+      await user.selectOptions(persona, "p2");
+      await user.selectOptions(persona, "");
+      expect(screen.getByTestId("users-save")).toBeDisabled();
     });
 
     it("picks a rubric version of the assigned bank, defaulting to its latest", async () => {
@@ -964,6 +990,7 @@ describe("AdminPage", () => {
       const picker = await screen.findByTestId("user-assign-version-user2");
       await waitFor(() => expect(picker).toHaveTextContent("v2 · 2026-10-08 (latest)"));
       await user.selectOptions(picker, "v1");
+      await user.click(screen.getByTestId("users-save"));
       expect(save).toHaveBeenLastCalledWith("u2", {
         persona_id: null,
         bank_id: "b2",

@@ -35,26 +35,6 @@ function PasswordCell({ u, state }: { u: AdminUser; state: UsersTabState }) {
   );
 }
 
-function AssignStatus({ u, state }: { u: AdminUser; state: UsersTabState }) {
-  const { t } = useTranslation();
-  const status = state.assignStatus[u.id];
-  if (status?.kind === "saved") {
-    return (
-      <Text size={200} data-testid={`user-assign-saved-${u.username}`}>
-        {t("admin.users.assignSaved")}
-      </Text>
-    );
-  }
-  if (status?.kind === "error") {
-    return (
-      <Text size={200} role="alert" style={{ color: tokens.colorPaletteRedForeground1 }}>
-        {t("admin.users.assignError", { message: status.message })}
-      </Text>
-    );
-  }
-  return null;
-}
-
 function PersonaSelect({ u, state }: { u: AdminUser; state: UsersTabState }) {
   const { t } = useTranslation();
   const defaultPersona = state.personas.find((p) => p.is_default && p.enabled);
@@ -125,6 +105,10 @@ function VersionSelect({ u, state }: { u: AdminUser; state: UsersTabState }) {
       )}
       {/* A bank never published has no version: its interviews read the current draft. */}
       {versions?.length === 0 && <option value="">{t("admin.versionNeverPublished")}</option>}
+      {/* A bank just picked starts on its latest version, which the save resolves. */}
+      {!u.assigned_bank_version_id && !!versions?.length && (
+        <option value="">{t("admin.users.versionLatestPending")}</option>
+      )}
       {(versions ?? []).map((v) => (
         <option key={v.id} value={v.id}>
           {t(v.is_latest ? "admin.users.versionLatest" : "admin.users.versionOption", {
@@ -152,7 +136,7 @@ export function UsersTab({ state }: { state: UsersTabState }) {
       text: (u) => statusText(u),
       cell: (u) => statusText(u),
     },
-    { id: "password", header: t("admin.users.colPassword"), width: 240, cell: (u) => <PasswordCell u={u} state={state} /> },
+    { id: "password", header: t("admin.users.colPassword"), width: 220, cell: (u) => <PasswordCell u={u} state={state} /> },
     {
       id: "interviewer",
       header: t("admin.users.colInterviewer"),
@@ -169,13 +153,7 @@ export function UsersTab({ state }: { state: UsersTabState }) {
       id: "version",
       header: t("admin.users.bankVersion"),
       width: 200,
-      cell: (u) =>
-        candidate(u) ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: tokens.spacingVerticalXS }}>
-            <VersionSelect u={u} state={state} />
-            <AssignStatus u={u} state={state} />
-          </div>
-        ) : null,
+      cell: (u) => (candidate(u) ? <VersionSelect u={u} state={state} /> : null),
     },
   ];
   function statusText(u: AdminUser) {
@@ -194,9 +172,55 @@ export function UsersTab({ state }: { state: UsersTabState }) {
           </Body1>
         )}
         {!usersLoading && !usersError && (
+          <div
+            style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 0 8px" }}
+            data-testid="users-save-bar"
+          >
+            <Button
+              appearance="primary"
+              size="small"
+              disabled={state.changedCount === 0 || state.saving}
+              onClick={() => void state.save()}
+              data-testid="users-save"
+            >
+              {state.saving ? t("admin.users.saving") : t("admin.users.save")}
+            </Button>
+            <Button
+              size="small"
+              disabled={state.changedCount === 0 || state.saving}
+              onClick={state.discard}
+              data-testid="users-discard"
+            >
+              {t("admin.users.discard")}
+            </Button>
+            <Text size={200} data-testid="users-save-status">
+              {state.changedCount > 0
+                ? t("admin.users.unsavedCount", { count: state.changedCount })
+                : state.saveResult?.kind === "saved"
+                  ? t("admin.users.savedCount", { count: state.saveResult.count })
+                  : ""}
+            </Text>
+            {/* Every message stays up here, never in the rows (owner: keep the table clean). */}
+            {Object.keys(state.rowErrors).length > 0 && (
+              <Text
+                size={200}
+                role="alert"
+                data-testid="users-save-errors"
+                style={{ color: tokens.colorPaletteRedForeground1 }}
+              >
+                {t("admin.users.saveFailed", { count: Object.keys(state.rowErrors).length })}{" "}
+                {users
+                  .filter((u) => state.rowErrors[u.id])
+                  .map((u) => `${u.username}: ${state.rowErrors[u.id]}`)
+                  .join("; ")}
+              </Text>
+            )}
+          </div>
+        )}
+        {!usersLoading && !usersError && (
           <DataTable
             testId="users-table"
-            items={users}
+            items={users.map(state.rowOf)}
             getRowId={(u) => u.id}
             rowProps={(u) => ({ "data-testid": `user-row-${u.username}` })}
             columns={columns}

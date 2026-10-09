@@ -27,7 +27,7 @@ import { InterviewDetailView, StatusBadge } from "../../components/InterviewHist
 import { InterviewRecordings } from "./InterviewRecordings";
 import { DataTable, type DataColumn } from "../../components/DataTable";
 import type { InterviewResultItem } from "../../api/admin";
-import { formatWhen } from "../../components/transcriptText";
+import { formatWhenShort } from "../../components/transcriptText";
 import { useAdminStyles } from "./shared";
 import { PAGE_SIZES, type InterviewsTabState, type SortKey } from "./useInterviewsTab";
 
@@ -126,7 +126,7 @@ export function InterviewsTab({ state }: { state: InterviewsTabState }) {
   const from = state.total === 0 ? 0 : state.page * state.pageSize + 1;
   const to = Math.min(state.total, (state.page + 1) * state.pageSize);
   const hasFilters = Object.keys(filters).length > 0;
-  const when = (v: string | null) => formatWhen(v, i18n.language);
+  const when = (v: string | null) => formatWhenShort(v, i18n.language);
   const columns: DataColumn<InterviewResultItem>[] = [
     {
       id: "candidate",

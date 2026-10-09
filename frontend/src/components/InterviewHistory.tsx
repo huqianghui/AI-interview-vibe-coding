@@ -29,7 +29,7 @@ import type {
 } from "../api/client";
 import { ReportView } from "./ReportView";
 import { SopOpenerContext } from "./sopOpener";
-import { formatWhen, transcriptText } from "./transcriptText";
+import { formatWhen, formatWhenShort, transcriptText } from "./transcriptText";
 import { fonts, palette } from "../theme";
 
 const useStyles = makeStyles({
@@ -108,7 +108,7 @@ export function InterviewHistoryTable({
   if (items.length === 0) {
     return <Body1 data-testid={`${testId}-empty`}>{t("history.empty")}</Body1>;
   }
-  const when = (v: string | null) => formatWhen(v, i18n.language);
+  const when = (v: string | null) => formatWhenShort(v, i18n.language);
   const score = (it: InterviewHistoryItem) => (it.total_score == null ? "—" : `${it.total_score}/100`);
   const columns: DataColumn<InterviewHistoryItem>[] = [
     { id: "started", header: t("history.colStarted"), text: (it) => when(it.started_at), cell: (it) => when(it.started_at) },
