@@ -144,7 +144,12 @@ async def list_libraries(db: AsyncSession = Depends(get_db)) -> list[SopLibraryO
 def _library_error(exc: Exception) -> HTTPException:
     if isinstance(exc, sop_library_service.LibraryNotFound):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Library not found")
-    if isinstance(exc, sop_library_service.LibraryNameTaken | sop_library_service.LibraryNotEmpty):
+    if isinstance(
+        exc,
+        sop_library_service.LibraryNameTaken
+        | sop_library_service.LibraryNotEmpty
+        | sop_library_service.LibraryInUse,
+    ):
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     # 422 literal: the constant was renamed across Starlette versions (as for 413 below).
     return HTTPException(status_code=422, detail=str(exc))
@@ -155,6 +160,7 @@ _LIBRARY_ERRORS = (
     sop_library_service.LibraryNameTaken,
     sop_library_service.LibraryNotEmpty,
     sop_library_service.LibraryNameInvalid,
+    sop_library_service.LibraryInUse,
 )
 
 
@@ -185,7 +191,7 @@ async def update_library(
 
 @router.delete("/libraries/{library_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_library(library_id: str, db: AsyncSession = Depends(get_db)) -> None:
-    """Delete an empty library. 409 while it still holds documents."""
+    """Delete an empty library. 409 while it still holds documents or a bank is bound to it."""
     try:
         await sop_library_service.delete_library(db, library_id)
     except _LIBRARY_ERRORS as exc:

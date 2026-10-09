@@ -35,6 +35,10 @@ class LibraryNameInvalid(Exception):
     pass
 
 
+class LibraryInUse(Exception):
+    """A question bank is bound to the library (spec-sop-libraries): rebind it first."""
+
+
 @dataclass(frozen=True)
 class LibraryRow:
     library: SopLibrary
@@ -100,6 +104,21 @@ async def delete_library(db: AsyncSession, library_id: str) -> None:
     )
     if held:
         raise LibraryNotEmpty(f"The library still holds {held} document(s)")
+    from app.models.question import QuestionBank
+
+    banks = (
+        (
+            await db.execute(
+                select(QuestionBank.name).where(QuestionBank.sop_library_id == library_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if banks:
+        raise LibraryInUse(
+            "The library is used by question bank(s): " + ", ".join(banks) + ". Rebind them first."
+        )
     await db.delete(library)
     try:
         await db.commit()

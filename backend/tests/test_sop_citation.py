@@ -9,7 +9,7 @@ import json
 import pytest
 
 from app.interview import state_machine
-from app.models.sop import SopDocument, SopSection
+from app.models.sop import DEFAULT_LIBRARY_ID, SopDocument, SopSection
 from app.services import (
     bank_bundle_service,
     bank_version_service,
@@ -88,6 +88,8 @@ async def test_refs_are_parsed_strictly_and_resolve_to_the_full_section(db_sessi
 
 async def _bank_question(db, text="How is a widget released?"):
     bank = await question_service.create_bank(db, name="Widgets", is_default=True)
+    # SOP-grounded: bound to the library its documents are in (spec-sop-libraries).
+    bank.sop_library_id = DEFAULT_LIBRARY_ID
     q = await question_service.add_question(
         db, bank_id=bank.id, text=text, order_index=0, expected_points=json.dumps([])
     )
@@ -127,6 +129,86 @@ async def test_the_editor_round_trips_refs_and_drops_a_section_that_does_not_exi
         f"/admin/checklists/{checklist.id}/items", headers=admin_auth, json={"items": items}
     )
     assert [r["section"] for r in again.json()["items"][0]["source_refs"]] == ["4.2"]
+
+
+async def test_the_editor_cannot_cite_a_document_outside_the_banks_library(
+    client, db_session, admin_auth
+):
+    from app.models.sop import SopLibrary
+
+    doc = await _widget_sop(db_session)
+    other = SopLibrary(name="Elsewhere")
+    db_session.add(other)
+    await db_session.flush()
+    foreign = SopDocument(
+        name="Foreign SOP.pdf",
+        status="chunked",
+        markdown_source="text",
+        markdown="x",
+        library_id=other.id,
+    )
+    db_session.add(foreign)
+    await db_session.flush()
+    db_session.add(
+        SopSection(
+            document_id=foreign.id,
+            order_index=0,
+            number="1",
+            title="Scope",
+            level=1,
+            page_start=1,
+            page_end=1,
+            text="Applies to gadgets.",
+        )
+    )
+    await db_session.commit()
+    foreign_id = foreign.id
+    _, q, checklist = await _bank_question(db_session)
+    got = (await client.get(f"/admin/checklists/questions/{q.id}", headers=admin_auth)).json()
+    items = [
+        {k: it[k] for k in ("kind", "text", "weight", "source_quote", "source_page")}
+        for it in got["items"]
+    ]
+    items[0]["source_refs"] = [
+        {"document_id": foreign_id, "section": "1"},
+        {"document_id": doc, "section": "4.2"},
+    ]
+    saved = await client.put(
+        f"/admin/checklists/{checklist.id}/items", headers=admin_auth, json={"items": items}
+    )
+    first = saved.json()["items"][0]
+    assert [r["section"] for r in first["source_refs"]] == ["4.2"]  # the foreign one is dropped
+    assert first["source_document_id"] == doc
+
+
+async def test_an_imported_bank_that_cites_an_sop_is_bound_to_its_library(db_session):
+    """A bundle import (and the boot-time importer) creates the bank: citing an SOP binds it."""
+    from app.models.question import QuestionBank
+    from app.models.sop import DEFAULT_LIBRARY_ID
+
+    await _widget_sop(db_session)
+    bundle = {
+        "bank": {"name": "Imported", "language": "en-US"},
+        "questions": [
+            {
+                "text": "How is a release approved?",
+                "checklist": {
+                    "items": [
+                        {
+                            "kind": "required",
+                            "text": "Gets sign-off",
+                            "weight": 100,
+                            "source_document_name": "Widget SOP.pdf",
+                            "source_refs": [{"document_name": "Widget SOP.pdf", "section": "4.2"}],
+                        }
+                    ]
+                },
+            }
+        ],
+    }
+    result = await bank_bundle_service.import_bank_bundle(db_session, bundle)
+    bank = await db_session.get(QuestionBank, result.bank_id)
+    assert bank.sop_library_id == DEFAULT_LIBRARY_ID
 
 
 async def test_refs_travel_in_bundles_by_document_name_and_in_versions(db_session):

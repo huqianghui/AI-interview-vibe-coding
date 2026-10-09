@@ -33,6 +33,12 @@ class QuestionBank(TimestampMixin, Base):
     language: Mapped[str] = mapped_column(String(16), default="en-US", nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # The SOP library this bank's rubric draws on (spec-sop-libraries §3): drafting, relocating
+    # and citing a section only ever look in it. None = no SOP, general evaluation. An authoring
+    # setting of the bank, not part of a published version (the citations themselves are).
+    sop_library_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("sop_libraries.id"), nullable=True
+    )
 
     __table_args__ = (
         # SPEC F2 (mirrors F5 persona): at most one enabled default bank, enforced in the DB.

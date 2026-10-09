@@ -5,12 +5,15 @@ import json
 
 import pytest
 
+from app.models.sop import DEFAULT_LIBRARY_ID
 from app.services import checklist_service as svc
 from app.services import question_service
 
 
 async def _question(db, *, text="Describe the safety procedure.", points=None):
     bank = await question_service.create_bank(db, name="B", is_default=True)
+    # SOP-grounded: bound to the library its documents are in (spec-sop-libraries).
+    bank.sop_library_id = DEFAULT_LIBRARY_ID
     return await question_service.add_question(
         db,
         bank_id=bank.id,
@@ -209,12 +212,12 @@ async def test_a_drafted_citation_survives_only_if_it_can_be_checked(db_session,
 
 
 @pytest.mark.asyncio
-async def test_a_bank_about_another_subject_is_drafted_without_sop_sections(
-    db_session, monkeypatch
-):
+@pytest.mark.parametrize("bound_to", ["none", "other"])
+async def test_a_bank_is_drafted_only_from_its_own_sop_library(db_session, monkeypatch, bound_to):
     """A behavioural bank grounded in clinical SOPs got clinical rubric items (live Demo bank,
-    2026-10-09): when the bank is judged off the library's subject, the model sees no sections."""
-    from app.models.sop import SopDocument, SopSection
+    2026-10-09). A bank bound to no library, or to another one, sees none of these sections."""
+    from app.models.question import QuestionBank
+    from app.models.sop import SopDocument, SopLibrary, SopSection
 
     doc = SopDocument(name="Safety SOP.pdf", status="chunked", markdown_source="text")
     db_session.add(doc)
@@ -228,25 +231,28 @@ async def test_a_bank_about_another_subject_is_drafted_without_sop_sections(
             text="Every serious adverse event is reported to safety within 24 hours.",
         )
     )
+    other = SopLibrary(name="Software SOPs")
+    db_session.add(other)
     await db_session.commit()
     prompts: list[str] = []
 
-    class OffTopicLLM:
+    class ScriptedLLM:
         name = "scripted"
 
         async def complete(self, prompt, *, json_mode=False, fast=False):
             prompts.append(prompt)
-            if "deciding whether a question bank" in prompt:
-                return '{"about": false}'
             item = '{"kind": "required", "text": "Gives a concrete example", "weight": 100}'
             return '{"items": [' + item + "]}"
 
         async def stream(self, prompt):
             yield ""
 
-    monkeypatch.setattr(svc, "get_llm_adapter", lambda name=None: OffTopicLLM())
+    monkeypatch.setattr(svc, "get_llm_adapter", lambda name=None: ScriptedLLM())
     q = await _question(db_session, text="Tell me about a time you caught a serious mistake.")
+    bank = await db_session.get(QuestionBank, q.bank_id)
+    bank.sop_library_id = None if bound_to == "none" else other.id
+    await db_session.commit()
     await svc.draft_checklist(db_session, q.id)
-    draft_prompt = next(p for p in prompts if "drafting a scoring checklist" in p)
+    (draft_prompt,) = prompts  # one call: no topic check any more
     assert "(no SOP section found for this question)" in draft_prompt
     assert "SAE reporting" not in draft_prompt

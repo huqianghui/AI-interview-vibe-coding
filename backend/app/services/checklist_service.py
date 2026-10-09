@@ -30,7 +30,7 @@ from app.interview.checklist_draft import (
 )
 from app.interview.questions import parse_points
 from app.models.checklist import CHECKLIST_ITEM_KINDS, Checklist, ChecklistItem
-from app.models.question import Question
+from app.models.question import Question, QuestionBank
 from app.models.sop import SopDocument
 from app.services import sop_citation, sop_citation_service, sop_search
 from app.services.agents.registry import get_llm_adapter
@@ -121,30 +121,15 @@ async def draft_checklist(
     if question is None:
         raise QuestionNotFound(question_id)
 
-    # 1. The SOP sections most relevant to the question, from our own converted documents — but
-    # only for a bank about the SOP library's subject. A behavioural or software bank grounded in
-    # clinical SOPs gets clinical rubric items ("states that an SAE was identified" for "tell me
-    # about a time you caught a mistake", measured on the live Demo bank 2026-10-09), so its
-    # questions are drafted from the question alone. Same decision as relocation, one per bank.
+    # 1. The SOP sections most relevant to the question, from the documents of the SOP library the
+    # bank is bound to (spec-sop-libraries). A bank bound to none (a behavioural or software
+    # bank, which grounded in clinical SOPs got clinical items, measured 2026-10-09) is drafted
+    # from the question alone.
     llm = get_llm_adapter(llm_provider)
-    bank_questions = (
-        (
-            await db.execute(
-                select(Question.text)
-                .where(Question.bank_id == question.bank_id)
-                .order_by(Question.order_index)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    library = await sop_citation_service.library(db)
+    library_id = await sop_citation_service.bank_library(db, question.bank_id)
     candidates: list[CitedSection] = []
-    if (
-        await sop_citation_service.bank_is_about_the_sops(llm, list(bank_questions), library)
-        is not False
-    ):
-        index = await sop_search.load_index(db)
+    if library_id is not None:
+        index = await sop_search.load_index(db, library_id)
         candidates = await sop_citation_service.candidates_for(db, index, question.text)
     # Only reads so far: end the transaction so no pooled connection waits on the LLM.
     await db.commit()
@@ -188,8 +173,27 @@ async def draft_checklist(
 
 
 async def _persist_draft(db: AsyncSession, question_id: str, draft: ChecklistDraft) -> Checklist:
-    """Persist a draft as the new default checklist for a question; demote prior defaults."""
-    await drop_missing_refs(db, draft.items)
+    """Persist a draft as the new default checklist for a question; demote prior defaults.
+
+    A bank bound to no SOP library that is given a rubric citing an SOP (a bundle import, the
+    boot-time bank importer) is bound to the library of the first document cited: the same rule
+    as the migration (spec-sop-libraries §8). Drafting cites only within a bank's own library, so
+    it never binds anything."""
+    bank = await db.scalar(
+        select(QuestionBank)
+        .join(Question, Question.bank_id == QuestionBank.id)
+        .where(Question.id == question_id)
+    )
+    if bank is not None and bank.sop_library_id is not None:
+        # A bound bank (a re-import, a draft) keeps only citations of its own library.
+        await drop_missing_refs(db, draft.items, bank.sop_library_id)
+    else:
+        await drop_missing_refs(db, draft.items)
+        cited = next((it.source_document_id for it in draft.items if it.source_document_id), None)
+        if bank is not None and cited is not None:
+            bank.sop_library_id = await db.scalar(
+                select(SopDocument.library_id).where(SopDocument.id == cited)
+            )
     for prior in await _default_checklists(db, question_id):
         prior.is_default = False
 
@@ -256,16 +260,43 @@ async def document_names(db: AsyncSession, document_ids: set[str]) -> dict[str, 
     return {doc_id: name for doc_id, name in rows}
 
 
-async def drop_missing_refs(db: AsyncSession, items: list[DraftItem]) -> None:
+_ANY_LIBRARY = object()
+
+
+async def drop_missing_refs(
+    db: AsyncSession, items: list[DraftItem], library_id: object = _ANY_LIBRARY
+) -> None:
     """Drop each item's citations of sections that do not exist (scoring would read nothing), in
     one lookup, and make the primary citation's document the item's linked document, so the
-    report's link opens the document its label names."""
+    report's link opens the document its label names.
+
+    With ``library_id`` (the bank's SOP library, or None for a bank bound to none), a citation of
+    a document outside that library is dropped too (spec-sop-libraries §4)."""
     parsed = [sop_citation.parse_refs(it.source_refs) for it in items]
     gone = set(await sop_citation.missing(db, [r for refs in parsed for r in refs]))
+    allowed: set[str] | None = None
+    if library_id is not _ANY_LIBRARY:
+        allowed = (
+            set(
+                (
+                    await db.execute(
+                        select(SopDocument.id).where(SopDocument.library_id == library_id)
+                    )
+                ).scalars()
+            )
+            if library_id is not None
+            else set()
+        )
     for it, refs in zip(items, parsed, strict=True):
-        it.source_refs = [r.as_dict() for r in refs if r not in gone]
+        it.source_refs = [
+            r.as_dict()
+            for r in refs
+            if r not in gone and (allowed is None or r.document_id in allowed)
+        ]
         if it.source_refs:
             it.source_document_id = it.source_refs[0]["document_id"]
+        elif allowed is not None and it.source_document_id not in allowed:
+            it.source_document_id = None
 
 
 async def _keep_item_sources(
@@ -273,6 +304,7 @@ async def _keep_item_sources(
     items: list[DraftItem],
     raw_items: list[dict],
     existing: Sequence[ChecklistItem],
+    library_id: object = _ANY_LIBRARY,
 ) -> None:
     """Keep each edited item's SOP link and advisory flag (they were lost on every editor save).
 
@@ -297,8 +329,8 @@ async def _keep_item_sources(
         if "source_refs" not in raw and previous is not None:
             item.source_refs = [r.as_dict() for r in sop_citation.parse_refs(previous.source_refs)]
     # A cited section that does not exist is dropped, not stored: scoring would read nothing. One
-    # lookup for the whole checklist.
-    await drop_missing_refs(db, items)
+    # lookup for the whole checklist. Only the bank's own library may be cited.
+    await drop_missing_refs(db, items, library_id)
     wanted = {it.source_document_id for it in items if it.source_document_id}
     if not wanted:
         return
@@ -330,7 +362,9 @@ async def update_items(
 
     existing_rows = list(await list_items(db, checklist_id))
     items = parse_draft_items(raw_items, trust_item_sources=True)
-    await _keep_item_sources(db, items, raw_items, existing_rows)
+    bank_id = await db.scalar(select(Question.bank_id).where(Question.id == checklist.question_id))
+    library_id = await sop_citation_service.bank_library(db, bank_id) if bank_id else _ANY_LIBRARY
+    await _keep_item_sources(db, items, raw_items, existing_rows, library_id)
     normalize_weights(items)
 
     # Replace: delete existing rows, then write the edited set.
