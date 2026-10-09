@@ -2,7 +2,9 @@
  * layout (filter fields above the table, the pager line below it). */
 import { makeStyles, tokens } from "@fluentui/react-components";
 
-export const PAGE_SIZES = [20, 50, 100] as const;
+export const PAGE_SIZES = [5, 10, 20, 50, 100] as const;
+// Owner, 2026-10-09: 5 and 10 are offered too, the default stays 20.
+export const DEFAULT_PAGE_SIZE = 20;
 
 export const useTableToolbarStyles = makeStyles({
   filters: {
