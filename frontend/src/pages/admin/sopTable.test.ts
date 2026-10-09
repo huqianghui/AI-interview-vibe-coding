@@ -43,3 +43,11 @@ describe("sopTable", () => {
     expect(pageOf([], 3, 20)).toEqual({ page: 0, rows: [] });
   });
 });
+
+describe("page sizes", () => {
+  it("offers 5 and 10 as well, and defaults to 20 (owner, 2026-10-09)", async () => {
+    const { PAGE_SIZES, DEFAULT_PAGE_SIZE } = await import("../../components/tableToolbar");
+    expect(PAGE_SIZES).toEqual([5, 10, 20, 50, 100]);
+    expect(DEFAULT_PAGE_SIZE).toBe(20);
+  });
+});

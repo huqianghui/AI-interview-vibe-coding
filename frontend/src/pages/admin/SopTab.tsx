@@ -22,7 +22,7 @@ import { ChevronDownRegular, ChevronRightRegular } from "@fluentui/react-icons";
 import type { SopDocument, SopLibrary } from "../../api/admin";
 import { DataTable, type DataColumn } from "../../components/DataTable";
 import { TablePager } from "../../components/TablePager";
-import { PAGE_SIZES, useTableToolbarStyles } from "../../components/tableToolbar";
+import { DEFAULT_PAGE_SIZE, useTableToolbarStyles } from "../../components/tableToolbar";
 import { MarkdownView } from "../../components/MarkdownView";
 import { SopSectionTree } from "./SopSectionTree";
 import { useAdminStyles } from "./shared";
@@ -185,7 +185,7 @@ function LibrarySection({
     order: "asc",
   });
   const [page, setPage] = useState(0);
-  const [pageSize, setPageSizeState] = useState<number>(PAGE_SIZES[0]);
+  const [pageSize, setPageSizeState] = useState<number>(DEFAULT_PAGE_SIZE);
   const setFilters = (change: Partial<SopFilters>) => {
     setFiltersState((prev) => ({ ...prev, ...change }));
     setPage(0);

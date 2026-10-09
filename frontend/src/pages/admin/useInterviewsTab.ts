@@ -13,9 +13,7 @@ import type {
 import type { InterviewDetail } from "../../api/client";
 import { listPersonas, type PersonaOut } from "../../api/personas";
 
-import { PAGE_SIZES } from "../../components/tableToolbar";
-
-export { PAGE_SIZES };
+import { DEFAULT_PAGE_SIZE } from "../../components/tableToolbar";
 
 // Background scoring is polled at this pace, for at most this long (~18 s per question, measured).
 // Exported so a test can shorten the wait.
@@ -34,7 +32,7 @@ export function useInterviewsTab(active: boolean) {
   const [filters, setFiltersState] = useState<InterviewResultFilters>({});
   const [sort, setSort] = useState<SortKey>("started_at");
   const [order, setOrder] = useState<"asc" | "desc">("desc");
-  const [pageSize, setPageSizeState] = useState<number>(PAGE_SIZES[0]);
+  const [pageSize, setPageSizeState] = useState<number>(DEFAULT_PAGE_SIZE);
   const [page, setPage] = useState(0); // zero-based
 
   const [items, setItems] = useState<InterviewResultItem[]>([]);

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.62.3.1 (2026-10-09)
+
+### Changed
+- **Tables offer 5 and 10 rows per page as well** (5, 10, 20, 50, 100), in both the SOP library
+  tables and Interview results; the default stays 20.
+
 ## 0.62.3.0 (2026-10-09)
 
 ### Fixed
