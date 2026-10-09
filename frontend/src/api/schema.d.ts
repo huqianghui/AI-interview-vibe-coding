@@ -2880,6 +2880,8 @@ export interface components {
             page_end: number;
             /** Page Start */
             page_start: number;
+            /** Piece */
+            piece: number;
             /** Section */
             section: string;
             /** Through */
@@ -2901,6 +2903,8 @@ export interface components {
             page_end: number;
             /** Page Start */
             page_start: number;
+            /** Piece */
+            piece: number;
             /** Section */
             section: string;
             /** Text */
@@ -2917,6 +2921,11 @@ export interface components {
              * @default
              */
             part: string;
+            /**
+             * Piece
+             * @default 0
+             */
+            piece: number;
             /** Section */
             section: string;
             /**
@@ -2943,6 +2952,11 @@ export interface components {
              * @default
              */
             part: string;
+            /**
+             * Piece
+             * @default 0
+             */
+            piece: number;
             /** Section */
             section: string;
             /**

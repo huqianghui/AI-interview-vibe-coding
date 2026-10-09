@@ -36,11 +36,11 @@ describe("CitationEditor", () => {
     vi.spyOn(admin, "listSopUnits").mockResolvedValue([
       {
         index: 0, label: "1–3 PURPOSE / SCOPE / RECORDS", page_start: 1, page_end: 2, length: 900,
-        section: "1", through: "3", own: false, members: ["1", "2", "3"],
+        section: "1", through: "3", own: false, piece: 0, members: ["1", "2", "3"],
       },
       {
         index: 1, label: "4.2 Approval", page_start: 4, page_end: 4, length: 1200,
-        section: "4.2", through: "", own: false, members: ["4.2"],
+        section: "4.2", through: "", own: false, piece: 0, members: ["4.2"],
       },
     ]);
     const existing: SourceRef = {

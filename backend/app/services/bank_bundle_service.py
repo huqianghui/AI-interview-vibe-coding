@@ -291,7 +291,7 @@ def _draft_items_from_bundle(
             # A run ("through") or a section's own text ("part") travels with the reference.
             refs.append(
                 {
-                    **{k: ref[k] for k in ("through", "part") if ref.get(k)},
+                    **{k: ref[k] for k in ("through", "part", "piece") if ref.get(k)},
                     "document_id": ref_doc,
                     "section": str(ref.get("section") or ""),
                 }

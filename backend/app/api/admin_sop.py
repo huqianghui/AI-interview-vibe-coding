@@ -108,6 +108,7 @@ class SopUnitOut(BaseModel):
     section: str
     through: str
     own: bool
+    piece: int  # 1-based piece of one long section's text; 0 = not a piece
     members: list[str]
 
 
@@ -372,7 +373,7 @@ async def section_text(
 
 
 def _unit_out(unit: Unit) -> dict:
-    section, through, own = unit.citation()
+    section, through, own, piece = unit.citation()
     return {
         "index": unit.index,
         "label": unit.label,
@@ -382,6 +383,7 @@ def _unit_out(unit: Unit) -> dict:
         "section": section,
         "through": through,
         "own": own,
+        "piece": piece,
         "members": [m.number for m in unit.members],
     }
 

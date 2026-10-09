@@ -294,3 +294,63 @@ def full_text(sections: list[ParsedSection], index: int) -> str:
 
     walk(index)
     return "\n\n".join(part for part in out if part)
+
+
+def _blocks(text: str) -> list[str]:
+    """A passage's blocks: paragraphs (split at blank lines), with an HTML table kept as one
+    block even if blank lines fall inside it (a Markdown table has none)."""
+    out: list[str] = []
+    table: list[str] | None = None
+    for para in re.split(r"\n\s*\n", text):
+        if table is not None:
+            table.append(para)
+            if "</table>" in para:
+                out.append("\n\n".join(table))
+                table = None
+            continue
+        if "<table" in para and "</table>" not in para.split("<table", 1)[1]:
+            table = [para]
+            continue
+        if para.strip():
+            out.append(para)
+    if table is not None:
+        out.append("\n\n".join(table))
+    return out
+
+
+def pieces(text: str, max_chars: int, min_chars: int = 0) -> list[str]:
+    """A passage too long for one unit, cut into balanced pieces at block boundaries (owner,
+    2026-10-10: a long section is split even without sub-headings, but a big table never is).
+    A text that fits is one piece. A table is never cut: one larger than ``max_chars`` is a piece
+    of its own. The cut is a pure function of the text, so a citation of "piece k" reads the same
+    piece every time."""
+    if len(text) <= max_chars:
+        return [text]
+    blocks = _blocks(text)
+    count = -(-len(text) // max_chars)  # ceil: as few pieces as fit, all about the same size
+    target = len(text) / count
+    out: list[str] = []
+    current: list[str] = []
+    size = 0
+    for block in blocks:
+        grown = size + (2 if current else 0) + len(block)
+        if current and (grown > max_chars or size >= target):
+            out.append("\n\n".join(current))
+            current, size = [], 0
+            grown = len(block)
+        current.append(block)
+        size = grown
+    if current:
+        out.append("\n\n".join(current))
+    # A fragment under ``min_chars`` (the line before or after a big table) joins its smaller
+    # neighbour, even past ``max_chars``: next to a table that is already over it.
+    i = 0
+    while len(out) > 1 and i < len(out):
+        if len(out[i]) >= min_chars:
+            i += 1
+            continue
+        j = min((k for k in (i - 1, i + 1) if 0 <= k < len(out)), key=lambda k: len(out[k]))
+        lo, hi = min(i, j), max(i, j)
+        out[lo : hi + 1] = [out[lo] + "\n\n" + out[hi]]
+        i = lo
+    return out

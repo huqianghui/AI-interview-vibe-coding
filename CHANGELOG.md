@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.63.2.0 (2026-10-10)
+
+### Changed
+- **A long section is split even without sub-headings, but a big table never is** (owner).
+  A section still over 4,000 characters with no subsection to open (or an opened section's own
+  intro that long) is cut at paragraph boundaries into balanced pieces, shown as
+  "5 MONITORING VISIT TYPES (1/2)" and cited as one piece (`{"section": "5", "piece": 1}`);
+  a table is never cut, so a big table stays one piece, with the line before or after it.
+  On live data: 474 units, none under 500, and only 2 over 4,000, both entirely table (the
+  training matrix). Existing citations are unchanged.
+
 ## 0.63.1.0 (2026-10-10)
 
 ### Fixed

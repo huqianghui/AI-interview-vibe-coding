@@ -18,6 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.sop import SopDocument, SopSection
 from app.services import sop_section_service
+from app.sop.sections import pieces
+from app.sop.units import MAX_CHARS, MIN_CHARS
 
 # The most references one item keeps (an imported label lists up to 8: "sections 5.1-5.8"); a
 # rubric item that "cites" a dozen sections cites nothing.
@@ -29,12 +31,15 @@ class SectionRef:
     """A cited passage: one section (with its subsections), or a run of sections in document
     order from ``section`` through ``through`` (a merged unit, app/sop/units.py), or a section's
     own text only (``own``: its subsections were cited apart). ``own`` on a run applies to its
-    last section: the run ends with ``through``'s own text, not its subsections."""
+    last section: the run ends with ``through``'s own text, not its subsections. ``piece`` (1-based)
+    is one piece of a section too long for one unit and with no subsection to open
+    (``app.sop.sections.pieces``): of its whole text, or of its own text with ``own``."""
 
     document_id: str
     section: str
     through: str = ""
     own: bool = False
+    piece: int = 0
 
     def as_dict(self) -> dict:
         out = {"document_id": self.document_id, "section": self.section}
@@ -42,6 +47,8 @@ class SectionRef:
             out["through"] = self.through
         if self.own:
             out["part"] = "own"
+        if self.piece:
+            out["piece"] = self.piece
         return out
 
 
@@ -66,7 +73,9 @@ class CitedSection:
     def span(self) -> str:
         """The section number, or the run it covers ("1–3")."""
         through = self.ref.through if self.ref else ""
-        return f"{self.number}–{through}" if through else self.number
+        piece = self.ref.piece if self.ref else 0
+        span = f"{self.number}–{through}" if through else self.number
+        return f"{span} (part {piece})" if piece else span
 
     @property
     def label(self) -> str:
@@ -106,7 +115,12 @@ def parse_refs(raw: object) -> list[SectionRef]:
         section = normalize_number(entry.get("section"))
         through = normalize_number(entry.get("through")) if entry.get("through") else ""
         own = entry.get("part") == "own"
-        ref = SectionRef(document_id, section, "" if through == section else through, own)
+        try:
+            piece = max(0, int(entry.get("piece") or 0))
+        except (TypeError, ValueError):
+            piece = 0
+        through = "" if through == section else through
+        ref = SectionRef(document_id, section, through, own, 0 if through else piece)
         if document_id and section and ref not in out:
             out.append(ref)
         if len(out) == MAX_REFS_PER_ITEM:
@@ -160,14 +174,20 @@ def _passage(sections: list[SopSection], ref: SectionRef) -> tuple[SopSection, s
     row = _find(sections, ref.section)
     if row is None:
         return None
-    if ref.own and not ref.through:
-        return row, sop_section_service.heading_block_of(row), row.page_end
     if not ref.through:
-        return (
-            row,
-            sop_section_service.full_text(sections, row.order_index),
-            sop_section_service.page_end(sections, row.order_index),
+        own = ref.own
+        text = (
+            sop_section_service.heading_block_of(row)
+            if own
+            else sop_section_service.full_text(sections, row.order_index)
         )
+        last_page = row.page_end if own else sop_section_service.page_end(sections, row.order_index)
+        if ref.piece:
+            cut = pieces(text, MAX_CHARS, MIN_CHARS)
+            if ref.piece > len(cut):
+                return None
+            text = cut[ref.piece - 1]
+        return row, text, last_page
     last = next(
         (s for s in sections if s.number == ref.through and s.order_index >= row.order_index), None
     )

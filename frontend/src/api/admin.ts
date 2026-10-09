@@ -115,6 +115,8 @@ export interface SourceRef {
   // A run of sections, "section" through "through" (one merged unit); or a section's own text.
   through?: string;
   part?: "own";
+  // One piece of a section too long for one unit and with no subsection to open (1-based).
+  piece?: number;
   document_name?: string;
   title?: string;
   page_start?: number | null;
@@ -531,6 +533,7 @@ export interface SopUnit {
   section: string;
   through: string;
   own: boolean;
+  piece: number; // 1-based piece of one long section; 0 = not a piece
   members: string[];
 }
 
@@ -550,6 +553,7 @@ export const unitRef = (documentId: string, u: SopUnit): SourceRef => ({
   section: u.section,
   ...(u.through ? { through: u.through } : {}),
   ...(u.own ? { part: "own" as const } : {}),
+  ...(u.piece ? { piece: u.piece } : {}),
 });
 
 export const listSopDocuments = () => adminRequest<SopDocument[]>("/admin/sop/documents");

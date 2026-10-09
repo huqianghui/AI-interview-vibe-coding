@@ -49,6 +49,7 @@ class Candidate:
     score: float
     through: str = ""  # the unit's last section, when it holds several
     own: bool = False  # the unit is one section's own text only
+    piece: int = 0  # the unit is one piece of a section too long for one
 
 
 @dataclass
@@ -103,7 +104,7 @@ class SectionIndex:
         scored.sort(key=lambda pair: -pair[0])
         out = []
         for score, i in scored[:limit]:
-            number, through, own = i.unit.citation()
+            number, through, own, piece = i.unit.citation()
             out.append(
                 Candidate(
                     document_id=i.document_id,
@@ -114,6 +115,7 @@ class SectionIndex:
                     score=round(score, 3),
                     through=through,
                     own=own,
+                    piece=piece,
                 )
             )
         return out
