@@ -1,7 +1,9 @@
-/** Admin "SOP documents" tab: each SOP's conversion to Markdown, its key-points summary, its
- * sections, and any section's full passage (spec-sop-section-grounding). This is where an admin
- * checks a document was split correctly, and edits and approves its summary: only an approved
- * summary is used in scoring. */
+/** Admin "SOP documents" tab: the SOP libraries (spec-sop-libraries), each listed collapsed and
+ * opened by a click to show and upload its documents; then each SOP's conversion to Markdown, its
+ * key-points summary, its sections, and any section's full passage (spec-sop-section-grounding).
+ * This is where an admin checks a document was split correctly, and edits and approves its
+ * summary: only an approved summary is used in scoring. */
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Badge,
@@ -9,11 +11,13 @@ import {
   Button,
   Card,
   CardHeader,
+  Input,
   Text,
   Textarea,
   Title3,
 } from "@fluentui/react-components";
-import type { SopDocument } from "../../api/admin";
+import { ChevronDownRegular, ChevronRightRegular } from "@fluentui/react-icons";
+import type { SopDocument, SopLibrary } from "../../api/admin";
 import { DataTable, type DataColumn } from "../../components/DataTable";
 import { useAdminStyles } from "./shared";
 import type { SopTabState } from "./useSopTab";
@@ -120,6 +124,155 @@ function SummaryCard({ state }: { state: SopTabState }) {
   );
 }
 
+/** One library: a header that opens and closes it; open, its upload, rename and documents. */
+function LibrarySection({
+  library,
+  state,
+  columns,
+}: {
+  library: SopLibrary;
+  state: SopTabState;
+  columns: DataColumn<SopDocument>[];
+}) {
+  const { t } = useTranslation();
+  const open = state.expanded.has(library.library_id);
+  const docs = state.documents.filter((d) => d.library_id === library.library_id);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const id = library.library_id;
+  return (
+    <section data-testid={`sop-library-${id}`} style={{ borderTop: "1px solid #e8e0d4" }}>
+      <Button
+        appearance="transparent"
+        icon={open ? <ChevronDownRegular /> : <ChevronRightRegular />}
+        aria-expanded={open}
+        onClick={() => state.toggleLibrary(id)}
+        data-testid={`sop-library-toggle-${id}`}
+        style={{ justifyContent: "flex-start", width: "100%", padding: "10px 0" }}
+      >
+        <Text weight="semibold">{library.name}</Text>
+        <Text size={200} style={{ marginLeft: 10 }}>
+          {t("admin.sop.lib.count", { count: library.document_count })}
+        </Text>
+      </Button>
+      {open && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "0 0 16px" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <input
+              ref={fileInput}
+              type="file"
+              multiple
+              accept=".pdf,.docx,.txt,.md"
+              style={{ display: "none" }}
+              data-testid={`sop-library-file-${id}`}
+              onChange={(e) => {
+                const files = Array.from(e.target.files ?? []);
+                e.target.value = "";
+                void state.upload(id, files);
+              }}
+            />
+            <Button
+              size="small"
+              appearance="primary"
+              disabled={state.uploading !== null}
+              onClick={() => fileInput.current?.click()}
+              data-testid={`sop-library-upload-${id}`}
+            >
+              {state.uploading === id ? t("admin.sop.lib.uploading") : t("admin.sop.lib.upload")}
+            </Button>
+            {renaming === null ? (
+              <Button size="small" onClick={() => setRenaming(library.name)} data-testid={`sop-library-rename-${id}`}>
+                {t("admin.sop.lib.rename")}
+              </Button>
+            ) : (
+              <>
+                <Input
+                  size="small"
+                  value={renaming}
+                  onChange={(_, d) => setRenaming(d.value)}
+                  aria-label={t("admin.sop.lib.name")}
+                  data-testid={`sop-library-name-${id}`}
+                />
+                <Button
+                  size="small"
+                  appearance="primary"
+                  disabled={!renaming.trim() || renaming.trim() === library.name}
+                  onClick={() => {
+                    void state.renameLibrary(id, renaming);
+                    setRenaming(null);
+                  }}
+                  data-testid={`sop-library-rename-save-${id}`}
+                >
+                  {t("admin.sop.lib.save")}
+                </Button>
+                <Button size="small" onClick={() => setRenaming(null)}>
+                  {t("admin.sop.lib.cancel")}
+                </Button>
+              </>
+            )}
+            {/* A library that holds documents cannot be deleted (the server refuses it too). */}
+            {library.document_count === 0 && (
+              <Button
+                size="small"
+                appearance="subtle"
+                onClick={() => void state.deleteLibrary(id)}
+                data-testid={`sop-library-delete-${id}`}
+              >
+                {t("admin.sop.lib.delete")}
+              </Button>
+            )}
+          </div>
+          {docs.length === 0 ? (
+            <Text size={200} data-testid={`sop-library-empty-${id}`}>
+              {t("admin.sop.lib.empty")}
+            </Text>
+          ) : (
+            <DataTable
+              size="small"
+              testId={`sop-documents-${id}`}
+              items={docs}
+              getRowId={(d) => d.document_id}
+              rowProps={(d) => ({
+                "data-testid": `sop-doc-${d.document_id}`,
+                "aria-selected": d.document_id === state.selected,
+              })}
+              columns={columns}
+            />
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function NewLibrary({ state }: { state: SopTabState }) {
+  const { t } = useTranslation();
+  const [name, setName] = useState("");
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <Input
+        size="small"
+        value={name}
+        placeholder={t("admin.sop.lib.newPlaceholder")}
+        onChange={(_, d) => setName(d.value)}
+        aria-label={t("admin.sop.lib.name")}
+        data-testid="sop-library-new-name"
+      />
+      <Button
+        size="small"
+        disabled={!name.trim()}
+        onClick={() => {
+          void state.createLibrary(name);
+          setName("");
+        }}
+        data-testid="sop-library-new"
+      >
+        {t("admin.sop.lib.add")}
+      </Button>
+    </div>
+  );
+}
+
 export function SopTab({ state }: { state: SopTabState }) {
   const styles = useAdminStyles();
   const { t } = useTranslation();
@@ -181,17 +334,25 @@ export function SopTab({ state }: { state: SopTabState }) {
             {state.error}
           </Body1>
         )}
-        <DataTable
-          size="small"
-          testId="sop-documents"
-          items={state.documents}
-          getRowId={(d) => d.document_id}
-          rowProps={(d) => ({
-            "data-testid": `sop-doc-${d.document_id}`,
-            "aria-selected": d.document_id === state.selected,
-          })}
-          columns={columns}
-        />
+        {/* One line above the libraries carries every message (owner: tables stay clean). */}
+        {state.notice && (
+          <Text size={200} data-testid="sop-library-notice">
+            {state.notice.uploaded > 0 && t("admin.sop.lib.uploaded", { count: state.notice.uploaded })}
+            {state.notice.failed.length > 0 && (
+              <span role="alert" className={styles.errorText}>
+                {" "}
+                {t("admin.sop.lib.uploadFailed", { count: state.notice.failed.length })}{" "}
+                {state.notice.failed.join("; ")}
+              </span>
+            )}
+          </Text>
+        )}
+        <NewLibrary state={state} />
+        <div data-testid="sop-libraries">
+          {state.libraries.map((lib) => (
+            <LibrarySection key={lib.library_id} library={lib} state={state} columns={columns} />
+          ))}
+        </div>
       </Card>
 
       {current && <SummaryCard state={state} />}

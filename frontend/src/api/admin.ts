@@ -4,7 +4,7 @@
  */
 import { getAdminToken } from "./auth";
 import type { HistoryStatus, InterviewDetail, InterviewHistoryItem } from "./client";
-import { apiFetch, HttpError, requestJson } from "./http";
+import { apiFetch, HttpError, readJson, requestJson } from "./http";
 
 /** A failed admin call: the shared {@link HttpError} (status + the server's detail). */
 export const AdminApiError = HttpError;
@@ -414,9 +414,51 @@ export async function fetchInterviewSopDocument(
 // A document is converted to Markdown in the background and split into sections. All or
 // nothing: a failed conversion has no sections and says why (`markdown_error`).
 
+// ── SOP libraries (spec-sop-libraries) ──────────────────────────────────
+// Every document belongs to one library, chosen before it is uploaded.
+
+export interface SopLibrary {
+  library_id: string;
+  name: string;
+  description: string;
+  document_count: number;
+}
+
+export const listSopLibraries = () => adminRequest<SopLibrary[]>("/admin/sop/libraries");
+
+export const createSopLibrary = (name: string, description = "") =>
+  adminRequest<SopLibrary>("/admin/sop/libraries", {
+    method: "POST",
+    body: JSON.stringify({ name, description }),
+  });
+
+export const updateSopLibrary = (libraryId: string, change: { name?: string; description?: string }) =>
+  adminRequest<SopLibrary>(`/admin/sop/libraries/${libraryId}`, {
+    method: "PATCH",
+    body: JSON.stringify(change),
+  });
+
+export const deleteSopLibrary = (libraryId: string) =>
+  adminRequest<void>(`/admin/sop/libraries/${libraryId}`, { method: "DELETE" });
+
+/** Upload one SOP file into a library. Multipart, so the browser sets the content type. */
+export async function uploadSopDocument(libraryId: string, file: File): Promise<SopDocument> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("library_id", libraryId);
+  const resp = await apiFetch(
+    "/admin/sop/documents",
+    { method: "POST", body: form },
+    { bearer: getAdminToken() },
+    { json: false },
+  );
+  return readJson<SopDocument>(resp);
+}
+
 export interface SopDocument {
   document_id: string;
   name: string;
+  library_id: string;
   status: string;
   size: number;
   chunk_count: number;

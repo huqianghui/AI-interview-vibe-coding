@@ -4,7 +4,13 @@
  * busy the list is polled, and the selected document reloads when its work finishes. */
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as admin from "../../api/admin";
-import type { SopDocument, SopSection, SopSectionText, SopSummary } from "../../api/admin";
+import type {
+  SopDocument,
+  SopLibrary,
+  SopSection,
+  SopSectionText,
+  SopSummary,
+} from "../../api/admin";
 
 export const SOP_POLL_MS = 3000;
 
@@ -63,14 +69,85 @@ export function useSopTab(active: boolean) {
     [showSummary],
   );
 
-  const loadDocuments = useCallback(async () => {
-    setError(null);
+  // Libraries (spec-sop-libraries): listed collapsed; a click opens one to show its documents.
+  const [libraries, setLibraries] = useState<SopLibrary[]>([]);
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const [uploading, setUploading] = useState<string | null>(null);
+  // The one line above the libraries: what the last upload did (how many went in, which failed).
+  const [notice, setNotice] = useState<{ uploaded: number; failed: string[] } | null>(null);
+
+  // `quiet`: the background poll, which must not wipe an error the admin has not read yet.
+  const loadDocuments = useCallback(async (quiet = false) => {
+    if (!quiet) setError(null);
     try {
-      setDocuments(await admin.listSopDocuments());
+      const [docs, libs] = await Promise.all([admin.listSopDocuments(), admin.listSopLibraries()]);
+      setDocuments(docs);
+      setLibraries(libs);
     } catch (e) {
       setError(message(e));
     }
   }, []);
+
+  const toggleLibrary = (libraryId: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(libraryId)) next.delete(libraryId);
+      else next.add(libraryId);
+      return next;
+    });
+
+  const run = async (action: () => Promise<void>) => {
+    setError(null);
+    setNotice(null);
+    try {
+      await action();
+      await loadDocuments();
+    } catch (e) {
+      setError(message(e));
+    }
+  };
+
+  const createLibrary = (name: string) =>
+    run(async () => {
+      const made = await admin.createSopLibrary(name.trim());
+      setExpanded((prev) => new Set(prev).add(made.library_id));
+    });
+
+  const renameLibrary = (libraryId: string, name: string) =>
+    run(async () => {
+      await admin.updateSopLibrary(libraryId, { name: name.trim() });
+    });
+
+  const deleteLibrary = (libraryId: string) =>
+    run(async () => {
+      await admin.deleteSopLibrary(libraryId);
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        next.delete(libraryId);
+        return next;
+      });
+    });
+
+  /** Upload files into a library, one after another; the conversion then runs in the background.
+   * A file that fails does not stop the rest: the notice names each one and why. */
+  const upload = async (libraryId: string, files: File[]) => {
+    if (files.length === 0 || uploading) return;
+    setUploading(libraryId);
+    setError(null);
+    let uploaded = 0;
+    const failed: string[] = [];
+    for (const file of files) {
+      try {
+        await admin.uploadSopDocument(libraryId, file);
+        uploaded += 1;
+      } catch (e) {
+        failed.push(`${file.name}: ${message(e)}`);
+      }
+    }
+    setNotice({ uploaded, failed });
+    await loadDocuments();
+    setUploading(null);
+  };
 
   useEffect(() => {
     if (active) void loadDocuments();
@@ -79,7 +156,7 @@ export function useSopTab(active: boolean) {
   const anyInProgress = documents.some(inProgress);
   useEffect(() => {
     if (!active || !anyInProgress) return;
-    const timer = setInterval(() => void loadDocuments(), SOP_POLL_MS);
+    const timer = setInterval(() => void loadDocuments(true), SOP_POLL_MS);
     return () => clearInterval(timer);
   }, [active, anyInProgress, loadDocuments]);
 
@@ -162,6 +239,15 @@ export function useSopTab(active: boolean) {
 
   return {
     documents,
+    libraries,
+    expanded,
+    toggleLibrary,
+    createLibrary,
+    renameLibrary,
+    deleteLibrary,
+    upload,
+    uploading,
+    notice,
     error,
     selected,
     sections,

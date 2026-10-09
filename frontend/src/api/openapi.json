@@ -511,10 +511,15 @@
             "contentMediaType": "application/octet-stream",
             "title": "File",
             "type": "string"
+          },
+          "library_id": {
+            "title": "Library Id",
+            "type": "string"
           }
         },
         "required": [
-          "file"
+          "file",
+          "library_id"
         ],
         "title": "Body_upload_document_admin_sop_documents_post",
         "type": "object"
@@ -2851,6 +2856,11 @@
             "title": "Document Id",
             "type": "string"
           },
+          "library_id": {
+            "default": "",
+            "title": "Library Id",
+            "type": "string"
+          },
           "markdown_error": {
             "default": "",
             "title": "Markdown Error",
@@ -2902,6 +2912,84 @@
           "chunk_count"
         ],
         "title": "SopDocumentOut",
+        "type": "object"
+      },
+      "SopLibraryIn": {
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SopLibraryIn",
+        "type": "object"
+      },
+      "SopLibraryOut": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "document_count": {
+            "title": "Document Count",
+            "type": "integer"
+          },
+          "library_id": {
+            "title": "Library Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "library_id",
+          "name",
+          "description",
+          "document_count"
+        ],
+        "title": "SopLibraryOut",
+        "type": "object"
+      },
+      "SopLibraryPatch": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "SopLibraryPatch",
         "type": "object"
       },
       "SopSectionOut": {
@@ -5671,7 +5759,7 @@
         ]
       },
       "post": {
-        "description": "Upload one SOP file and ingest it. A corrupt/unsupported file → status=failed, not 500.",
+        "description": "Upload one SOP file into a library and ingest it (spec-sop-libraries: the library is chosen\nfirst). A corrupt/unsupported file → status=failed, not 500. 404 when the library is unknown.",
         "operationId": "upload_document_admin_sop_documents_post",
         "requestBody": {
           "content": {
@@ -6020,6 +6108,179 @@
           }
         ],
         "summary": "Redraft Summary",
+        "tags": [
+          "admin-sop"
+        ]
+      }
+    },
+    "/admin/sop/libraries": {
+      "get": {
+        "description": "Every SOP library with its document count, by name.",
+        "operationId": "list_libraries_admin_sop_libraries_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SopLibraryOut"
+                  },
+                  "title": "Response List Libraries Admin Sop Libraries Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Libraries",
+        "tags": [
+          "admin-sop"
+        ]
+      },
+      "post": {
+        "description": "A new, empty library. 409 when the name is taken.",
+        "operationId": "create_library_admin_sop_libraries_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SopLibraryIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SopLibraryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Create Library",
+        "tags": [
+          "admin-sop"
+        ]
+      }
+    },
+    "/admin/sop/libraries/{library_id}": {
+      "delete": {
+        "description": "Delete an empty library. 409 while it still holds documents.",
+        "operationId": "delete_library_admin_sop_libraries__library_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "library_id",
+            "required": true,
+            "schema": {
+              "title": "Library Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Delete Library",
+        "tags": [
+          "admin-sop"
+        ]
+      },
+      "patch": {
+        "description": "Rename a library or change its description.",
+        "operationId": "update_library_admin_sop_libraries__library_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "library_id",
+            "required": true,
+            "schema": {
+              "title": "Library Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SopLibraryPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SopLibraryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Update Library",
         "tags": [
           "admin-sop"
         ]

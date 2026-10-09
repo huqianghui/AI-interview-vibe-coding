@@ -831,7 +831,8 @@ export interface paths {
         put?: never;
         /**
          * Upload Document
-         * @description Upload one SOP file and ingest it. A corrupt/unsupported file → status=failed, not 500.
+         * @description Upload one SOP file into a library and ingest it (spec-sop-libraries: the library is chosen
+         *     first). A corrupt/unsupported file → status=failed, not 500. 404 when the library is unknown.
          */
         post: operations["upload_document_admin_sop_documents_post"];
         delete?: never;
@@ -945,6 +946,54 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/admin/sop/libraries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Libraries
+         * @description Every SOP library with its document count, by name.
+         */
+        get: operations["list_libraries_admin_sop_libraries_get"];
+        put?: never;
+        /**
+         * Create Library
+         * @description A new, empty library. 409 when the name is taken.
+         */
+        post: operations["create_library_admin_sop_libraries_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/sop/libraries/{library_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Library
+         * @description Delete an empty library. 409 while it still holds documents.
+         */
+        delete: operations["delete_library_admin_sop_libraries__library_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Library
+         * @description Rename a library or change its description.
+         */
+        patch: operations["update_library_admin_sop_libraries__library_id__patch"];
         trace?: never;
     };
     "/admin/users": {
@@ -1690,6 +1739,8 @@ export interface components {
         Body_upload_document_admin_sop_documents_post: {
             /** File */
             file: string;
+            /** Library Id */
+            library_id: string;
         };
         /**
          * BundleImportOut
@@ -2573,6 +2624,11 @@ export interface components {
             /** Document Id */
             document_id: string;
             /**
+             * Library Id
+             * @default
+             */
+            library_id: string;
+            /**
              * Markdown Error
              * @default
              */
@@ -2608,6 +2664,34 @@ export interface components {
              * @default
              */
             summary_status: string;
+        };
+        /** SopLibraryIn */
+        SopLibraryIn: {
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Name */
+            name: string;
+        };
+        /** SopLibraryOut */
+        SopLibraryOut: {
+            /** Description */
+            description: string;
+            /** Document Count */
+            document_count: number;
+            /** Library Id */
+            library_id: string;
+            /** Name */
+            name: string;
+        };
+        /** SopLibraryPatch */
+        SopLibraryPatch: {
+            /** Description */
+            description?: string | null;
+            /** Name */
+            name?: string | null;
         };
         /** SopSectionOut */
         SopSectionOut: {
@@ -4387,6 +4471,123 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SopSummaryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_libraries_admin_sop_libraries_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SopLibraryOut"][];
+                };
+            };
+        };
+    };
+    create_library_admin_sop_libraries_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SopLibraryIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SopLibraryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_library_admin_sop_libraries__library_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                library_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_library_admin_sop_libraries__library_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                library_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SopLibraryPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SopLibraryOut"];
                 };
             };
             /** @description Validation Error */
