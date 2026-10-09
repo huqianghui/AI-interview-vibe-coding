@@ -248,6 +248,8 @@ def libreoffice() -> str | None:
 def _docx_to_pdf(content: bytes, soffice: str) -> bytes:
     """Print a .docx to PDF with LibreOffice, headless, in a private temporary directory (its
     own profile too, so two conversions never share one)."""
+    import os
+    import signal
     import subprocess
     import tempfile
     from pathlib import Path
@@ -255,7 +257,9 @@ def _docx_to_pdf(content: bytes, soffice: str) -> bytes:
     with tempfile.TemporaryDirectory() as tmp:
         source = Path(tmp) / "document.docx"
         source.write_bytes(content)
-        subprocess.run(
+        # Its own process group: soffice is a launcher script that starts soffice.bin, and a
+        # timeout must kill both, not leave soffice.bin running in the container.
+        process = subprocess.Popen(
             [
                 soffice,
                 "--headless",
@@ -267,10 +271,18 @@ def _docx_to_pdf(content: bytes, soffice: str) -> bytes:
                 tmp,
                 str(source),
             ],
-            check=True,
-            capture_output=True,
-            timeout=LIBREOFFICE_TIMEOUT_SECONDS,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
         )
+        try:
+            _, stderr = process.communicate(timeout=LIBREOFFICE_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.communicate()
+            raise RuntimeError(f"LibreOffice took over {LIBREOFFICE_TIMEOUT_SECONDS} s") from None
+        if process.returncode != 0:
+            raise RuntimeError(f"LibreOffice failed: {stderr.decode(errors='replace')[-300:]}")
         pdf = Path(tmp) / "document.pdf"
         if not pdf.exists():
             raise RuntimeError("LibreOffice produced no PDF")
@@ -292,6 +304,8 @@ def _docx_text(content: bytes) -> str:
 async def _docx_via_document_intelligence(content: bytes, endpoint: str, soffice: str) -> str:
     pdf = await asyncio.to_thread(_docx_to_pdf, content, soffice)
     page_count = len(await asyncio.to_thread(_pdf_page_texts, pdf))
+    if page_count == 0:
+        raise IncompleteConversion("LibreOffice printed the document to an empty PDF")
     result = await _analyze(pdf, endpoint, page_count)
     got = len(result.get("pages", []))
     if got != page_count:
@@ -344,8 +358,11 @@ async def _convert(content: bytes, filename: str) -> MarkdownResult:
                 async with asyncio.timeout(DI_TIMEOUT_SECONDS):
                     markdown = await _docx_via_document_intelligence(content, endpoint, soffice)
                 return MarkdownResult(markdown, "document_intelligence")
-            if get_settings().sop_require_libreoffice and not soffice:
-                raise RuntimeError("LibreOffice is not installed: Word cannot be converted")
+            if get_settings().sop_require_libreoffice:
+                # A published image never falls back (a "docx" result would never be redone).
+                if not soffice:
+                    raise RuntimeError("LibreOffice is not installed: Word cannot be converted")
+                raise RuntimeError("Word needs Document Intelligence, which is not configured")
             # Dev / CI only (no LibreOffice or no DI): our own converter, labelled.
             from app.sop.docx_markdown import docx_to_markdown
 

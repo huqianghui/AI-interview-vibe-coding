@@ -497,6 +497,31 @@ async def test_without_libreoffice_word_falls_back_only_where_it_is_not_required
     monkeypatch.setattr(settings, "sop_require_libreoffice", True)
     image = await sop_markdown.to_markdown(_word(*WORD_TEXT), "Release.docx")
     assert image.source == "failed" and "LibreOffice is not installed" in image.error
+    # ... nor without Document Intelligence.
+    monkeypatch.setattr(sop_markdown, "libreoffice", lambda: "/usr/bin/soffice")
+    monkeypatch.setattr(settings, "azure_foundry_endpoint", "")
+    no_di = await sop_markdown.to_markdown(_word(*WORD_TEXT), "Release.docx")
+    assert no_di.source == "failed" and "Document Intelligence" in no_di.error
+
+
+@pytest.mark.asyncio
+async def test_an_empty_pdf_from_libreoffice_is_a_clear_failure(monkeypatch):
+    monkeypatch.setattr(sop_markdown.get_settings(), "azure_foundry_endpoint", "https://di.example")
+    monkeypatch.setattr(sop_markdown, "libreoffice", lambda: "/usr/bin/soffice")
+    monkeypatch.setattr(sop_markdown, "_docx_to_pdf", lambda content, soffice: b"%PDF")
+    monkeypatch.setattr(sop_markdown, "_pdf_page_texts", lambda _c: [])
+    result = await sop_markdown.to_markdown(_word(*WORD_TEXT), "Release.docx")
+    assert result.source == "failed" and "empty PDF" in result.error
+
+
+def test_a_libreoffice_that_hangs_is_killed_with_its_children(monkeypatch, tmp_path):
+    """soffice starts soffice.bin; a timeout kills the whole process group."""
+    hang = tmp_path / "soffice"
+    hang.write_text("#!/bin/sh\nsleep 30 &\nwait\n")
+    hang.chmod(0o755)
+    monkeypatch.setattr(sop_markdown, "LIBREOFFICE_TIMEOUT_SECONDS", 0.5)
+    with pytest.raises(RuntimeError, match="took over"):
+        sop_markdown._docx_to_pdf(b"PK", str(hang))
 
 
 def test_text_gaps_names_the_recurring_words_the_markdown_lost():

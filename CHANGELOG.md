@@ -11,7 +11,9 @@
 - **Every published backend image has LibreOffice** (Writer, no GUI) and Noto CJK fonts. The image
   build fails unless LibreOffice converts a Chinese and English Word file with the Chinese drawn in
   a CJK font, and the image never falls back to the in-house Word converter: without LibreOffice a
-  Word conversion fails and says why. Local dev and CI still use the in-house converter.
+  Word conversion fails and says why (also without Document Intelligence). A conversion that
+  hangs is killed with all its processes, and `tini` runs as PID 1. Local dev and CI still use the
+  in-house converter.
 
 ### Fixed
 - **A heading with more than six `#` is a section.** DI writes a seventh-level Word heading as

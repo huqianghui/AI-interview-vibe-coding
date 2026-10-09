@@ -15,10 +15,11 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# curl is used by the HEALTHCHECK below. LibreOffice (Writer, headless) prints Word SOPs to PDF
+# curl is used by the HEALTHCHECK below; tini is PID 1, so a process left behind by a killed
+# LibreOffice conversion is reaped. LibreOffice (Writer, headless) prints Word SOPs to PDF
 # for Document Intelligence; the Noto CJK and DejaVu fonts let it lay out Chinese and Latin text.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends curl tini \
         libreoffice-writer-nogui fonts-noto-cjk fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 # Every published image has a working LibreOffice: no fallback to the in-house Word converter.
@@ -47,4 +48,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
     CMD curl -fsS http://localhost:8000/health || exit 1
 
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["./entrypoint.sh"]
