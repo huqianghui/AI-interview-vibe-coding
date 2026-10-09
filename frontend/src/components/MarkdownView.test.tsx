@@ -56,6 +56,7 @@ describe("MarkdownView", () => {
     expect(container.querySelector("script")).toBeNull();
     expect(container.querySelector("[onerror]")).toBeNull();
     expect(container.querySelector('a[href^="javascript"]')).toBeNull();
+    expect(container.querySelector("img")).toBeNull();
     expect(container).toHaveTextContent("ok");
   });
 

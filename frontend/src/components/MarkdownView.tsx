@@ -13,9 +13,11 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { prepareMarkdown } from "./markdownText";
 
-// GitHub's schema, plus the merged-cell attributes DI's tables use.
+// GitHub's schema, plus the merged-cell attributes DI's tables use, minus images: an uploaded
+// document must not make the admin's browser fetch a remote URL (SOP text carries no images).
 const schema = {
   ...defaultSchema,
+  tagNames: (defaultSchema.tagNames ?? []).filter((tag) => tag !== "img"),
   attributes: {
     ...defaultSchema.attributes,
     td: [...(defaultSchema.attributes?.td ?? []), "colSpan", "rowSpan"],

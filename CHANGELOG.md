@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.62.1.0 (2026-10-09)
+
+### Changed
+- **An SOP section's full text is shown as a document, not as plain text.** Headings, bold, lists,
+  Markdown tables, Document Intelligence's HTML tables (merged cells included) and checkboxes
+  (DI's selection marks and Markdown task lists) are rendered; a page break is a thin dashed rule,
+  and DI's page headers and footers are not shown. The text comes from uploaded documents, so it
+  is sanitised: no scripts, event handlers or `javascript:` links.
+
 ## 0.62.0.1 (2026-10-09)
 
 ### Fixed
