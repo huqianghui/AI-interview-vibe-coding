@@ -19,6 +19,7 @@ import {
 import { ChevronDownRegular, ChevronRightRegular } from "@fluentui/react-icons";
 import type { SopDocument, SopLibrary } from "../../api/admin";
 import { DataTable, type DataColumn } from "../../components/DataTable";
+import { SopSectionTree } from "./SopSectionTree";
 import { useAdminStyles } from "./shared";
 import type { SopTabState } from "./useSopTab";
 
@@ -353,14 +354,14 @@ export function SopTab({ state }: { state: SopTabState }) {
     {
       // Only an SOP nothing cites can be deleted; a cited one is replaced by a new bank or version.
       id: "actions",
-      header: "",
-      width: 96,
+      header: t("admin.sop.colAction"),
+      width: 110,
       cell: (d) =>
         // Not while it converts or its summary is drafted: that work would write for a gone row.
         (d.cited_in ?? []).length === 0 && !d.converting && !d.summarizing ? (
           <Button
             size="small"
-            appearance="subtle"
+            appearance="secondary"
             data-testid={`sop-doc-delete-${d.document_id}`}
             onClick={() => void state.deleteDocument(d, t("admin.sop.deleteConfirm", { name: d.name }))}
           >
@@ -423,32 +424,7 @@ export function SopTab({ state }: { state: SopTabState }) {
           {state.sections.length === 0 ? (
             <Body1 className={styles.emptyState}>{t("admin.sop.noSections")}</Body1>
           ) : (
-            <ul className={styles.list} data-testid="sop-sections">
-              {state.sections.map((s) => (
-                <li
-                  key={s.order_index}
-                  className={styles.row}
-                  style={{ paddingLeft: (s.level - 1) * 18 }}
-                >
-                  <Button
-                    appearance="subtle"
-                    className={styles.rowText}
-                    style={{ justifyContent: "flex-start", textAlign: "left" }}
-                    data-testid={`sop-section-${s.order_index}`}
-                    onClick={() => void state.openSection(s.order_index)}
-                  >
-                    {s.number.startsWith("§") ? s.title || t("admin.sop.preamble") : `${s.number} ${s.title}`}
-                  </Button>
-                  <Text size={200} className={styles.emptyState}>
-                    {t("admin.sop.sectionMeta", {
-                      pages:
-                        s.page_start === s.page_end ? s.page_start : `${s.page_start}-${s.page_end}`,
-                      chars: s.full_length,
-                    })}
-                  </Text>
-                </li>
-              ))}
-            </ul>
+            <SopSectionTree sections={state.sections} onOpen={(i) => void state.openSection(i)} />
           )}
         </Card>
       )}

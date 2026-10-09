@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.61.2.0 (2026-10-09)
+
+### Changed
+- **A document's sections are a tree.** Each level opens and closes on its own, only the top
+  level shows at first (Clinical Site Management and Monitoring: 9 top sections instead of 209
+  rows), and Expand all / Collapse all sit above it. A click on a section's title still shows its
+  full passage.
+- **The SOP table's Delete is a real button under an "Action" column header.**
+
 ## 0.61.1.0 (2026-10-09)
 
 ### Added
