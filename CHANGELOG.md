@@ -13,7 +13,7 @@
   line beside the picker says how many; publishing makes it reach interviews. Published versions
   keep what they cite.
 - Existing banks whose rubric already cites an SOP are bound to that SOP's library by the
-  migration (live: the two rf-CSM banks); the others stay unbound. A bank imported from a bundle
+  migration (live: the two SOP-grounded banks); the others stay unbound. A bank imported from a bundle
   or by the boot-time importer, whose rubric cites an SOP, is bound the same way.
 - API: `PUT /admin/question-banks/{id}/sop-library` (`{"library_id": ... | null}`, returns the
   bank and how many items were cleared); banks carry `sop_library_id`; relocating an unbound bank
