@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.59.0.0 (2026-10-09)
+
+### Added
+- **SOP libraries.** Every SOP document now belongs to one library (spec-sop-libraries, PR 1 of 3).
+  The SOP documents tab lists the libraries closed; a click opens one to show its documents, and
+  another closes it. Documents are uploaded from inside a library, so the library is always chosen
+  first; this is also the first upload button on the page (documents used to arrive only through
+  the API or the boot-time importer). A library can be created and renamed, and deleted only while
+  it is empty. Documents never move between libraries: one that belongs elsewhere is uploaded again
+  into the other library.
+- The existing documents all go into one library (`SOP library`, renamed in the page). A document
+  stored without a library, such as by the boot-time bank importer, goes there too, and the
+  library is recreated if it was deleted.
+- API: `GET/POST /admin/sop/libraries`, `PATCH/DELETE /admin/sop/libraries/{id}` (409 while it
+  holds documents, or when a name is taken); `POST /admin/sop/documents` now requires the form
+  field `library_id` (404 for an unknown library). Every document carries its `library_id`.
+
 ## 0.58.4.0 (2026-10-09)
 
 ### Changed
