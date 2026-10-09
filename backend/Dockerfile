@@ -23,7 +23,8 @@ RUN apt-get update \
         libreoffice-writer-nogui fonts-noto-cjk fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 # Every published image has a working LibreOffice: no fallback to the in-house Word converter.
-ENV SOP_REQUIRE_LIBREOFFICE=1
+ENV SOP_REQUIRE_LIBREOFFICE=1 \
+    SOP_WORD_VIA_PDF=1
 
 # Install deps first (better layer caching). Copy only the packaging metadata, then the source.
 # `pip install -e .[azure]` needs the app package present for the editable install to resolve.

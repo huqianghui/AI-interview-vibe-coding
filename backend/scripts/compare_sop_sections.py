@@ -88,7 +88,8 @@ async def main(word_only: bool) -> int:
                 continue
             old, new = _numbered(stored), _numbered(fresh)
             numbers = {num for num, _ in new}
-            broken = sorted(cited.get(doc.id, set()) - numbers - {"§0"})
+            # A citation names any section, numbered or not ("§3"): checked against all of them.
+            broken = sorted(cited.get(doc.id, set()) - {num for num, _ in fresh})
             same = old == new
             differs += not same or bool(broken)
             print(
