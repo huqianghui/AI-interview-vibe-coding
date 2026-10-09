@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.63.0.1 (2026-10-10)
+
+### Fixed
+- **Clicking a unit's name in the SOP tab shows its passage again.** The name was an expandable
+  long-text cell, which keeps its click to itself, so a click on the name (where people click)
+  opened nothing; only a click elsewhere on the row did. The name is a plain one-line cell now
+  (ellipsis, the whole name on hover), and a click anywhere on the row opens the passage.
+
 ## 0.63.0.0 (2026-10-10)
 
 ### Changed
