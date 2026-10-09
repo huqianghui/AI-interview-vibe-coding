@@ -20,7 +20,28 @@ export function SopUnitList({
     u.page_start === u.page_end ? String(u.page_start) : `${u.page_start}–${u.page_end}`;
   const label = (u: SopUnit) => u.label || t("admin.sop.preamble");
   const columns: DataColumn<SopUnit>[] = [
-    { id: "section", header: t("admin.sop.colSection"), long: true, text: label, cell: label },
+    {
+      // Not a "long" cell: that one keeps its click to expand, and here the name is what a person
+      // clicks to open the unit (owner, 2026-10-10: clicking showed nothing). One line, "…" at the
+      // end, the whole name on hover.
+      id: "section",
+      header: t("admin.sop.colSection"),
+      text: label,
+      maxWidth: 640,
+      cell: (u) => (
+        <span
+          title={label(u)}
+          style={{
+            display: "block",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {label(u)}
+        </span>
+      ),
+    },
     { id: "pages", header: t("admin.sop.colPages"), text: pages, cell: pages },
     {
       id: "chars",

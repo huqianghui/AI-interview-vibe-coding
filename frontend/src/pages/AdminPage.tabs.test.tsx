@@ -569,7 +569,8 @@ describe("SOP documents tab", () => {
     // The units, flat and in order; a merged one is named by its range.
     expect(await screen.findByTestId("sop-unit-0")).toHaveTextContent("1–2 PURPOSE / RESPONSIBILITIES");
     expect(screen.getByTestId("sop-unit-2")).toHaveTextContent("4 Inspector");
-    await user.click(screen.getByTestId("sop-unit-0"));
+    // A click on the unit's name opens it (it did nothing while the name was an expandable cell).
+    await user.click(within(screen.getByTestId("sop-unit-0")).getByText("1–2 PURPOSE / RESPONSIBILITIES"));
     expect(read).toHaveBeenCalledWith("d1", 0);
     // Every section in it keeps its own heading.
     const passage = await screen.findByTestId("sop-section-text");
