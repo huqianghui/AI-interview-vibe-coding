@@ -30,6 +30,8 @@ living specification is [`../../SPEC.md`](../../SPEC.md) at the repo root — st
 
 ## Post-spec feature specs
 
+- [`spec-sop-conversion-and-sections.md`](spec-sop-conversion-and-sections.md) — 所有格式统一用 Document
+  Intelligence 转换（Word 补回自动编号）；章节按长度自适应切分（上限 4000 字、下限 500 字，2547 → 388 个章节）。
 - [`spec-sop-libraries.md`](spec-sop-libraries.md) — SOP 文档库：每个文档属于一个文档库，上传前选定；题库绑定一个
   文档库，生成 / 重新定位 / 手动引用都只在该库里进行；没绑定的题库用通用提示词评估；去掉 AI 主题判断。
 - [`spec-sop-section-grounding.md`](spec-sop-section-grounding.md) — 评分标准引用真实的 SOP 章节原文（完整章节，
