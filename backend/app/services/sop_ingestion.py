@@ -47,6 +47,7 @@ async def ingest_document(
     content: bytes,
     content_type: str = "",
     storage_key: str | None = None,
+    library_id: str | None = None,
 ) -> IngestResult:
     """Ingest one uploaded SOP file end to end. Never raises on bad content (AC #4).
 
@@ -70,8 +71,15 @@ async def ingest_document(
         )
         blob_path = ""
 
+    # The admin page always names a library; a caller that does not (the boot-time bank importer)
+    # files the document in the default one (spec-sop-libraries §8).
+    if library_id is None:
+        from app.services.sop_library_service import ensure_default
+
+        library_id = await ensure_default(db)
     document = SopDocument(
         name=filename,
+        library_id=library_id,
         blob_path=blob_path,
         content_type=content_type,
         size=len(content),

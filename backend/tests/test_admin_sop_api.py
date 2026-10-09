@@ -3,6 +3,9 @@
 import pytest
 
 from app.config import get_settings  # noqa: F401 — used by later tests in this module
+from app.models.sop import DEFAULT_LIBRARY_ID
+
+LIB = {"library_id": DEFAULT_LIBRARY_ID}
 
 AUTH: dict = {}
 
@@ -25,7 +28,7 @@ async def test_sop_routes_require_a_token(client):
 
 async def test_upload_txt_ingests_and_lists(client):
     files = {"file": ("sop.txt", b"Step one.\n\nStep two.", "text/plain")}
-    resp = await client.post("/admin/sop/documents", headers=AUTH, files=files)
+    resp = await client.post("/admin/sop/documents", headers=AUTH, files=files, data=LIB)
     assert resp.status_code == 201
     body = resp.json()
     assert body["status"] == "chunked"
@@ -42,7 +45,7 @@ async def test_upload_txt_ingests_and_lists(client):
 async def test_upload_unsupported_file_is_recorded_failed_not_500(client):
     # AC #4: corrupt/unsupported file → status=failed, HTTP 201 (not a crash).
     files = {"file": ("broken.xyz", b"\x00\x01 not a doc", "application/octet-stream")}
-    resp = await client.post("/admin/sop/documents", headers=AUTH, files=files)
+    resp = await client.post("/admin/sop/documents", headers=AUTH, files=files, data=LIB)
     assert resp.status_code == 201
     assert resp.json()["status"] == "failed"
     assert resp.json()["chunk_count"] == 0
@@ -52,5 +55,5 @@ async def test_upload_rejects_oversize(client, monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "material_max_size_mb", 0)  # everything is "too big"
     files = {"file": ("sop.txt", b"x" * 10, "text/plain")}
-    resp = await client.post("/admin/sop/documents", headers=AUTH, files=files)
+    resp = await client.post("/admin/sop/documents", headers=AUTH, files=files, data=LIB)
     assert resp.status_code == 413

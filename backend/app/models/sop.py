@@ -20,10 +20,36 @@ from app.models.mixins import TimestampMixin
 SOP_STATUSES = ("uploaded", "extracting", "chunked", "indexed", "failed")
 
 
+# The library every SOP belonged to before libraries existed (spec-sop-libraries §8), created by
+# the migration with this fixed id. A document stored without a library (the boot-time bank
+# importer) goes here; an upload through the admin page always names its library.
+DEFAULT_LIBRARY_ID = "00000000-0000-4000-8000-000000000001"
+DEFAULT_LIBRARY_NAME = "SOP library"
+
+
+class SopLibrary(TimestampMixin, Base):
+    """A topic library of SOP documents (spec-sop-libraries). Every document belongs to exactly
+    one; a question bank is scoped to one (PR 2)."""
+
+    __tablename__ = "sop_libraries"
+
+    name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+
 class SopDocument(TimestampMixin, Base):
     __tablename__ = "sop_documents"
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # The library the document was uploaded into. Documents never move between libraries (owner,
+    # 2026-10-09): to change library, upload it again into the other one.
+    library_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("sop_libraries.id"),
+        nullable=False,
+        index=True,
+        default=DEFAULT_LIBRARY_ID,
+    )
     # Storage pointer resolved by the pluggable storage backend (local dev / Azure Blob prod).
     # Never exposed directly to candidates (SPEC P4) — only server-mediated citation text is.
     blob_path: Mapped[str] = mapped_column(String(512), default="", nullable=False)
