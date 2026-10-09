@@ -1,7 +1,10 @@
 """SOP libraries (spec-sop-libraries): every document in one library, chosen before upload."""
 
+import asyncio
+
 import pytest
 
+from app.api import admin_sop
 from app.models.sop import DEFAULT_LIBRARY_ID, SopDocument, SopLibrary
 from app.services import sop_ingestion, sop_library_service
 
@@ -16,11 +19,19 @@ def _upload(name: str, library_id: str | None) -> dict:
     return {"files": files, "data": data}
 
 
+async def _post_upload(client, auth, name: str, library_id: str | None):  # noqa: ANN001
+    """Upload, then wait for the background conversion it starts: it shares the test database,
+    and a request racing it on the one SQLite connection fails ("SQL statements in progress")."""
+    resp = await client.post("/admin/sop/documents", headers=auth, **_upload(name, library_id))
+    await asyncio.gather(*admin_sop._BUILDS)
+    return resp
+
+
 async def test_libraries_are_created_renamed_and_listed_with_their_counts(client, admin_auth):
     made = await client.post(BASE, headers=admin_auth, json={"name": "  Clinical   SOPs "})
     assert made.status_code == 201 and made.json()["name"] == "Clinical SOPs"
     lib = made.json()["library_id"]
-    up = await client.post("/admin/sop/documents", headers=admin_auth, **_upload("a.txt", lib))
+    up = await _post_upload(client, admin_auth, "a.txt", lib)
     assert up.status_code == 201 and up.json()["library_id"] == lib
 
     listed = {x["name"]: x for x in (await client.get(BASE, headers=admin_auth)).json()}
@@ -51,7 +62,7 @@ async def test_a_name_is_unique_and_never_blank(client, admin_auth):
 
 async def test_a_library_that_holds_documents_cannot_be_deleted(client, admin_auth):
     lib = (await client.post(BASE, headers=admin_auth, json={"name": "Full"})).json()["library_id"]
-    await client.post("/admin/sop/documents", headers=admin_auth, **_upload("a.txt", lib))
+    await _post_upload(client, admin_auth, "a.txt", lib)
     held = await client.delete(f"{BASE}/{lib}", headers=admin_auth)
     assert held.status_code == 409
     empty = (await client.post(BASE, headers=admin_auth, json={"name": "Empty"})).json()[
@@ -63,7 +74,7 @@ async def test_a_library_that_holds_documents_cannot_be_deleted(client, admin_au
 
 
 async def test_an_upload_names_a_library_that_exists(client, admin_auth):
-    none = await client.post("/admin/sop/documents", headers=admin_auth, **_upload("a.txt", None))
+    none = await _post_upload(client, admin_auth, "a.txt", None)
     assert none.status_code == 422  # the library is chosen first
     unknown = await client.post(
         "/admin/sop/documents", headers=admin_auth, **_upload("a.txt", "nope")
@@ -120,5 +131,5 @@ async def test_an_upload_into_a_library_deleted_mid_request_is_a_404(
         return library
 
     monkeypatch.setattr(sop_library_service, "get_library", found_then_deleted)
-    resp = await client.post("/admin/sop/documents", headers=admin_auth, **_upload("a.txt", lib))
+    resp = await _post_upload(client, admin_auth, "a.txt", lib)
     assert resp.status_code == 404
