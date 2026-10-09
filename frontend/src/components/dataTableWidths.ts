@@ -1,8 +1,8 @@
 /** How the shared table (DataTable.tsx) sizes its columns before anyone drags them. */
 import type { DataColumn } from "./DataTable";
 
-// Cell padding (both sides) plus room for the resize handle; sortable headers also show an arrow.
-export const CELL_CHROME = 28;
+// Fluent's cell padding (8px a side) plus a little air; sortable headers also show an arrow.
+export const CELL_CHROME = 20;
 export const SORT_ICON = 24;
 export const MIN_WIDTH = 64;
 export const MAX_WIDTH = 320;

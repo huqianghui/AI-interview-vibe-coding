@@ -18,34 +18,47 @@ import { DataTable, type DataColumn } from "../../components/DataTable";
 import { useAdminStyles } from "./shared";
 import type { SopTabState } from "./useSopTab";
 
+type T = ReturnType<typeof useTranslation>["t"];
+
+function conversionLabel(doc: SopDocument, t: T): string {
+  if (doc.converting || doc.markdown_source === "") return t("admin.sop.pending");
+  if (doc.markdown_source === "failed") return t("admin.sop.failed");
+  return t(`admin.sop.source.${doc.markdown_source}`, { defaultValue: doc.markdown_source });
+}
+
 function ConversionBadge({ doc }: { doc: SopDocument }) {
   const { t } = useTranslation();
-  if (doc.converting || doc.markdown_source === "") {
-    return <Badge appearance="tint" color="informative">{t("admin.sop.pending")}</Badge>;
-  }
-  if (doc.markdown_source === "failed") {
-    return <Badge appearance="tint" color="danger">{t("admin.sop.failed")}</Badge>;
-  }
+  const color =
+    doc.converting || doc.markdown_source === ""
+      ? "informative"
+      : doc.markdown_source === "failed"
+        ? "danger"
+        : "success";
   return (
-    <Badge appearance="tint" color="success">
-      {t(`admin.sop.source.${doc.markdown_source}`, { defaultValue: doc.markdown_source })}
+    <Badge appearance="tint" color={color}>
+      {conversionLabel(doc, t)}
     </Badge>
   );
 }
 
+const SUMMARY_COLOR = { reviewed: "success", draft: "warning", failed: "danger" } as const;
+
+function summaryLabel(status: string, busy: boolean, t: T): string {
+  if (busy) return t("admin.sop.summary.drafting");
+  if (status === "reviewed" || status === "draft" || status === "failed") {
+    return t(`admin.sop.summary.${status}`);
+  }
+  return t("admin.sop.summary.none");
+}
+
 function SummaryBadge({ status, busy }: { status: string; busy: boolean }) {
   const { t } = useTranslation();
-  if (busy) return <Badge appearance="tint" color="informative">{t("admin.sop.summary.drafting")}</Badge>;
-  if (status === "reviewed") {
-    return <Badge appearance="tint" color="success">{t("admin.sop.summary.reviewed")}</Badge>;
-  }
-  if (status === "draft") {
-    return <Badge appearance="tint" color="warning">{t("admin.sop.summary.draft")}</Badge>;
-  }
-  if (status === "failed") {
-    return <Badge appearance="tint" color="danger">{t("admin.sop.summary.failed")}</Badge>;
-  }
-  return <Badge appearance="outline" color="subtle">{t("admin.sop.summary.none")}</Badge>;
+  const color = busy ? "informative" : SUMMARY_COLOR[status as keyof typeof SUMMARY_COLOR];
+  return (
+    <Badge appearance={color ? "tint" : "outline"} color={color ?? "subtle"}>
+      {summaryLabel(status, busy, t)}
+    </Badge>
+  );
 }
 
 function SummaryCard({ state }: { state: SopTabState }) {
@@ -117,8 +130,13 @@ export function SopTab({ state }: { state: SopTabState }) {
       header: t("admin.sop.colName"),
       text: (d) => d.name,
       pad: 24, // the name is a subtle button
+      maxWidth: 460, // SOP file names run long; most fit on one line at this width
       cell: (d) => (
-        <Button appearance="subtle" onClick={() => void state.openDocument(d.document_id)}>
+        <Button
+          appearance="subtle"
+          style={{ justifyContent: "flex-start", textAlign: "start" }}
+          onClick={() => void state.openDocument(d.document_id)}
+        >
           {d.name}
         </Button>
       ),
@@ -127,8 +145,9 @@ export function SopTab({ state }: { state: SopTabState }) {
       id: "conversion",
       header: t("admin.sop.colConversion"),
       long: true,
-      minWidth: 120,
-      text: (d) => d.markdown_error ?? "",
+      // The badge's own padding; a failed conversion's error follows it, on one line until clicked.
+      pad: 24,
+      text: (d) => [conversionLabel(d, t), d.markdown_error].filter(Boolean).join("  "),
       cell: (d) => (
         <>
           <ConversionBadge doc={d} />
@@ -144,7 +163,8 @@ export function SopTab({ state }: { state: SopTabState }) {
     {
       id: "summary",
       header: t("admin.sop.colSummary"),
-      width: 140,
+      text: (d) => summaryLabel(d.summary_status, d.summarizing, t),
+      pad: 24, // the badge's own padding
       cell: (d) => <SummaryBadge status={d.summary_status} busy={d.summarizing} />,
     },
   ];

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.58.3.2 (2026-10-09)
+
+### Fixed
+- **Table columns fit what they hold.** The SOP table's Conversion and Summary badges were cut
+  short ("Document Intelligenc…") because those columns were sized without their badge text. Now
+  every badge column (Conversion, Summary and both Status columns) is measured from its label.
+  SOP file names are left-aligned and get up to 460px, so most fit on one line. The per-cell
+  allowance matches Fluent's padding, so Interview results fits the page without squeezing
+  Outcome onto two lines. Widths are measured again once the web font has loaded.
+
 ## 0.58.3.1 (2026-10-09)
 
 ### Fixed
