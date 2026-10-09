@@ -381,3 +381,13 @@ async def test_a_run_and_an_own_part_resolve_save_and_travel_like_a_section(
         {"document_name": "Widget SOP.pdf", "section": "4.1", "through": "5"},
         {"document_name": "Widget SOP.pdf", "section": "4", "part": "own"},
     ]
+
+
+async def test_a_run_that_ends_before_it_starts_is_reported_gone(db_session):
+    """Found in the editor means resolve reads something: "5 through 4.1" reads nothing."""
+    doc = await _widget_sop(db_session)
+    backwards = SectionRef(doc, "5", "4.1")
+    assert await sop_citation.resolve(db_session, [backwards]) == []
+    assert await sop_citation.missing(db_session, [backwards]) == [backwards]
+    (described,) = await sop_citation.describe(db_session, [backwards])
+    assert described["found"] is False

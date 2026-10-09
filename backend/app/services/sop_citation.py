@@ -28,7 +28,8 @@ MAX_REFS_PER_ITEM = 8
 class SectionRef:
     """A cited passage: one section (with its subsections), or a run of sections in document
     order from ``section`` through ``through`` (a merged unit, app/sop/units.py), or a section's
-    own text only (``own``: its subsections were cited apart)."""
+    own text only (``own``: its subsections were cited apart). ``own`` on a run applies to its
+    last section: the run ends with ``through``'s own text, not its subsections."""
 
     document_id: str
     section: str
@@ -104,7 +105,7 @@ def parse_refs(raw: object) -> list[SectionRef]:
         document_id = str(entry.get("document_id") or "").strip()
         section = normalize_number(entry.get("section"))
         through = normalize_number(entry.get("through")) if entry.get("through") else ""
-        own = entry.get("part") == "own" and not through
+        own = entry.get("part") == "own"
         ref = SectionRef(document_id, section, "" if through == section else through, own)
         if document_id and section and ref not in out:
             out.append(ref)
@@ -159,7 +160,7 @@ def _passage(sections: list[SopSection], ref: SectionRef) -> tuple[SopSection, s
     row = _find(sections, ref.section)
     if row is None:
         return None
-    if ref.own:
+    if ref.own and not ref.through:
         return row, sop_section_service.heading_block_of(row), row.page_end
     if not ref.through:
         return (
@@ -173,8 +174,12 @@ def _passage(sections: list[SopSection], ref: SectionRef) -> tuple[SopSection, s
     if last is None:
         return None
     # Document order: a section's subsections follow it, so the run ends with the last
-    # descendant of ``through``.
-    end = sop_section_service.last_descendant(sections, last.order_index)
+    # descendant of ``through``, or with ``through`` itself when only its own text is in the run.
+    end = (
+        last.order_index
+        if ref.own
+        else sop_section_service.last_descendant(sections, last.order_index)
+    )
     run = [s for s in sections if row.order_index <= s.order_index <= end]
     text = "\n\n".join(b for b in (sop_section_service.heading_block_of(s) for s in run) if b)
     return row, text, max(s.page_end for s in run)
@@ -209,27 +214,39 @@ async def resolve(db: AsyncSession, refs: Iterable[SectionRef]) -> list[CitedSec
 
 async def _section_heads(
     db: AsyncSession, document_ids: Iterable[str]
-) -> dict[tuple[str, str], tuple[str, int]]:
-    """``(document_id, number) → (title, page_start)`` of the first section with that number, read
-    without any section text (checking a citation must not load whole documents)."""
+) -> dict[tuple[str, str], tuple[str, int, int]]:
+    """``(document_id, number) → (title, page_start, order_index)`` of the first section with that
+    number, read without any section text (checking a citation must not load whole documents)."""
     ids = sorted(set(document_ids))
     if not ids:
         return {}
     rows = await db.execute(
-        select(SopSection.document_id, SopSection.number, SopSection.title, SopSection.page_start)
+        select(
+            SopSection.document_id,
+            SopSection.number,
+            SopSection.title,
+            SopSection.page_start,
+            SopSection.order_index,
+        )
         .where(SopSection.document_id.in_(ids))
         .order_by(SopSection.document_id, SopSection.order_index)
     )
-    out: dict[tuple[str, str], tuple[str, int]] = {}
-    for doc_id, number, title, page in rows.all():
-        out.setdefault((doc_id, number), (title, page))
+    out: dict[tuple[str, str], tuple[str, int, int]] = {}
+    for doc_id, number, title, page, order in rows.all():
+        out.setdefault((doc_id, number), (title, page, order))
     return out
 
 
 def _exists(heads: dict, ref: SectionRef) -> bool:
-    return (ref.document_id, ref.section) in heads and (
-        not ref.through or (ref.document_id, ref.through) in heads
-    )
+    """Whether :func:`resolve` would read something: the section exists, and a run's end exists
+    at or after it (the order resolve reads in)."""
+    first = heads.get((ref.document_id, ref.section))
+    if first is None:
+        return False
+    if not ref.through:
+        return True
+    last = heads.get((ref.document_id, ref.through))
+    return last is not None and last[2] >= first[2]
 
 
 async def missing(db: AsyncSession, refs: Iterable[SectionRef]) -> list[SectionRef]:

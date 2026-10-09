@@ -149,3 +149,54 @@ def test_search_proposes_units_and_each_names_its_run():
     # Sections 1-3 are one unit: the candidate is that unit, named by its run.
     assert (hit.number, hit.through, hit.own) == ("1", "3", False)
     assert hit.title == "1–3 PURPOSE / SCOPE / DEFINITIONS"
+
+
+def _round_trips(rows) -> None:
+    """Every unit's one citation reads exactly the unit's text, and every section is covered."""
+    from types import SimpleNamespace as S
+
+    from app.services import sop_citation
+
+    doc_rows = [S(document_id="d", **vars(r)) for r in rows]
+    seen: list[int] = []
+    for unit in units(doc_rows):
+        section, through, own = unit.citation()
+        found = sop_citation._passage(doc_rows, sop_citation.SectionRef("d", section, through, own))
+        assert found is not None and found[1] == unit.text, unit.label
+        seen += [m.order_index for m in unit.members]
+    assert len(seen) == len(set(seen))
+
+
+def test_a_small_section_never_merges_into_an_opened_neighbours_intro():
+    """Adversarial review, 2026-10-10: 1 (small) + 2's own intro became one unit whose citation
+    "1 through 2" read all of 2's subsections (170 characters shown, 8000 cited)."""
+    md = "\n\n".join(
+        [
+            f"## 1. PURPOSE\n\n{_words(15)}",
+            "## 2. PROCEDURE\n\nSteps.",
+            f"2.1 One\n\n{_words(798)}",  # too big to take 2's intro: the intro stands alone
+            f"2.2 Two\n\n{_words(798)}",
+        ]
+    )
+    rows = _rows(md)
+    got = units(rows)
+    # 1 joins 2's intro, cited as a run ending with 2's own text: it reads 170 characters, not 8000.
+    first = got[0]
+    assert [(m.number, m.own) for m in first.members] == [("1", False), ("2", True)]
+    assert first.citation() == ("1", "2", True) and first.length < 500 * 2
+    _round_trips(rows)
+
+
+def test_every_unit_of_any_outline_is_one_citation_that_reads_it():
+    import random
+
+    rng = random.Random(7)
+    for _ in range(200):
+        parts = []
+        for n in range(1, rng.randint(2, 7)):
+            parts.append(f"## {n}. TOP {n}\n\n{_words(rng.choice([2, 20, 120, 900]))}")
+            for k in range(1, rng.randint(1, 5)):
+                parts.append(f"{n}.{k} Sub {k}\n\n{_words(rng.choice([1, 30, 200, 700]))}")
+                for m in range(1, rng.randint(1, 3)):
+                    parts.append(f"{n}.{k}.{m} Leaf {m}\n\n{_words(rng.choice([5, 90, 400]))}")
+        _round_trips(_rows("\n\n".join(parts)))

@@ -72,7 +72,9 @@ class Unit:
         first, last = self.members[0], self.members[-1]
         if len(self.members) == 1:
             return first.number, "", first.own
-        return first.number, last.number, False
+        # ``own`` on a run: it ends with the last section's own text (its subsections are cited
+        # by the next unit).
+        return first.number, last.number, last.own
 
 
 class _Tree:
@@ -94,6 +96,23 @@ class _Tree:
             parts = [self.own(i), *(self.full(c) for c in self.children.get(i, []))]
             self._full[i] = _JOIN.join(p for p in parts if p)
         return self._full[i]
+
+    def end(self, i: int) -> int:
+        """Where a section's passage ends in document order: its last descendant, or itself."""
+        kids = self.children.get(i, [])
+        return self.end(kids[-1]) if kids else i
+
+    def run(self, members: list[Member]) -> str:
+        """What a unit's citation reads: the run in document order from its first member through
+        its last (all of the last one, or only its own text)."""
+        if len(members) == 1:
+            m = members[0]
+            return self.own(m.order_index) if m.own else self.full(m.order_index)
+        # A run ends with its last member: all of it, or only its own text.
+        last = members[-1].order_index if members[-1].own else self.end(members[-1].order_index)
+        order = sorted(self.rows)
+        run = [i for i in order if members[0].order_index <= i <= last]
+        return _JOIN.join(b for b in (self.own(i) for i in run) if b)
 
     def pages(self, i: int) -> tuple[int, int]:
         if i not in self._pages:
@@ -119,13 +138,25 @@ class _Part:
         self.pages = (min(self.pages[0], other.pages[0]), max(self.pages[1], other.pages[1]))
 
 
-def _merged(parts: list[_Part]) -> list[_Part]:
+def _join(tree: _Tree, first: _Part, second: _Part) -> _Part | None:
+    """``first`` and ``second`` as one part, or None: too long, or not citable as one reference
+    that reads exactly its text (the invariant every unit keeps; see :meth:`_Tree.run`)."""
+    if first.length + len(_JOIN) + second.length > MAX_CHARS:
+        return None
+    joined = _Part(list(first.members), list(first.texts), first.pages)
+    joined.absorb(second)
+    text = _JOIN.join(t for t in joined.texts if t)
+    return joined if tree.run(joined.members) == text else None
+
+
+def _merged(tree: _Tree, parts: list[_Part]) -> list[_Part]:
     """Small parts join their neighbour under the same parent, while the result fits."""
     out: list[_Part] = []
     for part in parts:
         if out and (out[-1].length < MIN_CHARS or part.length < MIN_CHARS):
-            if out[-1].length + len(_JOIN) + part.length <= MAX_CHARS:
-                out[-1].absorb(part)
+            joined = _join(tree, out[-1], part)
+            if joined is not None:
+                out[-1] = joined
                 continue
         out.append(part)
     return out
@@ -148,8 +179,8 @@ def _split(tree: _Tree, siblings: list[int]) -> list[_Part]:
             inner.append(own)
         inner += _split(tree, kids)
         # A unit never crosses a parent: the opened section's parts merge among themselves only.
-        parts += [_Sealed.of(p) for p in _merged_unsealed(inner)]
-    return _merged_unsealed(parts)
+        parts += [_Sealed.of(p) for p in _merged_unsealed(tree, inner)]
+    return _merged_unsealed(tree, parts)
 
 
 class _Sealed(_Part):
@@ -160,48 +191,43 @@ class _Sealed(_Part):
         return cls(part.members, part.texts, part.pages)
 
 
-def _merged_unsealed(parts: list[_Part]) -> list[_Part]:
+def _merged_unsealed(tree: _Tree, parts: list[_Part]) -> list[_Part]:
     """Merge runs of ordinary parts; parts from an opened section stay as they are."""
     out: list[_Part] = []
     run: list[_Part] = []
     for part in parts:
         if isinstance(part, _Sealed):
-            out += _merged(run)
+            out += _merged(tree, run)
             run = []
             out.append(part)
         else:
             run.append(part)
-    return out + _merged(run)
+    return out + _merged(tree, run)
 
 
-def _absorb_small(parts: list[_Part]) -> list[_Part]:
+def _absorb_small(tree: _Tree, parts: list[_Part]) -> list[_Part]:
     """Last resort for a part still under ``MIN_CHARS`` (both neighbours under its parent were too
     big, or it sits next to an opened section): it joins its smaller neighbour, wherever that
-    comes from, if the result still fits. A unit then reads e.g. "4.9–5 ..."."""
+    comes from, if the result still fits and is still one citation. A unit then reads e.g.
+    "4.9–5 ..."."""
     out = list(parts)
     i = 0
     while i < len(out):
-        part = out[i]
-        if part.length >= MIN_CHARS or len(out) == 1:
+        if out[i].length >= MIN_CHARS or len(out) == 1:
             i += 1
             continue
-        # A run that ended on a section's own text would read as the whole section: an own part
-        # may only lead its unit, so it joins the part after it, never the one before.
-        ends_own = part.members[-1].own
-        before = [] if part.members[0].own else [i - 1]
-        options = [j for j in (*before, i + 1) if 0 <= j < len(out)]
-        if ends_own:
-            options = [j for j in options if j > i]
-        options = [j for j in options if out[j].length + len(_JOIN) + part.length <= MAX_CHARS]
+        options = []
+        for j in (i - 1, i + 1):
+            if 0 <= j < len(out):
+                first, second = (out[j], out[i]) if j < i else (out[i], out[j])
+                joined = _join(tree, first, second)
+                if joined is not None:
+                    options.append((out[j].length, min(i, j), joined))
         if not options:
             i += 1
             continue
-        j = min(options, key=lambda k: out[k].length)
-        first, second = (out[j], part) if j < i else (part, out[j])
-        merged = _Part(list(first.members), list(first.texts), first.pages)
-        merged.absorb(second)
-        lo = min(i, j)
-        out[lo : lo + 2] = [merged]
+        _, lo, joined = min(options, key=lambda o: o[0])
+        out[lo : lo + 2] = [joined]
         i = lo
     return out
 
@@ -239,7 +265,7 @@ def units(rows: Sequence[_Row]) -> list[Unit]:
             )
         ]
     else:
-        parts = _absorb_small(_split(tree, roots))
+        parts = _absorb_small(tree, _split(tree, roots))
     out = []
     for n, part in enumerate(parts):
         members = tuple(part.members)

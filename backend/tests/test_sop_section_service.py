@@ -270,3 +270,22 @@ async def test_the_units_api_lists_units_and_reads_one(client, db_session, admin
         if d["document_id"] == doc.id
     )
     assert (row["section_count"], row["unit_count"]) == (5, 1)
+
+
+async def test_unit_counts_recount_only_a_document_whose_sections_changed(db_session, monkeypatch):
+    from app.sop import units as units_module
+
+    doc = await _ingest(db_session)
+    await sop_section_service.build(db_session, doc)
+    sop_section_service._UNIT_COUNTS.clear()
+    calls = []
+    real = units_module.units
+    monkeypatch.setattr(units_module, "units", lambda rows: calls.append(1) or real(rows))
+    assert (await sop_section_service.unit_counts(db_session))[doc.id] == 1
+    assert (await sop_section_service.unit_counts(db_session))[doc.id] == 1
+    assert len(calls) == 1  # the poll does not recount an unchanged document
+    doc.markdown += "\n\n## 3. RECORDS\n\n" + "kept " * 900
+    await db_session.commit()
+    await sop_section_service.resplit(db_session, doc)
+    assert (await sop_section_service.unit_counts(db_session))[doc.id] == 2
+    assert len(calls) == 2
