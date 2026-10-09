@@ -863,6 +863,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/sop/documents/{document_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Document
+         * @description Delete an SOP that nothing cites (its sections, chunks and stored file go with it). 409,
+         *     naming where, when a rubric, a published version or a report cites it: to replace a cited SOP,
+         *     make a new bank or version without it (owner, 2026-10-09). 404 for an unknown document.
+         */
+        delete: operations["delete_document_admin_sop_documents__document_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/sop/documents/{document_id}/rebuild": {
         parameters: {
             query?: never;
@@ -2652,6 +2674,11 @@ export interface components {
             /** Chunk Count */
             chunk_count: number;
             /**
+             * Cited In
+             * @default []
+             */
+            cited_in: string[];
+            /**
              * Converting
              * @default false
              */
@@ -2689,6 +2716,11 @@ export interface components {
              * @default false
              */
             summarizing: boolean;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
             /**
              * Summary Error
              * @default
@@ -4351,6 +4383,35 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["SopDocumentOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_document_admin_sop_documents__document_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

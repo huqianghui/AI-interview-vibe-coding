@@ -47,12 +47,22 @@ function ConversionBadge({ doc }: { doc: SopDocument }) {
 
 const SUMMARY_COLOR = { reviewed: "success", draft: "warning", failed: "danger" } as const;
 
+/** The summary's state, shown as a badge in the Status column. */
 function summaryLabel(status: string, busy: boolean, t: T): string {
   if (busy) return t("admin.sop.summary.drafting");
   if (status === "reviewed" || status === "draft" || status === "failed") {
-    return t(`admin.sop.summary.${status}`);
+    return t(`admin.sop.summary.state.${status}`);
   }
-  return t("admin.sop.summary.none");
+  return t("admin.sop.summary.state.none");
+}
+
+/** What the state means, in the Notes column: used in scoring or not, or why drafting failed. */
+function summaryNote(doc: SopDocument, t: T): string {
+  if (doc.summarizing) return "";
+  if (doc.summary_status === "failed") return doc.summary_error || t("admin.sop.summary.note.failed");
+  if (doc.summary_status === "reviewed") return t("admin.sop.summary.note.reviewed");
+  if (doc.summary_status === "draft") return t("admin.sop.summary.note.draft");
+  return t("admin.sop.summary.note.none");
 }
 
 function SummaryBadge({ status, busy }: { status: string; busy: boolean }) {
@@ -77,7 +87,16 @@ function SummaryCard({ state }: { state: SopTabState }) {
       <CardHeader
         header={<Title3>{t("admin.sop.summary.title")}</Title3>}
         description={<Text size={200}>{t("admin.sop.summary.hint")}</Text>}
-        action={<SummaryBadge status={summary.status} busy={state.summarizing} />}
+        action={
+          <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+            <SummaryBadge status={summary.status} busy={state.summarizing} />
+            {!state.summarizing && summary.status !== "failed" && (
+              <Text size={200}>
+                {t(`admin.sop.summary.note.${summary.status || "none"}`, { defaultValue: "" })}
+              </Text>
+            )}
+          </span>
+        }
       />
       {summary.error && (
         <Text size={200} className={styles.errorText}>
@@ -314,11 +333,44 @@ export function SopTab({ state }: { state: SopTabState }) {
     },
     { id: "sections", header: t("admin.sop.colSections"), text: (d) => String(d.section_count), cell: (d) => d.section_count },
     {
+      // The summary itself, one line until clicked (owner, 2026-10-09).
       id: "summary",
       header: t("admin.sop.colSummary"),
+      long: true,
+      text: (d) => d.summary ?? "",
+      cell: (d) => <Text size={200}>{(d.summary ?? "").replace(/\s+/g, " ").trim() || "—"}</Text>,
+    },
+    {
+      id: "status",
+      header: t("admin.sop.colStatus"),
       text: (d) => summaryLabel(d.summary_status, d.summarizing, t),
       pad: 24, // the badge's own padding
       cell: (d) => <SummaryBadge status={d.summary_status} busy={d.summarizing} />,
+    },
+    {
+      id: "notes",
+      header: t("admin.sop.colNotes"),
+      long: true,
+      text: (d) => summaryNote(d, t),
+      cell: (d) => <Text size={200}>{summaryNote(d, t)}</Text>,
+    },
+    {
+      // Only an SOP nothing cites can be deleted; a cited one is replaced by a new bank or version.
+      id: "actions",
+      header: "",
+      width: 96,
+      cell: (d) =>
+        // Not while it converts or its summary is drafted: that work would write for a gone row.
+        (d.cited_in ?? []).length === 0 && !d.converting && !d.summarizing ? (
+          <Button
+            size="small"
+            appearance="subtle"
+            data-testid={`sop-doc-delete-${d.document_id}`}
+            onClick={() => void state.deleteDocument(d, t("admin.sop.deleteConfirm", { name: d.name }))}
+          >
+            {t("admin.sop.delete")}
+          </Button>
+        ) : null,
     },
   ];
 

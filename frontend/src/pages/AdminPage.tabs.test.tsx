@@ -415,6 +415,29 @@ describe("SOP documents tab", () => {
     vi.spyOn(admin, "listSopLibraries").mockResolvedValue([LIBRARY]);
   });
 
+  it("shows each summary with its status and notes, and deletes only an SOP nothing cites", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(admin, "listSopDocuments").mockResolvedValue([
+      { ...DOCS[0], summary: "**Purpose:** Inspect every widget.", cited_in: ["Widgets v1"] },
+      { ...DOCS[1], summary: "", cited_in: [] },
+    ]);
+    const del = vi.spyOn(admin, "deleteSopDocument").mockResolvedValue(undefined);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+    renderPage();
+    await user.click(await screen.findByTestId("admin-tab-sop"));
+    await user.click(await screen.findByTestId("sop-library-toggle-lib1"));
+    const cited = await screen.findByTestId("sop-doc-d1");
+    expect(cited).toHaveTextContent("**Purpose:** Inspect every widget.");
+    expect(cited).toHaveTextContent("Not used in scoring until approved.");
+    expect(screen.queryByTestId("sop-doc-delete-d1")).not.toBeInTheDocument(); // cited: kept
+
+    await user.click(screen.getByTestId("sop-doc-delete-d2"));
+    expect(del).not.toHaveBeenCalled(); // the admin said no
+    await user.click(screen.getByTestId("sop-doc-delete-d2"));
+    expect(confirm).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(del).toHaveBeenCalledWith("d2"));
+  });
+
   it("lists libraries closed; a click opens one to show its documents", async () => {
     const user = userEvent.setup();
     vi.spyOn(admin, "listSopDocuments").mockResolvedValue(DOCS);
@@ -548,7 +571,7 @@ describe("SOP documents tab", () => {
     renderPage();
     await user.click(await screen.findByTestId("admin-tab-sop"));
     await user.click(await screen.findByTestId("sop-library-toggle-lib1"));
-    expect(await screen.findByTestId("sop-doc-d1")).toHaveTextContent("Draft — not used in scoring");
+    expect(await screen.findByTestId("sop-doc-d1")).toHaveTextContent("DraftNot used in scoring until approved.");
     await user.click(screen.getByText("Widget SOP.pdf"));
     const box = await screen.findByTestId("sop-summary-text");
     expect(box).toHaveValue("**Purpose:** Inspect widgets.");
@@ -559,7 +582,7 @@ describe("SOP documents tab", () => {
     list.mockResolvedValue([{ ...DOCS[0], summary_status: "reviewed" }, DOCS[1]]);
     await user.click(screen.getByTestId("sop-summary-approve"));
     expect(save).toHaveBeenCalledWith("d1", "**Purpose:** Inspect every widget.", true);
-    expect(await screen.findByTestId("sop-summary")).toHaveTextContent("Approved — used in scoring");
+    expect(await screen.findByTestId("sop-summary")).toHaveTextContent("ApprovedUsed in scoring.");
     expect(screen.getByTestId("sop-summary-approve")).toBeDisabled(); // already approved, unedited
     await waitFor(() => expect(screen.getByTestId("sop-doc-d1")).toHaveTextContent("Approved"));
   });
