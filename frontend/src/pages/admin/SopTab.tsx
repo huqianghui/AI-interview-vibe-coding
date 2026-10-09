@@ -24,10 +24,11 @@ import type { SopTabState } from "./useSopTab";
 
 type T = ReturnType<typeof useTranslation>["t"];
 
+/** Converted or not, never which tool did it (owner, 2026-10-09: success or failure only). */
 function conversionLabel(doc: SopDocument, t: T): string {
   if (doc.converting || doc.markdown_source === "") return t("admin.sop.pending");
   if (doc.markdown_source === "failed") return t("admin.sop.failed");
-  return t(`admin.sop.source.${doc.markdown_source}`, { defaultValue: doc.markdown_source });
+  return t("admin.sop.converted");
 }
 
 function ConversionBadge({ doc }: { doc: SopDocument }) {
@@ -181,7 +182,7 @@ function LibrarySection({
               ref={fileInput}
               type="file"
               multiple
-              accept=".pdf,.docx,.txt,.md"
+              accept=".pdf,.docx,.pptx"
               style={{ display: "none" }}
               data-testid={`sop-library-file-${id}`}
               onChange={(e) => {
@@ -199,6 +200,7 @@ function LibrarySection({
             >
               {state.uploading === id ? t("admin.sop.lib.uploading") : t("admin.sop.lib.upload")}
             </Button>
+            <Text size={200}>{t("admin.sop.lib.formats")}</Text>
             {renaming === null ? (
               <Button size="small" onClick={() => setRenaming(library.name)} data-testid={`sop-library-rename-${id}`}>
                 {t("admin.sop.lib.rename")}
@@ -333,14 +335,8 @@ export function SopTab({ state }: { state: SopTabState }) {
     },
     { id: "sections", header: t("admin.sop.colSections"), text: (d) => String(d.section_count), cell: (d) => d.section_count },
     {
-      // The summary itself, one line until clicked (owner, 2026-10-09).
-      id: "summary",
-      header: t("admin.sop.colSummary"),
-      long: true,
-      text: (d) => d.summary ?? "",
-      cell: (d) => <Text size={200}>{(d.summary ?? "").replace(/\s+/g, " ").trim() || "—"}</Text>,
-    },
-    {
+      // The summary's status and what it means; the summary itself is read in its card below,
+      // under the table (owner, 2026-10-09: too long for a column).
       id: "status",
       header: t("admin.sop.colStatus"),
       text: (d) => summaryLabel(d.summary_status, d.summarizing, t),
