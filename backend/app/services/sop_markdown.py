@@ -17,11 +17,16 @@ review: "要么全部成功，要么失败 … 先有全部的 markdown 内容�
   PDF, Word or PowerPoint, Excel is not supported). A deck has no reliable page numbers, so there
   is no per-page check: a result with no text is a failure (:func:`to_markdown`). Without an
   endpoint it cannot be converted at all.
-- **Word → our own converter** (``app.sop.docx_markdown``). Document Intelligence reads a .docx's
-  text but not its structure here: the client files number their headings with Word
-  auto-numbering under a custom style, which DI neither computes nor treats as a heading. Measured
-  2026-10-09 on the 4 client Word SOPs: DI gave 1 section each (Monitoring Plan: 52,551 characters,
-  no heading, no clause number) where this converter gives 7-18 sections with their numbers.
+- **Word → PDF (LibreOffice) → Azure Document Intelligence** (owner, 2026-10-09: one converter
+  for every format). DI reads a .docx's text but not its structure: the client files number their
+  headings with Word auto-numbering under a custom style, which DI neither computes nor treats as
+  a heading (measured: 1 section per document, no clause number, 1 "page"). Printed to PDF, the
+  numbers and the page layout are on the page, and DI reads them like any PDF (Monitoring Plan: 14
+  numbered sections over 29 pages, as many as our own converter found, now with real pages). The
+  completeness check compares DI's text with the .docx's own text, not with the PDF's text layer:
+  LibreOffice's text layer doubles Chinese characters ("检检"), which DI does not.
+  Without LibreOffice or DI (dev, CI) the document is converted by our own converter
+  (``app.sop.docx_markdown``) and labelled ``docx``.
 - **Text / Markdown** as is.
 
 :func:`to_markdown` never raises: a failure returns an empty Markdown with the reason, and the
@@ -74,7 +79,9 @@ _OFFICE = {
 # The current converter for each source. Raise one when its output changes, and every document
 # converted by the older version is converted again by the next background build.
 # docx 2 (v0.55.0.0): merged cells once, form tables as labelled sections.
-CONVERTER_VERSIONS = {"document_intelligence": 1, "pdf_text": 1, "docx": 2, "text": 1}
+# docx 3 (v0.62.0.0): Word goes through PDF (LibreOffice) → DI, so every Word document converted by
+# our own converter is converted again (and becomes "document_intelligence").
+CONVERTER_VERSIONS = {"document_intelligence": 1, "pdf_text": 1, "docx": 3, "text": 1}
 
 
 @dataclass(frozen=True)
@@ -105,6 +112,24 @@ def _tokens(text: str) -> list[str]:
     for run in _CJK_RUN.findall(text):
         words.extend(run[i : i + 2] for i in range(len(run) - 1))
     return words
+
+
+def text_gaps(source_text: str, markdown: str) -> tuple[float, list[str]]:
+    """How much of a document's own text (a .docx) the Markdown covers: ``(coverage, missing)``.
+    The same "required" words as :func:`page_gaps` (recurring words and document ids), for the
+    whole document at once: the source has no pages to compare page by page."""
+    counts = Counter(_tokens(source_text))
+    required = {w for w, n in counts.items() if n >= 2 or w.startswith("vv-")}
+    if not required:
+        return 1.0, []
+    flat = markdown.lower()
+    squashed = re.sub(r"[\s\-]", "", flat)
+    missing = sorted(
+        w
+        for w in required
+        if w not in flat and w[::-1] not in flat and w.replace("-", "") not in squashed
+    )
+    return 1 - len(missing) / len(required), missing
 
 
 def page_gaps(page_texts: list[str], markdown: str) -> list[tuple[int, float, list[str]]]:
@@ -210,6 +235,76 @@ async def _pdf_via_document_intelligence(content: bytes, endpoint: str) -> str:
     return markdown
 
 
+LIBREOFFICE_TIMEOUT_SECONDS = 180
+
+
+def libreoffice() -> str | None:
+    """The LibreOffice command (installed in the backend image), or None (dev, CI)."""
+    import shutil
+
+    return shutil.which("soffice") or shutil.which("libreoffice")
+
+
+def _docx_to_pdf(content: bytes, soffice: str) -> bytes:
+    """Print a .docx to PDF with LibreOffice, headless, in a private temporary directory (its
+    own profile too, so two conversions never share one)."""
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmp:
+        source = Path(tmp) / "document.docx"
+        source.write_bytes(content)
+        subprocess.run(
+            [
+                soffice,
+                "--headless",
+                "--norestore",
+                f"-env:UserInstallation=file://{tmp}/profile",
+                "--convert-to",
+                "pdf",
+                "--outdir",
+                tmp,
+                str(source),
+            ],
+            check=True,
+            capture_output=True,
+            timeout=LIBREOFFICE_TIMEOUT_SECONDS,
+        )
+        pdf = Path(tmp) / "document.pdf"
+        if not pdf.exists():
+            raise RuntimeError("LibreOffice produced no PDF")
+        return pdf.read_bytes()
+
+
+def _docx_text(content: bytes) -> str:
+    """The .docx's own text: every paragraph and table cell, for the completeness check."""
+    import docx
+
+    document = docx.Document(io.BytesIO(content))
+    parts = [p.text for p in document.paragraphs]
+    for table in document.tables:
+        for row in table.rows:
+            parts.extend(cell.text for cell in row.cells)
+    return "\n".join(parts)
+
+
+async def _docx_via_document_intelligence(content: bytes, endpoint: str, soffice: str) -> str:
+    pdf = await asyncio.to_thread(_docx_to_pdf, content, soffice)
+    page_count = len(await asyncio.to_thread(_pdf_page_texts, pdf))
+    result = await _analyze(pdf, endpoint, page_count)
+    got = len(result.get("pages", []))
+    if got != page_count:
+        raise IncompleteConversion(f"{got} of {page_count} pages converted")
+    markdown = result["content"]
+    coverage, missing = text_gaps(await asyncio.to_thread(_docx_text, content), markdown)
+    if coverage < PAGE_COVERAGE_MIN:
+        raise IncompleteConversion(
+            f"the document is not fully read: {coverage:.0%} (missing {', '.join(missing[:8])})"
+        )
+    return markdown
+
+
 async def to_markdown(content: bytes, filename: str) -> MarkdownResult:
     """The whole document as Markdown, or a failure with its reason. Never partial, never raises.
     A conversion with no text at all (a scanned PDF without Document Intelligence, an empty file)
@@ -243,6 +338,15 @@ async def _convert(content: bytes, filename: str) -> MarkdownResult:
                 result = await _analyze(content, endpoint, None, _OFFICE[ext])
             return MarkdownResult(result.get("content", ""), "document_intelligence")
         if ext == ".docx":
+            endpoint = get_settings().azure_foundry_endpoint
+            soffice = libreoffice()
+            if endpoint and soffice:
+                async with asyncio.timeout(DI_TIMEOUT_SECONDS):
+                    markdown = await _docx_via_document_intelligence(content, endpoint, soffice)
+                return MarkdownResult(markdown, "document_intelligence")
+            if get_settings().sop_require_libreoffice and not soffice:
+                raise RuntimeError("LibreOffice is not installed: Word cannot be converted")
+            # Dev / CI only (no LibreOffice or no DI): our own converter, labelled.
             from app.sop.docx_markdown import docx_to_markdown
 
             return MarkdownResult(await asyncio.to_thread(docx_to_markdown, content), "docx")

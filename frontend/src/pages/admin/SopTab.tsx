@@ -93,7 +93,8 @@ function SummaryCard({ state }: { state: SopTabState }) {
           <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
             <SummaryBadge status={summary.status} busy={state.summarizing} />
             {!state.summarizing && summary.status !== "failed" && (
-              <Text size={200}>
+              // One line: Text wraps by default, and the header's action slot is narrow.
+              <Text size={200} wrap={false}>
                 {t(`admin.sop.summary.note.${summary.status || "none"}`, { defaultValue: "" })}
               </Text>
             )}

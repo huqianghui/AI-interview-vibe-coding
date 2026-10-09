@@ -15,16 +15,23 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# curl is used by the HEALTHCHECK below.
+# curl is used by the HEALTHCHECK below. LibreOffice (Writer, headless) prints Word SOPs to PDF
+# for Document Intelligence; the Noto CJK and DejaVu fonts let it lay out Chinese and Latin text.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
+        libreoffice-writer-nogui fonts-noto-cjk fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
+# Every published image has a working LibreOffice: no fallback to the in-house Word converter.
+ENV SOP_REQUIRE_LIBREOFFICE=1
 
 # Install deps first (better layer caching). Copy only the packaging metadata, then the source.
 # `pip install -e .[azure]` needs the app package present for the editable install to resolve.
 COPY pyproject.toml ./
 COPY app ./app
 RUN pip install --upgrade pip && pip install -e ".[azure]"
+# The build fails unless LibreOffice really converts a Word file (Chinese included) to PDF.
+COPY scripts/check_libreoffice.py ./scripts/check_libreoffice.py
+RUN python scripts/check_libreoffice.py
 
 # Migration + start-up assets. scripts/ holds fetch_client_bundle.py (the gitignored importer is
 # NOT baked in — it arrives at boot inside the private client bundle).
