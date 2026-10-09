@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.62.0.1 (2026-10-09)
+
+### Fixed
+- **Word SOPs use the in-house converter again** (new setting `SOP_WORD_VIA_PDF`, off). On the
+  server, the PDF route lost 6 of the 14 numbered clauses of a client Word SOP: LibreOffice
+  printed its table of contents, which Document Intelligence read as headings numbered by their
+  page numbers, and the body headings came out as "10.TITLE", with no space after the number. So
+  rubric citations by clause number pointed at the wrong text. The route stays in the code and
+  LibreOffice stays in the image; it is switched back on once it handles both cases.
+
 ## 0.62.0.0 (2026-10-09)
 
 ### Changed

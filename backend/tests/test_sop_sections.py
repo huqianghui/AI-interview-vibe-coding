@@ -460,6 +460,7 @@ WORD_TEXT = [
 async def test_word_goes_through_libreoffice_to_document_intelligence(monkeypatch):
     """Word → PDF (LibreOffice) → DI (owner, 2026-10-09). Completeness is checked against the
     .docx's own text: a DI reading that drops a paragraph fails the whole document."""
+    monkeypatch.setattr(sop_markdown.get_settings(), "sop_word_via_pdf", True)
     monkeypatch.setattr(sop_markdown.get_settings(), "azure_foundry_endpoint", "https://di.example")
     monkeypatch.setattr(sop_markdown, "libreoffice", lambda: "/usr/bin/soffice")
     monkeypatch.setattr(sop_markdown, "_docx_to_pdf", lambda content, soffice: b"%PDF-word")
@@ -486,6 +487,7 @@ async def test_word_goes_through_libreoffice_to_document_intelligence(monkeypatc
 
 @pytest.mark.asyncio
 async def test_without_libreoffice_word_falls_back_only_where_it_is_not_required(monkeypatch):
+    monkeypatch.setattr(sop_markdown.get_settings(), "sop_word_via_pdf", True)
     settings = sop_markdown.get_settings()
     monkeypatch.setattr(settings, "azure_foundry_endpoint", "https://di.example")
     monkeypatch.setattr(sop_markdown, "libreoffice", lambda: None)
@@ -506,6 +508,7 @@ async def test_without_libreoffice_word_falls_back_only_where_it_is_not_required
 
 @pytest.mark.asyncio
 async def test_an_empty_pdf_from_libreoffice_is_a_clear_failure(monkeypatch):
+    monkeypatch.setattr(sop_markdown.get_settings(), "sop_word_via_pdf", True)
     monkeypatch.setattr(sop_markdown.get_settings(), "azure_foundry_endpoint", "https://di.example")
     monkeypatch.setattr(sop_markdown, "libreoffice", lambda: "/usr/bin/soffice")
     monkeypatch.setattr(sop_markdown, "_docx_to_pdf", lambda content, soffice: b"%PDF")
@@ -535,3 +538,12 @@ def test_libreoffice_prints_a_word_file_to_pdf():
     pdf = sop_markdown._docx_to_pdf(_word(*WORD_TEXT), sop_markdown.libreoffice())
     assert pdf.startswith(b"%PDF")
     assert "Inspector checks" in "".join(sop_markdown._pdf_page_texts(pdf))
+
+
+@pytest.mark.asyncio
+async def test_word_uses_the_in_house_converter_while_the_pdf_route_is_off(monkeypatch):
+    monkeypatch.setattr(sop_markdown.get_settings(), "azure_foundry_endpoint", "https://di.example")
+    monkeypatch.setattr(sop_markdown, "libreoffice", lambda: "/usr/bin/soffice")
+    monkeypatch.setattr(sop_markdown.get_settings(), "sop_require_libreoffice", True)
+    result = await sop_markdown.to_markdown(_word(*WORD_TEXT), "Release.docx")
+    assert result.source == "docx" and "Inspector checks" in result.markdown
