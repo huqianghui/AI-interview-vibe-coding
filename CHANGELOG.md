@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.58.4.0 (2026-10-09)
+
+### Changed
+- **The Users table saves with one Save button.** Choosing an interviewer, bank or bank version
+  no longer saves at once. Changes are staged until **Save**, which saves every changed user
+  together; **Discard changes** puts them back. Putting a choice back to what was saved is not a
+  change. All feedback sits in one line above the table ("1 user changed, not saved yet", "Saved 2
+  users", or which users could not be saved and why). The rows hold only data and controls; the
+  "Saved" text under the version picker is gone.
+- **Table rows stay on one line.** Only long-text columns (questions, rubric items, citations)
+  give way on a narrow page, with their ellipsis. Every other column keeps its content's width and
+  the table scrolls sideways instead of wrapping a cell. Columns of controls keep their full
+  width, so a version picker is never squeezed. Dates in tables are shown to the minute, 24-hour.
+
 ## 0.58.3.2 (2026-10-09)
 
 ### Fixed

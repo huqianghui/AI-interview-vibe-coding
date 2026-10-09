@@ -30,13 +30,14 @@ export function useUsersTab(active: boolean) {
       (e: unknown) => console.warn("[users] rubric versions", e),
     );
   }, []);
-  const [assignStatus, setAssignStatus] = useState<
-    Record<string, { kind: "saved" } | { kind: "error"; message: string }>
-  >({});
-
-  // The latest assignment chosen per user. Two quick changes on one row (interviewer, then bank)
-  // each build on the previous choice, not on the row as it was rendered before the first save.
-  const pendingAssignment = useRef<Record<string, Assignment>>({});
+  // Assignment changes are staged per user and saved together by the Save button (owner,
+  // 2026-10-09), not on every change of a select.
+  const [drafts, setDrafts] = useState<Record<string, Assignment>>({});
+  const [saving, setSaving] = useState(false);
+  const [saveResult, setSaveResult] = useState<
+    { kind: "saved"; count: number } | { kind: "error"; count: number } | null
+  >(null);
+  const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
 
   const loadUsers = useCallback(async () => {
     setUsersLoading(true);
@@ -71,54 +72,85 @@ export function useUsersTab(active: boolean) {
     }
   };
 
-  const assign = async (user: AdminUser, change: Partial<Assignment>) => {
-    const base = pendingAssignment.current[user.id] ?? {
-      persona_id: user.assigned_persona_id,
-      bank_id: user.assigned_bank_id,
-      bank_version_id: user.assigned_bank_version_id ?? null,
+  const savedAssignment = (u: AdminUser): Assignment => ({
+    persona_id: u.assigned_persona_id,
+    bank_id: u.assigned_bank_id,
+    bank_version_id: u.assigned_bank_version_id ?? null,
+  });
+  // Unset and null are the same choice (the default).
+  const same = (a: Assignment, b: Assignment) =>
+    (a.persona_id ?? null) === (b.persona_id ?? null) &&
+    (a.bank_id ?? null) === (b.bank_id ?? null) &&
+    (a.bank_version_id ?? null) === (b.bank_version_id ?? null);
+
+  /** Stage a change to one user's assignment; nothing is saved until Save. */
+  const assign = (row: AdminUser, change: Partial<Assignment>) => {
+    setSaveResult(null);
+    // The table hands over the row as shown (staged change applied): compare with what is saved.
+    const user = users.find((u) => u.id === row.id) ?? row;
+    setDrafts((prev) => {
+      const base = prev[user.id] ?? savedAssignment(user);
+      const next: Assignment = { ...base, ...change };
+      // A new bank starts on its latest version: null, which the backend resolves on save.
+      if ("bank_id" in change && change.bank_id !== base.bank_id && !("bank_version_id" in change)) {
+        next.bank_version_id = null;
+      }
+      const rest = { ...prev };
+      delete rest[user.id];
+      return same(next, savedAssignment(user)) ? rest : { ...rest, [user.id]: next };
+    });
+    if (change.bank_id) loadVersions(change.bank_id);
+  };
+
+  /** A user as the table shows them: the saved assignment with any staged change on top. */
+  const rowOf = (u: AdminUser): AdminUser => {
+    const d = drafts[u.id];
+    if (!d) return u;
+    return {
+      ...u,
+      assigned_persona_id: d.persona_id,
+      assigned_bank_id: d.bank_id,
+      assigned_bank_version_id: d.bank_version_id ?? null,
     };
-    const next: Assignment = { ...base, ...change };
-    // A new bank starts on that bank's latest version: the backend picks it when the id is null.
-    if ("bank_id" in change && change.bank_id !== base.bank_id && !("bank_version_id" in change)) {
-      next.bank_version_id = null;
-    }
-    pendingAssignment.current[user.id] = next;
-    // Show the choice at once; the save confirms it (or the error says it did not stick).
-    setUsers((prev) =>
-      prev.map((u) =>
-        u.id === user.id
-          ? {
-              ...u,
-              assigned_persona_id: next.persona_id,
-              assigned_bank_id: next.bank_id,
-              assigned_bank_version_id: next.bank_version_id ?? null,
-            }
-          : u,
-      ),
+  };
+
+  const changedCount = Object.keys(drafts).length;
+
+  const discard = () => {
+    setDrafts({});
+    setRowErrors({});
+    setSaveResult(null);
+  };
+
+  /** Save every staged change. A user whose save fails keeps the change staged and says why. */
+  const save = async () => {
+    const pending = Object.entries(drafts);
+    if (pending.length === 0) return;
+    setSaving(true);
+    setSaveResult(null);
+    const results = await Promise.allSettled(
+      pending.map(([id, next]) => admin.setUserAssignment(id, next)),
     );
-    try {
-      const saved = await admin.setUserAssignment(user.id, next);
-      // The backend resolved "latest" to a concrete version: show it and build on it next time.
-      pendingAssignment.current[user.id] = {
-        ...next,
-        bank_version_id: saved?.assigned_bank_version_id ?? null,
-      };
-      setUsers((prev) =>
-        prev.map((u) =>
-          u.id === user.id
-            ? {
-                ...u,
-                assigned_bank_version_id: saved?.assigned_bank_version_id ?? null,
-                assigned_bank_version_no: saved?.assigned_bank_version_no ?? null,
-              }
-            : u,
-        ),
-      );
-      if (next.bank_id) loadVersions(next.bank_id, true);
-      setAssignStatus((prev) => ({ ...prev, [user.id]: { kind: "saved" } }));
-    } catch (e) {
-      setAssignStatus((prev) => ({ ...prev, [user.id]: { kind: "error", message: message(e) } }));
-    }
+    const failed: Record<string, string> = {};
+    const saved: Record<string, AdminUser> = {};
+    results.forEach((r, i) => {
+      const id = pending[i][0];
+      if (r.status === "fulfilled" && r.value) saved[id] = r.value;
+      else failed[id] = r.status === "rejected" ? message(r.reason) : "not saved";
+    });
+    setUsers((prev) => prev.map((u) => saved[u.id] ?? u));
+    for (const u of Object.values(saved)) if (u.assigned_bank_id) loadVersions(u.assigned_bank_id, true);
+    setDrafts((prev) => {
+      const rest = { ...prev };
+      for (const id of Object.keys(saved)) delete rest[id];
+      return rest;
+    });
+    setRowErrors(failed);
+    const failures = Object.keys(failed).length;
+    setSaveResult(
+      failures ? { kind: "error", count: failures } : { kind: "saved", count: pending.length },
+    );
+    setSaving(false);
   };
 
   return {
@@ -131,7 +163,14 @@ export function useUsersTab(active: boolean) {
     banks,
     versionsByBank,
     assign,
-    assignStatus,
+    rowOf,
+    drafts,
+    changedCount,
+    save,
+    discard,
+    saving,
+    saveResult,
+    rowErrors,
   };
 }
 

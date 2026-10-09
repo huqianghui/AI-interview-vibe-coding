@@ -6,6 +6,20 @@ export function formatWhen(iso: string | null, locale: string): string {
   return iso ? new Date(iso).toLocaleString(locale) : "—";
 }
 
+/** The same moment for a table cell: to the minute, 24-hour, so a row stays one short line. */
+export function formatWhenShort(iso: string | null, locale: string): string {
+  return iso
+    ? new Date(iso).toLocaleString(locale, {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      })
+    : "—";
+}
+
 /** The transcript as plain text: a short header, then one turn per line, `[time] Speaker: text`. */
 export function transcriptText(detail: InterviewDetail, t: TFunction, locale: string): string {
   const head = [

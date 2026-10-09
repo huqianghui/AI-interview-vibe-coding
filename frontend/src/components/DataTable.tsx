@@ -143,7 +143,10 @@ export function DataTable<T>({
       out[c.id] = {
         idealWidth: widths[i],
         defaultWidth: widths[i],
-        minWidth: Math.min(c.minWidth ?? MIN_WIDTH, widths[i]),
+        // Rows stay one line (owner: tables clean and tidy). Only long text, which has its own
+        // ellipsis, gives way on a narrow page; every other column keeps its content's width and
+        // the table scrolls sideways instead of wrapping a cell onto a second line.
+        minWidth: c.long ? Math.min(c.minWidth ?? MIN_WIDTH, widths[i]) : widths[i],
       };
     });
     return out;
