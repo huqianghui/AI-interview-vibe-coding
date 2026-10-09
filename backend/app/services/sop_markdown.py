@@ -354,6 +354,12 @@ async def _convert(content: bytes, filename: str) -> MarkdownResult:
         if ext == ".docx":
             endpoint = get_settings().azure_foundry_endpoint
             soffice = libreoffice()
+            if not get_settings().sop_word_via_pdf:
+                # Off until the PDF route handles a table of contents and "10.TITLE" headings:
+                # on the server it lost 6 of 14 numbered clauses of a client SOP (2026-10-09).
+                from app.sop.docx_markdown import docx_to_markdown
+
+                return MarkdownResult(await asyncio.to_thread(docx_to_markdown, content), "docx")
             if endpoint and soffice:
                 async with asyncio.timeout(DI_TIMEOUT_SECONDS):
                     markdown = await _docx_via_document_intelligence(content, endpoint, soffice)
