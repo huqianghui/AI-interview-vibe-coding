@@ -1,7 +1,8 @@
 """Split every converted SOP's stored Markdown again with the current splitter, and replace its
 sections. No conversion and no Document Intelligence call: for a change to the splitter alone
-(v0.62.4.0: headings with 7+ "#", "10.TITLE" clauses). Word documents are skipped: they are
-converted again through the unified pipeline at boot (converter version bump).
+(v0.62.4.0: headings with 7+ "#", "10.TITLE" clauses; v0.62.5.0: paragraph breaks kept).
+Every document is re-split, Word included: its stored Markdown is Document Intelligence's since
+v0.62.4.0.
 
 Run inside the backend container, after ``scripts/compare_sop_sections.py`` has shown what will
 change:
@@ -29,9 +30,6 @@ async def main() -> None:
         query = select(SopDocument).order_by(SopDocument.name)
         documents = (await db.execute(query)).scalars().all()
         for n, document in enumerate(documents, 1):
-            if document.name.lower().endswith(".docx"):
-                print(f"doc{n:02d}: Word, converted again at boot")
-                continue
             print(f"doc{n:02d}: {await resplit(db, document)} sections")
 
 

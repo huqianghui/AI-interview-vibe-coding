@@ -47,8 +47,8 @@ async def test_build_stores_the_markdown_and_every_section(db_session):
     assert [r.number for r in rows] == ["§1", "1", "2", "2.1", "2.2"]
     two = next(r for r in rows if r.number == "2")
     assert sop_section_service.full_text(rows, two.order_index) == (
-        "2 RESPONSIBILITIES\n\n2.1 Inspector: checks every widget."
-        "\n\n2.2 Supervisor: reviews the log."
+        "## 2 RESPONSIBILITIES\n\n### 2.1 Inspector: checks every widget."
+        "\n\n### 2.2 Supervisor: reviews the log."
     )
     assert doc.markdown.startswith("# Widget SOP")
 
@@ -124,11 +124,11 @@ async def test_full_lengths_match_each_full_text():
     from types import SimpleNamespace as S
 
     rows = [
-        S(order_index=0, number="§0", title="", text="Intro.", parent_index=None),
-        S(order_index=1, number="1", title="SCOPE", text="", parent_index=None),
-        S(order_index=2, number="1.1", title="Sites", text="All sites.", parent_index=1),
-        S(order_index=3, number="1.1.1", title="", text="", parent_index=2),
-        S(order_index=4, number="§1", title="", text="", parent_index=None),
+        S(order_index=0, number="§0", title="", level=1, text="Intro.", parent_index=None),
+        S(order_index=1, number="1", title="SCOPE", level=1, text="", parent_index=None),
+        S(order_index=2, number="1.1", title="Sites", level=2, text="All sites.", parent_index=1),
+        S(order_index=3, number="1.1.1", title="", level=3, text="", parent_index=2),
+        S(order_index=4, number="§1", title="", level=1, text="", parent_index=None),
     ]
     assert sop_section_service.full_lengths(rows) == {
         r.order_index: len(sop_section_service.full_text(rows, r.order_index)) for r in rows

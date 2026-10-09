@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.62.5.0 (2026-10-09)
+
+### Changed
+- **A section's text keeps its Markdown structure.** Splitting a document into sections used to
+  drop blank lines, so paragraphs ran together and a Markdown table straight after a paragraph
+  was not a table any more; blank lines between blocks are kept now (repeated ones become one).
+  In a full section, every heading is a Markdown heading by its level (`## 4`, `### 4.2`, up to
+  six), so the preview shows where each subsection starts. Scoring reads the same passage;
+  citation quotes are matched with Markdown marks and spacing set aside, as before.
+
 ## 0.62.4.1 (2026-10-09)
 
 ### Fixed

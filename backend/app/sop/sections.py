@@ -147,11 +147,22 @@ def parse_sections(markdown: str) -> list[ParsedSection]:
         else:
             body.append(line)
 
+    def add_break() -> None:
+        """A blank line: a paragraph ends (Markdown needs it to tell paragraphs, lists and tables
+        apart). Never at a section's start, never twice."""
+        if sections:
+            current = sections[stack[-1]]
+            if current.text and not current.text.endswith("\n"):
+                current.text += "\n"
+        elif body and body[-1] != "":
+            body.append("")
+
     i = 0
     while i < len(raw):
         line = raw[i].strip()
         i += 1
         if not line:
+            add_break()
             continue
         if _PAGE_BREAK.match(line):
             page += 1
@@ -205,6 +216,10 @@ def parse_sections(markdown: str) -> list[ParsedSection]:
             continue
         add_text(line)
 
+    for s in sections:
+        s.text = s.text.strip("\n")
+    while body and body[-1] == "":
+        body.pop()
     if body:
         # Text before the first heading (or a document with no heading at all) is kept as its own
         # leading section, "§0": a job description or a plan whose only "headings" are a signature
@@ -224,14 +239,21 @@ def parse_sections(markdown: str) -> list[ParsedSection]:
     return sections
 
 
+def heading_block(number: str, title: str, level: int, text: str) -> str:
+    """A section's own part of a full passage, as Markdown: its heading (``##`` for a level-1
+    section, one more ``#`` per level, at most six) and its own text."""
+    head = (title if number.startswith("§") else f"{number} {title}").strip()
+    marked = f"{'#' * min(level + 1, 6)} {head}" if head else ""
+    return "\n\n".join(part for part in (marked, text) if part)
+
+
 def full_text(sections: list[ParsedSection], index: int) -> str:
     """A section's whole passage: its heading, its own text, then every descendant, in order."""
     out: list[str] = []
 
     def walk(i: int) -> None:
         s = sections[i]
-        head = f"{s.number} {s.title}".strip() if s.number[0] != "§" else s.title
-        out.append("\n".join(part for part in (head, s.text) if part))
+        out.append(heading_block(s.number, s.title, s.level, s.text))
         for child in s.children:
             walk(child)
 
