@@ -105,12 +105,14 @@ def test_unnumbered_headings_split_and_a_preamble_is_kept():
         ("§2", "Detail", 2),
     ]
     assert sections[0].text == "Intro before any heading."
-    assert full_text(sections, 1) == "Overview\nText A.\n\nDetail\nText B."
+    # Markdown: each heading a heading by its level, paragraphs apart (owner, 2026-10-09).
+    assert full_text(sections, 1) == "## Overview\n\nText A.\n\n### Detail\n\nText B."
 
 
 def test_a_document_with_no_heading_is_one_section():
     (only,) = parse_sections("Just a paragraph.\n\nAnd another.")
-    assert (only.number, only.text) == ("§0", "Just a paragraph.\nAnd another.")
+    # The blank line between paragraphs is kept: Markdown needs it to keep them apart.
+    assert (only.number, only.text) == ("§0", "Just a paragraph.\n\nAnd another.")
 
 
 def test_a_skipped_clause_does_not_orphan_the_ones_after_it():
@@ -608,3 +610,13 @@ def test_the_table_of_contents_is_removed_before_printing(kind):
 def test_a_document_without_a_table_of_contents_is_printed_unchanged():
     original = _word(*WORD_TEXT)
     assert sop_markdown.strip_table_of_contents(original) == original
+
+
+def test_a_section_keeps_its_paragraphs_and_tables_apart():
+    """Blank lines survive the split, so a section's Markdown still renders: a paragraph and the
+    pipe table after it stay two blocks (owner, 2026-10-09: show the text as Markdown)."""
+    table = "| Role | Task |\n| --- | --- |\n| QA | Signs |"
+    md = f"## 1. ROLES\n\nWho does what.\n\n{table}\n\n\n\nEnd."
+    (roles,) = parse_sections(md)
+    # Paragraphs stay apart, repeated blank lines become one.
+    assert roles.text == f"Who does what.\n\n{table}\n\nEnd."

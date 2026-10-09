@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.sop import SopDocument, SopSection
 from app.services import sop_summary_service, storage
 from app.services.sop_markdown import CONVERTER_VERSIONS, MarkdownResult, to_markdown
-from app.sop.sections import parse_sections
+from app.sop.sections import heading_block, parse_sections
 
 logger = logging.getLogger(__name__)
 
@@ -256,10 +256,7 @@ def full_text(sections: Sequence[SopSection], order_index: int) -> str:
     out: list[str] = []
 
     def walk(section: SopSection) -> None:
-        head = (
-            section.title if section.number.startswith("§") else f"{section.number} {section.title}"
-        )
-        out.append("\n".join(part for part in (head.strip(), section.text) if part))
+        out.append(_block(section))
         for child in sorted(children.get(section.order_index, []), key=lambda c: c.order_index):
             walk(child)
 
@@ -267,6 +264,13 @@ def full_text(sections: Sequence[SopSection], order_index: int) -> str:
     if root is not None:
         walk(root)
     return "\n\n".join(part for part in out if part)
+
+
+def _block(section: SopSection) -> str:
+    """One section's own part of a full passage: its heading as a Markdown heading, then its text.
+    The heading's level is the section's own (a clause "4" is ##, "4.2" ###, at most ######), so
+    a subsection reads the same in any passage that holds it."""
+    return heading_block(section.number, section.title, section.level, section.text)
 
 
 def _descendants(sections: Sequence[SopSection], order_index: int) -> list[SopSection]:
@@ -298,10 +302,7 @@ def full_lengths(sections: Sequence[SopSection]) -> dict[int, int]:
             children.setdefault(s.parent_index, []).append(s)
     texts: dict[int, str] = {}
     for section in sorted(sections, key=lambda s: s.order_index, reverse=True):
-        head = (
-            section.title if section.number.startswith("§") else f"{section.number} {section.title}"
-        )
-        block = "\n".join(part for part in (head.strip(), section.text) if part)
+        block = _block(section)
         kids = sorted(children.get(section.order_index, []), key=lambda c: c.order_index)
         texts[section.order_index] = "\n\n".join(
             part for part in [block, *(texts[c.order_index] for c in kids)] if part
