@@ -245,6 +245,43 @@ def libreoffice() -> str | None:
     return shutil.which("soffice") or shutil.which("libreoffice")
 
 
+_W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+# Word's built-in names for table-of-contents styles ("toc 1".."toc 9", "TOC Heading"). A style's
+# id is localised (Chinese Word uses "10", "20"), its name never is.
+_TOC_STYLE = re.compile(r"^toc( \d| heading)$", re.IGNORECASE)
+
+
+def strip_table_of_contents(content: bytes) -> bytes:
+    """The .docx without its table of contents, before it is printed to PDF.
+
+    A printed table of contents is a list of every heading with its page number; Document
+    Intelligence reads it as headings, so clause numbers came out as page numbers (a client SOP
+    lost 6 of 14 clauses on the server, 2026-10-09). Word keeps it in a content control marked
+    "Table of Contents", or (older files) as paragraphs in the "toc N" styles; both are removed.
+    The contents are only a copy of the headings, so nothing of the document is lost."""
+    import docx
+
+    document = docx.Document(io.BytesIO(content))
+    body = document.element.body
+    removed = 0
+    for sdt in list(body.iter(f"{_W}sdt")):
+        gallery = sdt.find(f"{_W}sdtPr/{_W}docPartObj/{_W}docPartGallery")
+        if gallery is not None and gallery.get(f"{_W}val") == "Table of Contents":
+            sdt.getparent().remove(sdt)
+            removed += 1
+    toc_styles = {s.style_id for s in document.styles if s.name and _TOC_STYLE.match(s.name)}
+    for paragraph in list(body.iter(f"{_W}p")):
+        style = paragraph.find(f"{_W}pPr/{_W}pStyle")
+        if style is not None and style.get(f"{_W}val") in toc_styles:
+            paragraph.getparent().remove(paragraph)
+            removed += 1
+    if not removed:
+        return content
+    out = io.BytesIO()
+    document.save(out)
+    return out.getvalue()
+
+
 def _docx_to_pdf(content: bytes, soffice: str) -> bytes:
     """Print a .docx to PDF with LibreOffice, headless, in a private temporary directory (its
     own profile too, so two conversions never share one)."""
@@ -302,7 +339,8 @@ def _docx_text(content: bytes) -> str:
 
 
 async def _docx_via_document_intelligence(content: bytes, endpoint: str, soffice: str) -> str:
-    pdf = await asyncio.to_thread(_docx_to_pdf, content, soffice)
+    printable = await asyncio.to_thread(strip_table_of_contents, content)
+    pdf = await asyncio.to_thread(_docx_to_pdf, printable, soffice)
     page_count = len(await asyncio.to_thread(_pdf_page_texts, pdf))
     if page_count == 0:
         raise IncompleteConversion("LibreOffice printed the document to an empty PDF")
