@@ -53,7 +53,9 @@ class QuestionNotFound(ChecklistError):
     """Raised when the target question id does not exist."""
 
 
-def _build_draft_prompt(question_text: str, candidates: list[CitedSection]) -> str:
+def _build_draft_prompt(
+    question_text: str, candidates: list[CitedSection], *, general: bool = False
+) -> str:
     """Assemble the LLM drafting instruction. Kept small + explicit; JSON-only output requested.
 
     SOP-optional (Design B / P2): the checklist is drafted from the QUESTION itself. The SOP
@@ -61,6 +63,22 @@ def _build_draft_prompt(question_text: str, candidates: list[CitedSection]) -> s
     it and are what items cite; when none are found, the model drafts from the question alone and
     cites nothing — it is never handed a made-up source.
     """
+    if general:
+        # The bank uses no SOP library (spec-sop-libraries §6): general interview criteria, no
+        # SOP block at all, so the model is not invited to imagine procedures or regulations.
+        return (
+            "You are drafting a scoring checklist (rubric) for one interview question.\n"
+            "This question bank uses no SOP. Draft the rubric on general interview criteria, "
+            "tailored to this question: what a strong answer to it contains, for example a clear "
+            "structure, a specific situation or example, the actions taken and the reasoning "
+            "behind them, the result or impact, and what was learned. Do not invent procedures, "
+            "regulations, policies or SOP requirements. Leave cite and source_quote empty.\n"
+            'Return ONLY a JSON object: {"items": [{"kind", "text", "weight", "cite", '
+            '"source_quote"}]}.\n'
+            "kind is one of required|recommended|forbidden. Include at least one required item. "
+            "Weights of required+recommended items should sum to about 100.\n\n"
+            f"QUESTION:\n{question_text}\n"
+        )
     if candidates:
         blocks = "\n\n".join(
             f'<section id="C{i + 1}" document="{c.document_name}" title="{c.label}">\n'
@@ -137,7 +155,10 @@ async def draft_checklist(
     # 2. Ask the LLM to draft items (JSON), then keep only citations that can be checked: a
     # section it was shown, a quote copied verbatim from it.
     raw_items = _parse_llm_items(
-        await llm.complete(_build_draft_prompt(question.text, candidates), json_mode=True)
+        await llm.complete(
+            _build_draft_prompt(question.text, candidates, general=library_id is None),
+            json_mode=True,
+        )
     )
     items = parse_draft_items(raw_items, source_document_id=None)
     survivors = [
