@@ -10,7 +10,9 @@ at most ``MAX_CHARS`` and at least ``MIN_CHARS`` characters, counted over a unit
 3. Parts under ``MIN_CHARS`` merge with the next (or the previous) part under the same parent,
    while the merged unit still fits. Only a part that could not, because both its neighbours
    there are too big, joins its smaller neighbour across a parent (a unit "4.9–5 ...").
-4. A leaf longer than ``MAX_CHARS`` (most often one big table) stays whole.
+4. A section still longer than ``MAX_CHARS`` with no subsection to open (or an opened section's
+   own text that long) is cut at paragraph boundaries into balanced pieces (owner, 2026-10-10),
+   but a table is never cut: one big table stays one piece. Pieces never merge.
 
 A unit cites its members: a whole section (its full text, every subsection included), or a
 section's own part only (``own=True``), when its subsections went to other units.
@@ -25,7 +27,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from app.sop.sections import heading_block
+from app.sop.sections import heading_block, pieces
 
 MAX_CHARS = 4000
 MIN_CHARS = 500
@@ -51,6 +53,7 @@ class Member:
     order_index: int
     number: str
     own: bool = False
+    piece: int = 0  # 1-based: this piece of the member's text (``pieces``); 0 = all of it
 
 
 @dataclass(frozen=True)
@@ -66,15 +69,16 @@ class Unit:
     def length(self) -> int:
         return len(self.text)
 
-    def citation(self) -> tuple[str, str, bool]:
-        """``(section, through, own)``: how a rubric item cites this unit. Members are one run in
-        document order, so the first and last name it (``through`` empty for one member)."""
+    def citation(self) -> tuple[str, str, bool, int]:
+        """``(section, through, own, piece)``: how a rubric item cites this unit. Members are one
+        run in document order, so the first and last name it (``through`` empty for one member);
+        a piece is always a unit of its own."""
         first, last = self.members[0], self.members[-1]
         if len(self.members) == 1:
-            return first.number, "", first.own
+            return first.number, "", first.own, first.piece
         # ``own`` on a run: it ends with the last section's own text (its subsections are cited
         # by the next unit).
-        return first.number, last.number, last.own
+        return first.number, last.number, last.own, 0
 
 
 class _Tree:
@@ -107,7 +111,8 @@ class _Tree:
         its last (all of the last one, or only its own text)."""
         if len(members) == 1:
             m = members[0]
-            return self.own(m.order_index) if m.own else self.full(m.order_index)
+            text = self.own(m.order_index) if m.own else self.full(m.order_index)
+            return pieces(text, MAX_CHARS, MIN_CHARS)[m.piece - 1] if m.piece else text
         # A run ends with its last member: all of it, or only its own text.
         last = members[-1].order_index if members[-1].own else self.end(members[-1].order_index)
         order = sorted(self.rows)
@@ -143,6 +148,8 @@ def _join(tree: _Tree, first: _Part, second: _Part) -> _Part | None:
     that reads exactly its text (the invariant every unit keeps; see :meth:`_Tree.run`)."""
     if first.length + len(_JOIN) + second.length > MAX_CHARS:
         return None
+    if any(m.piece for m in (*first.members, *second.members)):
+        return None  # a piece is part of one section's text: it stands alone
     joined = _Part(list(first.members), list(first.texts), first.pages)
     joined.absorb(second)
     text = _JOIN.join(t for t in joined.texts if t)
@@ -169,14 +176,28 @@ def _split(tree: _Tree, siblings: list[int]) -> list[_Part]:
         whole = tree.full(i)
         if len(whole) <= MAX_CHARS or not kids:
             r = tree.rows[i]
-            parts.append(_Part([Member(i, r.number)], [whole], tree.pages(i)))
+            cut = pieces(whole, MAX_CHARS, MIN_CHARS)
+            if len(cut) == 1:
+                parts.append(_Part([Member(i, r.number)], [whole], tree.pages(i)))
+            else:
+                parts += [
+                    _Sealed([Member(i, r.number, piece=k)], [text], tree.pages(i))
+                    for k, text in enumerate(cut, 1)
+                ]
             continue
         # Too long: its own text and its subsections are judged at the next level, together.
         r = tree.rows[i]
         inner: list[_Part] = []
         if tree.own(i):
-            own = _Part([Member(i, r.number, own=True)], [tree.own(i)], (r.page_start, r.page_end))
-            inner.append(own)
+            cut = pieces(tree.own(i), MAX_CHARS, MIN_CHARS)
+            pages = (r.page_start, r.page_end)
+            if len(cut) == 1:
+                inner.append(_Part([Member(i, r.number, own=True)], cut, pages))
+            else:
+                inner += [
+                    _Sealed([Member(i, r.number, own=True, piece=k)], [text], pages)
+                    for k, text in enumerate(cut, 1)
+                ]
         inner += _split(tree, kids)
         # A unit never crosses a parent: the opened section's parts merge among themselves only.
         parts += [_Sealed.of(p) for p in _merged_unsealed(tree, inner)]
@@ -266,14 +287,24 @@ def units(rows: Sequence[_Row]) -> list[Unit]:
         ]
     else:
         parts = _absorb_small(tree, _split(tree, roots))
+    counts: dict[tuple[int, bool], int] = {}
+    for part in parts:
+        for m in part.members:
+            if m.piece:
+                key = (m.order_index, m.own)
+                counts[key] = max(counts.get(key, 0), m.piece)
     out = []
     for n, part in enumerate(parts):
         members = tuple(part.members)
+        label = _label(tree, members)
+        if len(members) == 1 and members[0].piece:
+            m = members[0]
+            label = f"{label} ({m.piece}/{counts[(m.order_index, m.own)]})"[:_TITLE_MAX]
         out.append(
             Unit(
                 index=n,
                 members=members,
-                label=_label(tree, members),
+                label=label,
                 page_start=part.pages[0],
                 page_end=part.pages[1],
                 text=_JOIN.join(t for t in part.texts if t),

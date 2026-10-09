@@ -401,7 +401,7 @@ describe("SOP documents tab", () => {
   ];
   // Units: sections merged or opened to 500-4000 characters, what the tab lists (owner, 2026-10-09).
   const unit = (index: number, label: string, section: string, through = ""): admin.SopUnit => ({
-    index, label, page_start: 1, page_end: 2, length: 800, section, through, own: false,
+    index, label, page_start: 1, page_end: 2, length: 800, section, through, own: false, piece: 0,
     members: through ? [section, through] : [section],
   });
   const SECTIONS: admin.SopUnit[] = [

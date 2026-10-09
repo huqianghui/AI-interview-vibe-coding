@@ -3237,6 +3237,10 @@
             "title": "Page Start",
             "type": "integer"
           },
+          "piece": {
+            "title": "Piece",
+            "type": "integer"
+          },
           "section": {
             "title": "Section",
             "type": "string"
@@ -3255,6 +3259,7 @@
           "section",
           "through",
           "own",
+          "piece",
           "members"
         ],
         "title": "SopUnitOut",
@@ -3293,6 +3298,10 @@
             "title": "Page Start",
             "type": "integer"
           },
+          "piece": {
+            "title": "Piece",
+            "type": "integer"
+          },
           "section": {
             "title": "Section",
             "type": "string"
@@ -3315,6 +3324,7 @@
           "section",
           "through",
           "own",
+          "piece",
           "members",
           "text"
         ],
@@ -3331,6 +3341,11 @@
             "default": "",
             "title": "Part",
             "type": "string"
+          },
+          "piece": {
+            "default": 0,
+            "title": "Piece",
+            "type": "integer"
           },
           "section": {
             "title": "Section",
@@ -3379,6 +3394,11 @@
             "default": "",
             "title": "Part",
             "type": "string"
+          },
+          "piece": {
+            "default": 0,
+            "title": "Piece",
+            "type": "integer"
           },
           "section": {
             "title": "Section",

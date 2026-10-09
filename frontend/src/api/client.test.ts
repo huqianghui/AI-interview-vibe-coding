@@ -384,3 +384,13 @@ describe("fetchSopDocument", () => {
     await expect(fetchSopDocument("iv1", "x")).rejects.toThrow(/404/);
   });
 });
+
+describe("sectionName", () => {
+  it("names a section, a run of sections and a piece of one long section", async () => {
+    const { sectionName } = await import("./client");
+    expect(sectionName({ section: "4.2", title: "Approval" })).toBe("4.2 Approval");
+    expect(sectionName({ section: "1", through: "3", title: "PURPOSE" })).toBe("1–3 PURPOSE");
+    expect(sectionName({ section: "5", title: "VISITS", piece: 2 })).toBe("5 VISITS (part 2)");
+    expect(sectionName({ section: "§2", title: "Tips", piece: 1 })).toBe("Tips (part 1)");
+  });
+});

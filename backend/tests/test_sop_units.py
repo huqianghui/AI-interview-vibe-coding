@@ -68,11 +68,21 @@ def test_a_long_section_opens_and_only_a_part_left_too_small_crosses_into_it():
     assert all(u.length <= MAX_CHARS for u in got)
 
 
-def test_a_leaf_longer_than_the_limit_stays_whole():
-    md = f"## 1. TABLE\n\n{_words(1500)}\n\n## 2. END\n\n{_words(200)}"
-    got = units(_rows(md))
-    assert got[0].members[0].number == "1" and got[0].length > MAX_CHARS
-    assert [m.number for m in got[1].members] == ["2"]
+def test_a_long_section_without_subsections_is_cut_into_pieces_but_a_table_is_not():
+    """Owner, 2026-10-10: a section that is not a big table is split even without sub-headings;
+    a big table never is. Pieces are balanced, cut at paragraph boundaries."""
+    prose = "\n\n".join([_words(160)] * 12)  # about 9,600 characters of paragraphs
+    table = "<table><tr><td>" + "cell " * 1500 + "</td></tr></table>"
+    md = f"## 1. PROCEDURE\n\n{prose}\n\n## 2. MATRIX\n\n{table}\n\n## 3. END\n\n{_words(200)}"
+    rows = _rows(md)
+    got = units(rows)
+    one = [u for u in got if u.members[0].number == "1"]
+    assert [u.members[0].piece for u in one] == [1, 2, 3]
+    assert [u.label for u in one] == [f"1 PROCEDURE ({k}/3)" for k in (1, 2, 3)]
+    assert all(MIN_CHARS <= u.length <= MAX_CHARS for u in one)
+    (matrix,) = [u for u in got if u.members[0].number == "2"]
+    assert matrix.length > MAX_CHARS and matrix.members[0].piece == 0  # the table stays whole
+    _round_trips(rows)
 
 
 def test_units_cover_every_section_once_and_almost_none_is_small():
@@ -125,8 +135,8 @@ def test_a_unit_is_cited_as_one_run_and_that_run_reads_as_the_unit():
     )
     rows = [S(document_id="d", **vars(r)) for r in _rows(md)]
     for unit in units(rows):
-        section, through, own = unit.citation()
-        ref = sop_citation.SectionRef("d", section, through, own)
+        section, through, own, piece = unit.citation()
+        ref = sop_citation.SectionRef("d", section, through, own, piece)
         row, text, _ = sop_citation._passage(rows, ref)
         assert text == unit.text, unit.label
 
@@ -147,7 +157,7 @@ def test_search_proposes_units_and_each_names_its_run():
     rows = [S(document_id="d", **vars(r)) for r in _rows(md)]
     (hit,) = SectionIndex(rows, {"d": "Widget SOP.pdf"}).search("escalated widget batch", limit=1)
     # Sections 1-3 are one unit: the candidate is that unit, named by its run.
-    assert (hit.number, hit.through, hit.own) == ("1", "3", False)
+    assert (hit.number, hit.through, hit.own, hit.piece) == ("1", "3", False, 0)
     assert hit.title == "1–3 PURPOSE / SCOPE / DEFINITIONS"
 
 
@@ -160,10 +170,11 @@ def _round_trips(rows) -> None:
     doc_rows = [S(document_id="d", **vars(r)) for r in rows]
     seen: list[int] = []
     for unit in units(doc_rows):
-        section, through, own = unit.citation()
-        found = sop_citation._passage(doc_rows, sop_citation.SectionRef("d", section, through, own))
+        section, through, own, piece = unit.citation()
+        ref = sop_citation.SectionRef("d", section, through, own, piece)
+        found = sop_citation._passage(doc_rows, ref)
         assert found is not None and found[1] == unit.text, unit.label
-        seen += [m.order_index for m in unit.members]
+        seen += [(m.order_index, m.own, m.piece) for m in unit.members]
     assert len(seen) == len(set(seen))
 
 
@@ -183,7 +194,7 @@ def test_a_small_section_never_merges_into_an_opened_neighbours_intro():
     # 1 joins 2's intro, cited as a run ending with 2's own text: it reads 170 characters, not 8000.
     first = got[0]
     assert [(m.number, m.own) for m in first.members] == [("1", False), ("2", True)]
-    assert first.citation() == ("1", "2", True) and first.length < 500 * 2
+    assert first.citation() == ("1", "2", True, 0) and first.length < 500 * 2
     _round_trips(rows)
 
 
@@ -199,4 +210,13 @@ def test_every_unit_of_any_outline_is_one_citation_that_reads_it():
                 parts.append(f"{n}.{k} Sub {k}\n\n{_words(rng.choice([1, 30, 200, 700]))}")
                 for m in range(1, rng.randint(1, 3)):
                     parts.append(f"{n}.{k}.{m} Leaf {m}\n\n{_words(rng.choice([5, 90, 400]))}")
+        _round_trips(_rows("\n\n".join(parts)))
+    # Outlines whose sections are long prose: pieces round-trip too.
+    for _ in range(50):
+        parts = []
+        for n in range(1, rng.randint(2, 5)):
+            paras = "\n\n".join(
+                _words(rng.choice([40, 150, 300])) for _ in range(rng.randint(1, 30))
+            )
+            parts.append(f"## {n}. TOP {n}\n\n{paras}")
         _round_trips(_rows("\n\n".join(parts)))

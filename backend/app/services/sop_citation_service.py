@@ -244,7 +244,7 @@ async def candidates_for(
     of it cites."""
     found = index.search(text, limit=SEARCH_CANDIDATES, document_ids=document_ids)
     return await sop_citation.resolve(
-        db, [SectionRef(c.document_id, c.number, c.through, c.own) for c in found]
+        db, [SectionRef(c.document_id, c.number, c.through, c.own, c.piece) for c in found]
     )
 
 

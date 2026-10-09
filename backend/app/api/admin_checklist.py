@@ -36,6 +36,7 @@ class SourceRefOut(BaseModel):
     # text only. Both empty for one whole section.
     through: str = ""
     part: str = ""
+    piece: int = 0
 
 
 class SourceRefIn(BaseModel):
@@ -43,6 +44,7 @@ class SourceRefIn(BaseModel):
     section: str
     through: str = ""
     part: str = ""
+    piece: int = 0
 
 
 class ChecklistItemOut(BaseModel):
@@ -77,7 +79,13 @@ async def _checklist_out(db: AsyncSession, checklist) -> ChecklistOut:
     refs = {i.id: sop_citation.parse_refs(i.source_refs) for i in items}
     described = await sop_citation.describe(db, [r for rs in refs.values() for r in rs])
     by_ref = {
-        (d["document_id"], d["section"], d.get("through", ""), d.get("part", "")): d
+        (
+            d["document_id"],
+            d["section"],
+            d.get("through", ""),
+            d.get("part", ""),
+            d.get("piece", 0),
+        ): d
         for d in described
     }
     return ChecklistOut(
@@ -98,7 +106,9 @@ async def _checklist_out(db: AsyncSession, checklist) -> ChecklistOut:
                 advisory=i.advisory,
                 source_refs=[
                     SourceRefOut(
-                        **by_ref[(r.document_id, r.section, r.through, "own" if r.own else "")]
+                        **by_ref[
+                            (r.document_id, r.section, r.through, "own" if r.own else "", r.piece)
+                        ]
                     )
                     for r in refs[i.id]
                 ],

@@ -12,7 +12,9 @@ import { sectionName } from "../../api/client";
 /** A unit's titles without its number range: the chip adds the range back ("1–3 …"). */
 function unitTitle(u: SopUnit): string {
   const span = u.through ? `${u.section}–${u.through}` : u.section;
-  return u.label.startsWith(`${span} `) ? u.label.slice(span.length + 1) : u.label;
+  const title = u.label.startsWith(`${span} `) ? u.label.slice(span.length + 1) : u.label;
+  // The chip says "(part k)" itself: the label's "(k/n)" is not repeated.
+  return u.piece ? title.replace(/ \(\d+\/\d+\)$/, "") : title;
 }
 
 export function CitationEditor({
@@ -71,7 +73,8 @@ export function CitationEditor({
         r.document_id === ref.document_id &&
         r.section === ref.section &&
         (r.through ?? "") === (ref.through ?? "") &&
-        (r.part ?? "") === (ref.part ?? ""),
+        (r.part ?? "") === (ref.part ?? "") &&
+        (r.piece ?? 0) === (ref.piece ?? 0),
     );
     if (!duplicate) onChange([...refs, ref]);
     setAdding(false);
@@ -100,7 +103,7 @@ export function CitationEditor({
             (r.found === false ? ` (${t("admin.citationGone")})` : "");
           return (
             <Tag
-              key={`${r.document_id}:${r.section}:${r.through ?? ""}:${r.part ?? ""}`}
+              key={`${r.document_id}:${r.section}:${r.through ?? ""}:${r.part ?? ""}:${r.piece ?? 0}`}
               value={String(i)}
               size="small"
               dismissible
