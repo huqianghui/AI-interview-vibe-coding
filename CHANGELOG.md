@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.61.1.0 (2026-10-09)
+
+### Added
+- **PowerPoint SOPs.** A `.pptx` is converted by Azure Document Intelligence: each slide title
+  becomes a section and the slide number is its page. The upload button now accepts PDF, Word
+  (`.docx`) and PowerPoint (`.pptx`) and says so; Excel is not supported (SOPs come as PDF, Word or
+  PowerPoint).
+
+### Changed
+- **The Conversion column says only whether a document converted** (Converting…, Converted,
+  Failed and why), no longer which tool did it.
+- **The SOP table has no Summary column any more**: a summary is too long for a cell, so it is
+  read in its card below the table, as before. The Status and Notes columns stay.
+
 ## 0.61.0.1 (2026-10-09)
 
 ### Fixed

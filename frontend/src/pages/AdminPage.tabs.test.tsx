@@ -415,7 +415,7 @@ describe("SOP documents tab", () => {
     vi.spyOn(admin, "listSopLibraries").mockResolvedValue([LIBRARY]);
   });
 
-  it("shows each summary with its status and notes, and deletes only an SOP nothing cites", async () => {
+  it("shows each summary's status and notes, and deletes only an SOP nothing cites", async () => {
     const user = userEvent.setup();
     vi.spyOn(admin, "listSopDocuments").mockResolvedValue([
       { ...DOCS[0], summary: "**Purpose:** Inspect every widget.", cited_in: ["Widgets v1"] },
@@ -427,7 +427,8 @@ describe("SOP documents tab", () => {
     await user.click(await screen.findByTestId("admin-tab-sop"));
     await user.click(await screen.findByTestId("sop-library-toggle-lib1"));
     const cited = await screen.findByTestId("sop-doc-d1");
-    expect(cited).toHaveTextContent("**Purpose:** Inspect every widget.");
+    // The summary text is read in its card below the table, not in a column.
+    expect(cited).not.toHaveTextContent("**Purpose:** Inspect every widget.");
     expect(cited).toHaveTextContent("Not used in scoring until approved.");
     expect(screen.queryByTestId("sop-doc-delete-d1")).not.toBeInTheDocument(); // cited: kept
 
@@ -522,7 +523,7 @@ describe("SOP documents tab", () => {
     await user.click(await screen.findByTestId("sop-library-toggle-lib1"));
     expect(await screen.findByTestId("sop-doc-d2")).toHaveTextContent("Failed");
     expect(screen.getByTestId("sop-doc-d2")).toHaveTextContent("page 3: 34%");
-    expect(screen.getByTestId("sop-doc-d1")).toHaveTextContent("Document Intelligence");
+    expect(screen.getByTestId("sop-doc-d1")).toHaveTextContent("Converted");
 
     await user.click(screen.getByText("Widget SOP.pdf"));
     expect(await screen.findByTestId("sop-section-2")).toHaveTextContent("2.1 Inspector");
@@ -553,7 +554,7 @@ describe("SOP documents tab", () => {
       list.mockResolvedValue([{ ...DOCS[0], section_count: 4 }, DOCS[1]]);
       sections.mockResolvedValue([...SECTIONS, { ...SECTIONS[2], order_index: 3, number: "2.2", title: "Supervisor" }]);
       await vi.advanceTimersByTimeAsync(SOP_POLL_MS);
-      await waitFor(() => expect(screen.getByTestId("sop-doc-d1")).toHaveTextContent("Document Intelligence"));
+      await waitFor(() => expect(screen.getByTestId("sop-doc-d1")).toHaveTextContent("Converted"));
       expect(await screen.findByTestId("sop-section-3")).toHaveTextContent("2.2 Supervisor");
       expect(screen.getByTestId("sop-rebuild")).toBeEnabled();
     } finally {

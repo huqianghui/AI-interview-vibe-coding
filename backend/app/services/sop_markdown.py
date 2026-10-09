@@ -13,7 +13,15 @@ review: "要么全部成功，要么失败 … 先有全部的 markdown 内容�
   table page's words (Study-Specific Training Matrix p.3) while still returning every page;
   ``ocrHighResolution`` read it whole, and with it every page of every PDF passes the check.
   Without an endpoint (dev / CI) the PDF's text layer is used and the source says so.
-- **Word → our own converter** (``app.sop.docx_markdown``).
+- **PowerPoint → Azure Document Intelligence** too (``.pptx``; owner, 2026-10-09: SOPs come as
+  PDF, Word or PowerPoint, Excel is not supported). A deck has no reliable page numbers, so there
+  is no per-page check: a result with no text is a failure (:func:`to_markdown`). Without an
+  endpoint it cannot be converted at all.
+- **Word → our own converter** (``app.sop.docx_markdown``). Document Intelligence reads a .docx's
+  text but not its structure here: the client files number their headings with Word
+  auto-numbering under a custom style, which DI neither computes nor treats as a heading. Measured
+  2026-10-09 on the 4 client Word SOPs: DI gave 1 section each (Monitoring Plan: 52,551 characters,
+  no heading, no clause number) where this converter gives 7-18 sections with their numbers.
 - **Text / Markdown** as is.
 
 :func:`to_markdown` never raises: a failure returns an empty Markdown with the reason, and the
@@ -58,6 +66,10 @@ PAGE_WINDOW = 1
 _PAGE_BREAK = "<!-- PageBreak -->"
 
 _PDF = "application/pdf"
+# Office formats Document Intelligence converts (prebuilt-layout); Word is converted by our own.
+_OFFICE = {
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+}
 
 # The current converter for each source. Raise one when its output changes, and every document
 # converted by the older version is converted again by the next background build.
@@ -151,20 +163,24 @@ async def _send(client: httpx.AsyncClient, method: str, url: str, **kwargs) -> h
     raise RuntimeError("unreachable")  # pragma: no cover
 
 
-async def _analyze(content: bytes, endpoint: str, page_count: int) -> dict:
-    """The DI ``analyzeResult`` for every page of the PDF."""
+async def _analyze(
+    content: bytes, endpoint: str, page_count: int | None, content_type: str = _PDF
+) -> dict:
+    """The DI ``analyzeResult``: for a PDF every page named explicitly (``page_count``) and read
+    with high-resolution OCR; for an Office file (``page_count`` None) the whole file."""
     token = await get_bearer_token(COGNITIVE_SERVICES_SCOPE)
     if not token:
         raise RuntimeError("No Entra token for Azure Document Intelligence")
     url = (
         f"{endpoint.rstrip('/')}/documentintelligence/documentModels/prebuilt-layout:analyze"
         f"?api-version={DI_API_VERSION}&outputContentFormat=markdown"
-        f"&features=ocrHighResolution&pages=1-{page_count}"
     )
+    if page_count is not None:
+        url += f"&features=ocrHighResolution&pages=1-{page_count}"
     headers = {"Authorization": f"Bearer {token}"}
     async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await _send(
-            client, "POST", url, content=content, headers={**headers, "Content-Type": _PDF}
+            client, "POST", url, content=content, headers={**headers, "Content-Type": content_type}
         )
         operation = resp.headers["operation-location"]
         deadline = asyncio.get_running_loop().time() + DI_TIMEOUT_SECONDS
@@ -217,6 +233,15 @@ async def _convert(content: bytes, filename: str) -> MarkdownResult:
             # Dev / CI only: no Document Intelligence configured. Labelled, never silent.
             texts = await asyncio.to_thread(_pdf_page_texts, content)
             return MarkdownResult("\n\n<!-- PageBreak -->\n\n".join(texts), "pdf_text")
+        if ext in _OFFICE:
+            endpoint = get_settings().azure_foundry_endpoint
+            if not endpoint:
+                return MarkdownResult(
+                    "", "failed", f"{ext} needs Azure Document Intelligence, which is not set up"
+                )
+            async with asyncio.timeout(DI_TIMEOUT_SECONDS):
+                result = await _analyze(content, endpoint, None, _OFFICE[ext])
+            return MarkdownResult(result.get("content", ""), "document_intelligence")
         if ext == ".docx":
             from app.sop.docx_markdown import docx_to_markdown
 

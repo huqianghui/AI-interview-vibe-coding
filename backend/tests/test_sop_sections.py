@@ -395,3 +395,37 @@ def test_a_one_column_table_and_a_time_are_not_a_form():
     md = docx_to_markdown(_docx_with_table([["10:30 site review"], ["Note: bring the log"]]))
     assert md.splitlines()[0] == "| 10:30 site review |"
     assert "## " not in md
+
+
+async def test_a_powerpoint_is_converted_by_document_intelligence_slide_by_slide(monkeypatch):
+    """PowerPoint goes to DI (owner, 2026-10-09): every slide title a section, the slide its page.
+    No page count is asked for and no high-resolution OCR (a deck is not a scan)."""
+    monkeypatch.setattr(sop_markdown.get_settings(), "azure_foundry_endpoint", "https://di.example")
+    seen = {}
+
+    async def deck(content, endpoint, page_count, content_type=sop_markdown._PDF):
+        seen.update(page_count=page_count, content_type=content_type)
+        return {
+            "content": "# 1 PURPOSE\n\nCovers widgets.\n\n<!-- PageBreak -->\n\n"
+            "# 2 RELEASE\n\nSigned within 24 hours.\n",
+            "pages": [{}, {}],
+        }
+
+    monkeypatch.setattr(sop_markdown, "_analyze", deck)
+    result = await sop_markdown.to_markdown(b"PK", "Release.pptx")
+    assert result.source == "document_intelligence"
+    assert seen == {"page_count": None, "content_type": sop_markdown._OFFICE[".pptx"]}
+    sections = parse_sections(result.markdown)
+    assert [(s.number, s.page_start) for s in sections] == [("1", 1), ("2", 2)]
+
+
+async def test_a_powerpoint_without_document_intelligence_is_a_labelled_failure(monkeypatch):
+    monkeypatch.setattr(sop_markdown.get_settings(), "azure_foundry_endpoint", "")
+    result = await sop_markdown.to_markdown(b"PK", "Release.pptx")
+    assert result.source == "failed" and "Document Intelligence" in result.error
+
+
+async def test_excel_is_not_a_supported_sop_format(monkeypatch):
+    monkeypatch.setattr(sop_markdown.get_settings(), "azure_foundry_endpoint", "https://di.example")
+    result = await sop_markdown.to_markdown(b"PK", "Plan.xlsx")
+    assert result.source == "failed" and "unsupported" in result.error

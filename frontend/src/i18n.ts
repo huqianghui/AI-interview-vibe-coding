@@ -315,6 +315,7 @@ export const resources = {
             count_one: "{{count}} document",
             count_other: "{{count}} documents",
             upload: "Upload documents",
+            formats: "PDF, Word (.docx) or PowerPoint (.pptx)",
             uploading: "Uploading…",
             uploaded_one: "Uploaded {{count}} document; it is being converted.",
             uploaded_other: "Uploaded {{count}} documents; they are being converted.",
@@ -339,6 +340,7 @@ export const resources = {
           deleteConfirm: "Delete {{name}}? Its sections and file are deleted too. Nothing cites it.",
           pending: "Converting…",
           failed: "Failed",
+          converted: "Converted",
           source: {
             document_intelligence: "Document Intelligence",
             pdf_text: "PDF text (no Document Intelligence)",
@@ -779,6 +781,7 @@ export const resources = {
             count_one: "{{count}} 个文档",
             count_other: "{{count}} 个文档",
             upload: "上传文档",
+            formats: "支持 PDF、Word（.docx）和 PowerPoint（.pptx）",
             uploading: "上传中…",
             uploaded_one: "已上传 {{count}} 个文档，正在转换。",
             uploaded_other: "已上传 {{count}} 个文档，正在转换。",
@@ -803,6 +806,7 @@ export const resources = {
           deleteConfirm: "删除 {{name}}？它的章节和文件会一并删除。目前没有任何地方引用它。",
           pending: "转换中…",
           failed: "失败",
+          converted: "已转换",
           source: {
             document_intelligence: "Document Intelligence",
             pdf_text: "PDF 文字层（未配置 Document Intelligence）",
