@@ -716,3 +716,14 @@ async def test_a_bound_bank_keeps_only_its_own_librarys_citations_when_a_rubric_
     written = await checklist_service._persist_draft(db_session, q_id, draft)
     (item,) = await checklist_service.list_items(db_session, written.id)
     assert (item.source_refs, item.source_document_id) == ("[]", None)
+
+
+def test_a_quote_matches_a_word_broken_across_two_printed_lines():
+    """DI keeps a printed line break inside a word: "non-\\ncompliance" (a Word SOP read through
+    PDF, 2026-10-09). The quote is the same sentence, so it is verbatim, hyphen kept or not."""
+    from app.services.sop_citation_service import verbatim_in
+
+    text = "including protocol deviations, non-\ncompliance, and the regu-\n  lation of sites"
+    assert verbatim_in("including protocol deviations, non-compliance, and the", text)
+    assert verbatim_in("non-compliance, and the regulation of sites", text)
+    assert not verbatim_in("including protocol deviations, noncompliance with", text)

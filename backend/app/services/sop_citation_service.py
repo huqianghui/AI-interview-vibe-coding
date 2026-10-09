@@ -64,10 +64,21 @@ def _flat(text: str) -> str:
 MIN_QUOTE_CHARS = 20
 
 
+# A word broken across a printed line: "non-\ncompliance" (a hyphenated word) or "regu-\nlation"
+# (hyphenated only to fit the line). Document Intelligence keeps the break as it reads the page.
+_LINE_HYPHEN = re.compile(r"-[ \t]*\n\s*")
+
+
 def verbatim_in(quote: str, text: str) -> bool:
-    """Whether ``quote`` is copied from ``text`` (whitespace, case and Markdown marks aside)."""
+    """Whether ``quote`` is copied from ``text`` (whitespace, case and Markdown marks aside, and a
+    word broken across two lines read as one, whether its hyphen belongs to it or not)."""
     q = _flat(quote)
-    return len(q) >= MIN_QUOTE_CHARS and q in _flat(text)
+    if len(q) < MIN_QUOTE_CHARS:
+        return False
+    if q in _flat(text):
+        return True
+    # A passage can hold both kinds of break, so hyphens are set aside on both sides.
+    return q.replace("-", "") in _flat(_LINE_HYPHEN.sub("", text)).replace("-", "")
 
 
 # The section text cannot close its own candidate tag, whatever its case or spacing.
