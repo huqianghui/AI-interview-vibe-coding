@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.62.4.0 (2026-10-09)
+
+### Changed
+- **Every SOP format goes through one pipeline again, Word included** (owner): Word → PDF
+  (LibreOffice, table of contents removed first) → Document Intelligence. Checked first on the
+  live server with the real files and real DI (`scripts/compare_sop_sections.py`): all 4 Word
+  documents keep every numbered section, and no rubric citation would break. Only unnumbered
+  headings differ: the in-house converter split Word form tables into labelled sections (Job Title,
+  Department...); DI splits by the document's real headings. The owner accepted that. The image
+  turns the route on (`SOP_WORD_VIA_PDF=1`), and the Word converter version goes to 4, so the
+  Word documents are converted again after the deploy.
+
+### Added
+- **`scripts/resplit_sop_sections.py`**: splits every converted SOP's stored Markdown again with
+  the current splitter, with no new conversion (sections the old splitter missed, such as
+  `######## 7. APPENDICES`, become sections). `compare_sop_sections.py` now checks unnumbered
+  ("§") citations against every section, not only the numbered ones.
+
 ## 0.62.3.1 (2026-10-09)
 
 ### Changed

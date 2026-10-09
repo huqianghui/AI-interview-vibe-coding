@@ -71,6 +71,36 @@ class BuildResult:
     error: str = ""
 
 
+async def _replace_sections(db: AsyncSession, document: SopDocument, parsed: list) -> None:
+    await db.execute(delete(SopSection).where(SopSection.document_id == document.id))
+    for index, section in enumerate(parsed):
+        db.add(
+            SopSection(
+                document_id=document.id,
+                order_index=index,
+                number=section.number,
+                title=section.title,
+                level=section.level,
+                parent_index=section.parent,
+                page_start=section.page_start,
+                page_end=section.page_end,
+                text=section.text,
+            )
+        )
+
+
+async def resplit(db: AsyncSession, document: SopDocument) -> int:
+    """Split a converted document's stored Markdown again and replace its sections, without
+    converting it again: what a change to the splitter alone needs (no Document Intelligence
+    call). A document with no stored Markdown is left as it is. Commits; returns the count."""
+    if not document.markdown or document.markdown_source in _NEEDS_CONVERTING:
+        return 0
+    parsed = parse_sections(document.markdown)
+    await _replace_sections(db, document, parsed)
+    await db.commit()
+    return len(parsed)
+
+
 async def build(
     db: AsyncSession, document: SopDocument, content: bytes | None = None
 ) -> BuildResult:
@@ -107,21 +137,7 @@ async def build(
         )
     # All or nothing: a failed conversion leaves NO sections (never a partial set) and says why.
     parsed = parse_sections(converted.markdown) if converted.source != "failed" else []
-    await db.execute(delete(SopSection).where(SopSection.document_id == document.id))
-    for index, section in enumerate(parsed):
-        db.add(
-            SopSection(
-                document_id=document.id,
-                order_index=index,
-                number=section.number,
-                title=section.title,
-                level=section.level,
-                parent_index=section.parent,
-                page_start=section.page_start,
-                page_end=section.page_end,
-                text=section.text,
-            )
-        )
+    await _replace_sections(db, document, parsed)
     document.markdown = converted.markdown
     document.markdown_source = converted.source
     document.markdown_error = converted.error

@@ -81,7 +81,9 @@ _OFFICE = {
 # docx 2 (v0.55.0.0): merged cells once, form tables as labelled sections.
 # docx 3 (v0.62.0.0): Word goes through PDF (LibreOffice) → DI, so every Word document converted by
 # our own converter is converted again (and becomes "document_intelligence").
-CONVERTER_VERSIONS = {"document_intelligence": 1, "pdf_text": 1, "docx": 3, "text": 1}
+# docx 4 (v0.62.4.0): the PDF route is on in the image, with the table of contents removed first;
+# every Word document converted by our own converter goes through it.
+CONVERTER_VERSIONS = {"document_intelligence": 1, "pdf_text": 1, "docx": 4, "text": 1}
 
 
 @dataclass(frozen=True)
@@ -393,8 +395,7 @@ async def _convert(content: bytes, filename: str) -> MarkdownResult:
             endpoint = get_settings().azure_foundry_endpoint
             soffice = libreoffice()
             if not get_settings().sop_word_via_pdf:
-                # Off until the PDF route handles a table of contents and "10.TITLE" headings:
-                # on the server it lost 6 of 14 numbered clauses of a client SOP (2026-10-09).
+                # Dev / CI (the image turns the PDF route on: one pipeline for every format).
                 from app.sop.docx_markdown import docx_to_markdown
 
                 return MarkdownResult(await asyncio.to_thread(docx_to_markdown, content), "docx")

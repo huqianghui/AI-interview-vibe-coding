@@ -213,3 +213,38 @@ async def test_an_outdated_conversion_whose_file_is_gone_keeps_its_sections(db_s
     assert (doc.markdown_source, doc.markdown_converter_version) == ("text", 0)
     assert len(await sop_section_service.list_sections(db_session, doc.id)) == 5
     assert doc.markdown_error.startswith("converting again failed")
+
+
+async def test_resplit_splits_the_stored_markdown_again_without_converting(db_session, monkeypatch):
+    """A splitter change alone needs no new conversion (v0.62.4.0): the stored Markdown is split
+    again, the converter is never called, and a document never converted is left alone."""
+    from sqlalchemy import select
+
+    from app.models.sop import SopSection
+
+    doc = await _ingest(db_session)
+    await sop_section_service.build(db_session, doc)
+    # The stored Markdown now carries a heading the old splitter missed.
+    doc.markdown += "\n######## 3. RECORDS\n\nKept for 3 years.\n"
+    await db_session.commit()
+
+    async def no_conversion(*_a, **_k):
+        raise AssertionError("resplit must not convert")
+
+    monkeypatch.setattr(sop_section_service, "to_markdown", no_conversion)
+    assert await sop_section_service.resplit(db_session, doc) == len(
+        sop_section_service.parse_sections(doc.markdown)
+    )
+    rows = (
+        await db_session.execute(
+            select(SopSection.number)
+            .where(SopSection.document_id == doc.id)
+            .order_by(SopSection.order_index)
+        )
+    ).scalars()
+    assert "3" in list(rows)
+
+    never = SopDocument(name="new.pdf", status="uploaded", markdown_source="")
+    db_session.add(never)
+    await db_session.commit()
+    assert await sop_section_service.resplit(db_session, never) == 0

@@ -80,7 +80,8 @@ class Settings(BaseSettings):
     # image installs LibreOffice and sets this, so a published image never falls back to the
     # in-house Word converter: a missing LibreOffice fails the conversion instead. Off in dev/CI.
     sop_require_libreoffice: bool = False
-    # Word → PDF (LibreOffice) → Document Intelligence. Off: Word uses the in-house converter.
+    # Word → PDF (LibreOffice) → Document Intelligence, the one pipeline for every format (owner,
+    # 2026-10-09). The backend image turns it on; off (dev, CI) Word uses the in-house converter.
     sop_word_via_pdf: bool = False
     azure_storage_account_url: str = ""
     material_blob_container: str = "materials"
