@@ -111,8 +111,6 @@ self-hosted font).
 
 ![Executive report — rating badge, score gauge, SOP source beside the answer](docs/images/05-report-executive.png)
 
-![Report detail — per-question breakdown](docs/images/06-report-detail.png)
-
 ### 7. Admin — question banks & AI-drafted scoring rubrics
 
 Admins author question banks and per-question checklists. Checklists are **AI-drafted from the
