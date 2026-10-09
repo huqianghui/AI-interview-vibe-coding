@@ -45,6 +45,10 @@ class BlobStore(Protocol):
         """Whether ``blob_path`` still has bytes behind it."""
         ...
 
+    def remove(self, blob_path: str) -> None:
+        """Delete the bytes at ``blob_path``; nothing there is not an error."""
+        ...
+
 
 def _safe_key(key: str) -> str:
     """Normalise a key and refuse one that climbs out of its root ("../")."""
@@ -75,6 +79,13 @@ class LocalBlobStore:
 
     def exists(self, blob_path: str) -> bool:
         return bool(blob_path) and Path(blob_path).is_file()
+
+    def remove(self, blob_path: str) -> None:
+        path = Path(blob_path).resolve()
+        # Only a file this store wrote (under its root), never a path a damaged row points at.
+        if not str(path).startswith(str(self._root.resolve())):
+            raise ValueError(f"Refusing to delete outside the storage root: {blob_path!r}")
+        path.unlink(missing_ok=True)
 
 
 class AzureBlobStore:
@@ -128,6 +139,14 @@ class AzureBlobStore:
         except FileNotFoundError:
             return False
         return bool(self._container_client().get_blob_client(key).exists())
+
+    def remove(self, blob_path: str) -> None:
+        from azure.core.exceptions import ResourceNotFoundError
+
+        try:
+            self._container_client().delete_blob(self._key(blob_path))
+        except (FileNotFoundError, ResourceNotFoundError):
+            pass
 
 
 _STORES: dict[str, BlobStore] = {}
@@ -200,3 +219,23 @@ def exists(blob_path: str) -> bool:
         store = get_storage("azure")
         return store.name == "azure" and store.exists(blob_path)
     return _local().exists(blob_path)
+
+
+def remove(blob_path: str) -> None:
+    """Delete an SOP file (``blob_path``) from whichever store wrote it. Best effort: a failure is
+    logged, never raised (the document row is already gone; a stray file is the lesser harm)."""
+    if not blob_path:
+        return
+    try:
+        if blob_path.startswith(BLOB_SCHEME):
+            container = blob_path[len(BLOB_SCHEME) :].split("/", 1)[0]
+            # SOP files live in the materials container only: never delete from another one.
+            if container != get_settings().material_blob_container:
+                raise ValueError(f"Refusing to delete outside the SOP container: {blob_path!r}")
+            store = get_storage("azure")
+            if store.name == "azure":
+                store.remove(blob_path)
+            return
+        _local().remove(blob_path)
+    except Exception:  # noqa: BLE001
+        logger.exception("Could not delete stored file %s", blob_path)
