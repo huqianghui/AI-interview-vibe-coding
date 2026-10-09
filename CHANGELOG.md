@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.62.4.1 (2026-10-09)
+
+### Fixed
+- **A citation's quote matches a word broken across two printed lines.** Document Intelligence
+  keeps a page's line breaks, including the one inside a hyphenated word ("non-\ncompliance").
+  The verbatim-quote check treated that as different text, so a correct quote failed: one of 134
+  quotes after the Word documents went through the unified pipeline, and relocation would have
+  dropped such quotes from PDFs too. The exact match is tried first; then hyphens are set aside on
+  both sides, so a hyphenated word and a word hyphenated only to fit the line both match.
+
 ## 0.62.4.0 (2026-10-09)
 
 ### Changed
