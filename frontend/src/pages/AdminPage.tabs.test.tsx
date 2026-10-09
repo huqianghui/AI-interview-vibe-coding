@@ -526,7 +526,14 @@ describe("SOP documents tab", () => {
     expect(screen.getByTestId("sop-doc-d1")).toHaveTextContent("Converted");
 
     await user.click(screen.getByText("Widget SOP.pdf"));
+    // The sections are a tree, closed below the top level: 2.1 shows once its parent opens.
+    await screen.findByTestId("sop-section-1");
+    expect(screen.queryByTestId("sop-section-2")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("sop-sections-expand"));
     expect(await screen.findByTestId("sop-section-2")).toHaveTextContent("2.1 Inspector");
+    await user.click(screen.getByTestId("sop-sections-collapse"));
+    await waitFor(() => expect(screen.queryByTestId("sop-section-2")).not.toBeInTheDocument());
+    await user.click(screen.getByTestId("sop-sections-expand"));
     await user.click(screen.getByTestId("sop-section-1"));
     expect(await screen.findByTestId("sop-section-text")).toHaveTextContent("2.1 Inspector checks every widget.");
   });
@@ -544,6 +551,7 @@ describe("SOP documents tab", () => {
       await user.click(await screen.findByTestId("admin-tab-sop"));
     await user.click(await screen.findByTestId("sop-library-toggle-lib1"));
       await user.click(await screen.findByText("Widget SOP.pdf"));
+      await user.click(await screen.findByTestId("sop-sections-expand"));
       await screen.findByTestId("sop-section-2");
 
       await user.click(screen.getByTestId("sop-rebuild"));
