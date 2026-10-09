@@ -19,6 +19,7 @@ import {
 import { ChevronDownRegular, ChevronRightRegular } from "@fluentui/react-icons";
 import type { SopDocument, SopLibrary } from "../../api/admin";
 import { DataTable, type DataColumn } from "../../components/DataTable";
+import { MarkdownView } from "../../components/MarkdownView";
 import { SopSectionTree } from "./SopSectionTree";
 import { useAdminStyles } from "./shared";
 import type { SopTabState } from "./useSopTab";
@@ -446,9 +447,7 @@ export function SopTab({ state }: { state: SopTabState }) {
               </Text>
             }
           />
-          <pre style={{ whiteSpace: "pre-wrap", margin: 0, fontFamily: "inherit" }}>
-            {state.section.full_text}
-          </pre>
+          <MarkdownView text={state.section.full_text} />
         </Card>
       )}
     </>
