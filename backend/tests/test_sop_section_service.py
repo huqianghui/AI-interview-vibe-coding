@@ -248,3 +248,25 @@ async def test_resplit_splits_the_stored_markdown_again_without_converting(db_se
     db_session.add(never)
     await db_session.commit()
     assert await sop_section_service.resplit(db_session, never) == 0
+
+
+async def test_the_units_api_lists_units_and_reads_one(client, db_session, admin_auth):
+    """The SOP tab lists units (owner, 2026-10-09: the same set the AI uses), not the fine tree."""
+    doc = await _ingest(db_session)
+    await sop_section_service.build(db_session, doc)
+    listed = (await client.get(f"/admin/sop/documents/{doc.id}/units", headers=admin_auth)).json()
+    # The widget SOP is short: the whole document is one unit, cited as one run.
+    (only,) = listed
+    assert (only["section"], only["through"], only["own"]) == ("§1", "2", False)  # 2 with 2.1, 2.2
+    assert only["members"] == ["§1", "1", "2"]
+    text = (await client.get(f"/admin/sop/documents/{doc.id}/units/0", headers=admin_auth)).json()
+    assert text["text"].startswith("## Widget SOP") and "### 2.1 Inspector" in text["text"]
+    assert (
+        await client.get(f"/admin/sop/documents/{doc.id}/units/9", headers=admin_auth)
+    ).status_code == 404
+    row = next(
+        d
+        for d in (await client.get("/admin/sop/documents", headers=admin_auth)).json()
+        if d["document_id"] == doc.id
+    )
+    assert (row["section_count"], row["unit_count"]) == (5, 1)

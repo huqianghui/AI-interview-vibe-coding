@@ -239,9 +239,13 @@ async def set_bank_library(db: AsyncSession, bank_id: str, library_id: str | Non
 async def candidates_for(
     db: AsyncSession, index: SectionIndex, text: str, *, document_ids: list[str] | None = None
 ) -> list[CitedSection]:
-    """The sections most relevant to ``text`` (optionally within some documents), full text."""
+    """The units most relevant to ``text`` (optionally within some documents), full text: each
+    one read through the citation it would be given, so what the model is shown is what a choice
+    of it cites."""
     found = index.search(text, limit=SEARCH_CANDIDATES, document_ids=document_ids)
-    return await sop_citation.resolve(db, [SectionRef(c.document_id, c.number) for c in found])
+    return await sop_citation.resolve(
+        db, [SectionRef(c.document_id, c.number, c.through, c.own) for c in found]
+    )
 
 
 # "off_topic" is no longer produced (the topic check gave way to the bank's library); reports from
@@ -356,7 +360,7 @@ async def _locate(
 
 def _cited(choice: Choice) -> list[dict]:
     return [
-        {"document_name": s.document_name, "section": s.number, "title": s.title}
+        {"document_name": s.document_name, "section": s.span, "title": s.title}
         for s in choice.sections
     ]
 
@@ -531,9 +535,7 @@ async def relocate(
         elif choice.sections:
             primary = choice.sections[0]
             values = {
-                "source_refs": sop_citation.dump_refs(
-                    SectionRef(s.document_id, s.number) for s in choice.sections
-                ),
+                "source_refs": sop_citation.dump_refs(s.reference for s in choice.sections),
                 "source_document_id": primary.document_id,
                 "source_page": primary.pages,
                 "source_quote": choice.quote,

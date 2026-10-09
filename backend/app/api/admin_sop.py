@@ -28,6 +28,7 @@ from app.services import (
     sop_section_service,
     sop_summary_service,
 )
+from app.sop.units import Unit, units
 
 # Background section builds started by uploads and "Convert again"; held so they are not
 # garbage-collected mid-run, and cancelled at shutdown (app.main).
@@ -50,6 +51,8 @@ class SopDocumentOut(BaseModel):
     # ("" = not yet: conversion runs in the background) and how many sections it split into.
     markdown_source: str = ""
     section_count: int = 0
+    # The units it reads as (sections merged or opened to 500-4000 characters): what the tab shows.
+    unit_count: int = 0
     # Why the conversion failed (all or nothing: a failed document has no sections), or why
     # converting again failed while the previous complete conversion was kept.
     markdown_error: str = ""
@@ -90,6 +93,26 @@ class SopSectionOut(BaseModel):
     page_end: int
     # Characters of the FULL section (own text + every subsection): what a citation hands over.
     full_length: int
+
+
+class SopUnitOut(BaseModel):
+    """A unit (sections merged or opened to 500-4000 characters): what the SOP tab lists, what
+    search proposes and what a rubric item cites (spec-sop-conversion-and-sections §2)."""
+
+    index: int
+    label: str
+    page_start: int
+    page_end: int
+    length: int
+    # The citation that names it: section, through (a run), own (a section's own text only).
+    section: str
+    through: str
+    own: bool
+    members: list[str]
+
+
+class SopUnitTextOut(SopUnitOut):
+    text: str
 
 
 class SopSectionTextOut(BaseModel):
@@ -253,6 +276,7 @@ async def list_documents(db: AsyncSession = Depends(get_db)) -> list[SopDocument
     """List ingested SOP documents with their chunk counts (admin knowledge-base view)."""
     rows = await sop_document_service.list_documents_with_chunk_counts(db)
     sections = await sop_section_service.section_counts(db)
+    unit_counts = await sop_section_service.unit_counts(db)
     citations = await sop_document_service.document_citations(db)
     return [
         SopDocumentOut(
@@ -264,6 +288,7 @@ async def list_documents(db: AsyncSession = Depends(get_db)) -> list[SopDocument
             chunk_count=chunk_count,
             markdown_source=d.markdown_source,
             section_count=sections.get(d.id, 0),
+            unit_count=unit_counts.get(d.id, 0),
             markdown_error=d.markdown_error,
             converting=sop_section_service.converting(d.id),
             summary_status=d.summary_status,
@@ -346,6 +371,41 @@ async def section_text(
     )
 
 
+def _unit_out(unit: Unit) -> dict:
+    section, through, own = unit.citation()
+    return {
+        "index": unit.index,
+        "label": unit.label,
+        "page_start": unit.page_start,
+        "page_end": unit.page_end,
+        "length": unit.length,
+        "section": section,
+        "through": through,
+        "own": own,
+        "members": [m.number for m in unit.members],
+    }
+
+
+@router.get("/documents/{document_id}/units", response_model=list[SopUnitOut])
+async def list_units(document_id: str, db: AsyncSession = Depends(get_db)) -> list[SopUnitOut]:
+    """The document's units in order (no text: :func:`unit_text` reads one)."""
+    await _document(db, document_id)
+    rows = await sop_section_service.list_sections(db, document_id)
+    return [SopUnitOut(**_unit_out(u)) for u in units(rows)]
+
+
+@router.get("/documents/{document_id}/units/{index}", response_model=SopUnitTextOut)
+async def unit_text(
+    document_id: str, index: int, db: AsyncSession = Depends(get_db)
+) -> SopUnitTextOut:
+    """One unit's passage as Markdown: every member section's heading and text, never cut."""
+    await _document(db, document_id)
+    found = units(await sop_section_service.list_sections(db, document_id))
+    if not 0 <= index < len(found):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unit not found")
+    return SopUnitTextOut(**_unit_out(found[index]), text=found[index].text)
+
+
 @router.post(
     "/documents/{document_id}/rebuild",
     response_model=SopDocumentOut,
@@ -373,6 +433,7 @@ async def rebuild_sections(
         chunk_count=counts.get(document.id, 0),
         markdown_source=document.markdown_source,
         section_count=sections.get(document.id, 0),
+        unit_count=(await sop_section_service.unit_counts(db)).get(document.id, 0),
         markdown_error=document.markdown_error,
         converting=True,
     )

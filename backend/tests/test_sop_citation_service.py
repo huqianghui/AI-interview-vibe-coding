@@ -18,6 +18,32 @@ from tests.conftest import ScriptedJudgeAdapter, _real_judge_adapter
 pytestmark = pytest.mark.asyncio
 
 
+def _one_unit_per_section(rows):
+    """Units at section grain: these tests are about choosing and checking a citation, on a
+    corpus far smaller than one 500-character unit (sizing is tested in test_sop_units.py)."""
+    from app.services import sop_section_service
+    from app.sop.units import Member, Unit
+
+    return [
+        Unit(
+            index=k,
+            members=(Member(r.order_index, r.number),),
+            label=r.title if r.number.startswith("§") else f"{r.number} {r.title}",
+            page_start=r.page_start,
+            page_end=r.page_end,
+            text=sop_section_service.full_text(rows, r.order_index),
+        )
+        for k, r in enumerate(rows)
+    ]
+
+
+@pytest.fixture(autouse=True)
+def _section_grain_units(monkeypatch):
+    from app.services import sop_search
+
+    monkeypatch.setattr(sop_search, "units", _one_unit_per_section)
+
+
 async def _doc(db, name, sections, library_id=DEFAULT_LIBRARY_ID) -> str:
     doc = SopDocument(name=name, status="chunked", markdown_source="text", library_id=library_id)
     db.add(doc)

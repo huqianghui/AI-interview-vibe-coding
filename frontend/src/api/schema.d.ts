@@ -992,6 +992,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/sop/documents/{document_id}/units": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Units
+         * @description The document's units in order (no text: :func:`unit_text` reads one).
+         */
+        get: operations["list_units_admin_sop_documents__document_id__units_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/sop/documents/{document_id}/units/{index}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Unit Text
+         * @description One unit's passage as Markdown: every member section's heading and text, never cut.
+         */
+        get: operations["unit_text_admin_sop_documents__document_id__units__index__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/sop/libraries": {
         parameters: {
             query?: never;
@@ -2731,6 +2771,11 @@ export interface components {
              * @default
              */
             summary_status: string;
+            /**
+             * Unit Count
+             * @default 0
+             */
+            unit_count: number;
         };
         /** SopLibraryIn */
         SopLibraryIn: {
@@ -2815,12 +2860,70 @@ export interface components {
             /** Summary */
             summary: string;
         };
+        /**
+         * SopUnitOut
+         * @description A unit (sections merged or opened to 500-4000 characters): what the SOP tab lists, what
+         *     search proposes and what a rubric item cites (spec-sop-conversion-and-sections §2).
+         */
+        SopUnitOut: {
+            /** Index */
+            index: number;
+            /** Label */
+            label: string;
+            /** Length */
+            length: number;
+            /** Members */
+            members: string[];
+            /** Own */
+            own: boolean;
+            /** Page End */
+            page_end: number;
+            /** Page Start */
+            page_start: number;
+            /** Section */
+            section: string;
+            /** Through */
+            through: string;
+        };
+        /** SopUnitTextOut */
+        SopUnitTextOut: {
+            /** Index */
+            index: number;
+            /** Label */
+            label: string;
+            /** Length */
+            length: number;
+            /** Members */
+            members: string[];
+            /** Own */
+            own: boolean;
+            /** Page End */
+            page_end: number;
+            /** Page Start */
+            page_start: number;
+            /** Section */
+            section: string;
+            /** Text */
+            text: string;
+            /** Through */
+            through: string;
+        };
         /** SourceRefIn */
         SourceRefIn: {
             /** Document Id */
             document_id: string;
+            /**
+             * Part
+             * @default
+             */
+            part: string;
             /** Section */
             section: string;
+            /**
+             * Through
+             * @default
+             */
+            through: string;
         };
         /**
          * SourceRefOut
@@ -2835,8 +2938,18 @@ export interface components {
             found: boolean;
             /** Page Start */
             page_start: number | null;
+            /**
+             * Part
+             * @default
+             */
+            part: string;
             /** Section */
             section: string;
+            /**
+             * Through
+             * @default
+             */
+            through: string;
             /** Title */
             title: string;
         };
@@ -4602,6 +4715,69 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SopSummaryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_units_admin_sop_documents__document_id__units_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SopUnitOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unit_text_admin_sop_documents__document_id__units__index__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+                index: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SopUnitTextOut"];
                 };
             };
             /** @description Validation Error */

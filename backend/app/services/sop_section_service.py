@@ -246,6 +246,17 @@ async def section_counts(db: AsyncSession) -> dict[str, int]:
     return {doc_id: int(n) for doc_id, n in rows}
 
 
+async def unit_counts(db: AsyncSession) -> dict[str, int]:
+    """How many units (app.sop.units) each document reads as: what the SOP tab lists."""
+    from app.sop.units import units
+
+    rows = (await db.execute(select(SopSection).order_by(SopSection.order_index))).scalars().all()
+    by_doc: dict[str, list[SopSection]] = {}
+    for row in rows:
+        by_doc.setdefault(row.document_id, []).append(row)
+    return {doc_id: len(units(doc_rows)) for doc_id, doc_rows in by_doc.items()}
+
+
 def full_text(sections: Sequence[SopSection], order_index: int) -> str:
     """A section's whole passage: heading, own text, then every descendant in document order."""
     children: dict[int, list[SopSection]] = {}
@@ -271,6 +282,16 @@ def _block(section: SopSection) -> str:
     The heading's level is the section's own (a clause "4" is ##, "4.2" ###, at most ######), so
     a subsection reads the same in any passage that holds it."""
     return heading_block(section.number, section.title, section.level, section.text)
+
+
+def heading_block_of(section: SopSection) -> str:
+    """A section's own part of a passage (its heading and its own text, no subsection)."""
+    return _block(section)
+
+
+def last_descendant(sections: Sequence[SopSection], order_index: int) -> int:
+    """The order_index where a section's passage ends: its last descendant, or itself."""
+    return max([order_index, *(d.order_index for d in _descendants(sections, order_index))])
 
 
 def _descendants(sections: Sequence[SopSection], order_index: int) -> list[SopSection]:

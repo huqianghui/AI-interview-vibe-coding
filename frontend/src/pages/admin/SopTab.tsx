@@ -24,7 +24,7 @@ import { DataTable, type DataColumn } from "../../components/DataTable";
 import { TablePager } from "../../components/TablePager";
 import { DEFAULT_PAGE_SIZE, useTableToolbarStyles } from "../../components/tableToolbar";
 import { MarkdownView } from "../../components/MarkdownView";
-import { SopSectionTree } from "./SopSectionTree";
+import { SopUnitList } from "./SopUnitList";
 import { useAdminStyles } from "./shared";
 import {
   filterDocuments,
@@ -452,7 +452,8 @@ export function SopTab({ state }: { state: SopTabState }) {
         </>
       ),
     },
-    { id: "sections", header: t("admin.sop.colSections"), text: (d) => String(d.section_count), cell: (d) => d.section_count },
+    // Units: what the document reads as here and to the AI (sections merged or opened to size).
+    { id: "sections", header: t("admin.sop.colSections"), text: (d) => String(d.unit_count), cell: (d) => d.unit_count },
     {
       // The summary's status and what it means; the summary itself is read in its card below,
       // under the table (owner, 2026-10-09: too long for a column).
@@ -542,7 +543,11 @@ export function SopTab({ state }: { state: SopTabState }) {
           {state.sections.length === 0 ? (
             <Body1 className={styles.emptyState}>{t("admin.sop.noSections")}</Body1>
           ) : (
-            <SopSectionTree sections={state.sections} onOpen={(i) => void state.openSection(i)} />
+            <SopUnitList
+              units={state.sections}
+              selected={state.section?.index ?? null}
+              onOpen={(i) => void state.openSection(i)}
+            />
           )}
         </Card>
       )}
@@ -551,19 +556,15 @@ export function SopTab({ state }: { state: SopTabState }) {
         <Card className={styles.card} data-testid="sop-section-text">
           <CardHeader
             header={
-              <Title3>
-                {state.section.number.startsWith("§")
-                  ? state.section.title || t("admin.sop.preamble")
-                  : `${state.section.number} ${state.section.title}`}
-              </Title3>
+              <Title3>{state.section.label || t("admin.sop.preamble")}</Title3>
             }
             description={
               <Text size={200}>
-                {t("admin.sop.fullSectionHint", { chars: state.section.full_text.length })}
+                {t("admin.sop.fullSectionHint", { chars: state.section.length })}
               </Text>
             }
           />
-          <MarkdownView text={state.section.full_text} />
+          <MarkdownView text={state.section.text} />
         </Card>
       )}
     </>

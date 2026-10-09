@@ -32,11 +32,17 @@ class SourceRefOut(BaseModel):
     page_start: int | None
     # False when the document or the section no longer exists.
     found: bool
+    # A run of sections (a merged unit) ends at ``through``; ``part`` "own" = the section's own
+    # text only. Both empty for one whole section.
+    through: str = ""
+    part: str = ""
 
 
 class SourceRefIn(BaseModel):
     document_id: str
     section: str
+    through: str = ""
+    part: str = ""
 
 
 class ChecklistItemOut(BaseModel):
@@ -70,7 +76,10 @@ async def _checklist_out(db: AsyncSession, checklist) -> ChecklistOut:
     )
     refs = {i.id: sop_citation.parse_refs(i.source_refs) for i in items}
     described = await sop_citation.describe(db, [r for rs in refs.values() for r in rs])
-    by_ref = {(d["document_id"], d["section"]): d for d in described}
+    by_ref = {
+        (d["document_id"], d["section"], d.get("through", ""), d.get("part", "")): d
+        for d in described
+    }
     return ChecklistOut(
         checklist_id=checklist.id,
         question_id=checklist.question_id,
@@ -88,7 +97,10 @@ async def _checklist_out(db: AsyncSession, checklist) -> ChecklistOut:
                 source_document_name=names.get(i.source_document_id or ""),
                 advisory=i.advisory,
                 source_refs=[
-                    SourceRefOut(**by_ref[(r.document_id, r.section)]) for r in refs[i.id]
+                    SourceRefOut(
+                        **by_ref[(r.document_id, r.section, r.through, "own" if r.own else "")]
+                    )
+                    for r in refs[i.id]
                 ],
             )
             for i in items

@@ -175,9 +175,7 @@ async def draft_checklist(
         item.source_quote = choice.quote
         item.source_page = choice.sections[0].pages if choice.sections else None
         item.source_document_id = choice.sections[0].document_id if choice.sections else None
-        item.source_refs = [
-            {"document_id": c.document_id, "section": c.number} for c in choice.sections
-        ]
+        item.source_refs = [c.reference.as_dict() for c in choice.sections]
 
     # 3. Fallback: if the LLM gave nothing usable, derive required items from expected_points.
     if not items:

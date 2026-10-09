@@ -1,9 +1,11 @@
 """Find the SOP sections relevant to a piece of text (spec-sop-section-grounding §4-§5).
 
-Keyword scoring over our own ``sop_sections`` (BM25), no index service: 26 documents, a few
-thousand sections, all in memory for one call. It only proposes CANDIDATES; the model chooses among
-them and its choice is checked (``sop_citation_service``). Each section is scored on its title, its
-parent's title and its own text, so a short clause under a telling heading still matches.
+Keyword scoring (BM25), no index service: 26 documents, all in memory for one call. What is
+scored is each document's UNITS (``app.sop.units``: sections merged or opened to 500-4000
+characters), the same passages the SOP tab shows and a citation names (owner, 2026-10-09: what
+a person sees and what the AI uses are one set). A unit is scored on its label, twice, and its
+whole text. It only proposes CANDIDATES; the model chooses among them and its choice is checked
+(``sop_citation_service``).
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.sop import SopDocument, SopSection
+from app.sop.units import Unit, units
 
 _BM25_K1 = 1.4
 _BM25_B = 0.75
@@ -40,35 +43,40 @@ def tokens(text: str) -> list[str]:
 class Candidate:
     document_id: str
     document_name: str
-    number: str
-    title: str
-    order_index: int
+    number: str  # the unit's first section
+    title: str  # the unit's label ("1–3 PURPOSE / SCOPE")
+    order_index: int  # the unit's index in its document
     score: float
+    through: str = ""  # the unit's last section, when it holds several
+    own: bool = False  # the unit is one section's own text only
 
 
 @dataclass
 class _Indexed:
-    section: SopSection
+    document_id: str
+    unit: Unit
     document_name: str
     counts: Counter
     length: int
 
 
 class SectionIndex:
-    """Every converted document's sections, scored on demand."""
+    """Every converted document's units, scored on demand."""
 
     def __init__(self, rows: Sequence[SopSection], names: dict[str, str]) -> None:
-        by_key = {(r.document_id, r.order_index): r for r in rows}
+        by_doc: dict[str, list[SopSection]] = {}
+        for r in rows:
+            by_doc.setdefault(r.document_id, []).append(r)
         self._items: list[_Indexed] = []
         df: Counter = Counter()
-        for r in rows:
-            parent = (
-                by_key.get((r.document_id, r.parent_index)) if r.parent_index is not None else None
-            )
-            words = tokens(f"{r.title} {r.title} {parent.title if parent else ''} {r.text}")
-            counts = Counter(words)
-            self._items.append(_Indexed(r, names.get(r.document_id, ""), counts, len(words)))
-            df.update(counts.keys())
+        for doc_id, doc_rows in by_doc.items():
+            for unit in units(sorted(doc_rows, key=lambda r: r.order_index)):
+                words = tokens(f"{unit.label} {unit.label} {unit.text}")
+                counts = Counter(words)
+                self._items.append(
+                    _Indexed(doc_id, unit, names.get(doc_id, ""), counts, len(words))
+                )
+                df.update(counts.keys())
         n = max(1, len(self._items))
         self._idf = {w: math.log(1 + (n - c + 0.5) / (c + 0.5)) for w, c in df.items()}
         self._avg = sum(i.length for i in self._items) / n if self._items else 1.0
@@ -76,13 +84,13 @@ class SectionIndex:
     def search(
         self, text: str, *, limit: int = 8, document_ids: Iterable[str] | None = None
     ) -> list[Candidate]:
-        """The best-scoring sections for ``text``, at most ``limit``, optionally only within some
-        documents. Sections scoring nothing are never returned."""
+        """The best-scoring units for ``text``, at most ``limit``, optionally only within some
+        documents. Units scoring nothing are never returned."""
         query = set(tokens(text))
         allowed = set(document_ids) if document_ids is not None else None
         scored: list[tuple[float, _Indexed]] = []
         for item in self._items:
-            if allowed is not None and item.section.document_id not in allowed:
+            if allowed is not None and item.document_id not in allowed:
                 continue
             score = 0.0
             for w in query:
@@ -93,17 +101,22 @@ class SectionIndex:
             if score > 0:
                 scored.append((score, item))
         scored.sort(key=lambda pair: -pair[0])
-        return [
-            Candidate(
-                document_id=i.section.document_id,
-                document_name=i.document_name,
-                number=i.section.number,
-                title=i.section.title,
-                order_index=i.section.order_index,
-                score=round(score, 3),
+        out = []
+        for score, i in scored[:limit]:
+            number, through, own = i.unit.citation()
+            out.append(
+                Candidate(
+                    document_id=i.document_id,
+                    document_name=i.document_name,
+                    number=number,
+                    title=i.unit.label,
+                    order_index=i.unit.index,
+                    score=round(score, 3),
+                    through=through,
+                    own=own,
+                )
             )
-            for score, i in scored[:limit]
-        ]
+        return out
 
 
 async def load_index(db: AsyncSession, library_id: str | None = None) -> SectionIndex:

@@ -190,10 +190,7 @@ async def collect_sources(
         for ref in sop_citation.parse_refs(list(it.source_refs)):
             if ref not in order:
                 order.append(ref)
-    resolved = {
-        sop_citation.SectionRef(c.document_id, c.number): c
-        for c in await sop_citation.resolve(db, order)
-    }
+    resolved = {c.reference: c for c in await sop_citation.resolve(db, order)}
     found = [r for r in order if r in resolved]
     index = {ref: i for i, ref in enumerate(found)}
     item_sections = {
