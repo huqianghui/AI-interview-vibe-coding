@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import { DataTable, type DataColumn } from "./DataTable";
-import { fitWidths } from "./dataTableWidths";
+import { CELL_CHROME, fitWidths } from "./dataTableWidths";
 
 interface Row {
   id: string;
@@ -45,11 +45,11 @@ describe("DataTable", () => {
       ROWS,
       perChar,
     );
-    expect(name).toBe(34 * 8 + 28); // the longest name, plus the cell's padding
+    expect(name).toBe(34 * 8 + CELL_CHROME); // the longest name, plus the cell's padding
     expect(flag).toBe(64); // never narrower than the minimum
     expect(ctl).toBe(180); // a column of controls says its width
     expect(note).toBe(440); // long text is capped, not 400 characters wide
-    expect(sorted).toBe(4 * 8 + 24 + 28); // a sortable header leaves room for its arrow
+    expect(sorted).toBe(4 * 8 + 24 + CELL_CHROME); // a sortable header leaves room for its arrow
   });
 
   it("lets every column but the last be dragged", () => {

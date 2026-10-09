@@ -174,7 +174,8 @@ export function InterviewsTab({ state }: { state: InterviewsTabState }) {
     {
       id: "status",
       header: t("history.colStatus"),
-      width: 130,
+      text: (it) => t(`history.status.${it.status}`),
+      pad: 24, // the badge's own padding
       cell: (it) => <StatusBadge status={it.status} />,
     },
     {

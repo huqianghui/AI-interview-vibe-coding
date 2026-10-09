@@ -125,7 +125,13 @@ export function InterviewHistoryTable({
       text: (it) => it.bank_name ?? t("history.notRecorded"),
       cell: (it) => it.bank_name ?? t("history.notRecorded"),
     },
-    { id: "status", header: t("history.colStatus"), width: 130, cell: (it) => <StatusBadge status={it.status} /> },
+    {
+      id: "status",
+      header: t("history.colStatus"),
+      text: (it) => t(`history.status.${it.status}`),
+      pad: 24, // the badge's own padding
+      cell: (it) => <StatusBadge status={it.status} />,
+    },
     { id: "score", header: t("history.colScore"), text: score, cell: score },
     {
       id: "open",

@@ -112,16 +112,30 @@ export function DataTable<T>({
   const styles = useStyles();
   const wrapRef = useRef<HTMLDivElement>(null);
   const [font, setFont] = useState<string | null>(null);
+  // Measured until the web font has loaded, a width is the fallback font's: measure again then.
+  const [fontsLoaded, setFontsLoaded] = useState(0);
   useLayoutEffect(() => {
     const el = wrapRef.current;
     if (!el || typeof getComputedStyle === "undefined") return;
     const cs = getComputedStyle(el);
     if (cs.fontFamily) setFont(`${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`);
   }, []);
+  useLayoutEffect(() => {
+    let live = true;
+    void document.fonts?.ready.then(() => live && setFontsLoaded((n) => n + 1));
+    return () => {
+      live = false;
+    };
+  }, []);
 
   // Each column's starting width, measured from its content. A string key keeps the options
   // stable across renders that change nothing, so a drag is not undone by the next render.
-  const widths = useMemo(() => fitWidths(columns, items, makeMeasure(font)), [columns, items, font]);
+  const widths = useMemo(
+    () => fitWidths(columns, items, makeMeasure(font)),
+    // fontsLoaded: the same font string measures differently once the web font is in.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [columns, items, font, fontsLoaded],
+  );
   const widthKey = widths.join(",");
   const columnSizingOptions = useMemo<TableColumnSizingOptions>(() => {
     const out: TableColumnSizingOptions = {};
