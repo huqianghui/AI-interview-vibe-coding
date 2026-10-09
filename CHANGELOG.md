@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.62.2.1 (2026-10-09)
+
+### Fixed
+- **A section's deepest headings are shown as headings.** Document Intelligence writes a Word
+  heading below level 6 with 7 or more `#` ("######## 7. APPENDICES"); Markdown stops at six, so
+  the section preview showed those lines as raw text. They are shown as the deepest heading now.
+
 ## 0.62.2.0 (2026-10-09)
 
 ### Added

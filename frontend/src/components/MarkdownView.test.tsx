@@ -72,6 +72,11 @@ describe("MarkdownView", () => {
     expect(container.querySelector("hr")).not.toBeNull();
   });
 
+  it("shows a heading DI wrote with more than six # as a heading, not as raw text", () => {
+    render(<MarkdownView text={"######## 7. APPENDICES\n\nN/A"} />);
+    expect(screen.getByRole("heading", { name: "7. APPENDICES" })).toBeInTheDocument();
+  });
+
   it("keeps a document's single line breaks", () => {
     const { container } = render(<MarkdownView text={"2.1\nInspector:"} />);
     expect(container.querySelector("br")).not.toBeNull();
