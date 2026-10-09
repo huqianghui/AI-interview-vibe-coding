@@ -468,6 +468,9 @@ export interface SopDocument {
   document_id: string;
   name: string;
   library_id: string;
+  // The key-points summary text, and where the document is cited (a cited SOP is never deleted).
+  summary?: string;
+  cited_in?: string[];
   status: string;
   size: number;
   chunk_count: number;
@@ -513,6 +516,10 @@ export interface SopSectionText {
 }
 
 export const listSopDocuments = () => adminRequest<SopDocument[]>("/admin/sop/documents");
+
+/** Delete an SOP nothing cites; a cited one is a 409 naming where it is cited. */
+export const deleteSopDocument = (documentId: string) =>
+  adminRequest<void>(`/admin/sop/documents/${documentId}`, { method: "DELETE" });
 
 export const listSopSections = (documentId: string) =>
   adminRequest<SopSection[]>(`/admin/sop/documents/${documentId}/sections`);

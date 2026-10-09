@@ -118,6 +118,18 @@ export function useSopTab(active: boolean) {
       await admin.updateSopLibrary(libraryId, { name: name.trim() });
     });
 
+  /** Delete an SOP nothing cites, after the admin confirms; the server refuses a cited one. */
+  const deleteDocument = (doc: SopDocument, confirmText: string) => {
+    if (typeof window !== "undefined" && !window.confirm(confirmText)) return Promise.resolve();
+    return run(async () => {
+      await admin.deleteSopDocument(doc.document_id);
+      if (selected === doc.document_id) {
+        wanted.current = null;
+        setSelected(null);
+      }
+    });
+  };
+
   const deleteLibrary = (libraryId: string) =>
     run(async () => {
       await admin.deleteSopLibrary(libraryId);
@@ -245,6 +257,7 @@ export function useSopTab(active: boolean) {
     createLibrary,
     renameLibrary,
     deleteLibrary,
+    deleteDocument,
     upload,
     uploading,
     notice,

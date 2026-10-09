@@ -58,6 +58,10 @@ class SopDocumentOut(BaseModel):
     # The key-points summary's state: "" none | draft | reviewed (used in scoring) | failed.
     summary_status: str = ""
     summary_error: str = ""
+    # The summary itself (the SOP table shows it on one line), and where the document is cited:
+    # a cited document is never deleted (owner, 2026-10-09).
+    summary: str = ""
+    cited_in: list[str] = []
     # Being drafted by the LLM right now (background).
     summarizing: bool = False
 
@@ -249,6 +253,7 @@ async def list_documents(db: AsyncSession = Depends(get_db)) -> list[SopDocument
     """List ingested SOP documents with their chunk counts (admin knowledge-base view)."""
     rows = await sop_document_service.list_documents_with_chunk_counts(db)
     sections = await sop_section_service.section_counts(db)
+    citations = await sop_document_service.document_citations(db)
     return [
         SopDocumentOut(
             document_id=d.id,
@@ -264,9 +269,32 @@ async def list_documents(db: AsyncSession = Depends(get_db)) -> list[SopDocument
             summary_status=d.summary_status,
             summary_error=d.summary_error,
             summarizing=sop_summary_service.drafting(d.id),
+            summary=d.summary,
+            cited_in=citations.get(d.id, []),
         )
         for d, chunk_count in rows
     ]
+
+
+@router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_document(document_id: str, db: AsyncSession = Depends(get_db)) -> None:
+    """Delete an SOP that nothing cites (its sections, chunks and stored file go with it). 409,
+    naming where, when a rubric, a published version or a report cites it: to replace a cited SOP,
+    make a new bank or version without it (owner, 2026-10-09). 404 for an unknown document."""
+    try:
+        deleted = await sop_document_service.delete_document(db, document_id)
+    except sop_document_service.DocumentInUse as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This SOP is cited and cannot be deleted: " + "; ".join(exc.where),
+        ) from exc
+    except sop_document_service.DocumentBusy as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This SOP is being converted or summarised: delete it when that has finished",
+        ) from exc
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
 
 async def _document(db: AsyncSession, document_id: str) -> SopDocument:

@@ -333,6 +333,10 @@ export const resources = {
           colConversion: "Conversion",
           colSections: "Sections",
           colSummary: "Summary",
+          colStatus: "Status",
+          colNotes: "Notes",
+          delete: "Delete",
+          deleteConfirm: "Delete {{name}}? Its sections and file are deleted too. Nothing cites it.",
           pending: "Converting…",
           failed: "Failed",
           source: {
@@ -360,6 +364,13 @@ export const resources = {
             saveDraft: "Save as draft",
             redraft: "Draft again with AI",
             redraftEdited: "Save or undo your edits first: a new draft would replace them.",
+            state: { reviewed: "Approved", draft: "Draft", failed: "Failed", none: "None" },
+            note: {
+              reviewed: "Used in scoring.",
+              draft: "Not used in scoring until approved.",
+              failed: "Drafting failed.",
+              none: "Drafted after the document is converted.",
+            },
           },
         },
         users: {
@@ -786,6 +797,10 @@ export const resources = {
           colConversion: "转换",
           colSections: "章节数",
           colSummary: "摘要",
+          colStatus: "状态",
+          colNotes: "备注",
+          delete: "删除",
+          deleteConfirm: "删除 {{name}}？它的章节和文件会一并删除。目前没有任何地方引用它。",
           pending: "转换中…",
           failed: "失败",
           source: {
@@ -813,6 +828,13 @@ export const resources = {
             saveDraft: "保存为草稿",
             redraft: "让 AI 重新起草",
             redraftEdited: "请先保存或撤销你的修改：重新起草会覆盖它们。",
+            state: { reviewed: "已审核", draft: "草稿", failed: "失败", none: "无" },
+            note: {
+              reviewed: "用于评分。",
+              draft: "审核通过后才用于评分。",
+              failed: "起草失败。",
+              none: "文档转换完成后自动起草。",
+            },
           },
         },
         users: {

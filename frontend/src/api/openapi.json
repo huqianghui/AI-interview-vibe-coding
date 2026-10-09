@@ -2892,6 +2892,14 @@
             "title": "Chunk Count",
             "type": "integer"
           },
+          "cited_in": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Cited In",
+            "type": "array"
+          },
           "converting": {
             "default": false,
             "title": "Converting",
@@ -2937,6 +2945,11 @@
             "default": false,
             "title": "Summarizing",
             "type": "boolean"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
           },
           "summary_error": {
             "default": "",
@@ -5902,6 +5915,47 @@
           }
         ],
         "summary": "Upload Document",
+        "tags": [
+          "admin-sop"
+        ]
+      }
+    },
+    "/admin/sop/documents/{document_id}": {
+      "delete": {
+        "description": "Delete an SOP that nothing cites (its sections, chunks and stored file go with it). 409,\nnaming where, when a rubric, a published version or a report cites it: to replace a cited SOP,\nmake a new bank or version without it (owner, 2026-10-09). 404 for an unknown document.",
+        "operationId": "delete_document_admin_sop_documents__document_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Delete Document",
         "tags": [
           "admin-sop"
         ]
