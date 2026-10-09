@@ -27,6 +27,10 @@ from dataclasses import dataclass, field
 _HEADING = re.compile(r"^(#+)\s+(.+?)\s*#*\s*$")
 # "4.2 Title" / "4.2. Title" / "4. PURPOSE". Up to 6 levels, each part 1-2 digits, first part <= 99.
 _NUMBERED_INLINE = re.compile(r"^(\d{1,2}(?:\.\d{1,2}){0,5})\.?\s+(\S.*)$")
+# "10.REVIEW OF ..." with no space after the number: how Word's auto-numbered headings print when
+# their tab collapses (measured on the server, 2026-10-09). Only an upper-case title, so "3.5mg"
+# or "2.1x" in prose never matches; the outline order is checked too, as for every clause.
+_NUMBERED_TIGHT = re.compile(r"^(\d{1,2}(?:\.\d{1,2}){0,5})\.([A-Z][A-Z&/,()'\- ]{2,}.*)$")
 # The number alone on its line ("4.2" or "4.2."), its text on the next non-empty line.
 _NUMBER_ALONE = re.compile(r"^(\d{1,2}(?:\.\d{1,2}){0,5})\.?$")
 _PAGE_BREAK = re.compile(r"^<!--\s*PageBreak\s*-->$")
@@ -165,7 +169,7 @@ def parse_sections(markdown: str) -> list[ParsedSection]:
                 add_text(text)
             continue
 
-        numbered = _NUMBERED_INLINE.match(text)
+        numbered = _NUMBERED_INLINE.match(text) or _NUMBERED_TIGHT.match(text)
         alone = None if numbered else _NUMBER_ALONE.match(text)
         if alone:
             # "4.2" alone: the clause's text is the next non-empty, non-noise line.

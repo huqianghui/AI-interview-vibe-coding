@@ -547,3 +547,64 @@ async def test_word_uses_the_in_house_converter_while_the_pdf_route_is_off(monke
     monkeypatch.setattr(sop_markdown.get_settings(), "sop_require_libreoffice", True)
     result = await sop_markdown.to_markdown(_word(*WORD_TEXT), "Release.docx")
     assert result.source == "docx" and "Inspector checks" in result.markdown
+
+
+def test_a_heading_with_no_space_after_its_number_is_a_clause():
+    """How Word's auto-numbered headings printed on the server: "10.REVIEW OF ..." (2026-10-09)."""
+    md = "## 1. PRODUCT\n\nKept.\n\n2.REVIEW OF SITE STAFF\n\nText.\n\n3.CTMS RECORDS\n\nMore."
+    assert [(s.number, s.title) for s in parse_sections(md)] == [
+        ("1", "PRODUCT"),
+        ("2", "REVIEW OF SITE STAFF"),
+        ("3", "CTMS RECORDS"),
+    ]
+
+
+def test_a_number_glued_to_prose_is_not_a_clause():
+    md = "## 1. DOSING\n\n2.5mg twice a day.\n\n2.Inspect the widget.\n\n3.5 ML per kg."
+    assert [s.number for s in parse_sections(md)] == ["1"]
+
+
+def _docx_with_toc(kind: str) -> bytes:
+    """A .docx whose table of contents is a content control ("sdt") or "toc N" paragraphs."""
+    import docx
+    from docx.oxml import parse_xml
+
+    document = docx.Document()
+    if kind == "sdt":
+        document.element.body.insert(
+            0,
+            parse_xml(
+                '<w:sdt xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                '<w:sdtPr><w:docPartObj><w:docPartGallery w:val="Table of Contents"/>'
+                "</w:docPartObj></w:sdtPr><w:sdtContent>"
+                "<w:p><w:r><w:t>Table of Contents</w:t></w:r></w:p>"
+                "<w:p><w:r><w:t>1. PURPOSE 3</w:t></w:r></w:p>"
+                "</w:sdtContent></w:sdt>"
+            ),
+        )
+    else:
+        toc = document.styles.add_style("Contents Line", 1)  # WD_STYLE_TYPE.PARAGRAPH
+        toc.name = "toc 1"
+        document.add_paragraph("1. PURPOSE 3", style=toc)
+    document.add_paragraph("1. PURPOSE")
+    document.add_paragraph("Inspect every widget.")
+    buffer = io.BytesIO()
+    document.save(buffer)
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize("kind", ["sdt", "style"])
+def test_the_table_of_contents_is_removed_before_printing(kind):
+    """A printed table of contents made DI read page numbers as clause numbers (2026-10-09)."""
+    import docx
+
+    stripped = sop_markdown.strip_table_of_contents(_docx_with_toc(kind))
+    text = [p.text for p in docx.Document(io.BytesIO(stripped)).paragraphs]
+    xml = docx.Document(io.BytesIO(stripped)).element.body.xml
+    assert text == ["1. PURPOSE", "Inspect every widget."]
+    assert "Table of Contents" not in xml and "PURPOSE 3" not in xml
+
+
+def test_a_document_without_a_table_of_contents_is_printed_unchanged():
+    original = _word(*WORD_TEXT)
+    assert sop_markdown.strip_table_of_contents(original) == original

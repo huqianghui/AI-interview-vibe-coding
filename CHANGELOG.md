@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.62.3.0 (2026-10-09)
+
+### Fixed
+- **Word's table of contents is removed before the document is printed to PDF.** A printed table
+  of contents is a list of every heading with its page number, and Document Intelligence read it
+  as headings numbered by their pages (a client SOP lost 6 of 14 clauses on the server). Word keeps
+  it in a "Table of Contents" content control or in "toc N"-styled paragraphs; both are removed.
+- **A clause heading with no space after its number is a section** ("10.REVIEW OF ..."): how
+  Word's auto-numbered headings print when their tab collapses. Only an upper-case title, in
+  outline order, so a number in prose ("2.5mg") never matches.
+
+### Added
+- **`scripts/compare_sop_sections.py`**, run inside the backend container: for every SOP, the
+  stored sections against a fresh run (Word: the PDF route with real Document Intelligence; other
+  documents: their stored Markdown split again), and which rubric citations would stop resolving.
+  Read-only, prints numbers only. The Word PDF route stays off (`SOP_WORD_VIA_PDF`) until this
+  shows every Word document identical.
+
 ## 0.62.2.1 (2026-10-09)
 
 ### Fixed
