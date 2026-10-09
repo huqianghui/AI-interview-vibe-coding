@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.62.0.0 (2026-10-09)
+
+### Changed
+- **Word SOPs are read by Azure Document Intelligence too, through PDF.** A `.docx` is printed to
+  PDF by LibreOffice (headless) and DI reads that PDF like any other: Word's auto-numbered
+  headings come back with their numbers, and every section now has page numbers (Monitoring Plan:
+  14 numbered sections over 29 pages). Completeness is checked against the Word file's own text.
+  Every Word document converted by the old converter is converted again after the deploy.
+- **Every published backend image has LibreOffice** (Writer, no GUI) and Noto CJK fonts. The image
+  build fails unless LibreOffice converts a Chinese and English Word file with the Chinese drawn in
+  a CJK font, and the image never falls back to the in-house Word converter: without LibreOffice a
+  Word conversion fails and says why (also without Document Intelligence). A conversion that
+  hangs is killed with all its processes, and `tini` runs as PID 1. Local dev and CI still use the
+  in-house converter.
+
+### Fixed
+- **A heading with more than six `#` is a section.** DI writes a seventh-level Word heading as
+  `#######`, which dropped a client SOP's "14. SIGNATURES".
+- **"Used in scoring." stays on one line** next to the summary's status badge.
+
 ## 0.61.2.0 (2026-10-09)
 
 ### Changed

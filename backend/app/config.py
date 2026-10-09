@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     # MUST be "azure": a Container App's disk does not survive a new revision (services/storage).
     default_storage_provider: str = "local"
     material_storage_path: str = "./_sop_storage"
+    # Word SOPs are printed to PDF by LibreOffice and read by Document Intelligence. The backend
+    # image installs LibreOffice and sets this, so a published image never falls back to the
+    # in-house Word converter: a missing LibreOffice fails the conversion instead. Off in dev/CI.
+    sop_require_libreoffice: bool = False
     azure_storage_account_url: str = ""
     material_blob_container: str = "materials"
     # Candidate voice recordings (the microphone only, one WAV per question), in their own private

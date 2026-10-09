@@ -24,7 +24,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field
 
-_HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
+_HEADING = re.compile(r"^(#+)\s+(.+?)\s*#*\s*$")
 # "4.2 Title" / "4.2. Title" / "4. PURPOSE". Up to 6 levels, each part 1-2 digits, first part <= 99.
 _NUMBERED_INLINE = re.compile(r"^(\d{1,2}(?:\.\d{1,2}){0,5})\.?\s+(\S.*)$")
 # The number alone on its line ("4.2" or "4.2."), its text on the next non-empty line.
@@ -194,7 +194,7 @@ def parse_sections(markdown: str) -> list[ParsedSection]:
             unnumbered += 1
             # An unnumbered heading inside a numbered outline nests under the open clause, so a
             # sub-heading of 5.3 stays part of 5.3's full text.
-            level = len(heading.group(1))
+            level = min(len(heading.group(1)), 6)  # DI writes "#######" for a 7th level
             if stack and sections[stack[-1]].number[0] != "§":
                 level = max(level, sections[stack[-1]].level + 1)
             open_section(f"§{unnumbered}", text, level)

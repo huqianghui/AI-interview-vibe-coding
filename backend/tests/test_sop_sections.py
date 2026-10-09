@@ -429,3 +429,109 @@ async def test_excel_is_not_a_supported_sop_format(monkeypatch):
     monkeypatch.setattr(sop_markdown.get_settings(), "azure_foundry_endpoint", "https://di.example")
     result = await sop_markdown.to_markdown(b"PK", "Plan.xlsx")
     assert result.source == "failed" and "unsupported" in result.error
+
+
+def test_a_heading_deeper_than_six_hashes_is_still_a_section():
+    """DI writes a seventh-level Word heading as "#######" (a client SOP's "14. SIGNATURES" was
+    lost this way, 2026-10-09). It is a heading, kept at level 6."""
+    sections = parse_sections("## 1. RECORDS\n\nKept.\n\n####### 2. SIGNATURES\n\nSigned.\n")
+    assert [s.number for s in sections] == ["1", "2"]
+    assert sections[1].title == "SIGNATURES"
+
+
+def _word(*paragraphs: str) -> bytes:
+    import docx
+
+    document = docx.Document()
+    for text in paragraphs:
+        document.add_paragraph(text)
+    buffer = io.BytesIO()
+    document.save(buffer)
+    return buffer.getvalue()
+
+
+WORD_TEXT = [
+    "Inspector checks every widget before release and records the widget result.",
+    "Supervisor reviews the log weekly; the supervisor signs it weekly.",
+]
+
+
+@pytest.mark.asyncio
+async def test_word_goes_through_libreoffice_to_document_intelligence(monkeypatch):
+    """Word → PDF (LibreOffice) → DI (owner, 2026-10-09). Completeness is checked against the
+    .docx's own text: a DI reading that drops a paragraph fails the whole document."""
+    monkeypatch.setattr(sop_markdown.get_settings(), "azure_foundry_endpoint", "https://di.example")
+    monkeypatch.setattr(sop_markdown, "libreoffice", lambda: "/usr/bin/soffice")
+    monkeypatch.setattr(sop_markdown, "_docx_to_pdf", lambda content, soffice: b"%PDF-word")
+    monkeypatch.setattr(sop_markdown, "_pdf_page_texts", lambda _c: ["page one", "page two"])
+    seen = {}
+
+    async def read(content, endpoint, page_count, content_type=sop_markdown._PDF):
+        seen.update(content=content, page_count=page_count, content_type=content_type)
+        return {"content": "# 1 RELEASE\n\n" + "\n\n".join(WORD_TEXT), "pages": [{}, {}]}
+
+    monkeypatch.setattr(sop_markdown, "_analyze", read)
+    ok = await sop_markdown.to_markdown(_word(*WORD_TEXT), "Release.docx")
+    assert (ok.source, ok.error) == ("document_intelligence", "")
+    # The PDF went to DI as a PDF, every page named.
+    assert seen == {"content": b"%PDF-word", "page_count": 2, "content_type": sop_markdown._PDF}
+
+    async def half(*_a, **_k):
+        return {"content": WORD_TEXT[0], "pages": [{}, {}]}
+
+    monkeypatch.setattr(sop_markdown, "_analyze", half)
+    failed = await sop_markdown.to_markdown(_word(*WORD_TEXT), "Release.docx")
+    assert failed.source == "failed" and "not fully read" in failed.error
+
+
+@pytest.mark.asyncio
+async def test_without_libreoffice_word_falls_back_only_where_it_is_not_required(monkeypatch):
+    settings = sop_markdown.get_settings()
+    monkeypatch.setattr(settings, "azure_foundry_endpoint", "https://di.example")
+    monkeypatch.setattr(sop_markdown, "libreoffice", lambda: None)
+    # Dev / CI: our own converter, labelled.
+    monkeypatch.setattr(settings, "sop_require_libreoffice", False)
+    dev = await sop_markdown.to_markdown(_word(*WORD_TEXT), "Release.docx")
+    assert dev.source == "docx" and "Inspector checks" in dev.markdown
+    # A published image requires LibreOffice: no silent fallback, a failure that says why.
+    monkeypatch.setattr(settings, "sop_require_libreoffice", True)
+    image = await sop_markdown.to_markdown(_word(*WORD_TEXT), "Release.docx")
+    assert image.source == "failed" and "LibreOffice is not installed" in image.error
+    # ... nor without Document Intelligence.
+    monkeypatch.setattr(sop_markdown, "libreoffice", lambda: "/usr/bin/soffice")
+    monkeypatch.setattr(settings, "azure_foundry_endpoint", "")
+    no_di = await sop_markdown.to_markdown(_word(*WORD_TEXT), "Release.docx")
+    assert no_di.source == "failed" and "Document Intelligence" in no_di.error
+
+
+@pytest.mark.asyncio
+async def test_an_empty_pdf_from_libreoffice_is_a_clear_failure(monkeypatch):
+    monkeypatch.setattr(sop_markdown.get_settings(), "azure_foundry_endpoint", "https://di.example")
+    monkeypatch.setattr(sop_markdown, "libreoffice", lambda: "/usr/bin/soffice")
+    monkeypatch.setattr(sop_markdown, "_docx_to_pdf", lambda content, soffice: b"%PDF")
+    monkeypatch.setattr(sop_markdown, "_pdf_page_texts", lambda _c: [])
+    result = await sop_markdown.to_markdown(_word(*WORD_TEXT), "Release.docx")
+    assert result.source == "failed" and "empty PDF" in result.error
+
+
+def test_a_libreoffice_that_hangs_is_killed_with_its_children(monkeypatch, tmp_path):
+    """soffice starts soffice.bin; a timeout kills the whole process group."""
+    hang = tmp_path / "soffice"
+    hang.write_text("#!/bin/sh\nsleep 30 &\nwait\n")
+    hang.chmod(0o755)
+    monkeypatch.setattr(sop_markdown, "LIBREOFFICE_TIMEOUT_SECONDS", 0.5)
+    with pytest.raises(RuntimeError, match="took over"):
+        sop_markdown._docx_to_pdf(b"PK", str(hang))
+
+
+def test_text_gaps_names_the_recurring_words_the_markdown_lost():
+    coverage, missing = sop_markdown.text_gaps("\n".join(WORD_TEXT), WORD_TEXT[0])
+    assert coverage < sop_markdown.PAGE_COVERAGE_MIN and "supervisor" in missing
+    assert sop_markdown.text_gaps("\n".join(WORD_TEXT), "\n".join(WORD_TEXT)) == (1.0, [])
+
+
+@pytest.mark.skipif(sop_markdown.libreoffice() is None, reason="LibreOffice is not installed")
+def test_libreoffice_prints_a_word_file_to_pdf():
+    pdf = sop_markdown._docx_to_pdf(_word(*WORD_TEXT), sop_markdown.libreoffice())
+    assert pdf.startswith(b"%PDF")
+    assert "Inspector checks" in "".join(sop_markdown._pdf_page_texts(pdf))
