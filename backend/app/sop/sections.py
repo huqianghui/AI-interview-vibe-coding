@@ -108,6 +108,25 @@ def _is_successor(prev: str | None, number: str) -> bool:
     return False
 
 
+# How many recently accepted clauses a heading may continue from (one stray clause in between
+# must not block it), and how far its first differing part may move forward.
+_HEADING_LOOKBACK = 5
+_HEADING_GAP = 9
+
+
+def _heading_follows(prev: str, number: str) -> bool:
+    """A heading's number may skip clauses DI never marked: forward in outline order, its first
+    differing part at most ``_HEADING_GAP`` ahead (a child counts as one step), deeper parts free.
+    Measured on a client SOP, 2026-10-10: 6.8 → "### 6.8.6", 5.4.3.1.9 → "### 5.4.6.5.5"."""
+    a, b = _parts(prev), _parts(number)
+    if len(b) > len(a) and b[: len(a)] == a:
+        return 1 <= b[len(a)] <= _HEADING_GAP
+    for x, y in zip(a, b, strict=False):
+        if x != y:
+            return 0 < y - x <= _HEADING_GAP
+    return False
+
+
 def parse_sections(markdown: str) -> list[ParsedSection]:
     """The document's sections in order, with parent/children links and page ranges."""
     raw = markdown.replace("\r\n", "\n").split("\n")
@@ -117,6 +136,11 @@ def parse_sections(markdown: str) -> list[ParsedSection]:
     body: list[str] = []  # text before the first section (a preamble)
     page = 1
     last_number: str | None = None
+    # The clauses accepted so far, newest last. DI marks a heading only from the page's layout,
+    # so a numbered heading is trusted further than a number at the start of a body line: it may
+    # continue from any of the last few clauses (``_heading_follows``), so one stray clause ("8.1
+    # The SCV Lead documents ...", a sentence) cannot make every later heading look out of order.
+    accepted: list[str] = []
     unnumbered = 0
     kept_once: set[str] = set()
 
@@ -193,16 +217,27 @@ def parse_sections(markdown: str) -> list[ParsedSection]:
                 title = _clean_heading(_HEADING.sub(r"\2", raw[j].strip()))
                 clause = alone.group(1)
                 last_number = clause
+                accepted.append(clause)
                 open_section(clause, title, len(_parts(clause)))
                 i = j + 1
                 continue
         if (
             numbered
             and not _NOT_A_CLAUSE.match(text)
-            and _is_successor(last_number, numbered.group(1))
+            and (
+                _is_successor(last_number, numbered.group(1))
+                or (
+                    heading is not None
+                    and any(
+                        _heading_follows(p, numbered.group(1))
+                        for p in accepted[-_HEADING_LOOKBACK:]
+                    )
+                )
+            )
         ):
             clause = numbered.group(1)
             last_number = clause
+            accepted.append(clause)
             open_section(clause, numbered.group(2), len(_parts(clause)))
             continue
         if heading and not numbered:

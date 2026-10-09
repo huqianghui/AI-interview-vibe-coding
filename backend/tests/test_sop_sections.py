@@ -620,3 +620,28 @@ def test_a_section_keeps_its_paragraphs_and_tables_apart():
     (roles,) = parse_sections(md)
     # Paragraphs stay apart, repeated blank lines become one.
     assert roles.text == f"Who does what.\n\n{table}\n\nEnd."
+
+
+def test_a_heading_continues_the_outline_after_a_stray_clause_and_may_skip_numbers():
+    """Live, 2026-10-10: after clause 1.8 came a heading-formatted sentence taken as 3.1, then
+    "### 1.8.6" (1.8.1-1.8.5 were never marked): every heading after it looked out of order and
+    one 6,753-character section held them all. A heading may skip numbers forward, from any of
+    the last few clauses."""
+    md = "\n\n".join(
+        [
+            "## 1. PROCEDURE",
+            "### 1.8 Report",
+            "### 3.1 The lead documents the visit in the system, records it",  # a sentence
+            "### 1.8.6 Report Distribution",
+            "### 1.9 Closure",
+            "## 2. REFERENCES",
+            "### 2.1 Parent Document",
+        ]
+    )
+    assert [s.number for s in parse_sections(md)] == ["1", "1.8", "3.1", "1.8.6", "1.9", "2", "2.1"]
+
+
+def test_a_body_line_number_still_needs_the_strict_order():
+    """Only a heading is trusted to skip: a stray "7.4" starting a sentence is not a clause."""
+    md = "## 1. DOSING\n\n1.1 Weigh the dose.\n\n7.4 litres of buffer are prepared.\n"
+    assert [s.number for s in parse_sections(md)] == ["1", "1.1"]

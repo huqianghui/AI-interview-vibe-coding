@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.63.1.0 (2026-10-10)
+
+### Fixed
+- **A heading that skips clause numbers is still a section.** Document Intelligence marks a
+  heading from the page's layout, but not every clause is marked, so the numbers it carries can
+  skip ("6.8" then "### 6.8.6"). The splitter took a skip that large for a stray number and kept
+  every later heading as body text: a client SOP held "6.8.6" to "8" (27 clauses) in one
+  6,753-character section, another held 142 clauses in one of 60,083. A Markdown heading may now
+  skip forward (up to 9 at the first changed part, from any of the last five clauses, so one
+  stray clause in between cannot block it); a number on a body line still needs the strict order.
+  On live data this only adds sections, in those two documents; no section number is lost.
 ## 0.63.0.1 (2026-10-10)
 
 ### Fixed
