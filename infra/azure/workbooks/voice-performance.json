@@ -44,16 +44,17 @@
             "id": "a1f0c6a2-1d6e-4c55-9d1c-6f0b2a1e0002",
             "version": "KqlParameterItem/1.0",
             "name": "Interview",
-            "label": "Interview (for the per-turn view)",
+            "label": "Interview",
             "type": 2,
-            "query": "customEvents\n| where name == \"voice.turn\"\n| summarize last_seen = max(timestamp) by id = tostring(customDimensions.interview_id)\n| order by last_seen desc\n| take 50\n| project value = id, label = strcat(id, \"  (\", format_datetime(last_seen, \"yyyy-MM-dd HH:mm\"), \")\")",
+            "query": "// Interviews with voice telemetry, newest first; the newest is selected by default.\ncustomEvents\n| where name startswith \"voice.\" and isnotempty(tostring(customDimensions.interview_id)) and tostring(customDimensions.interview_id) != \"playground\"\n| summarize last_seen = max(timestamp), turns = countif(name == \"voice.turn\") by id = tostring(customDimensions.interview_id)\n| order by last_seen desc\n| take 50\n| project value = id, label = strcat(format_datetime(last_seen, \"yyyy-MM-dd HH:mm\"), \"  \", substring(id, 0, 8), \"  (\", tostring(turns), \" turns)\"), selected = row_number() == 1",
             "timeContextFromParameter": "TimeRange",
             "queryType": 0,
             "resourceType": "microsoft.insights/components",
             "typeSettings": {
               "additionalResourceOptions": [],
               "showDefault": false
-            }
+            },
+            "isRequired": true
           }
         ],
         "style": "pills",
@@ -64,7 +65,31 @@
     {
       "type": 1,
       "content": {
-        "json": "## End to end for one interview\n\nPick the interview above. Every browser call (REST and the voice WebSocket) with the backend work it caused: `network_ms` is browser time minus server time (distance + proxy), `breakdown` the backend's direct children (Azure OpenAI, SQL, judge, external brain). The `operation_Id` opens the whole trace in **Transaction search**."
+        "json": "## End to end for one interview\n\nPick the interview above (the newest is selected by default). The first table is its **full trace**: every telemetry item from the browser and the backend, in time order. Every browser call (REST and the voice WebSocket) with the backend work it caused: `network_ms` is browser time minus server time (distance + proxy), `breakdown` the backend's direct children (Azure OpenAI, SQL, judge, external brain). The `operation_Id` opens the whole trace in **Transaction search**."
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "title": "Full trace of this interview: every item, browser and backend, in time order",
+        "query": "let iv = \"{Interview}\";\n// The interview's operations: its browser voice events, its backend voice sessions, its REST calls.\nlet ops = union\n    (customEvents | where tostring(customDimensions.interview_id) == iv | distinct operation_Id),\n    (dependencies | where tostring(customDimensions[\"voice.interview_id\"]) == iv | distinct operation_Id),\n    (dependencies | where client_Type == \"Browser\" and name has iv | distinct operation_Id);\nunion requests, dependencies, customEvents, pageViews, traces, exceptions\n| where isnotempty(iv) and operation_Id in (ops)\n| where not(itemType == \"dependency\" and (name endswith \" http send\" or name endswith \" http receive\"))\n| project timestamp, side = iff(client_Type == \"Browser\", \"browser\", \"backend\"), item = itemType, name = tostring(split(name, \"?\")[0]),\n    duration_ms = round(duration), success, result = resultCode, detail = iff(itemType in (\"trace\", \"exception\"), coalesce(message, outerMessage), \"\"),\n    id, parent_id = operation_ParentId, operation_Id\n| order by timestamp asc",
+        "size": 0,
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "duration_ms",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "greenRed"
+              }
+            }
+          ]
+        }
       }
     },
     {

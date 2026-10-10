@@ -221,7 +221,10 @@ resuming; the normal pause between utterances is not part of it.
 Azure portal → the App Insights resource → **Workbooks** → **AI Interview — Voice performance**.
 Sections:
 
-* **End to end for one interview** (picked from the **Interview** parameter): every browser call,
+* **End to end for one interview** (picked from the **Interview** parameter, newest selected by
+  default): its **full trace** (every telemetry item from the browser and the backend, in time
+  order: page view, the voice socket and its backend session, voice events, each REST call with its
+  backend request and the Azure OpenAI / blob / SQL calls under it); every browser call,
   REST and the voice WebSocket, with the backend request or session it caused, the network gap
   (browser time minus server time), the backend's direct children (Azure OpenAI, SQL, judge,
   external brain), the Azure errors in the voice session, and the `operation_Id` for
@@ -247,6 +250,21 @@ an existing App Insights resource:
 az deployment group create -g <resource-group> \
   -f infra/azure/modules/voice-workbook.bicep -p appInsightsName=<app-insights-name>
 ```
+
+## One interview's full trace
+
+In the workbook: pick the interview, read **Full trace of this interview**. In App Insights itself:
+
+1. Find the interview's operation id: **Logs**, then
+   `customEvents | where tostring(customDimensions.interview_id) == "<interview id>" | distinct operation_Id`
+   (or copy `operation_Id` from any workbook row).
+2. **Investigate → Transaction search**, paste the operation id in the search box, open any result:
+   the **End-to-end transaction details** view shows the whole tree (browser call → backend request
+   → its dependencies) with a timeline. Or in **Logs**:
+   `union * | where operation_Id == "<operation id>" | order by timestamp asc`.
+
+One interview is normally one operation: the browser's trace id lasts for the page view, and the
+backend joins it through `traceparent` (REST headers, the WebSocket query string).
 
 ## Querying directly
 
