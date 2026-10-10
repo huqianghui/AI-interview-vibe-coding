@@ -4,7 +4,7 @@
     {
       "type": 1,
       "content": {
-        "json": "# Voice performance\n\nMeasured in the candidate's browser (App Insights JS SDK) and in the backend (OpenTelemetry). Every number is a duration in **milliseconds**; only timings, ids and outcomes are recorded, never text.\n\n* **voice.setup** — one per voice connection, from opening the WebSocket.\n* **voice.avatar** — one per avatar WebRTC handshake (first connect, recovery rebuild, media-mode switch). `stun_srflx_ms` = time to the STUN answer (first server-reflexive candidate), `turn_relay_ms` = time to the TURN allocation (first relay candidate), both from the offer.\n* **voice.turn** — one per interviewer response; `kind = answer` turns include the candidate's answer. `click_to_audible_ms` is what the candidate feels: from finishing the answer to hearing the next question.\n\nMetric definitions: `docs/voice-performance-telemetry.md`."
+        "json": "# Voice performance\n\nMeasured in the candidate's browser (App Insights JS SDK) and in the backend (OpenTelemetry). Every number is a duration in **milliseconds**; only timings, ids and outcomes are recorded, never text.\n\n* **voice.setup** — one per voice connection, from opening the WebSocket.\n* **voice.avatar** — one per avatar WebRTC handshake (first connect, recovery rebuild, media-mode switch). `stun_srflx_ms` = time to the STUN answer (first server-reflexive candidate), `turn_relay_ms` = time to the TURN allocation (first relay candidate), both from the offer.\n* **voice.turn** — one per interviewer response; `kind = answer` turns include the candidate's answer. `click_to_audible_ms` is what the candidate feels: from finishing the answer to hearing the next question.\n\n* **voice.media** — WebRTC quality every 15 s from the browser's `getStats()`: RTT, jitter, loss, audible concealment, jitter buffer, bitrate, fps, freezes.\n* **The voice WebSocket** — a `WebSocket` dependency in the browser, parent of the backend's `voice.session` span (same trace).\n\nMetric definitions: `docs/voice-performance-telemetry.md`."
       }
     },
     {
@@ -59,6 +59,112 @@
         "style": "pills",
         "queryType": 0,
         "resourceType": "microsoft.insights/components"
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## End to end for one interview\n\nPick the interview above. Every browser call (REST and the voice WebSocket) with the backend work it caused: `network_ms` is browser time minus server time (distance + proxy), `breakdown` the backend's direct children (Azure OpenAI, SQL, judge, external brain). The `operation_Id` opens the whole trace in **Transaction search**."
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let iv = \"{Interview}\";\n// The interview's voice sockets, found through the backend session span that names it.\nlet ws_ids = dependencies\n  | where name == \"voice.session\" and tostring(customDimensions[\"voice.interview_id\"]) == iv\n  | distinct operation_ParentId;\nlet browser = dependencies\n  | where isnotempty(iv) and client_Type == \"Browser\" and (name has iv or (type == \"WebSocket\" and id in (ws_ids)))\n  | project b_time = timestamp, call = tostring(split(name, \"?\")[0]), call_type = type, browser_ms = duration, b_id = id, operation_Id, result = resultCode;\nlet server = union requests, (dependencies | where name == \"voice.session\")\n  | where client_Type != \"Browser\"\n  | project s_id = id, s_parent = operation_ParentId, server_ms = duration;\nlet children = dependencies\n  | where client_Type != \"Browser\" and not(name endswith \" http send\" or name endswith \" http receive\")\n  | summarize ms = round(sum(duration)), n = count() by parent = operation_ParentId, name\n  | summarize breakdown = make_bag(bag_pack(strcat(name, iff(n > 1, strcat(\" x\", tostring(n)), \"\")), ms)) by parent;\nlet azure_errors = traces\n  | where message == \"voice.azure_error\"\n  | summarize azure_errors = count(), avatar_rate_limited = countif(tostring(customDimensions.avatar_rate_limited) =~ \"true\") by parent = operation_ParentId;\nbrowser\n| join kind=leftouter server on $left.b_id == $right.s_parent\n| join kind=leftouter children on $left.s_id == $right.parent\n| join kind=leftouter azure_errors on $left.s_id == $right.parent\n// A socket is open for the whole session on both sides: there is no network share to subtract.\n| project b_time, call, call_type, result, browser_ms = round(browser_ms), server_ms = round(server_ms),\n    network_ms = iff(call_type == \"WebSocket\", real(null), round(browser_ms - server_ms)), breakdown, azure_errors, avatar_rate_limited, operation_Id\n| order by b_time asc",
+        "size": 0,
+        "title": "Request chain: browser call → backend → its children",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "_ms$",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "greenRed"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "title": "Backend voice sessions of this interview (also those opened before the page's SDK was up)",
+        "query": "let iv = \"{Interview}\";\nlet errors = traces | where message == \"voice.azure_error\"\n  | summarize azure_errors = count(), avatar_rate_limited = countif(tostring(customDimensions.avatar_rate_limited) =~ \"true\") by parent = operation_ParentId;\ndependencies\n| where isnotempty(iv) and name == \"voice.session\" and tostring(customDimensions[\"voice.interview_id\"]) == iv\n| join kind=leftouter errors on $left.id == $right.parent\n| project timestamp, minutes = round(duration / 60000.0, 1), success, realtime = tostring(customDimensions[\"voice.realtime\"]),\n    mode = tostring(customDimensions[\"voice.mode\"]), azure_errors, avatar_rate_limited, linked_to_browser = isnotempty(operation_ParentId), operation_Id\n| order by timestamp asc",
+        "size": 0,
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customEvents\n| where name startswith \"voice.\" and tostring(customDimensions.interview_id) == \"{Interview}\"\n| extend d = customDimensions\n| project timestamp, name, turn_kind = tostring(d.kind), outcome = tostring(d.outcome), mode = tostring(d.mode),\n    turn = toint(customMeasurements.turn_index), click_to_audible_ms = todouble(customMeasurements.click_to_audible_ms),\n    total_ms = todouble(customMeasurements.total_ms), first_audible_ms = todouble(customMeasurements.first_audible_ms),\n    rtt_ms = todouble(customMeasurements.rtt_ms)\n| order by timestamp asc",
+        "size": 0,
+        "title": "Voice events of this interview, in order",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "_ms$",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "greenRed"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customEvents\n| where name == \"voice.media\" and tostring(customDimensions.interview_id) == \"{Interview}\"\n| project timestamp, rtt_ms = todouble(customMeasurements.rtt_ms), audio_jitter_ms = todouble(customMeasurements.audio_jitter_ms), jitter_buffer_ms = todouble(customMeasurements.jitter_buffer_ms)\n| order by timestamp asc",
+        "size": 0,
+        "title": "WebRTC network over the session (RTT, jitter)",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "linechart"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customEvents\n| where name == \"voice.media\" and tostring(customDimensions.interview_id) == \"{Interview}\"\n| project timestamp, audio_loss_pct = todouble(customMeasurements.audio_loss_pct), audio_concealed_pct = todouble(customMeasurements.audio_concealed_pct), video_loss_pct = todouble(customMeasurements.video_loss_pct)\n| order by timestamp asc",
+        "size": 0,
+        "title": "WebRTC loss over the session (%)",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "linechart"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customEvents\n| where name == \"voice.media\" and tostring(customDimensions.interview_id) == \"{Interview}\"\n| project timestamp, video_fps = todouble(customMeasurements.video_fps), video_kbps = todouble(customMeasurements.video_kbps), audio_kbps = todouble(customMeasurements.audio_kbps), video_freezes = todouble(customMeasurements.video_freezes)\n| order by timestamp asc",
+        "size": 0,
+        "title": "WebRTC video over the session (fps, kbps, freezes)",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "linechart"
       }
     },
     {
@@ -285,6 +391,227 @@
         "query": "traces\n| where message == \"voice.azure_error\"\n| summarize n = count() by code = tostring(customDimensions.code), avatar_rate_limited = tostring(customDimensions.avatar_rate_limited), bin(timestamp, 1d)\n| order by timestamp desc",
         "size": 0,
         "title": "Voice Live errors from Azure (avatar rate limit included)",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table"
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Voice WebSocket sessions\n\nThe browser records the voice socket as a `WebSocket` dependency (its duration is the session length) and passes its trace context when it opens it; the backend's `voice.session` span is its child. A socket opened before the SDK had loaded is recorded but not linked."
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let backend = dependencies | where name == \"voice.session\" | project s_parent = operation_ParentId, backend_s = duration / 1000.0, backend_ok = success;\ndependencies\n| where client_Type == \"Browser\" and type == \"WebSocket\"\n| join kind=leftouter backend on $left.id == $right.s_parent\n| summarize sessions = count(), clean = countif(success == true), linked_to_backend = countif(isnotempty(s_parent)),\n    p50_minutes = round(percentile(duration, 50) / 60000.0, 1), p95_minutes = round(percentile(duration, 95) / 60000.0, 1)\n  by close_code = resultCode\n| order by sessions desc",
+        "size": 0,
+        "title": "Sessions by close code",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let errors = traces | where message == \"voice.azure_error\"\n  | summarize azure_errors = count(), avatar_rate_limited = countif(tostring(customDimensions.avatar_rate_limited) =~ \"true\") by parent = operation_ParentId;\ndependencies\n| where name == \"voice.session\"\n| join kind=leftouter errors on $left.id == $right.parent\n| summarize sessions = count(), failed = countif(success == false), with_azure_errors = countif(azure_errors > 0),\n    avatar_rate_limited = sum(avatar_rate_limited), p50_minutes = round(percentile(duration, 50) / 60000.0, 1)\n  by realtime = tostring(customDimensions[\"voice.realtime\"]), mode = tostring(customDimensions[\"voice.mode\"])",
+        "size": 0,
+        "title": "Backend voice sessions and the Azure errors in them",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table"
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## WebRTC media quality (`voice.media`)\n\nThe avatar's media goes browser ↔ Azure's TURN relay and never through our backend, so it is measured from the browser's `getStats()`: one sample per 15 s window while the call runs."
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customEvents\n| where name == \"voice.media\"\n| summarize windows = count(),\n    p50_rtt_ms = round(percentile(todouble(customMeasurements.rtt_ms), 50), 1), p95_rtt_ms = round(percentile(todouble(customMeasurements.rtt_ms), 95), 1),\n    p50_audio_jitter_ms = round(percentile(todouble(customMeasurements.audio_jitter_ms), 50), 1), p95_audio_jitter_ms = round(percentile(todouble(customMeasurements.audio_jitter_ms), 95), 1),\n    p50_jitter_buffer_ms = round(percentile(todouble(customMeasurements.jitter_buffer_ms), 50), 1), p95_jitter_buffer_ms = round(percentile(todouble(customMeasurements.jitter_buffer_ms), 95), 1),\n    p50_audio_loss_pct = round(percentile(todouble(customMeasurements.audio_loss_pct), 50), 1), p95_audio_loss_pct = round(percentile(todouble(customMeasurements.audio_loss_pct), 95), 1),\n    p50_audio_concealed_pct = round(percentile(todouble(customMeasurements.audio_concealed_pct), 50), 1), p95_audio_concealed_pct = round(percentile(todouble(customMeasurements.audio_concealed_pct), 95), 1),\n    p50_video_loss_pct = round(percentile(todouble(customMeasurements.video_loss_pct), 50), 1), p95_video_loss_pct = round(percentile(todouble(customMeasurements.video_loss_pct), 95), 1),\n    p50_video_fps = round(percentile(todouble(customMeasurements.video_fps), 50), 1), p95_video_fps = round(percentile(todouble(customMeasurements.video_fps), 95), 1),\n    p50_video_kbps = round(percentile(todouble(customMeasurements.video_kbps), 50), 1), p95_video_kbps = round(percentile(todouble(customMeasurements.video_kbps), 95), 1)\n  by mode = tostring(customDimensions.mode)",
+        "size": 0,
+        "title": "Quality per media mode (p50 / p95)",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customEvents\n| where name == \"voice.media\" and tostring(customDimensions.mode) == \"video\"\n| summarize freezes = sum(todouble(customMeasurements.video_freezes)), freeze_s = round(sum(todouble(customMeasurements.video_freeze_ms)) / 1000.0, 1),\n    dropped_frames = sum(todouble(customMeasurements.video_frames_dropped)) by bin(timestamp, 1h)",
+        "size": 0,
+        "title": "Freezes and dropped frames per hour",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "timechart"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customEvents\n| where name == \"voice.media\"\n| summarize p95_rtt_ms = percentile(todouble(customMeasurements.rtt_ms), 95), p95_audio_loss_pct = percentile(todouble(customMeasurements.audio_loss_pct), 95) by bin(timestamp, 1h)",
+        "size": 0,
+        "title": "RTT and loss over time (p95)",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "timechart"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customEvents\n| where name == \"voice.media\" and isnotempty(tostring(customDimensions.resolution))\n| summarize windows = count() by resolution = tostring(customDimensions.resolution)",
+        "size": 1,
+        "title": "Resolution received",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "piechart"
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Voice-only sessions (audio over the WebSocket)\n\nWithout an avatar the interviewer's audio arrives as PCM on the WebSocket and plays through the page's jitter buffer: a gap is the buffer running dry mid-speech."
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customEvents\n| where name == \"voice.turn\" and tostring(customDimensions.audio_path) == \"ws\"\n| extend gaps = todouble(customMeasurements.playback_gaps), gap_ms = todouble(customMeasurements.playback_gap_ms_total)\n| summarize turns = count(), turns_with_gaps = countif(gaps > 0), gaps = sum(gaps), avg_gap_ms = round(sum(gap_ms) / iff(sum(gaps) > 0, sum(gaps), 1.0))",
+        "size": 0,
+        "title": "Playback gaps per turn",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table"
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Page load and API latency as the browser sees it"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "browserTimings\n| summarize loads = count(), p50_total_ms = round(percentile(totalDuration, 50)), p95_total_ms = round(percentile(totalDuration, 95)),\n    p50_network_ms = round(percentile(networkDuration, 50)), p50_receive_ms = round(percentile(receiveDuration, 50)), p50_processing_ms = round(percentile(processingDuration, 50))\n  by name",
+        "size": 0,
+        "title": "Page load (browser timings)",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "_ms$",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "greenRed"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let server = requests | project s_parent = operation_ParentId, server_ms = duration;\ndependencies\n| where client_Type == \"Browser\" and type != \"WebSocket\"\n| extend route = replace_regex(tostring(split(name, \"?\")[0]), @\"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\", \"{id}\")\n| join kind=leftouter server on $left.id == $right.s_parent\n| summarize calls = count(), p50_browser_ms = round(percentile(duration, 50)), p50_server_ms = round(percentile(server_ms, 50)),\n    p50_network_ms = round(percentile(duration - server_ms, 50)), p95_browser_ms = round(percentile(duration, 95)), failed = countif(success == false)\n  by route\n| order by calls desc",
+        "size": 0,
+        "title": "API calls: browser time vs server time, per route",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "_ms$",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "greenRed"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Scoring, judge and external brain"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "dependencies\n| where name == \"scoring.question\"\n| summarize p50_s = percentile(duration, 50) / 1000.0, p95_s = percentile(duration, 95) / 1000.0 by bin(timestamp, 1h)",
+        "size": 0,
+        "title": "Per-question scoring over time (p50 / p95)",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "timechart"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "requests\n| where name has \"/report\"\n| summarize reports = count(), p50_s = round(percentile(duration, 50) / 1000.0, 1), p95_s = round(percentile(duration, 95) / 1000.0, 1), max_s = round(max(duration) / 1000.0, 1), failed = countif(success == false) by name",
+        "size": 0,
+        "title": "Whole reports (request time)",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "dependencies\n| where name == \"judge.call\"\n| summarize calls = count(), p50_ms = round(percentile(duration, 50)), p95_ms = round(percentile(duration, 95)), failed = countif(success == false)\n  by verdict = tostring(customDimensions[\"judge.verdict\"])",
+        "size": 0,
+        "title": "Judge verdicts and latency",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "dependencies\n| where name == \"external_brain.turn\"\n| summarize turns = count(), p50_ms = round(percentile(duration, 50)), p95_ms = round(percentile(duration, 95)), failed = countif(success == false) by bin(timestamp, 1d)",
+        "size": 0,
+        "title": "External brain turns",
         "timeContextFromParameter": "TimeRange",
         "queryType": 0,
         "resourceType": "microsoft.insights/components",

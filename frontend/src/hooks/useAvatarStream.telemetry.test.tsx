@@ -298,4 +298,35 @@ describe("voice.avatar wiring", () => {
     });
     expect(turn.mock.calls.length).toBe(calls);
   });
+
+  it("samples WebRTC quality from the health sampler's stats while the call runs (voice.media)", async () => {
+    const { result, pc } = await connected();
+    await completeHandshake(pc, result.current.handleServerSdp);
+    let frames = 0;
+    let bytes = 0;
+    const rows = () => [
+      { id: "A", type: "inbound-rtp", kind: "audio", packetsReceived: frames * 2, packetsLost: 0, totalSamplesReceived: frames * 1920 },
+      { id: "V", type: "inbound-rtp", kind: "video", framesDecoded: frames, bytesReceived: bytes },
+      ...SELECTED_RELAY_PAIR,
+    ];
+    pc.statsRows = rows();
+    await act(async () => {
+      pc.fireIce("connected"); // starts the health sampler
+      await Promise.resolve();
+    });
+    for (let i = 0; i < 10; i++) {
+      frames += 50; // 25 fps over each 2 s tick
+      bytes += 500_000;
+      pc.statsRows = rows();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+    }
+    const media = tracked.filter((e) => e.name === "voice.media");
+    expect(media.length).toBeGreaterThan(0);
+    expect(media[0].m.video_fps).toBe(25);
+    expect(media[0].m.rtt_ms).toBe(50);
+    expect(media[0].p).toMatchObject({ mode: "video", window_index: 0 });
+  });
 });
+

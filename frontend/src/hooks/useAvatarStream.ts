@@ -73,6 +73,7 @@ import {
   voiceMetrics,
   watchAudibleOnsets,
 } from "../telemetry/voiceTimeline";
+import { MediaQualityWindow } from "../telemetry/mediaQuality";
 
 /** All candidates gathered within this window before falling back to sending whatever we have. */
 const ICE_GATHERING_TIMEOUT_MS = 8000;
@@ -160,6 +161,8 @@ export function useAvatarStream(
   // superseded one's late events land on its own record.
   const handshakesRef = useRef(new WeakMap<RTCPeerConnection, AvatarHandshakeMetrics>());
   const stopAudibleRef = useRef<(() => void) | null>(null);
+  // `voice.media` quality windows over the current connection's stats (telemetry/mediaQuality.ts).
+  const mediaWindowRef = useRef<MediaQualityWindow | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const sdpResolverRef = useRef<((sdp: string) => void) | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
@@ -286,6 +289,8 @@ export function useAvatarStream(
     pendingStreamRef.current = null;
     stopAudibleRef.current?.();
     stopAudibleRef.current = null;
+    mediaWindowRef.current?.finish();
+    mediaWindowRef.current = null;
     if (pcRef.current) {
       void handshakesRef.current.get(pcRef.current)?.finish("closed");
       pcRef.current.close();
@@ -397,6 +402,9 @@ export function useAvatarStream(
     (pc: RTCPeerConnection) => {
       stopSampling();
       windowCountRef.current = 0;
+      // A new connection's counters start from zero: close the previous one's window first.
+      mediaWindowRef.current?.finish();
+      mediaWindowRef.current = new MediaQualityWindow();
       const gen = genRef.current;
       statsTimerRef.current = setInterval(() => {
         if (gen !== genRef.current || pc !== pcRef.current) {
@@ -410,6 +418,7 @@ export function useAvatarStream(
             const now = Date.now();
             const { snapshot, health } = readHealth(snapshotRef.current, report, now);
             snapshotRef.current = snapshot;
+            mediaWindowRef.current?.sample(report, performance.now(), decisionRef.current.mode);
             if (!health) return; // first sample: no window to judge yet.
 
             const before = decisionRef.current;

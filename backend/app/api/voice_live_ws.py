@@ -256,10 +256,14 @@ async def voice_live_websocket(ws: WebSocket) -> None:
         resolved_profile or None,
     )
     try:
-        # One span per voice session, from connect to close: its duration is the session length.
+        # One span per voice session, from connect to close: its duration is the session length. The
+        # browser passes its trace context in the query string (a WebSocket cannot carry headers),
+        # so the session joins the interview page's trace in App Insights.
         with telemetry.span(
             "voice.session",
+            parent=telemetry.parent_context(ws.query_params.get("traceparent")),
             **{
+                "voice.interview_id": interview_id,
                 "voice.realtime": realtime_pipeline,
                 "voice.playground": bool(persona_id),
                 "voice.mode": _voice_mode or "native",

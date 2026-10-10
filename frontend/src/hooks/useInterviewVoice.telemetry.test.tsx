@@ -5,11 +5,30 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, render } from "@testing-library/react";
+import { voiceMetrics } from "../telemetry/voiceTimeline";
 
 const tracked: { name: string; m: Record<string, number>; p: Record<string, unknown> }[] = [];
+const TRACEPARENT = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+const wsEnds: [number, boolean][] = [];
 vi.mock("../telemetry/appInsights", () => ({
   trackEvent: (name: string, m: Record<string, number>, p: Record<string, unknown>) =>
     tracked.push({ name, m, p }),
+  // Like the real one: each socket's trace ends once, however many paths try to end it.
+  beginWebSocketTrace: () => {
+    let ended = false;
+    let live = false;
+    return {
+      traceparent: TRACEPARENT,
+      markLive: () => {
+        live = true;
+      },
+      // Records what the real one reports as `success`: a live session AND a clean close.
+      end: (code: number, clean: boolean) => {
+        if (!ended) wsEnds.push([code, live && clean]);
+        ended = true;
+      },
+    };
+  },
 }));
 
 vi.mock("./useAvatarStream", () => ({
@@ -103,6 +122,7 @@ async function connected() {
 afterEach(() => {
   vi.unstubAllGlobals();
   tracked.length = 0;
+  wsEnds.length = 0;
 });
 
 describe("voice timings → App Insights", () => {
@@ -159,4 +179,49 @@ describe("voice timings → App Insights", () => {
     const turn = tracked.find((e) => e.name === "voice.turn");
     expect(turn!.p).toMatchObject({ avatar: true, linear_turns: true, audio_path: "webrtc", kind: "opening" });
   });
+
+  it("opens the voice socket inside the page's trace and records it when it closes", async () => {
+    const { ws, unmount } = await connected();
+    // The backend parents its voice.session span on this, so the two join in App Insights.
+    expect(new URL(ws.url).searchParams.get("traceparent")).toBe(TRACEPARENT);
+    unmount(); // closes the socket
+    expect(wsEnds).toEqual([[1005, true]]);
+  });
+
+  it("an abnormal close is a failed socket, and the reconnect opens a new traced one", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { ws, unmount } = await connected();
+    act(() => (ws.onclose as ((e: unknown) => void) | null)?.({ code: 1006, reason: "" }));
+    expect(wsEnds).toEqual([[1006, false]]);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_500); // the first reconnect backoff
+    });
+    const reconnected = FakeWebSocket.last!;
+    expect(reconnected).not.toBe(ws);
+    expect(new URL(reconnected.url).searchParams.get("traceparent")).toBe(TRACEPARENT);
+    act(() => {
+      reconnected.receive({ type: "proxy.connected", avatar_enabled: false, input_audio_sampling_rate: MIC_SAMPLE_RATE });
+      reconnected.receive({ type: "session.updated", session: {} });
+    });
+    unmount();
+    expect(wsEnds).toEqual([
+      [1006, false],
+      [1005, true],
+    ]);
+    vi.useRealTimers();
+  });
+
+  it("sends the turn's playback-gap counters with the turn", async () => {
+    const { ws, unmount } = await connected();
+    act(() => {
+      ws.receive({ type: "response.created", response: { id: "r1" } });
+    });
+    voiceMetrics.count("playback_gaps");
+    voiceMetrics.count("playback_gap_ms_total", 180);
+    act(() => ws.receive({ type: "response.done" }));
+    unmount();
+    const turn = tracked.find((e) => e.name === "voice.turn");
+    expect(turn!.m).toMatchObject({ playback_gaps: 1, playback_gap_ms_total: 180 });
+  });
 });
+

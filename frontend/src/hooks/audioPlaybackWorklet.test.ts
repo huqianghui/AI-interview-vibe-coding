@@ -293,6 +293,31 @@ describe("playback flush", () => {
   });
 });
 
+describe("gap accounting", () => {
+  it("measures only a gap as gap time, never the normal pause after it (regression)", () => {
+    const w = load();
+    // An utterance that stalls once mid-way (a real gap), then finishes normally.
+    w.push(leadSamples * 2);
+    w.render(Math.ceil((leadSamples * 3) / QUANTUM)); // drains: one underrun, the gap opens
+    w.push(leadSamples * 2); // the rest arrives: the gap closes when playback resumes
+    w.end();
+    w.render(Math.ceil((leadSamples * 4) / QUANTUM));
+    const afterFirst = w.freshStats() as Stats & { lastGapMs: number; totalGapMs: number };
+    expect(afterFirst.underruns).toBe(1);
+    // A long, NORMAL pause between utterances, then the next one starts.
+    w.render(Math.ceil((RATE * 3) / QUANTUM));
+    w.push(leadSamples * 2);
+    w.end();
+    w.render(Math.ceil((leadSamples * 3) / QUANTUM));
+    const afterPause = w.freshStats() as Stats & { lastGapMs: number; totalGapMs: number };
+    // Before the fix the 3 s pause was folded into the old gap and reported as a new, huge one.
+    expect(afterPause.underruns).toBe(1);
+    expect(afterPause.lastGapMs).toBe(afterFirst.lastGapMs);
+    expect(afterPause.totalGapMs).toBe(afterFirst.totalGapMs);
+    expect(afterFirst.totalGapMs).toBeLessThan(1_000);
+  });
+});
+
 describe("playback started", () => {
   it("is posted once per utterance, the moment the first sample renders", () => {
     const w = load();

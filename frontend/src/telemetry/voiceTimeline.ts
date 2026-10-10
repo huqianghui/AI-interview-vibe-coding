@@ -139,6 +139,8 @@ function guarded(what: string, fn: () => void): void {
  */
 export class VoiceMetrics {
   private turnLine: Timeline;
+  /** Per-turn counts sent with the turn (e.g. playback gaps); reset with it. */
+  private turnCounts: Record<string, number> = {};
   private setupLine: Timeline | null = null;
   private turnIndex = 0;
   private turnTimer: ReturnType<typeof setTimeout> | null = null;
@@ -196,6 +198,13 @@ export class VoiceMetrics {
     guarded("turn", () => this.recordTurn(name));
   }
 
+  /** Add `by` to this turn's `name` counter (sent with the turn as a measurement). */
+  count(name: string, by = 1): void {
+    guarded("count", () => {
+      this.turnCounts[name] = (this.turnCounts[name] ?? 0) + by;
+    });
+  }
+
   private recordTurn(name: string): void {
     if (this.turnTimer && TURN_OPENING_MARKS.has(name)) this.flushTurn();
     // The tail of the previous question can still be playing after its response.done; a sample is
@@ -222,7 +231,9 @@ export class VoiceMetrics {
     if (this.turnTimer) clearTimeout(this.turnTimer);
     this.turnTimer = null;
     const line = this.turnLine;
+    const counts = this.turnCounts;
     this.turnLine = new Timeline(this.clock);
+    this.turnCounts = {};
     if (line.isEmpty) return;
     // answer: the candidate submitted, and this is the next read. aside: they spoke but did not
     // submit, so the response was a judge nudge (or, in the Playground, a model turn). opening: a
@@ -232,7 +243,7 @@ export class VoiceMetrics {
       : line.has("speech_started")
         ? "aside"
         : "opening";
-    this.emit("voice.turn", line.measurements(TURN_SPANS), {
+    this.emit("voice.turn", { ...line.measurements(TURN_SPANS), ...counts }, {
       ...this.context,
       turn_index: this.turnIndex,
       kind,

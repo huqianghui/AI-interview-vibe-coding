@@ -18,6 +18,7 @@ from __future__ import annotations
 import functools
 import logging
 import os
+import re
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -113,9 +114,31 @@ class _NoSpan:
         pass
 
 
+# A W3C trace context header value: version, 32-hex trace id, 16-hex parent id, flags.
+_TRACEPARENT = re.compile(r"00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}")
+
+
+def parent_context(traceparent: str | None) -> Any:
+    """The OpenTelemetry context a well-formed W3C ``traceparent`` names, or None.
+
+    For a caller that cannot send it as a header: the browser's voice WebSocket passes it in the
+    query string, so the session's span joins the page's trace. Anything malformed is ignored rather
+    than trusted, and so is an all-zero id (invalid by the spec)."""
+    if _tracer is None or not traceparent or not _TRACEPARENT.fullmatch(traceparent):
+        return None
+    if traceparent[3:35] == "0" * 32 or traceparent[36:52] == "0" * 16:
+        return None
+    from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+
+    return TraceContextTextMapPropagator().extract({"traceparent": traceparent})
+
+
 @contextmanager
-def span(name: str, **attributes: Any) -> Iterator[Any]:
-    """A business span (or a no-op without telemetry). Exceptions are recorded and re-raised."""
+def span(name: str, parent: Any = None, **attributes: Any) -> Iterator[Any]:
+    """A business span (or a no-op without telemetry). Exceptions are recorded and re-raised.
+
+    ``parent`` is a context from :func:`parent_context`; without it the span nests under whatever
+    span is current, as usual."""
     if _tracer is None:
         yield _NoSpan()
         return
@@ -124,7 +147,7 @@ def span(name: str, **attributes: Any) -> Iterator[Any]:
     # Exceptions are recorded by TYPE only: an exception message can carry model output or request
     # detail, and nothing in a span may carry text.
     with _tracer.start_as_current_span(
-        name, record_exception=False, set_status_on_exception=False
+        name, context=parent, record_exception=False, set_status_on_exception=False
     ) as current:
         for key, value in attributes.items():
             if value is not None:

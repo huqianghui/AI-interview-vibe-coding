@@ -104,6 +104,8 @@ export function useVoiceAudio() {
   /** Last stats frame from the worklet: how deep the buffer is and how many gaps it has had. Read
    * by `getPlaybackStats` — the only way the main thread can see inside the worklet's queue, and
    * what makes the jitter buffer measurable rather than merely plausible. */
+  // The worklet's cumulative gap time as last seen, so each stats frame adds only what is new.
+  const totalGapMsRef = useRef(0);
   const playbackStatsRef = useRef<PlaybackStats>({
     underruns: 0,
     bufferedMs: 0,
@@ -203,7 +205,7 @@ export function useVoiceAudio() {
             outputChannelCount: [1],
           });
           node.port.onmessage = (e: MessageEvent) => {
-            const msg = e.data as PlaybackStats & { eventType?: string };
+            const msg = e.data as PlaybackStats & { eventType?: string; totalGapMs?: number };
             if (msg.eventType === "started") {
               // The worklet just began rendering a response's audio: the candidate hears it now.
               voiceMetrics.turn("first_audible");
@@ -224,6 +226,16 @@ export function useVoiceAudio() {
             // Warn when a gap ENDS, not when the counter ticks: the length is only known once the
             // buffer has refilled, so warning on the increment printed "0ms" (measured — the first
             // version of this log did exactly that).
+            // Counted on the turn the candidate heard them in (voiceTimeline, `voice.turn`), from the
+            // worklet's own running totals: two gaps of the same length are still two, and still
+            // twice as long.
+            if (msg.underruns > playbackStatsRef.current.underruns) {
+              voiceMetrics.count("playback_gaps", msg.underruns - playbackStatsRef.current.underruns);
+            }
+            if (typeof msg.totalGapMs === "number" && msg.totalGapMs > totalGapMsRef.current) {
+              voiceMetrics.count("playback_gap_ms_total", Math.round(msg.totalGapMs - totalGapMsRef.current));
+              totalGapMsRef.current = msg.totalGapMs;
+            }
             if (msg.lastGapMs > 0 && msg.lastGapMs !== playbackStatsRef.current.lastGapMs) {
               console.warn(
                 `[voice-audio] playback underrun #${String(msg.underruns)} — the interviewer's ` +
@@ -299,6 +311,7 @@ export function useVoiceAudio() {
     playbackNodeRef.current?.port.postMessage({ command: "flush" });
     pendingPlaybackRef.current = [];
     playbackStatsRef.current = { underruns: 0, bufferedMs: 0, lastGapMs: 0, state: "filling" };
+    totalGapMsRef.current = 0; // the worklet's flush resets its total too
   }, []);
 
   /** Tell the jitter buffer that Azure has finished sending this response's audio.

@@ -173,3 +173,60 @@ def test_the_app_is_traced_without_the_excluded_urls(monkeypatch):
         client.get("/admin/users?x=1")
     servers = [s.name for s in exporter.get_finished_spans() if s.kind.name == "SERVER"]
     assert servers == ["GET /admin/users"]
+
+
+TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736"
+PARENT_ID = "00f067aa0ba902b7"
+
+
+def _recording_tracer(monkeypatch):
+    sdk = pytest.importorskip("opentelemetry.sdk.trace")
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    exporter = InMemorySpanExporter()
+    provider = sdk.TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(telemetry, "_tracer", provider.get_tracer("test"))
+    return exporter
+
+
+def test_a_voice_session_joins_the_browser_trace_it_names(monkeypatch):
+    # The voice WebSocket cannot carry headers, so the page passes its traceparent in the query
+    # string; the session's span must become a child of it (same trace id, the browser's span id
+    # as parent), which is what joins the two in App Insights.
+    exporter = _recording_tracer(monkeypatch)
+    parent = telemetry.parent_context(f"00-{TRACE_ID}-{PARENT_ID}-01")
+    with telemetry.span("voice.session", parent=parent, **{"voice.interview_id": "iv1"}):
+        pass
+    (span,) = exporter.get_finished_spans()
+    assert format(span.context.trace_id, "032x") == TRACE_ID
+    assert format(span.parent.span_id, "016x") == PARENT_ID
+    assert span.attributes["voice.interview_id"] == "iv1"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        "",
+        "garbage",
+        f"01-{TRACE_ID}-{PARENT_ID}-01",  # unknown version
+        f"00-{TRACE_ID.upper()}-{PARENT_ID}-01",  # the spec is lowercase hex
+        f"00-{'0' * 32}-{PARENT_ID}-01",  # all-zero ids are invalid
+        f"00-{TRACE_ID}-{'0' * 16}-01",
+        f"00-{TRACE_ID}-{PARENT_ID}-01 extra",
+    ],
+)
+def test_a_malformed_traceparent_is_ignored(monkeypatch, value):
+    exporter = _recording_tracer(monkeypatch)
+    assert telemetry.parent_context(value) is None
+    with telemetry.span("voice.session", parent=telemetry.parent_context(value)):
+        pass
+    (span,) = exporter.get_finished_spans()
+    assert span.parent is None  # a fresh root, not a trusted bogus parent
+
+
+def test_without_telemetry_there_is_no_parent(monkeypatch):
+    monkeypatch.setattr(telemetry, "_tracer", None)
+    assert telemetry.parent_context(f"00-{TRACE_ID}-{PARENT_ID}-01") is None

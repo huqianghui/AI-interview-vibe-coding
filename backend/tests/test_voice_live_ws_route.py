@@ -287,3 +287,34 @@ async def test_a_non_admin_login_still_opens_the_interview_path(db_session, prox
     await _run(_FakeWs(token=await _admin_token(db_session, role="user")))
     (call,) = proxy_calls
     assert call["playground"] is False
+
+
+# --- App Insights: the session joins the browser's trace ------------------------------------
+
+
+async def test_the_session_span_is_parented_on_the_browsers_traceparent(
+    db_session, proxy_calls, monkeypatch
+):
+    # A WebSocket cannot carry headers, so the page passes its W3C trace context in the query
+    # string; the route must hand it to the session span (with the interview id) or the browser's
+    # socket and the backend's session never join in App Insights.
+    import contextlib
+
+    from app import telemetry
+
+    spans: list[tuple[str, dict]] = []
+
+    @contextlib.contextmanager
+    def _span(name, parent=None, **attributes):
+        spans.append((name, {"parent": parent, **attributes}))
+        yield None
+
+    monkeypatch.setattr(telemetry, "span", _span)
+    monkeypatch.setattr(telemetry, "parent_context", lambda tp: f"ctx:{tp}")
+    await _default_persona(db_session)
+    tp = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+    await _run(_FakeWs(token=await _anon_token(db_session), traceparent=tp))
+    ((name, attrs),) = spans
+    assert name == "voice.session"
+    assert attrs["parent"] == f"ctx:{tp}"
+    assert "voice.interview_id" in attrs  # None here: this anonymous session has no interview yet
