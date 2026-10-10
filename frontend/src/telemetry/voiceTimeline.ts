@@ -75,7 +75,9 @@ export const SETUP_SPANS: readonly SpanDef[] = [
 ];
 
 export const AVATAR_SPANS: readonly SpanDef[] = [
-  ["create_offer_ms", "pc_created", "offer_created"],
+  // Waiting out Azure's avatar request allowance before the offer (0 unless reconnecting fast).
+  ["hold_ms", "pc_created", "offer_start"],
+  ["create_offer_ms", "offer_start", "offer_created"],
   ["stun_srflx_ms", "offer_created", "first_srflx"],
   ["turn_relay_ms", "offer_created", "first_relay"],
   ["first_host_ms", "offer_created", "first_host"],
@@ -85,8 +87,8 @@ export const AVATAR_SPANS: readonly SpanDef[] = [
   ["pc_connect_ms", "answer_applied", "pc_connected"],
   ["first_track_ms", "answer_applied", "first_track"],
   ["first_frame_ms", "ice_connected", "first_frame"],
-  ["total_ms", "pc_created", "first_frame"],
-  ["total_audio_ms", "pc_created", "audio_live"],
+  ["total_ms", "offer_start", "first_frame"],
+  ["total_audio_ms", "offer_start", "audio_live"],
 ];
 
 export const TURN_SPANS: readonly SpanDef[] = [
@@ -105,8 +107,9 @@ export const TURN_SPANS: readonly SpanDef[] = [
   ["stop_to_audible_ms", "speech_stopped", "first_audible"],
 ];
 
-/** Marks recorded at their latest occurrence: a turn can have several VAD segments. */
-const TURN_LAST_MARKS = new Set(["speech_stopped", "transcript", "response_done"]);
+/** Marks recorded at their latest occurrence: a turn can have several VAD segments, and an "I'm done"
+ * refused for an empty answer is followed by another click. */
+const TURN_LAST_MARKS = new Set(["speech_stopped", "transcript", "response_done", "answer_click"]);
 /** Marks that belong to the NEXT turn: seeing one closes a turn still waiting for its audio. */
 const TURN_OPENING_MARKS = new Set(["speech_started", "answer_click"]);
 /** After `response.done`, how long a turn waits for its first audible sample before it is sent
@@ -117,6 +120,16 @@ export const TURN_AUDIBLE_GRACE_MS = 8_000;
 export const SETUP_TIMEOUT_MS = 60_000;
 
 type Emit = (name: string, measurements: Record<string, number>, properties: Properties) => void;
+
+/** Telemetry runs inside WebSocket and WebRTC handlers of a live interview: it must never throw into
+ * them. */
+function guarded(what: string, fn: () => void): void {
+  try {
+    fn();
+  } catch (err) {
+    console.debug(`[telemetry] ${what} failed`, err);
+  }
+}
 
 /**
  * Turn and setup bookkeeping for one voice hook. The hooks call `turn(...)` / `setup(...)` with mark
@@ -150,16 +163,20 @@ export class VoiceMetrics {
 
   /** A new voice connection: send any setup still open and start a fresh one. */
   startSetup(): void {
-    this.flushSetup("superseded");
-    this.setupLine = new Timeline(this.clock);
-    this.setupLine.mark("connect_start");
-    this.setupTimer = setTimeout(() => this.flushSetup("timeout"), SETUP_TIMEOUT_MS);
+    guarded("startSetup", () => {
+      this.flushSetup("superseded");
+      this.setupLine = new Timeline(this.clock);
+      this.setupLine.mark("connect_start");
+      this.setupTimer = setTimeout(() => this.flushSetup("timeout"), SETUP_TIMEOUT_MS);
+    });
   }
 
   setup(name: string): void {
-    if (!this.setupLine) return;
-    this.setupLine.mark(name);
-    if (name === "first_audible") this.flushSetup("heard");
+    guarded("setup", () => {
+      if (!this.setupLine) return;
+      this.setupLine.mark(name);
+      if (name === "first_audible") this.flushSetup("heard");
+    });
   }
 
   private flushSetup(outcome: string): void {
@@ -174,6 +191,10 @@ export class VoiceMetrics {
   // --- turns -------------------------------------------------------------------------------------
 
   turn(name: string): void {
+    guarded("turn", () => this.recordTurn(name));
+  }
+
+  private recordTurn(name: string): void {
     if (this.turnTimer && TURN_OPENING_MARKS.has(name)) this.flushTurn();
     // The tail of the previous question can still be playing after its response.done; a sample is
     // only "this turn's first audible" once this turn's response exists.
@@ -201,11 +222,18 @@ export class VoiceMetrics {
     const line = this.turnLine;
     this.turnLine = new Timeline(this.clock);
     if (line.isEmpty) return;
-    const answered = line.has("answer_submit") || line.has("speech_started");
+    // answer: the candidate submitted, and this is the next read. aside: they spoke but did not
+    // submit, so the response was a judge nudge (or, in the Playground, a model turn). opening: a
+    // read with nothing before it, i.e. question 1 or a reconnect's re-read.
+    const kind = line.has("answer_submit")
+      ? "answer"
+      : line.has("speech_started")
+        ? "aside"
+        : "opening";
     this.emit("voice.turn", line.measurements(TURN_SPANS), {
       ...this.context,
       turn_index: this.turnIndex,
-      kind: answered ? "answer" : "opening",
+      kind,
       heard: line.has("first_audible"),
     });
     this.turnIndex += 1;
@@ -213,10 +241,14 @@ export class VoiceMetrics {
 
   /** The connection is going away: send whatever is open. */
   flush(): void {
-    this.flushTurn();
-    this.flushSetup("closed");
+    guarded("flush", () => {
+      this.flushTurn();
+      this.flushSetup("closed");
+    });
   }
 }
+
+export const PENDING_LIMIT_MS = 2_000;
 
 /** One avatar handshake. `finish()` sends it once; later calls are ignored. */
 export class AvatarHandshakeMetrics {
@@ -236,7 +268,11 @@ export class AvatarHandshakeMetrics {
   }
 
   mark(name: string): void {
-    if (!this.done) this.line.mark(name);
+    if (!this.done) guarded("avatar mark", () => this.line.mark(name));
+  }
+
+  has(name: string): boolean {
+    return this.line.has(name);
   }
 
   /** Candidate pair and other facts learned along the way (e.g. from getStats). */
@@ -248,9 +284,11 @@ export class AvatarHandshakeMetrics {
     return this.done;
   }
 
-  /** Hold the event until `work` settles (a getStats read racing the first frame). */
+  /** Hold the event until `work` settles (a getStats read racing the first frame), but never longer
+   * than PENDING_LIMIT_MS: a stats read on a connection closing underneath it may never answer. */
   waitFor(work: Promise<unknown>): void {
-    this.pending.push(work.catch(() => undefined));
+    const limit = new Promise((resolve) => setTimeout(resolve, PENDING_LIMIT_MS));
+    this.pending.push(Promise.race([work.catch(() => undefined), limit]));
   }
 
   /** Stop recording marks and send the event once everything it waits for has settled. */
@@ -258,14 +296,16 @@ export class AvatarHandshakeMetrics {
     if (this.done) return;
     this.done = true;
     await Promise.all(this.pending);
-    // Numbers (the pair RTT) are measurements, so the workbook can chart them; the rest are labels.
-    const measurements = this.line.measurements(AVATAR_SPANS);
-    const props: Properties = { outcome };
-    for (const [key, value] of Object.entries(this.props)) {
-      if (typeof value === "number") measurements[key] = value;
-      else props[key] = value;
-    }
-    this.emit("voice.avatar", measurements, props);
+    guarded("avatar finish", () => {
+      // Numbers (the pair RTT) are measurements, so the workbook can chart them; the rest are labels.
+      const measurements = this.line.measurements(AVATAR_SPANS);
+      const props: Properties = { outcome };
+      for (const [key, value] of Object.entries(this.props)) {
+        if (typeof value === "number") measurements[key] = value;
+        else props[key] = value;
+      }
+      this.emit("voice.avatar", measurements, props);
+    });
   }
 }
 

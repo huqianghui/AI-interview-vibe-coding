@@ -134,7 +134,8 @@ describe("voice timings → App Insights", () => {
         "response_ms",
       ]),
     );
-    expect(turn!.p).toMatchObject({ interview_id: "iv-1", audio_path: "ws", kind: "answer" });
+    // Spoken but never submitted, so the response was an aside (a nudge), not the next question.
+    expect(turn!.p).toMatchObject({ interview_id: "iv-1", audio_path: "ws", kind: "aside" });
 
     const setup = tracked.find((e) => e.name === "voice.setup");
     expect(setup).toBeDefined();
@@ -145,5 +146,17 @@ describe("voice timings → App Insights", () => {
     const everything = JSON.stringify(tracked);
     expect(everything).not.toContain("secret");
     expect(everything).not.toContain("Next question");
+  });
+
+  it("labels an avatar session's events with the WebRTC audio path and linear turns", async () => {
+    const { ws, unmount } = await connected();
+    act(() => {
+      ws.receive({ type: "proxy.connected", avatar_enabled: true, linear_turns: true, input_audio_sampling_rate: MIC_SAMPLE_RATE });
+      ws.receive({ type: "response.created", response: { id: "r1" } });
+      ws.receive({ type: "response.done" });
+    });
+    unmount();
+    const turn = tracked.find((e) => e.name === "voice.turn");
+    expect(turn!.p).toMatchObject({ avatar: true, linear_turns: true, audio_path: "webrtc", kind: "opening" });
   });
 });

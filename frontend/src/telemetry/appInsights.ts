@@ -14,6 +14,11 @@
  */
 import { requestJson } from "../api/http";
 
+/** `GET /public/client-config` (pinned against the backend schema in `api/contract.check.ts`). */
+export interface ClientConfig {
+  app_insights_connection_string?: string | null;
+}
+
 type Measurements = Record<string, number>;
 type Properties = Record<string, string | number | boolean>;
 
@@ -27,6 +32,8 @@ const MAX_BUFFERED = 200;
 let buffered: { name: string; measurements: Measurements; properties: Properties }[] = [];
 let sink: Sink | null = null;
 let started = false;
+const START_ATTEMPTS = 2;
+const START_RETRY_MS = 10_000;
 
 /** Strip the query string (and fragment) from a URL-ish value. */
 export function stripQuery(value: string): string {
@@ -35,7 +42,9 @@ export function stripQuery(value: string): string {
 
 const URL_FIELDS = ["uri", "refUri", "name", "target", "data", "url"] as const;
 
-/** Remove query strings from every URL field of a telemetry item, in place. Exported for tests. */
+/** Remove query strings from every URL field of a telemetry item, in place, and cut an `HttpError`
+ * message down to its status: the API layer puts the response body in the message
+ * (`api/http.ts`), and a body can carry text. Exported for tests. */
 export function scrubItem(item: { baseData?: Record<string, unknown> }): void {
   const data = item.baseData;
   if (!data) return;
@@ -43,32 +52,58 @@ export function scrubItem(item: { baseData?: Record<string, unknown> }): void {
     const value = data[field];
     if (typeof value === "string") data[field] = stripQuery(value);
   }
+  const exceptions = data.exceptions;
+  if (Array.isArray(exceptions)) {
+    for (const ex of exceptions as { typeName?: string; message?: string }[]) {
+      if (ex.typeName === "HttpError" && typeof ex.message === "string") {
+        ex.message = ex.message.split(":")[0];
+      }
+    }
+  }
 }
 
 /** Record one custom event. Safe to call at any time: before start-up it is buffered, and without
  * App Insights it is dropped. */
 export function trackEvent(name: string, measurements: Measurements, properties: Properties = {}): void {
   if (sink) {
-    sink.trackEvent(name, measurements, properties);
+    try {
+      sink.trackEvent(name, measurements, properties);
+    } catch (err) {
+      console.debug("[telemetry] trackEvent failed", err);
+    }
     return;
   }
   if (buffered.length < MAX_BUFFERED) buffered.push({ name, measurements, properties });
 }
 
-/** Fetch the runtime config and, when the deployment has App Insights, load the SDK. Idempotent;
- * never throws (telemetry must not break the page). */
-export async function startTelemetry(): Promise<boolean> {
-  if (started) return sink !== null;
-  started = true;
+/** Resolve when the main thread is idle (or after `timeoutMs`), so the SDK's download, parse and
+ * fetch patching stay out of the way of the voice prewarm that starts on page load. */
+function whenIdle(timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof window.requestIdleCallback === "function") {
+      window.requestIdleCallback(() => resolve(), { timeout: timeoutMs });
+    } else {
+      setTimeout(resolve, 0);
+    }
+  });
+}
+
+/** Fetch the runtime config and, when the deployment has App Insights, load the SDK once the page is
+ * idle. Events recorded meanwhile are buffered. Idempotent; never throws (telemetry must not break
+ * the page). */
+export async function startTelemetry(attempt = 1): Promise<boolean> {
+  if (attempt === 1) {
+    if (started) return sink !== null;
+    started = true;
+  }
   try {
-    const config = await requestJson<{ app_insights_connection_string?: string | null }>(
-      "/public/client-config",
-    );
+    const config = await requestJson<ClientConfig>("/public/client-config");
     const connectionString = config.app_insights_connection_string;
     if (!connectionString) {
       buffered = [];
       return false;
     }
+    await whenIdle(5_000);
     const { ApplicationInsights, DistributedTracingModes } = await import(
       "@microsoft/applicationinsights-web"
     );
@@ -96,6 +131,12 @@ export async function startTelemetry(): Promise<boolean> {
     buffered = [];
     return true;
   } catch (err) {
+    if (attempt < START_ATTEMPTS) {
+      // One transient failure at page load must not switch telemetry off for the whole interview:
+      // keep the buffer and try again.
+      await new Promise((resolve) => setTimeout(resolve, START_RETRY_MS));
+      return startTelemetry(attempt + 1);
+    }
     console.info("[telemetry] App Insights not started", err);
     buffered = [];
     return false;

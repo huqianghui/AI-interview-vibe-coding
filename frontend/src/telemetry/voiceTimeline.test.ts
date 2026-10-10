@@ -205,6 +205,7 @@ describe("AvatarHandshakeMetrics", () => {
     const h = harness();
     const hs = new AvatarHandshakeMetrics({ label: "initial" }, h.emit, h.clock);
     const steps: [string, number][] = [
+      ["offer_start", 1_000], // a rate-limit hold before the offer
       ["offer_created", 30],
       ["first_host", 5],
       ["first_srflx", 60],
@@ -230,6 +231,7 @@ describe("AvatarHandshakeMetrics", () => {
     expect(h.sent).toHaveLength(1);
     expect(h.sent[0].p).toMatchObject({ label: "initial", local_candidate: "relay", outcome: "frame" });
     expect(h.sent[0].m).toMatchObject({
+      hold_ms: 1_000,
       create_offer_ms: 30,
       first_host_ms: 5,
       stun_srflx_ms: 65,
@@ -238,7 +240,7 @@ describe("AvatarHandshakeMetrics", () => {
       sdp_answer_ms: 700,
       ice_connect_ms: 250,
       first_frame_ms: 420,
-      total_ms: 1_865,
+      total_ms: 1_865, // from offer_start: the hold is not part of the handshake
       rtt_ms: 42,
     });
   });

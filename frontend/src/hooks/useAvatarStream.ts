@@ -81,6 +81,8 @@ const ICE_GATHERING_TIMEOUT_MS = 8000;
  * networks that never signal gathering "complete" (VPN/mDNS interfaces). Azure's avatar path runs
  * over its TURN relay, so one relay candidate is enough to connect. */
 const ICE_SETTLE_AFTER_CANDIDATE_MS = 300;
+/** A connection that has ICE but paints no frame within this window is reported as `no_frame`. */
+const NO_FRAME_LIMIT_MS = 20_000;
 /** Azure's SDP answer (`session.avatar.connecting`) must arrive within this window. */
 const SERVER_SDP_TIMEOUT_MS = 15000;
 /** An ICE `disconnected` often self-heals (brief network blip). Wait this long before treating it
@@ -480,7 +482,14 @@ export function useAvatarStream(
     (pc: RTCPeerConnection) => {
       pc.onconnectionstatechange = () => {
         console.info("[avatar-stream] connectionState:", pc.connectionState);
-        if (pc.connectionState === "connected") handshakesRef.current.get(pc)?.mark("pc_connected");
+        if (pc.connectionState !== "connected") return;
+        const handshake = handshakesRef.current.get(pc);
+        handshake?.mark("pc_connected");
+        // An audio-only session has no frame to wait for: it is up once ICE and DTLS are.
+        if (handshake && !wantVideoRef.current) {
+          handshake.mark("audio_live");
+          void handshake.finish("audio");
+        }
       };
       pc.oniceconnectionstatechange = () => {
         if (pc !== pcRef.current) return;
@@ -498,6 +507,12 @@ export function useAvatarStream(
               if (pair) handshake.set(pair);
             }),
           );
+          // Connected but never painting is its own outcome, not a late "closed".
+          if (wantVideoRef.current) {
+            setTimeout(() => {
+              if (!handshake.finished) void handshake.finish("no_frame");
+            }, NO_FRAME_LIMIT_MS);
+          }
         }
         if (state === "failed") void handshake?.finish("ice_failed");
         if (state === "connected" || state === "completed") {
@@ -566,12 +581,7 @@ export function useAvatarStream(
         stopAudibleRef.current = watchAudibleOnsets(event.receiver, () =>
           voiceMetrics.turn("first_audible"),
         );
-        if (!wantVideoRef.current) {
-          const handshake = handshakesRef.current.get(pc);
-          handshake?.mark("audio_live");
-          void handshake?.finish("audio");
-          voiceMetrics.setup("media_ready");
-        }
+        if (!wantVideoRef.current) voiceMetrics.setup("media_ready");
         // Audio-only sessions never paint a frame, so `reflectDimensions` — which is where a normal
         // session clears the recovery bookkeeping and declares itself settled — never runs. The live
         // audio track is the equivalent milestone here: without this the recovery budget would stay
@@ -645,6 +655,8 @@ export function useAvatarStream(
       // REJECTED by Azure ("WebRTC SDP negotiation failed: peer connect created failure: None is not
       // in list"), which is why this is a direction flip and not a missing transceiver — measured
       // 2026-09-30, `docs/avatar-weaknet-probe.md` §3.6.
+      // The handshake proper starts here, after any rate-limit hold (`hold_ms`).
+      handshake?.mark("offer_start");
       pc.addTransceiver("video", { direction: wantVideo ? "recvonly" : "inactive" });
       pc.addTransceiver("audio", { direction: "recvonly" });
       console.info(
@@ -687,9 +699,11 @@ export function useAvatarStream(
       });
 
       const offer = await pc.createOffer();
+      // Marked BEFORE setLocalDescription: that call is what starts ICE gathering, so the candidate
+      // timings (first host / srflx / relay) are measured from here.
+      handshake?.mark("offer_created");
       console.info("[avatar-stream] createOffer resolved; calling setLocalDescription()");
       await pc.setLocalDescription(offer);
-      handshake?.mark("offer_created");
       console.info("[avatar-stream] setLocalDescription done; gathering ICE for offer");
 
       const serverSdpPromise = new Promise<string>((resolve, reject) => {
@@ -704,6 +718,8 @@ export function useAvatarStream(
       // in the middle of a recovery the user can already see failing. Attaching an observer here does
       // not consume the rejection — the real `await` still receives it — it only stops the orphan case
       // from looking like a crash.
+      // The timeout is this promise's only rejection, so it is also where the handshake's timing
+      // record ends with `sdp_timeout`.
       serverSdpPromise.catch(() => {
         void handshake?.finish("sdp_timeout");
       });
@@ -736,8 +752,13 @@ export function useAvatarStream(
     ) => {
       const gen = genRef.current;
       stopSampling();
+      stopAudibleRef.current?.();
+      stopAudibleRef.current = null;
 
       if (pcRef.current) {
+        // The old connection's handshake record ends here; `createPeerConnection` below no longer
+        // sees it, because `pcRef` is cleared first.
+        void handshakesRef.current.get(pcRef.current)?.finish("rebuilt");
         pcRef.current.close();
         pcRef.current = null;
       }
@@ -757,6 +778,7 @@ export function useAvatarStream(
           console.info(`[avatar-stream] ${label} handshake completed`);
         })
         .catch((err: unknown) => {
+          void handshakesRef.current.get(pc)?.finish("handshake_failed");
           if (gen !== genRef.current) return;
           console.warn(`[avatar-stream] ${label} handshake failed`, err);
           recoveringRef.current = false;
@@ -931,7 +953,10 @@ export function useAvatarStream(
       avatarConnectedAtRef.current = Date.now();
       setCanEnableVideo(false);
 
-      await runHandshake(pc, sendSdpOffer, wantVideo);
+      await runHandshake(pc, sendSdpOffer, wantVideo).catch((err: unknown) => {
+        void handshakesRef.current.get(pc)?.finish("handshake_failed");
+        throw err;
+      });
     },
     [applyMode, clearTimers, createPeerConnection, runHandshake, videoRef],
   );

@@ -103,7 +103,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "customEvents\n| where name == \"voice.avatar\"\n| mv-expand bagexpansion=array m = customMeasurements\n| extend metric = tostring(m[0]), value = todouble(m[1])\n| where metric endswith \"_ms\"\n| summarize n = count(), p50 = round(percentile(value, 50)), p90 = round(percentile(value, 90)), p95 = round(percentile(value, 95)), max = round(max(value)) by metric\n| extend step = array_index_of(dynamic([\"create_offer_ms\", \"first_host_ms\", \"stun_srflx_ms\", \"turn_relay_ms\", \"ice_gather_ms\", \"sdp_answer_ms\", \"ice_connect_ms\", \"pc_connect_ms\", \"first_track_ms\", \"first_frame_ms\", \"total_ms\", \"total_audio_ms\", \"rtt_ms\"]), metric)\n| order by step asc\n| project-away step",
+        "query": "customEvents\n| where name == \"voice.avatar\"\n| mv-expand bagexpansion=array m = customMeasurements\n| extend metric = tostring(m[0]), value = todouble(m[1])\n| where metric endswith \"_ms\"\n| summarize n = count(), p50 = round(percentile(value, 50)), p90 = round(percentile(value, 90)), p95 = round(percentile(value, 95)), max = round(max(value)) by metric\n| extend step = array_index_of(dynamic([\"hold_ms\", \"create_offer_ms\", \"first_host_ms\", \"stun_srflx_ms\", \"turn_relay_ms\", \"ice_gather_ms\", \"sdp_answer_ms\", \"ice_connect_ms\", \"pc_connect_ms\", \"first_track_ms\", \"first_frame_ms\", \"total_ms\", \"total_audio_ms\", \"rtt_ms\"]), metric)\n| order by step asc\n| project-away step",
         "size": 0,
         "title": "Handshake stages (ICE, STUN, TURN, SDP, first frame)",
         "timeContextFromParameter": "TimeRange",

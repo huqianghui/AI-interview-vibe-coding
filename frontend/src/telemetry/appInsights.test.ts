@@ -90,8 +90,41 @@ describe("start-up", () => {
     expect(fetch).toHaveBeenCalledWith("/api/public/client-config", expect.anything());
   });
 
-  it("never throws when the config cannot be read", async () => {
+  it("retries a failed config read once, then gives up without throwing", async () => {
+    vi.useFakeTimers();
     vi.stubGlobal("fetch", vi.fn(async () => new Response("nope", { status: 500 })));
-    expect(await startTelemetry()).toBe(false);
+    const result = startTelemetry();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(await result).toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it("recovers when the retry succeeds, keeping what was buffered", async () => {
+    vi.useFakeTimers();
+    sdk.events.length = 0;
+    let calls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        ++calls === 1
+          ? new Response("busy", { status: 503 })
+          : new Response(JSON.stringify({ app_insights_connection_string: "InstrumentationKey=k" })),
+      ),
+    );
+    trackEvent("during-outage", {});
+    const result = startTelemetry();
+    await vi.advanceTimersByTimeAsync(10_050); // the retry delay, then the idle wait
+    expect(await result).toBe(true);
+    expect(sdk.events.map((e) => e.event.name)).toContain("during-outage");
+    vi.useRealTimers();
+  });
+
+  it("cuts an HttpError message down to its status, so a response body never ships", () => {
+    const item = {
+      baseData: { exceptions: [{ typeName: "HttpError", message: "422 Unprocessable: {\"detail\":\"text\"}" }] },
+    };
+    scrubItem(item);
+    expect(item.baseData.exceptions[0].message).toBe("422 Unprocessable");
   });
 });
