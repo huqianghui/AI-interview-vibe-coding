@@ -180,6 +180,11 @@ model. Which models are realtime, and the measurements behind this table:
   login disabled: the backend signs in with its managed identity's Entra token. Boot migrations and
   seeds are idempotent and never replace existing rows, so a deploy or restart changes no data.
   Details: [`docs/database.md`](docs/database.md).
+- **Observability** — the backend (OpenTelemetry) and the candidate's browser (App Insights JS
+  SDK) both report to the deployment's Application Insights: every voice turn is broken into its
+  stages, down to the first sample the candidate hears, and charted by the **Voice performance**
+  workbook. Timings and ids only, never text:
+  [`docs/voice-performance-telemetry.md`](docs/voice-performance-telemetry.md).
 - **Candidate privacy boundary (P3)** — the candidate API never exposes rubric/checklist content;
   enforced by tests.
 - **Scoring is concurrent and survives failure** — each question is graded against its own
@@ -262,4 +267,5 @@ stored cloud credentials, managed identity everywhere, keyless. See
 | [`docs/webrtc-ice-voice-transport.md`](docs/webrtc-ice-voice-transport.md) | WebRTC vs WebSocket for Voice Live: ICE / STUN / TURN candidates, why voice-only has none, Opus vs PCM, and how to verify with chrome://webrtc-internals (中文) |
 | [`docs/candidate-recordings.md`](docs/candidate-recordings.md) | Candidate voice recordings: what is recorded, where it is kept, the 90-day deletion, who can listen (中文) |
 | [`docs/sop-coverage-audit.md`](docs/sop-coverage-audit.md) | The opt-in SOP coverage audit: why binding the SOP to a rubric does not answer "did the rubric miss anything", what it costs, and how the cited SOP sources are chosen (中文) |
+| [`docs/voice-performance-telemetry.md`](docs/voice-performance-telemetry.md) | Where the time goes in a voice interview: the browser and backend timings sent to Application Insights (ICE / STUN / TURN, first frame, STT, the `/answer` hop, first audible sample) and the Voice performance workbook |
 | [`CHANGELOG.md`](CHANGELOG.md) | Release history: every version and what changed in it |

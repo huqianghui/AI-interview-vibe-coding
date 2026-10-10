@@ -9,7 +9,7 @@ A deliberately small footprint (subscription-scope `main.bicep` creates the reso
 
 | Resource | Purpose |
 |---|---|
-| Log Analytics + App Insights | logs/traces for both apps |
+| Log Analytics + App Insights | logs/traces for both apps, plus the **Voice performance** workbook (`modules/voice-workbook.bicep`, see `docs/voice-performance-telemetry.md`) |
 | User-assigned managed identity | backend auth to Foundry / Storage (keyless) |
 | Container Registry (Basic) | holds backend + frontend images |
 | Storage account | private `client-bundle` container (client interview material) + `materials`; reached only via a blob **private endpoint** (no public access) |

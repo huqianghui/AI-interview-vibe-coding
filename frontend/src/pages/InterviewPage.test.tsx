@@ -18,6 +18,7 @@ import * as client from "../api/client";
 import * as auth from "../api/auth";
 import { layout } from "../theme";
 import type { TranscriptSegment } from "../types/voice";
+import { voiceMetrics } from "../telemetry/voiceTimeline";
 
 function seg(id: string, content: string, role: "user" | "assistant", isFinal: boolean): TranscriptSegment {
   return { id, content, role, isFinal, timestamp: 0 };
@@ -391,6 +392,7 @@ describe("InterviewPage", () => {
     await screen.findByText("Question one?");
 
     await user.click(screen.getByRole("button", { name: /answer by voice/i }));
+    const marks = vi.spyOn(voiceMetrics, "turn");
     await user.click(await screen.findByRole("button", { name: /i'm done answering/i }));
 
     // The empty-answer notice shows; no answer was submitted; still on the same question.
@@ -398,6 +400,8 @@ describe("InterviewPage", () => {
       expect(screen.getByText(/we didn't catch an answer/i)).toBeInTheDocument(),
     );
     expect(submitSpy).not.toHaveBeenCalled();
+    // The click is timed (the next one replaces it); no /answer round trip was.
+    expect(marks.mock.calls.map((c) => c[0])).toEqual(["answer_click"]);
     expect(screen.getByText("Question one?")).toBeInTheDocument();
   });
 
@@ -798,8 +802,15 @@ describe("InterviewPage", () => {
     await waitFor(() => expect(spoken).toContain("Main question?"));
 
     // Answer it → a follow-up becomes current. It must NOT be verbatim-read (agent voices it).
+    const marks = vi.spyOn(voiceMetrics, "turn");
     await user.click(await screen.findByRole("button", { name: /i'm done answering/i }));
     await screen.findByText("You mentioned X — can you clarify?");
+    // The turn's timing brackets the /answer round trip (the brain or judge hop).
+    expect(marks.mock.calls.map((c) => c[0])).toEqual([
+      "answer_click",
+      "answer_submit",
+      "answer_response",
+    ]);
     expect(spoken).not.toContain("You mentioned X — can you clarify?");
     expect(spoken).toEqual(["Main question?"]);
   });

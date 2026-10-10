@@ -16,6 +16,7 @@
  * without clicks/gaps.
  */
 import { useCallback, useEffect, useRef } from "react";
+import { voiceMetrics } from "../telemetry/voiceTimeline";
 
 /**
  * Mic capture rate, in Hz. MUST equal the backend's `input_audio_sampling_rate`
@@ -203,6 +204,11 @@ export function useVoiceAudio() {
           });
           node.port.onmessage = (e: MessageEvent) => {
             const msg = e.data as PlaybackStats & { eventType?: string };
+            if (msg.eventType === "started") {
+              // The worklet just began rendering a response's audio: the candidate hears it now.
+              voiceMetrics.turn("first_audible");
+              return;
+            }
             if (msg.eventType !== "stats") return;
             // Log each new gap rather than only the total. This is the one symptom a candidate
             // reports as "the interviewer kept cutting out", and without it the only evidence is

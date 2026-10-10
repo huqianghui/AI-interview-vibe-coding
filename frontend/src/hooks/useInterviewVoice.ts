@@ -44,6 +44,7 @@ import {
   useVoiceAudio,
 } from "./useVoiceAudio";
 import { useAvatarStream } from "./useAvatarStream";
+import { voiceMetrics } from "../telemetry/voiceTimeline";
 import type {
   AudioState,
   TranscriptSegment,
@@ -450,6 +451,7 @@ export function useInterviewVoice(
   }, [draft, firstReadGate, readWatch, speakQueue]);
 
   const cleanup = useCallback(() => {
+    voiceMetrics.flush();
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -509,6 +511,12 @@ export function useInterviewVoice(
       switch (msg.type as string | undefined) {
         case "proxy.connected":
           avatarEnabledRef.current = Boolean(msg.avatar_enabled);
+          voiceMetrics.setContext({
+            avatar: Boolean(msg.avatar_enabled),
+            linear_turns: Boolean(msg.linear_turns),
+            audio_path: msg.avatar_enabled ? "webrtc" : "ws",
+          });
+          voiceMetrics.setup("proxy_connected");
           // Uplink framing (perf review P0-1): with this flag the mic goes up as raw binary PCM
           // and the backend does the base64. Absent means an older backend whose relay would
           // reject a binary frame, so the page keeps the base64-JSON path.
@@ -587,6 +595,7 @@ export function useInterviewVoice(
           const iceServers = toRtcIceServers(avatarConf?.ice_servers);
 
           sessionLiveRef.current = true;
+          voiceMetrics.setup("session_updated");
           // A session that reached `session.updated` works, whatever it took to get here.
           policy.noteLive();
           setConn("connected");
@@ -662,6 +671,7 @@ export function useInterviewVoice(
         }
 
         case "input_audio_buffer.speech_started":
+          voiceMetrics.turn("speech_started");
           setAudio("listening");
           // The candidate resumed speaking — they haven't finished the answer yet, so cancel any
           // pending silence-auto-commit (and the judge window). Both re-arm when the next
@@ -670,6 +680,7 @@ export function useInterviewVoice(
           draft.clearJudge();
           break;
         case "input_audio_buffer.speech_stopped":
+          voiceMetrics.turn("speech_stopped");
           setAudio("idle");
           break;
         case "conversation.item.input_audio_transcription.delta": {
@@ -687,6 +698,7 @@ export function useInterviewVoice(
           break;
         }
         case "conversation.item.input_audio_transcription.completed": {
+          voiceMetrics.turn("transcript");
           const transcript = (msg.transcript as string | undefined) ?? "";
           // Finalize under the SAME per-item id the deltas streamed into, so the live bubble is
           // replaced in place (no duplicate). Items that never streamed a delta (delta events off
@@ -736,6 +748,7 @@ export function useInterviewVoice(
         }
 
         case "response.created":
+          voiceMetrics.turn("response_created");
           activeResponseRef.current = true;
           // A response is now genuinely in flight, so any prior speak attempt was ACCEPTED (not
           // rejected). Clear the retry slot so a later, unrelated collision error can't re-queue an
@@ -752,6 +765,7 @@ export function useInterviewVoice(
           setAudio("speaking");
           break;
         case "response.audio.delta":
+          voiceMetrics.turn("first_audio_delta");
           if (msg.delta) audio.playAudio(msg.delta as string);
           break;
         case "response.audio.done":
@@ -767,6 +781,7 @@ export function useInterviewVoice(
           const key = `assistant-${msg.response_id}-${msg.item_id}`;
           const delta = (msg.delta as string | undefined) ?? "";
           if (delta) {
+            voiceMetrics.turn("first_text");
             const running =
               (assistantLiveTranscriptRef.current.get(key) ?? "") + delta;
             assistantLiveTranscriptRef.current.set(key, running);
@@ -811,6 +826,7 @@ export function useInterviewVoice(
           break;
         }
         case "response.done":
+          voiceMetrics.turn("response_done");
           activeResponseRef.current = false;
           setAudio("idle");
           optionsRef.current.onResponseDone?.();
@@ -981,8 +997,10 @@ export function useInterviewVoice(
       );
 
       await new Promise<void>((resolve, reject) => {
+        voiceMetrics.startSetup();
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
+        ws.onopen = () => voiceMetrics.setup("ws_open");
         let resolved = false;
 
         const resolveOnce = () => {
@@ -1284,6 +1302,7 @@ export function useInterviewVoice(
       // Refuses a text already handed to a live response — several routes reach here and every
       // `response.done` fires the flush, so without this the same question was read two or three times.
       if (!speakQueue.claimEmit(text)) return;
+      voiceMetrics.turn("read_request");
       // The next `response.created` belongs to THIS attempt — its id becomes the delivery proof.
       readWatch.expectResponse();
       // Optimistically mark active so a rapid second speakQuestion (or a commit nudge) defers
@@ -1466,6 +1485,11 @@ export function useInterviewVoice(
     // depended on something rebuilt per render. The omission is the safer statement of intent.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Every voice timing event carries the interview it belongs to ("playground" for the editor).
+  useEffect(() => {
+    voiceMetrics.setContext({ interview_id: interviewId || "playground" });
+  }, [interviewId]);
 
   useEffect(() => {
     if (interviewId)

@@ -58,6 +58,7 @@ import { ScoringProgressCard } from "./interview/ScoringProgressCard";
 import { StatusLegend } from "./interview/StatusLegend";
 import { useInterviewStyles } from "./interview/styles";
 import { useScoringFlow } from "./interview/useScoringFlow";
+import { voiceMetrics } from "../telemetry/voiceTimeline";
 
 // "review" (requirement 4): once all questions are answered the interview is `completed` but NOT
 // scored — the candidate reviews every answer and must explicitly submit before scoring starts.
@@ -469,17 +470,21 @@ export function InterviewPage() {
       const iv = interviewRef.current;
       if (!iv) return;
       submitSeqRef.current += 1; // a submit always advances — a late judge reply is discarded
+      voiceMetrics.turn("answer_click");
       const spoken = await voice.commitAnswer();
       if (!spoken.trim()) {
         // Requirement 3: an empty answer cannot pass. Don't advance — let the candidate speak again.
         setError(t("voice.emptyAnswer"));
         return;
       }
+      // The `/answer` round trip is the brain (or judge) hop of the turn's timing (voiceTimeline.ts).
+      voiceMetrics.turn("answer_submit");
       const updated = await submitAnswer(
         iv.interview_session_id,
         spoken,
         "voice",
       );
+      voiceMetrics.turn("answer_response");
       await advanceOrComplete(updated);
     });
 

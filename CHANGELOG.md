@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.65.0.0 (2026-10-10)
+
+### Added
+- **Where the time goes in a voice interview, measured in the candidate's browser.** The page
+  now loads the Application Insights JS SDK (its own ~80 KB gzip chunk, loaded when the main
+  thread is idle) and sends three timing events, plus page views, its `/api` calls (correlated
+  with the backend's traces through W3C `traceparent`) and uncaught errors:
+  - `voice.setup`, once per connection: WebSocket open, `proxy.connected`, `session.updated`,
+    first avatar frame, first interviewer audio heard.
+  - `voice.avatar`, once per avatar WebRTC handshake: the rate-limit hold, the first host / srflx
+    (STUN) / relay (TURN) candidate, the ICE gate, Azure's SDP answer, ICE and DTLS connected,
+    first track, first painted frame, the selected candidate pair and its RTT, and how it ended
+    (`frame`, `audio`, `ice_failed`, `no_frame`, `sdp_timeout`, `handshake_failed`, `rebuilt`,
+    `superseded`, `closed`).
+  - `voice.turn`, once per interviewer response: VAD speaking, speech-to-text, waiting on "I'm
+    done", the `/answer` round trip (brain or judge), the read request, `response.created`, the
+    first text and audio deltas, the first sample the candidate actually hears, `response.done`,
+    and `click_to_audible_ms`: from finishing an answer to hearing the next question. Turns are
+    `answer`, `aside` (a judge nudge) or `opening`.
+- **`GET /public/client-config`** hands the browser the deployment's App Insights connection string
+  at run time (one image serves every tenant). Without it the page sends nothing.
+- **The "AI Interview — Voice performance" Azure Workbook** on the App Insights resource
+  (`infra/azure/modules/voice-workbook.bicep`, deployed by `monitoring.bicep`, or on its own):
+  setup, avatar handshake and turn stages as p50 / p90 / p95, the selected candidate path, outcome
+  splits, trends, a per-turn table for one interview, and the backend spans, routes, outbound
+  calls and Azure errors. Metric definitions: `docs/voice-performance-telemetry.md`.
+
+Telemetry carries only timings, ids and outcomes: no transcript, answer or question text. URL
+query strings are stripped (the voice WebSocket URL carries a token), `HttpError` messages are cut
+to their status, cookies are off, and no telemetry call can throw into the interview. The playback
+worklet now posts `started` the moment it renders a response's first sample.
+
 ## 0.64.0.1 (2026-10-10)
 
 ### Fixed

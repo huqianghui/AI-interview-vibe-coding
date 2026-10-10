@@ -19,6 +19,7 @@ import type * as Auth from "./auth";
 import type * as Client from "./client";
 import type * as Knowledge from "./personaKnowledge";
 import type * as Personas from "./personas";
+import type * as Telemetry from "../telemetry/appInsights";
 import type { components } from "./schema";
 
 type Schemas = components["schemas"];
@@ -80,4 +81,6 @@ export type ApiContract = [
   Holds<Refines<Admin.Assignment, Schemas["AssignmentIn"]>>,
   Holds<Refines<Admin.InterviewResultItem, Schemas["InterviewResultItem"]>>,
   Holds<Refines<Admin.InterviewResultsPage, Schemas["InterviewResultsPage"]>>,
+  // Runtime config for the browser (App Insights).
+  Holds<Refines<Telemetry.ClientConfig, Schemas["ClientConfig"]>>,
 ];
