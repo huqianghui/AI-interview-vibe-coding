@@ -4,17 +4,18 @@
  * `voiceTimeline.ts`.
  *
  * Off unless the deployment has App Insights: the connection string comes from the backend at run
- * time (`GET /public/client-config`), because one image is deployed into every environment. The SDK
- * is loaded with a dynamic import so it lands in its own chunk and never delays the first paint or
- * the voice prewarm.
+ * time (`GET /client-config`), because one image is deployed into every environment. The backend
+ * hands it only to a signed-in candidate or admin, so telemetry starts at sign-in (or on load, when a
+ * session is already stored). The SDK is loaded with a dynamic import so it lands in its own chunk
+ * and never delays the first paint or the voice prewarm.
  *
  * Telemetry carries ids, timings, counts and outcomes, never a transcript, an answer, a question or
  * any SOP text. Query strings are stripped from every URL before it leaves the page: some carry a
  * session token.
  */
-import { requestJson } from "../api/http";
+import { HttpError, requestJson } from "../api/http";
 
-/** `GET /public/client-config` (pinned against the backend schema in `api/contract.check.ts`). */
+/** `GET /client-config` (pinned against the backend schema in `api/contract.check.ts`). */
 export interface ClientConfig {
   app_insights_connection_string?: string | null;
 }
@@ -31,7 +32,13 @@ interface Sink {
 const MAX_BUFFERED = 200;
 let buffered: { name: string; measurements: Measurements; properties: Properties }[] = [];
 let sink: Sink | null = null;
-let started = false;
+/** The deployment has no App Insights: nothing will ever be sent, so nothing is buffered either. */
+let disabled = false;
+/** The start in flight, if any: concurrent callers share it instead of racing it. */
+let starting: Promise<boolean> | null = null;
+/** The newest signed-in token we were given. Every attempt reads it, so a sign-in that lands while
+ * an earlier start is still running (or waiting to retry) is never lost. */
+let latestToken = "";
 const START_ATTEMPTS = 2;
 const START_RETRY_MS = 10_000;
 
@@ -73,7 +80,7 @@ export function trackEvent(name: string, measurements: Measurements, properties:
     }
     return;
   }
-  if (buffered.length < MAX_BUFFERED) buffered.push({ name, measurements, properties });
+  if (!disabled && buffered.length < MAX_BUFFERED) buffered.push({ name, measurements, properties });
 }
 
 /** Resolve when the main thread is idle (or after `timeoutMs`), so the SDK's download, parse and
@@ -88,69 +95,96 @@ function whenIdle(timeoutMs: number): Promise<void> {
   });
 }
 
-/** Fetch the runtime config and, when the deployment has App Insights, load the SDK once the page is
- * idle. Events recorded meanwhile are buffered. Idempotent; never throws (telemetry must not break
- * the page). */
-export async function startTelemetry(attempt = 1): Promise<boolean> {
-  if (attempt === 1) {
-    if (started) return sink !== null;
-    started = true;
+/** With a signed-in user's `token`, fetch the runtime config and, when the deployment has App
+ * Insights, load the SDK once the page is idle. Events recorded meanwhile are buffered. Without a
+ * token, or with one the backend refuses (expired), nothing starts and the next sign-in tries again;
+ * a sign-in during a start in flight is picked up by it. Never throws (telemetry must not break the
+ * page). Resolves whether telemetry is running. */
+export function startTelemetry(token: string): Promise<boolean> {
+  if (token) latestToken = token;
+  if (sink) return Promise.resolve(true);
+  if (disabled || !latestToken) return Promise.resolve(false);
+  if (!starting) {
+    starting = runStart().finally(() => {
+      starting = null;
+    });
   }
-  try {
-    const config = await requestJson<ClientConfig>("/public/client-config");
-    const connectionString = config.app_insights_connection_string;
-    if (!connectionString) {
-      buffered = [];
+  return starting;
+}
+
+async function runStart(): Promise<boolean> {
+  let failures = 0;
+  for (;;) {
+    const token = latestToken;
+    try {
+      const config = await requestJson<ClientConfig>("/client-config", {}, { bearer: token });
+      const connectionString = config.app_insights_connection_string;
+      if (!connectionString) {
+        disabled = true;
+        buffered = [];
+        return false;
+      }
+      await loadSdk(connectionString);
+      return true;
+    } catch (err) {
+      if (err instanceof HttpError && (err.status === 401 || err.status === 403)) {
+        // Refused (an expired stored session). A newer sign-in since this attempt began gets its
+        // turn now; otherwise wait for the next one.
+        if (latestToken !== token) continue;
+        return false;
+      }
+      failures += 1;
+      if (failures < START_ATTEMPTS) {
+        // One transient failure at page load must not switch telemetry off for the interview: keep
+        // the buffer and try again (with whatever token is newest by then).
+        await new Promise((resolve) => setTimeout(resolve, START_RETRY_MS));
+        continue;
+      }
+      console.info("[telemetry] App Insights not started", err);
       return false;
     }
-    await whenIdle(5_000);
-    const { ApplicationInsights, DistributedTracingModes } = await import(
-      "@microsoft/applicationinsights-web"
-    );
-    const ai = new ApplicationInsights({
-      config: {
-        connectionString,
-        enableAutoRouteTracking: true,
-        distributedTracingMode: DistributedTracingModes.W3C,
-        // No cookies: the voice timings are keyed by interview id, and candidates are not tracked
-        // across visits.
-        disableCookiesUsage: true,
-        disableFlushOnBeforeUnload: false,
-      },
-    });
-    ai.loadAppInsights();
-    ai.addTelemetryInitializer((item) => {
-      scrubItem(item as { baseData?: Record<string, unknown> });
-    });
-    ai.trackPageView();
-    sink = {
-      // Sent at once rather than with the SDK's next batch (15 s): there is about one voice event
-      // per turn, and a candidate closing the tab right after an answer would otherwise lose it
-      // (measured live: the last turn of a run went missing that way).
-      trackEvent: (name, measurements, properties) => {
-        ai.trackEvent({ name, measurements }, properties);
-        ai.flush();
-      },
-    };
-    for (const event of buffered) sink.trackEvent(event.name, event.measurements, event.properties);
-    buffered = [];
-    return true;
-  } catch (err) {
-    if (attempt < START_ATTEMPTS) {
-      // One transient failure at page load must not switch telemetry off for the whole interview:
-      // keep the buffer and try again.
-      await new Promise((resolve) => setTimeout(resolve, START_RETRY_MS));
-      return startTelemetry(attempt + 1);
-    }
-    console.info("[telemetry] App Insights not started", err);
-    buffered = [];
-    return false;
   }
+}
+
+async function loadSdk(connectionString: string): Promise<void> {
+  await whenIdle(5_000);
+  const { ApplicationInsights, DistributedTracingModes } = await import(
+    "@microsoft/applicationinsights-web"
+  );
+  const ai = new ApplicationInsights({
+    config: {
+      connectionString,
+      enableAutoRouteTracking: true,
+      distributedTracingMode: DistributedTracingModes.W3C,
+      // No cookies: the voice timings are keyed by interview id, and candidates are not tracked
+      // across visits.
+      disableCookiesUsage: true,
+      disableFlushOnBeforeUnload: false,
+    },
+  });
+  ai.loadAppInsights();
+  ai.addTelemetryInitializer((item) => {
+    scrubItem(item as { baseData?: Record<string, unknown> });
+  });
+  ai.trackPageView();
+  sink = {
+    // Sent at once rather than with the SDK's next batch (15 s): there is about one voice event
+    // per turn, and a candidate closing the tab right after an answer would otherwise lose it
+    // (measured live: the last turn of a run went missing that way).
+    trackEvent: (name, measurements, properties) => {
+      ai.trackEvent({ name, measurements }, properties);
+      ai.flush();
+    },
+  };
+  for (const event of buffered) sink.trackEvent(event.name, event.measurements, event.properties);
+  buffered = [];
 }
 
 /** Test hook: forget everything. */
 export function resetTelemetryForTests(next: Sink | null = null): void {
   sink = next;
   buffered = [];
-  started = false;
+  disabled = false;
+  starting = null;
+  latestToken = "";
 }
