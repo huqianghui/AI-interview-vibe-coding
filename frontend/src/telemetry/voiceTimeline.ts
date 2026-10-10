@@ -85,7 +85,9 @@ export const AVATAR_SPANS: readonly SpanDef[] = [
   ["sdp_answer_ms", "offer_sent", "answer_received"],
   ["ice_connect_ms", "answer_applied", "ice_connected"],
   ["pc_connect_ms", "answer_applied", "pc_connected"],
-  ["first_track_ms", "answer_applied", "first_track"],
+  // From the answer's ARRIVAL: the browser fires `ontrack` while applying it, before
+  // setRemoteDescription resolves, so measured from `answer_applied` it came out negative.
+  ["first_track_ms", "answer_received", "first_track"],
   ["first_frame_ms", "ice_connected", "first_frame"],
   ["total_ms", "offer_start", "first_frame"],
   ["total_audio_ms", "offer_start", "audio_live"],
