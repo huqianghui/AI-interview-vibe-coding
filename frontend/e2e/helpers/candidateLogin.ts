@@ -17,6 +17,12 @@ const API = process.env.E2E_API || (BASE ? `${BASE}/api` : "http://127.0.0.1:810
 const ADMIN_USER = process.env.E2E_ADMIN_USERNAME || "admin";
 const ADMIN_PW = process.env.E2E_ADMIN_PASSWORD || "e2e-admin-pw";
 
+/** An absolute API URL. Playwright resolves a path that starts with "/" against the ORIGIN of
+ * `baseURL`, dropping its path, so `baseURL: ".../api"` + `"/auth/login"` hit `/auth/login` on the
+ * frontend (nginx 405) instead of the backend: these helpers only ever worked against a local
+ * backend served at the root. Joining the strings keeps a deployed site's `/api` prefix. */
+const url = (path: string) => `${API}${path}`;
+
 export const CANDIDATE_TOKEN_KEY = "candidate_access_token";
 
 type AdminUserRow = { username: string; generated_password: string | null };
@@ -27,7 +33,7 @@ export async function adminApi(): Promise<{
   headers: Record<string, string>;
 }> {
   const api = await pwRequest.newContext({ baseURL: API });
-  const login = await api.post("/auth/login", {
+  const login = await api.post(url("/auth/login"), {
     headers: { "Content-Type": "application/json" },
     data: { username: ADMIN_USER, password: ADMIN_PW },
   });
@@ -40,7 +46,7 @@ export async function adminApi(): Promise<{
 export async function candidatePassword(username = "user1"): Promise<string> {
   const { api, headers } = await adminApi();
   try {
-    const users = await api.get("/admin/users", { headers });
+    const users = await api.get(url("/admin/users"), { headers });
     if (!users.ok()) throw new Error(`GET /admin/users failed: ${users.status()}`);
     const row = ((await users.json()) as AdminUserRow[]).find((u) => u.username === username);
     if (!row?.generated_password) {
@@ -57,7 +63,7 @@ export async function candidateToken(username = "user1"): Promise<string> {
   const password = await candidatePassword(username);
   const api = await pwRequest.newContext({ baseURL: API });
   try {
-    const login = await api.post("/auth/login", {
+    const login = await api.post(url("/auth/login"), {
       headers: { "Content-Type": "application/json" },
       data: { username, password },
     });
@@ -79,13 +85,13 @@ export async function candidateToken(username = "user1"): Promise<string> {
 export async function finishOpenInterview(token: string): Promise<void> {
   const api = await pwRequest.newContext({ baseURL: API });
   try {
-    const sess = await api.post("/public/candidate/session", {
+    const sess = await api.post(url("/public/candidate/session"), {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!sess.ok()) throw new Error(`session mint failed: ${sess.status()} ${await sess.text()}`);
     const anon = { "X-Anon-Session": (await sess.json()).token as string };
     // start() resumes an in-progress interview (or creates one); end it so the next start is fresh.
-    const started = await api.post("/candidate/interview/start", { headers: anon });
+    const started = await api.post(url("/candidate/interview/start"), { headers: anon });
     if (!started.ok()) return; // e.g. no default bank yet — nothing to clean
     let iv = (await started.json()) as {
       interview_session_id: string;
@@ -96,13 +102,13 @@ export async function finishOpenInterview(token: string): Promise<void> {
     const id = iv.interview_session_id;
     if (iv.external_phase != null) {
       // External brain: the end turn finalizes it.
-      await api.post(`/candidate/interview/${id}/end`, { headers: anon });
+      await api.post(url(`/candidate/interview/${id}/end`), { headers: anon });
       return;
     }
     // Bank interview: /end is a no-op for it (it completes when its questions run out), so walk it
     // to completion with placeholder answers. Nothing is scored until a report is requested.
     for (let i = 0; i < 30 && iv.status === "in_progress"; i++) {
-      const r = await api.post(`/candidate/interview/${id}/answer`, {
+      const r = await api.post(url(`/candidate/interview/${id}/answer`), {
         headers: anon,
         data: { text: "(e2e cleanup) skipped", source: "text" },
       });
@@ -112,7 +118,7 @@ export async function finishOpenInterview(token: string): Promise<void> {
     if (iv.status === "in_progress") {
       // All questions answered but not yet submitted: requesting the report scores + closes it
       // (mock scorer locally), so the next start is a fresh interview.
-      await api.post(`/candidate/interview/${id}/report`, { headers: anon });
+      await api.post(url(`/candidate/interview/${id}/report`), { headers: anon });
     }
   } finally {
     await api.dispose();
