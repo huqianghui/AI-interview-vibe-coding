@@ -21,8 +21,18 @@ throws into the interview: every call from a WebSocket or WebRTC handler is guar
 The connection string is configured once, by the deployment: `monitoring.bicep` creates App
 Insights, `main.bicep` passes its connection string to `container-apps.bicep`, which sets
 `APPLICATIONINSIGHTS_CONNECTION_STRING` on the backend. The browser gets the same string at run time
-from `GET /public/client-config` (one image serves every environment, so it cannot be baked into the
+from `GET /client-config` (one image serves every environment, so it cannot be baked into the
 bundle). Without the variable (local dev, CI) both sides send nothing.
+
+### Who can get the connection string
+
+`/client-config` answers only a signed-in candidate or admin (401 otherwise), so the page starts
+telemetry at sign-in, or on load when a session is already stored; an expired stored session waits
+for the next sign-in. The string is not a secret in Azure Monitor's own terms: it lets a client
+SEND telemetry to this resource and nothing else (reading needs Entra / RBAC, and it gives no access
+to the app or any candidate data). What it allows is junk data in the dashboards. The login gate
+keeps it away from anonymous callers; a signed-in user can still copy it from the browser's network
+panel, which is true of every browser telemetry setup.
 
 The SDK is a separate ~80 KB (gzip) chunk, loaded only after the config says App Insights is on and
 the main thread is idle (at most 5 s), so it never delays the first paint or competes with the

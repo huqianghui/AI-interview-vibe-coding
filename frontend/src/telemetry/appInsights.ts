@@ -4,17 +4,18 @@
  * `voiceTimeline.ts`.
  *
  * Off unless the deployment has App Insights: the connection string comes from the backend at run
- * time (`GET /public/client-config`), because one image is deployed into every environment. The SDK
- * is loaded with a dynamic import so it lands in its own chunk and never delays the first paint or
- * the voice prewarm.
+ * time (`GET /client-config`), because one image is deployed into every environment. The backend
+ * hands it only to a signed-in candidate or admin, so telemetry starts at sign-in (or on load, when a
+ * session is already stored). The SDK is loaded with a dynamic import so it lands in its own chunk
+ * and never delays the first paint or the voice prewarm.
  *
  * Telemetry carries ids, timings, counts and outcomes, never a transcript, an answer, a question or
  * any SOP text. Query strings are stripped from every URL before it leaves the page: some carry a
  * session token.
  */
-import { requestJson } from "../api/http";
+import { HttpError, requestJson } from "../api/http";
 
-/** `GET /public/client-config` (pinned against the backend schema in `api/contract.check.ts`). */
+/** `GET /client-config` (pinned against the backend schema in `api/contract.check.ts`). */
 export interface ClientConfig {
   app_insights_connection_string?: string | null;
 }
@@ -88,16 +89,18 @@ function whenIdle(timeoutMs: number): Promise<void> {
   });
 }
 
-/** Fetch the runtime config and, when the deployment has App Insights, load the SDK once the page is
- * idle. Events recorded meanwhile are buffered. Idempotent; never throws (telemetry must not break
- * the page). */
-export async function startTelemetry(attempt = 1): Promise<boolean> {
+/** With a signed-in user's `token`, fetch the runtime config and, when the deployment has App
+ * Insights, load the SDK once the page is idle. Events recorded meanwhile are buffered. Without a
+ * token, or with one the backend refuses (expired), nothing starts and the next sign-in tries again.
+ * Idempotent once started; never throws (telemetry must not break the page). */
+export async function startTelemetry(token: string, attempt = 1): Promise<boolean> {
+  if (!token) return false;
   if (attempt === 1) {
     if (started) return sink !== null;
     started = true;
   }
   try {
-    const config = await requestJson<ClientConfig>("/public/client-config");
+    const config = await requestJson<ClientConfig>("/client-config", {}, { bearer: token });
     const connectionString = config.app_insights_connection_string;
     if (!connectionString) {
       buffered = [];
@@ -136,11 +139,16 @@ export async function startTelemetry(attempt = 1): Promise<boolean> {
     buffered = [];
     return true;
   } catch (err) {
+    if (err instanceof HttpError && (err.status === 401 || err.status === 403)) {
+      // A stored session that has expired: wait for the next sign-in rather than give up.
+      started = false;
+      return false;
+    }
     if (attempt < START_ATTEMPTS) {
       // One transient failure at page load must not switch telemetry off for the whole interview:
       // keep the buffer and try again.
       await new Promise((resolve) => setTimeout(resolve, START_RETRY_MS));
-      return startTelemetry(attempt + 1);
+      return startTelemetry(token, attempt + 1);
     }
     console.info("[telemetry] App Insights not started", err);
     buffered = [];

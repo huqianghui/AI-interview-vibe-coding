@@ -9,6 +9,7 @@
 import i18n from "../i18n";
 import { apiFetch, HttpError, requestJson } from "./http";
 import { tokenStore } from "./tokenStore";
+import { startTelemetry } from "../telemetry/appInsights";
 
 export const ADMIN_TOKEN_KEY = "admin_access_token";
 const CANDIDATE_TOKEN_KEY = "candidate_access_token";
@@ -74,6 +75,7 @@ function loginErrorMessage(e: HttpError): string {
 export async function login(username: string, password: string): Promise<string> {
   const token = await exchangePassword(username, password);
   setAdminToken(token);
+  void startTelemetry(token);
   return token;
 }
 
@@ -111,5 +113,6 @@ export function clearCandidateToken(): void {
 export async function loginCandidate(username: string, password: string): Promise<string> {
   const token = await exchangePassword(username, password);
   setCandidateToken(token);
+  void startTelemetry(token);
   return token;
 }

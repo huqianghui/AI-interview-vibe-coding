@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.65.1.0 (2026-10-10)
+
+### Changed
+- **The App Insights connection string is handed only to a signed-in user.** The runtime-config
+  route moved from `GET /public/client-config` to `GET /client-config` and now needs a candidate or
+  admin login (401 otherwise), so an anonymous visitor can no longer fetch it. The page starts
+  telemetry at sign-in, or on load when a session is already stored; an expired stored session
+  waits for the next sign-in. The string still only lets a client send telemetry, never read it.
+
 ## 0.65.0.1 (2026-10-10)
 
 ### Fixed

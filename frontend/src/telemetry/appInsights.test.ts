@@ -71,7 +71,7 @@ describe("start-up", () => {
       vi.fn(async () => new Response(JSON.stringify({ app_insights_connection_string: "InstrumentationKey=k" }))),
     );
     trackEvent("early", { x: 1 }, { k: "v" });
-    expect(await startTelemetry()).toBe(true);
+    expect(await startTelemetry("tok")).toBe(true);
     trackEvent("late", { y: 2 });
     expect(sdk.config).toMatchObject({ connectionString: "InstrumentationKey=k", disableCookiesUsage: true });
     expect(sdk.events.map((e) => e.event.name)).toEqual(["early", "late"]);
@@ -89,16 +89,48 @@ describe("start-up", () => {
       vi.fn(async () => new Response(JSON.stringify({ app_insights_connection_string: null }))),
     );
     trackEvent("early", {});
-    expect(await startTelemetry()).toBe(false);
-    expect(await startTelemetry()).toBe(false); // idempotent: one config fetch
+    expect(await startTelemetry("tok")).toBe(false);
+    expect(await startTelemetry("tok")).toBe(false); // idempotent: one config fetch
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch).toHaveBeenCalledWith("/api/public/client-config", expect.anything());
+    expect(fetch).toHaveBeenCalledWith("/api/client-config", expect.anything());
+    // The backend hands the string only to a signed-in user: the token rides as a bearer.
+    const init = vi.mocked(fetch).mock.calls[0][1] as RequestInit;
+    expect(new Headers(init.headers).get("Authorization")).toBe("Bearer tok");
+  });
+
+  it("does nothing before sign-in, and starts at the first sign-in", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ app_insights_connection_string: null }))),
+    );
+    expect(await startTelemetry("")).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+    await startTelemetry("tok");
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for the next sign-in when a stored session has expired", async () => {
+    sdk.events.length = 0;
+    let calls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        ++calls === 1
+          ? new Response("expired", { status: 401 })
+          : new Response(JSON.stringify({ app_insights_connection_string: "InstrumentationKey=k" })),
+      ),
+    );
+    trackEvent("before-sign-in", {});
+    expect(await startTelemetry("stale")).toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(1); // no 10 s retry for a refusal
+    expect(await startTelemetry("fresh")).toBe(true);
+    expect(sdk.events.map((e) => e.event.name)).toContain("before-sign-in");
   });
 
   it("retries a failed config read once, then gives up without throwing", async () => {
     vi.useFakeTimers();
     vi.stubGlobal("fetch", vi.fn(async () => new Response("nope", { status: 500 })));
-    const result = startTelemetry();
+    const result = startTelemetry("tok");
     await vi.advanceTimersByTimeAsync(10_000);
     expect(await result).toBe(false);
     expect(fetch).toHaveBeenCalledTimes(2);
@@ -118,7 +150,7 @@ describe("start-up", () => {
       ),
     );
     trackEvent("during-outage", {});
-    const result = startTelemetry();
+    const result = startTelemetry("tok");
     await vi.advanceTimersByTimeAsync(10_050); // the retry delay, then the idle wait
     expect(await result).toBe(true);
     expect(sdk.events.map((e) => e.event.name)).toContain("during-outage");
