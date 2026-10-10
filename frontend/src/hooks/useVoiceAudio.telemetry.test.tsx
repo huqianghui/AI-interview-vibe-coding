@@ -68,4 +68,29 @@ describe("playback started → first_audible", () => {
     expect(result.current.getPlaybackStats()).toMatchObject({ bufferedMs: 120, state: "playing" });
     expect(turn).toHaveBeenCalledTimes(1);
   });
+
+  it("counts each playback gap, with its length, once it ends", async () => {
+    const count = vi.spyOn(voiceMetrics, "count");
+    const { result } = renderHook(() => useVoiceAudio());
+    await act(async () => {
+      result.current.playAudio("QUJDRA==");
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const port = FakeNode.last!.port;
+    const stats = (lastGapMs: number) =>
+      act(() =>
+        port.onmessage?.({
+          data: { eventType: "stats", underruns: 1, bufferedMs: 80, lastGapMs, state: "playing" },
+        }),
+      );
+    stats(0); // no gap yet
+    stats(240); // a gap of 240 ms just ended
+    stats(240); // the same gap, reported again
+    expect(count.mock.calls).toEqual([
+      ["playback_gaps"],
+      ["playback_gap_ms_total", 240],
+    ]);
+  });
 });
+

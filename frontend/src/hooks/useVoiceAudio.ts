@@ -225,6 +225,9 @@ export function useVoiceAudio() {
             // buffer has refilled, so warning on the increment printed "0ms" (measured — the first
             // version of this log did exactly that).
             if (msg.lastGapMs > 0 && msg.lastGapMs !== playbackStatsRef.current.lastGapMs) {
+              // Counted on the turn the candidate heard it in (voiceTimeline, `voice.turn`).
+              voiceMetrics.count("playback_gaps");
+              voiceMetrics.count("playback_gap_ms_total", Math.round(msg.lastGapMs));
               console.warn(
                 `[voice-audio] playback underrun #${String(msg.underruns)} — the interviewer's ` +
                   `voice had a gap of ${msg.lastGapMs.toFixed(0)}ms`,
