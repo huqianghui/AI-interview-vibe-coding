@@ -26,7 +26,14 @@ vi.mock("@microsoft/applicationinsights-web", () => ({
   },
 }));
 
-import { resetTelemetryForTests, scrubItem, startTelemetry, stripQuery, trackEvent } from "./appInsights";
+import {
+  beginWebSocketTrace,
+  resetTelemetryForTests,
+  scrubItem,
+  startTelemetry,
+  stripQuery,
+  trackEvent,
+} from "./appInsights";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -209,3 +216,39 @@ describe("start-up", () => {
     expect(item.baseData.exceptions[0].message).toBe("422 Unprocessable");
   });
 });
+
+describe("WebSocket trace", () => {
+  const TRACE = "4bf92f3577b34da6a3ce929d0e0e4736";
+
+  it("names the page's trace for the backend and records the socket under the same id", () => {
+    const deps: Record<string, unknown>[] = [];
+    resetTelemetryForTests({
+      trackEvent: () => undefined,
+      trackDependency: (d) => deps.push(d),
+      traceId: () => TRACE,
+    });
+    const trace = beginWebSocketTrace("WS /api/voice-live/ws", "example.test");
+    expect(trace.traceparent).toMatch(new RegExp(`^00-${TRACE}-[0-9a-f]{16}-01$`));
+    trace.end(1000, true);
+    trace.end(1006, false); // idempotent: one socket, one record
+    expect(deps).toHaveLength(1);
+    expect(deps[0]).toMatchObject({
+      name: "WS /api/voice-live/ws",
+      type: "WebSocket",
+      success: true,
+      responseCode: 1000,
+      // The backend's span names this id as its parent: that is the join.
+      id: trace.traceparent!.split("-")[2],
+    });
+  });
+
+  it("opens unlinked before the SDK is up, and never throws", () => {
+    resetTelemetryForTests(null);
+    const trace = beginWebSocketTrace("WS /api/voice-live/ws", "example.test");
+    expect(trace.traceparent).toBeNull();
+    expect(() => trace.end(1006, false)).not.toThrow();
+    resetTelemetryForTests({ trackEvent: () => undefined, traceId: () => "not-a-trace-id" });
+    expect(beginWebSocketTrace("x", "y").traceparent).toBeNull();
+  });
+});
+

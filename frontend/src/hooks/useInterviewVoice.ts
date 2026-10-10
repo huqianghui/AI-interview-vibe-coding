@@ -45,6 +45,7 @@ import {
 } from "./useVoiceAudio";
 import { useAvatarStream } from "./useAvatarStream";
 import { voiceMetrics } from "../telemetry/voiceTimeline";
+import { beginWebSocketTrace, type WebSocketTrace } from "../telemetry/appInsights";
 import type {
   AudioState,
   TranscriptSegment,
@@ -236,9 +237,12 @@ function buildWsUrl(
   personaId: string | undefined,
   locale: string,
   avatarBackground?: string,
+  traceparent?: string | null,
 ): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const params = new URLSearchParams({ token, locale });
+  // App Insights trace context: the backend's voice session span joins the page's trace with it.
+  if (traceparent) params.set("traceparent", traceparent);
   if (personaId) params.set("persona_id", personaId);
   const bg = avatarBackground?.replace(/^#/, "");
   if (bg && /^[0-9a-fA-F]{6}$/.test(bg)) params.set("avatar_bg", bg.toLowerCase());
@@ -267,6 +271,9 @@ export function useInterviewVoice(
   });
 
   const wsRef = useRef<WebSocket | null>(null);
+  // The App Insights trace of the current socket (telemetry/appInsights.beginWebSocketTrace).
+  const wsTraceRef = useRef<WebSocketTrace | null>(null);
+
   /** Who may open a session, how often a drop is retried, and when to stop and say the voice is gone.
    * Extracted to `useConnectionPolicy`: the per-drop budget, the attempts-since-live ceiling and the
    * in-flight guard were five refs whose DIFFERENCES carry the behaviour — each was separately a shipped
@@ -983,11 +990,16 @@ export function useInterviewVoice(
 
       // Step 3: open the Voice Live WS proxy and wait for `session.updated` (connected) or an
       // error/timeout.
+      // The previous socket's trace (a reconnect replaces it) ends here if its close never reported.
+      wsTraceRef.current?.end(1000, true);
+      const wsTrace = beginWebSocketTrace("WS /api/voice-live/ws", window.location.host);
+      wsTraceRef.current = wsTrace;
       const wsUrl = buildWsUrl(
         token,
         optionsRef.current.personaId,
         effectiveLocale,
         optionsRef.current.avatarBackground,
+        wsTrace.traceparent,
       );
       console.info(
         "[voice] opening WS proxy; persona:",
@@ -1020,8 +1032,11 @@ export function useInterviewVoice(
           rejectOnce(new Error("Voice Live WebSocket connection failed"));
         };
 
-        ws.onclose = () => {
+        ws.onclose = (event?: CloseEvent) => {
           const wasConnected = resolved;
+          const code = event?.code ?? 1005;
+          // Clean: opened, and closed normally (1000), by navigation (1001) or with no status (1005).
+          wsTrace.end(code, wasConnected && (code === 1000 || code === 1001 || code === 1005));
           wsRef.current = null;
           if (!wasConnected) {
             rejectOnce(
@@ -1183,6 +1198,8 @@ export function useInterviewVoice(
         wsRef.current.onerror = null;
         wsRef.current.close();
         wsRef.current = null;
+        // Its close handler is detached, so its trace ends here: a deliberate rebuild, not a failure.
+        wsTraceRef.current?.end(1000, true);
       }
       audio.cleanupMic();
       avatarStartedRef.current = false;

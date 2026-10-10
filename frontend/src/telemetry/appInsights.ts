@@ -24,13 +24,32 @@ type Measurements = Record<string, number>;
 type Properties = Record<string, string | number | boolean>;
 
 interface Sink {
-  trackEvent(name: string, measurements: Measurements, properties: Properties): void;
+  /** `urgent` events leave at once; the rest go with the SDK's next batch. */
+  trackEvent(name: string, measurements: Measurements, properties: Properties, urgent: boolean): void;
+  /** A browser-side call App Insights does not see by itself (the voice WebSocket). */
+  trackDependency?(dependency: {
+    id: string;
+    name: string;
+    target: string;
+    type: string;
+    duration: number;
+    success: boolean;
+    responseCode: number;
+    startTime: Date;
+  }): void;
+  /** The page's current trace id (32 hex), or null. */
+  traceId?(): string | null;
 }
 
 // Events recorded before the SDK is ready (the voice session prewarms on page load, in parallel with
 // the config fetch). Bounded so a page that never gets telemetry cannot grow it without limit.
 const MAX_BUFFERED = 200;
-let buffered: { name: string; measurements: Measurements; properties: Properties }[] = [];
+let buffered: {
+  name: string;
+  measurements: Measurements;
+  properties: Properties;
+  urgent: boolean;
+}[] = [];
 let sink: Sink | null = null;
 /** The deployment has no App Insights: nothing will ever be sent, so nothing is buffered either. */
 let disabled = false;
@@ -70,17 +89,79 @@ export function scrubItem(item: { baseData?: Record<string, unknown> }): void {
 }
 
 /** Record one custom event. Safe to call at any time: before start-up it is buffered, and without
- * App Insights it is dropped. */
-export function trackEvent(name: string, measurements: Measurements, properties: Properties = {}): void {
+ * App Insights it is dropped. `urgent` (the default) sends it at once; periodic samples pass false
+ * and ride the SDK's next batch. */
+export function trackEvent(
+  name: string,
+  measurements: Measurements,
+  properties: Properties = {},
+  urgent = true,
+): void {
   if (sink) {
     try {
-      sink.trackEvent(name, measurements, properties);
+      sink.trackEvent(name, measurements, properties, urgent);
     } catch (err) {
       console.debug("[telemetry] trackEvent failed", err);
     }
     return;
   }
-  if (!disabled && buffered.length < MAX_BUFFERED) buffered.push({ name, measurements, properties });
+  if (!disabled && buffered.length < MAX_BUFFERED) {
+    buffered.push({ name, measurements, properties, urgent });
+  }
+}
+
+const randomHex = (bytes: number): string =>
+  Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (b) => b.toString(16).padStart(2, "0")).join(
+    "",
+  );
+
+export interface WebSocketTrace {
+  /** W3C `traceparent` for the backend to parent its session span on, or null before the SDK is up. */
+  traceparent: string | null;
+  /** Report the socket as a dependency once it closes. Idempotent. */
+  end(code: number, success: boolean): void;
+}
+
+/**
+ * Trace one WebSocket the SDK cannot see by itself. The page passes `traceparent` when it opens the
+ * socket (a WebSocket cannot carry headers, so it rides the query string), the backend starts its
+ * span as a child of it, and `end()` records the socket as a dependency with that same id: in App
+ * Insights the browser's socket and the backend's session become one parent/child pair in the page's
+ * trace. Opened before the SDK has loaded, the socket is still recorded at `end()`, just unlinked.
+ */
+export function beginWebSocketTrace(name: string, target: string): WebSocketTrace {
+  const id = randomHex(8);
+  let traceparent: string | null = null;
+  try {
+    const traceId = sink?.traceId?.() ?? null;
+    if (traceId && /^[0-9a-f]{32}$/.test(traceId)) traceparent = `00-${traceId}-${id}-01`;
+  } catch (err) {
+    console.debug("[telemetry] no trace context", err);
+  }
+  const startTime = new Date();
+  const started = performance.now();
+  let ended = false;
+  return {
+    traceparent,
+    end(code, success) {
+      if (ended) return;
+      ended = true;
+      try {
+        sink?.trackDependency?.({
+          id,
+          name,
+          target,
+          type: "WebSocket",
+          duration: performance.now() - started,
+          success,
+          responseCode: code,
+          startTime,
+        });
+      } catch (err) {
+        console.debug("[telemetry] WebSocket dependency failed", err);
+      }
+    },
+  };
 }
 
 /** Resolve when the main thread is idle (or after `timeoutMs`), so the SDK's download, parse and
@@ -171,12 +252,19 @@ async function loadSdk(connectionString: string): Promise<void> {
     // Sent at once rather than with the SDK's next batch (15 s): there is about one voice event
     // per turn, and a candidate closing the tab right after an answer would otherwise lose it
     // (measured live: the last turn of a run went missing that way).
-    trackEvent: (name, measurements, properties) => {
+    trackEvent: (name, measurements, properties, urgent) => {
       ai.trackEvent({ name, measurements }, properties);
+      if (urgent) ai.flush();
+    },
+    trackDependency: (dependency) => {
+      ai.trackDependencyData(dependency);
       ai.flush();
     },
+    traceId: () => ai.getTraceCtx()?.getTraceId() ?? null,
   };
-  for (const event of buffered) sink.trackEvent(event.name, event.measurements, event.properties);
+  for (const event of buffered) {
+    sink.trackEvent(event.name, event.measurements, event.properties, event.urgent);
+  }
   buffered = [];
 }
 
