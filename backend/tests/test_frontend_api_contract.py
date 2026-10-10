@@ -25,6 +25,8 @@ API_FILES = [
     # Source only: the unit tests call the wrappers with placeholder paths like "/admin/x".
     *sorted(f for f in (FRONTEND_SRC / "api").glob("*.ts") if not f.name.endswith(".test.ts")),
     FRONTEND_SRC / "hooks" / "useInterviewVoice.ts",
+    # The runtime config is read at start-up, before (and outside) the API layer.
+    FRONTEND_SRC / "telemetry" / "appInsights.ts",
 ]
 
 # Routes the SPA never calls, and who does. Keep each reason specific enough to check.

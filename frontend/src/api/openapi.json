@@ -893,6 +893,23 @@
         "title": "CitationRunOut",
         "type": "object"
       },
+      "ClientConfig": {
+        "properties": {
+          "app_insights_connection_string": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Insights Connection String"
+          }
+        },
+        "title": "ClientConfig",
+        "type": "object"
+      },
       "ConnectionTestResult": {
         "properties": {
           "message": {
@@ -7958,6 +7975,27 @@
         "summary": "Mint the candidate session token (requires a candidate login)",
         "tags": [
           "candidate-session"
+        ]
+      }
+    },
+    "/public/client-config": {
+      "get": {
+        "operationId": "client_config_public_client_config_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientConfig"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Client Config",
+        "tags": [
+          "client-config"
         ]
       }
     }
