@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.66.0.0 (2026-10-10)
+
+### Added
+- **The voice WebSocket is traced end to end.** The page opens it with a W3C `traceparent` (a
+  WebSocket cannot carry headers, so it rides the query string) and records it as a `WebSocket`
+  dependency when it closes; the backend's `voice.session` span is its child and carries the
+  interview id. In App Insights a candidate's socket, the backend session behind it, and the Azure
+  Voice Live errors in it (avatar rate limit included) are one trace. A socket counts as a success
+  only if its session went live and it closed normally; tab closes are reported too.
+- **WebRTC call quality, measured in the browser.** `voice.media` every 15 s from the avatar
+  connection's `getStats()`: RTT, jitter, jitter buffer, audio and video loss, audible
+  concealment, bitrates, fps, dropped frames, freezes. The media goes browser ↔ Azure's TURN
+  relay, so this is the only place it can be seen.
+- **Playback gaps per turn on voice-only sessions** (`playback_gaps`, `playback_gap_ms_total`).
+- **The workbook shows the whole chain.** For one interview: every browser call with the backend
+  request or session it caused, the network gap, the backend's own breakdown, Azure errors, its
+  backend voice sessions, and its WebRTC quality over time. Across sessions: WebSocket sessions by
+  close code, WebRTC quality per media mode, playback gaps, page load, browser vs server latency
+  per route, per-question scoring, whole reports, judge verdicts and latency, external brain turns.
+
+### Fixed
+- **A normal pause after a playback gap is no longer reported as gap time.** After a session's
+  first underrun, the playback worklet counted every silence between utterances as part of that
+  gap, so the "the interviewer's voice had a gap of N ms" warning reported the whole pause
+  (measured in a test: 4053 ms reported for a 298 ms gap).
+
 ## 0.65.1.0 (2026-10-10)
 
 ### Changed
