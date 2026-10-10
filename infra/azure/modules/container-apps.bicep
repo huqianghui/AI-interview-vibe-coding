@@ -66,6 +66,7 @@ param azureFoundryDefaultProject string = ''
 param foundryAgentModel string = 'gpt-5-mini'
 param voiceLiveDefaultModel string = 'gpt-5-mini'
 param voiceLiveApiVersion string = '2026-01-01-preview'
+param sopEmbeddingDeployment string = 'text-embedding-3-small'
 
 // Ephemeral writable paths inside the container (mirrors the Dockerfile ENV defaults).
 @description('Backend DATABASE_URL. The PostgreSQL URL from postgres.bicep; the in-container SQLite default is lost on every restart and is kept only for a deployment without the server.')
@@ -249,6 +250,10 @@ resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
             {
               name: 'VOICE_LIVE_API_VERSION'
               value: voiceLiveApiVersion
+            }
+            {
+              name: 'SOP_EMBEDDING_DEPLOYMENT'
+              value: sopEmbeddingDeployment
             }
             // Selects the user-assigned MI for DefaultAzureCredential (the app has one identity but
             // this is required to disambiguate from any system-assigned identity).

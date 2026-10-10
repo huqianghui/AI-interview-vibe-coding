@@ -112,6 +112,10 @@ class Settings(BaseSettings):
     azure_foundry_endpoint: str = ""
     azure_foundry_api_key: str = ""
     azure_foundry_default_project: str = ""
+    # Embedding model for SOP search (hybrid: BM25 + vectors, fused by rank). A deployment on the
+    # AZURE_FOUNDRY_ENDPOINT resource; empty = keyword search only (dev and CI without Azure).
+    sop_embedding_deployment: str = "text-embedding-3-small"
+    sop_embedding_api_version: str = "2024-10-21"
     # Model Voice Live runs the session on (MODEL mode). Voice Live only accepts models it hosts
     # natively in the resource's region (Learn: Speech regions → Voice Live tab) — NOT arbitrary
     # deployments. Project default gpt-5-mini (second choice gpt-4.1-mini); both live-verified on

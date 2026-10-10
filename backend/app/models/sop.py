@@ -147,3 +147,24 @@ class CitationRun(TimestampMixin, Base):
     # JSON list of rows: question, item, old citation, new citation, how it was found.
     report_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     error: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+
+class SopUnitEmbedding(TimestampMixin, Base):
+    """The embedding of one unit of an SOP (app.sop.units), for hybrid search: a plain column,
+    the ranking done in the backend (owner, 2026-10-09: "a plain column, with the backend doing
+    the math"). A unit is named by its citation (``unit_key``) and its text by a hash, so a
+    re-split re-embeds only the units whose text changed."""
+
+    __tablename__ = "sop_unit_embeddings"
+    __table_args__ = (
+        UniqueConstraint("document_id", "unit_key", "text_hash", name="uq_sop_unit_embeddings"),
+    )
+
+    document_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("sop_documents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    unit_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    text_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    model: Mapped[str] = mapped_column(String(100), default="", nullable=False)
+    # JSON list of floats.
+    vector: Mapped[str] = mapped_column(Text, nullable=False)

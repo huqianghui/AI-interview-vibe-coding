@@ -4,7 +4,11 @@ Keyword scoring (BM25), no index service: 26 documents, all in memory for one ca
 scored is each document's UNITS (``app.sop.units``: sections merged or opened to 500-4000
 characters), the same passages the SOP tab shows and a citation names (owner, 2026-10-09: what
 a person sees and what the AI uses are one set). A unit is scored on its label, twice, and its
-whole text. It only proposes CANDIDATES; the model chooses among them and its choice is checked
+whole text, and, when its vector is stored (``sop_embeddings``), by meaning too: hybrid search,
+the two rankings fused by Reciprocal Rank Fusion, score = sum of 1 / (60 + rank) over the lists
+a unit is in (owner, 2026-10-09: the backend does the math; a plain column, no index service).
+Without vectors (dev, CI, embeddings off or failing) it is the keyword ranking alone. It only
+proposes CANDIDATES; the model chooses among them and its choice is checked
 (``sop_citation_service``).
 """
 
@@ -20,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.sop import SopDocument, SopSection
+from app.services import sop_embeddings
 from app.sop.units import Unit, units
 
 _BM25_K1 = 1.4
@@ -52,6 +57,16 @@ class Candidate:
     piece: int = 0  # the unit is one piece of a section too long for one
 
 
+# Reciprocal Rank Fusion's constant (the usual 60), and how deep each ranking is read.
+_RRF_K = 60
+_DEPTH = 50
+# The least cosine similarity a unit needs to be proposed by meaning. Measured 2026-10-10 on
+# text-embedding-3-small with SOP-style text: a question and the passage answering it scored
+# 0.59-0.72, the same question and another SOP topic 0.19-0.45, unrelated text 0.04-0.36. Below
+# the floor a unit is not "found by meaning", so a query nothing answers still finds nothing.
+VECTOR_MIN_COSINE = 0.5
+
+
 @dataclass
 class _Indexed:
     document_id: str
@@ -59,12 +74,25 @@ class _Indexed:
     document_name: str
     counts: Counter
     length: int
+    vector: list[float] | None = None
+    norm: float = 0.0
+
+
+def _cosine(a: list[float], norm_a: float, b: list[float], norm_b: float) -> float:
+    if not norm_a or not norm_b or len(a) != len(b):
+        return 0.0  # another model's vector (another size) is never compared
+    return sum(x * y for x, y in zip(a, b, strict=False)) / (norm_a * norm_b)
 
 
 class SectionIndex:
     """Every converted document's units, scored on demand."""
 
-    def __init__(self, rows: Sequence[SopSection], names: dict[str, str]) -> None:
+    def __init__(
+        self,
+        rows: Sequence[SopSection],
+        names: dict[str, str],
+        vectors: dict[tuple[str, str, str], list[float]] | None = None,
+    ) -> None:
         by_doc: dict[str, list[SopSection]] = {}
         for r in rows:
             by_doc.setdefault(r.document_id, []).append(r)
@@ -74,19 +102,33 @@ class SectionIndex:
             for unit in units(sorted(doc_rows, key=lambda r: r.order_index)):
                 words = tokens(f"{unit.label} {unit.label} {unit.text}")
                 counts = Counter(words)
+                vector = (vectors or {}).get(
+                    (doc_id, sop_embeddings.unit_key(unit), sop_embeddings.text_hash(unit.text))
+                )
+                norm = math.sqrt(sum(x * x for x in vector)) if vector else 0.0
                 self._items.append(
-                    _Indexed(doc_id, unit, names.get(doc_id, ""), counts, len(words))
+                    _Indexed(doc_id, unit, names.get(doc_id, ""), counts, len(words), vector, norm)
                 )
                 df.update(counts.keys())
         n = max(1, len(self._items))
         self._idf = {w: math.log(1 + (n - c + 0.5) / (c + 0.5)) for w, c in df.items()}
         self._avg = sum(i.length for i in self._items) / n if self._items else 1.0
 
+    @property
+    def has_vectors(self) -> bool:
+        return any(i.vector for i in self._items)
+
     def search(
-        self, text: str, *, limit: int = 8, document_ids: Iterable[str] | None = None
+        self,
+        text: str,
+        *,
+        limit: int = 8,
+        document_ids: Iterable[str] | None = None,
+        query_vector: list[float] | None = None,
     ) -> list[Candidate]:
         """The best-scoring units for ``text``, at most ``limit``, optionally only within some
-        documents. Units scoring nothing are never returned."""
+        documents. A unit is returned only if its keywords score or, with ``query_vector``, its
+        meaning is close enough (``VECTOR_MIN_COSINE``)."""
         query = set(tokens(text))
         allowed = set(document_ids) if document_ids is not None else None
         scored: list[tuple[float, _Indexed]] = []
@@ -102,6 +144,8 @@ class SectionIndex:
             if score > 0:
                 scored.append((score, item))
         scored.sort(key=lambda pair: -pair[0])
+        if query_vector is not None:
+            scored = self._fused(scored, query_vector, allowed)
         out = []
         for score, i in scored[:limit]:
             number, through, own, piece = i.unit.citation()
@@ -120,6 +164,30 @@ class SectionIndex:
             )
         return out
 
+    def _fused(
+        self,
+        keyword: list[tuple[float, _Indexed]],
+        query_vector: list[float],
+        allowed: set[str] | None,
+    ) -> list[tuple[float, _Indexed]]:
+        """Keyword and vector rankings fused by rank: RRF, sum of 1 / (60 + rank)."""
+        norm_q = math.sqrt(sum(x * x for x in query_vector))
+        scored = (
+            (_cosine(query_vector, norm_q, i.vector, i.norm), i)
+            for i in self._items
+            if i.vector and (allowed is None or i.document_id in allowed)
+        )
+        by_meaning = sorted(
+            ((c, i) for c, i in scored if c >= VECTOR_MIN_COSINE), key=lambda pair: -pair[0]
+        )
+        fused: dict[int, float] = {}
+        items: dict[int, _Indexed] = {}
+        for ranking in (keyword[:_DEPTH], by_meaning[:_DEPTH]):
+            for rank, (_, item) in enumerate(ranking, 1):
+                fused[id(item)] = fused.get(id(item), 0.0) + 1.0 / (_RRF_K + rank)
+                items[id(item)] = item
+        return sorted(((score, items[k]) for k, score in fused.items()), key=lambda p: -p[0])
+
 
 async def load_index(db: AsyncSession, library_id: str | None = None) -> SectionIndex:
     """Every section, or only those of one SOP library's documents (spec-sop-libraries: a bank
@@ -132,4 +200,5 @@ async def load_index(db: AsyncSession, library_id: str | None = None) -> Section
     if library_id is not None:
         sections = sections.where(SopSection.document_id.in_(list(names)))
     rows = (await db.execute(sections)).scalars().all()
-    return SectionIndex(rows, names)
+    vectors = await sop_embeddings.vectors_for(db, names) if sop_embeddings.enabled() else {}
+    return SectionIndex(rows, names, vectors)

@@ -18,7 +18,7 @@ from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.sop import SopDocument, SopSection
-from app.services import sop_summary_service, storage
+from app.services import sop_embeddings, sop_summary_service, storage
 from app.services.sop_markdown import CONVERTER_VERSIONS, MarkdownResult, to_markdown
 from app.sop.sections import heading_block, parse_sections
 
@@ -168,12 +168,25 @@ async def _build_one(session_factory, doc_id: str, *, only_if_needed: bool) -> b
             if only_if_needed and not needs_converting(document):
                 return False
             await build(db, document)
-            return True
+        # Its units' vectors for hybrid search (only the units whose text changed); a failure
+        # leaves keyword search for this document.
+        await _embed(session_factory, doc_id)
+        return True
     except Exception:  # noqa: BLE001 — background work: log, keep going
         logger.exception("Converting SOP %s to sections failed", doc_id)
         return False
     finally:
         _CONVERTING.discard(doc_id)
+
+
+async def _embed(session_factory, doc_id: str) -> None:  # noqa: ANN001
+    try:
+        async with session_factory() as db:
+            await sop_embeddings.refresh(db, doc_id)
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 — background work: log, keep going
+        logger.warning("Embedding SOP %s failed; it is searched by keywords", doc_id, exc_info=True)
 
 
 async def build_missing(session_factory) -> int:  # noqa: ANN001 — async_sessionmaker
@@ -198,6 +211,9 @@ async def build_missing(session_factory) -> int:  # noqa: ANN001 — async_sessi
         # Then, OUTSIDE the build lock (drafting touches only the summary columns, and takes
         # ~25 s per document), draft every converted document's missing summary (spec §2).
         await sop_summary_service.summarize_missing(session_factory)
+        # Every document's search vectors, for the units that have none yet (the first boot after
+        # hybrid search came in embeds them all; later boots find nothing to do).
+        await sop_embeddings.refresh_all(session_factory)
         return done
     except asyncio.CancelledError:
         raise
