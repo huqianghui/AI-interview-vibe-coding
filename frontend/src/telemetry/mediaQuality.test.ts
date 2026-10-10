@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { MEDIA_WINDOW_MS, MediaQualityWindow, readMediaStats, windowMeasurements } from "./mediaQuality";
+import {
+  MEDIA_MEASUREMENTS,
+  MEDIA_WINDOW_MS,
+  MIN_PARTIAL_WINDOW_MS,
+  MediaQualityWindow,
+  readMediaStats,
+  windowMeasurements,
+} from "./mediaQuality";
 import { voiceMetrics } from "./voiceTimeline";
 
 /** A getStats report shaped like Chrome's, from cumulative counters. */
@@ -145,6 +152,40 @@ describe("MediaQualityWindow", () => {
     w.sample(report(AFTER_15S), 2 * MEDIA_WINDOW_MS, "audio-only");
     expect(sent[1].p).toMatchObject({ mode: "audio-only", window_index: 1 });
     expect(sent[1].m.video_fps).toBe(0);
+  });
+
+  it("restarts the window on a counter reset instead of inventing a rate across it", () => {
+    const sent: Record<string, number>[] = [];
+    const w = new MediaQualityWindow((_n, m) => sent.push(m));
+    w.sample(report(AFTER_15S), 0, "video");
+    w.sample(report(ZERO), 5_000, "video"); // the stream restarted: counters went back to zero
+    w.sample(report(AFTER_15S), 5_000 + MEDIA_WINDOW_MS, "video");
+    expect(sent).toHaveLength(1);
+    expect(sent[0].window_s).toBe(15); // measured from the restart, not from before it
+    expect(sent[0].video_fps).toBe(25);
+  });
+
+  it("sends the partial window when the connection ends, if it is long enough", () => {
+    const sent: { m: Record<string, number>; p: Record<string, unknown> }[] = [];
+    const w = new MediaQualityWindow((_n, m, p = {}) => sent.push({ m, p }));
+    w.sample(report(ZERO), 0, "video");
+    w.sample(report(AFTER_15S), MIN_PARTIAL_WINDOW_MS + 1_000, "video");
+    w.finish();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].p.partial).toBe(true);
+    const short = new MediaQualityWindow((_n, m, p = {}) => sent.push({ m, p }));
+    short.sample(report(ZERO), 0, "video");
+    short.sample(report(AFTER_15S), MIN_PARTIAL_WINDOW_MS - 1_000, "video");
+    short.finish();
+    expect(sent).toHaveLength(1); // too short to mean anything
+  });
+
+  it("only ever emits names in MEDIA_MEASUREMENTS", () => {
+    const a = readMediaStats(report(ZERO), 0).counters;
+    const { counters: b, gauges } = readMediaStats(report(AFTER_15S), 15_000);
+    for (const key of Object.keys(windowMeasurements(a, b, gauges))) {
+      expect(MEDIA_MEASUREMENTS as readonly string[]).toContain(key);
+    }
   });
 
   it("never throws into the health sampler", () => {

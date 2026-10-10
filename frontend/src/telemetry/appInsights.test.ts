@@ -5,6 +5,7 @@ const sdk = vi.hoisted(() => ({
   events: [] as { event: { name: string; measurements?: Record<string, number> }; props?: unknown }[],
   initializers: [] as ((item: unknown) => void)[],
   flushes: 0,
+  dependencies: [] as Record<string, unknown>[],
 }));
 vi.mock("@microsoft/applicationinsights-web", () => ({
   DistributedTracingModes: { W3C: 2 },
@@ -20,6 +21,12 @@ vi.mock("@microsoft/applicationinsights-web", () => ({
     trackEvent(event: { name: string }, props?: unknown) {
       sdk.events.push({ event, props });
     }
+    trackDependencyData(dependency: Record<string, unknown>) {
+      sdk.dependencies.push(dependency);
+    }
+    getTraceCtx() {
+      return { getTraceId: () => "4bf92f3577b34da6a3ce929d0e0e4736" };
+    }
     flush() {
       sdk.flushes += 1;
     }
@@ -28,6 +35,7 @@ vi.mock("@microsoft/applicationinsights-web", () => ({
 
 import {
   beginWebSocketTrace,
+  pinOperation,
   resetTelemetryForTests,
   scrubItem,
   startTelemetry,
@@ -88,6 +96,26 @@ describe("start-up", () => {
     const item = { baseData: { uri: "https://h/p?token=1" } };
     sdk.initializers[0](item);
     expect(item.baseData.uri).toBe("https://h/p");
+  });
+
+  it("the loaded SDK carries the WebSocket trace: the page's trace id out, the socket as a dependency", async () => {
+    sdk.dependencies.length = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ app_insights_connection_string: "InstrumentationKey=k" }))),
+    );
+    expect(await startTelemetry("tok")).toBe(true);
+    const trace = beginWebSocketTrace("WS /api/voice-live/ws", "example.test");
+    expect(trace.traceparent).toMatch(/^00-4bf92f3577b34da6a3ce929d0e0e4736-[0-9a-f]{16}-01$/);
+    trace.end(1006, false);
+    expect(sdk.dependencies).toEqual([
+      expect.objectContaining({
+        id: trace.traceparent!.split("-")[2],
+        type: "WebSocket",
+        success: false,
+        responseCode: 1006,
+      }),
+    ]);
   });
 
   it("stays off and drops the buffer when the deployment has no App Insights", async () => {
@@ -229,7 +257,8 @@ describe("WebSocket trace", () => {
     });
     const trace = beginWebSocketTrace("WS /api/voice-live/ws", "example.test");
     expect(trace.traceparent).toMatch(new RegExp(`^00-${TRACE}-[0-9a-f]{16}-01$`));
-    trace.end(1000, true);
+    trace.markLive();
+    trace.end(1000, true, "bye");
     trace.end(1006, false); // idempotent: one socket, one record
     expect(deps).toHaveLength(1);
     expect(deps[0]).toMatchObject({
@@ -239,7 +268,31 @@ describe("WebSocket trace", () => {
       responseCode: 1000,
       // The backend's span names this id as its parent: that is the join.
       id: trace.traceparent!.split("-")[2],
+      // Pinned to the trace it opened in (see pinOperation), with why it closed.
+      properties: { live: true, close_reason: "bye", trace_id: TRACE },
     });
+  });
+
+  it("is a failure unless its session went live, however cleanly it closed", () => {
+    const deps: Record<string, unknown>[] = [];
+    resetTelemetryForTests({ trackEvent: () => undefined, trackDependency: (d) => deps.push(d), traceId: () => TRACE });
+    beginWebSocketTrace("ws", "t").end(1000, true); // closed before session.updated
+    const dropped = beginWebSocketTrace("ws", "t");
+    dropped.markLive();
+    dropped.end(1000, false, "azure_stream_ended"); // Azure ended it mid-interview
+    expect(deps.map((d) => d.success)).toEqual([false, false]);
+  });
+
+  it("puts a WebSocket dependency back in the trace it opened in", () => {
+    const item = {
+      baseData: { type: "WebSocket", properties: { trace_id: TRACE } },
+      tags: { "ai.operation.id": "a-later-route" } as Record<string, unknown>,
+    };
+    pinOperation(item);
+    expect(item.tags["ai.operation.id"]).toBe(TRACE);
+    const fetchItem = { baseData: { type: "Fetch", properties: { trace_id: TRACE } }, tags: {} as Record<string, unknown> };
+    pinOperation(fetchItem);
+    expect(fetchItem.tags).toEqual({}); // only the socket is pinned
   });
 
   it("opens unlinked before the SDK is up, and never throws", () => {

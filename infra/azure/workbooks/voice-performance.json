@@ -71,7 +71,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "let iv = \"{Interview}\";\nlet ops = customEvents | where tostring(customDimensions.interview_id) == iv | distinct operation_Id;\nlet browser = dependencies\n  | where client_Type == \"Browser\" and (operation_Id in (ops) or name has iv)\n  | project b_time = timestamp, call = tostring(split(name, \"?\")[0]), call_type = type, browser_ms = duration, b_id = id, operation_Id, result = resultCode;\nlet server = union requests, (dependencies | where name == \"voice.session\")\n  | where client_Type != \"Browser\"\n  | project s_id = id, s_parent = operation_ParentId, server_ms = duration;\nlet children = dependencies\n  | where client_Type != \"Browser\" and not(name endswith \" http send\" or name endswith \" http receive\")\n  | summarize ms = round(sum(duration)), n = count() by parent = operation_ParentId, name\n  | summarize breakdown = make_bag(bag_pack(strcat(name, iff(n > 1, strcat(\" x\", tostring(n)), \"\")), ms)) by parent;\nlet azure_errors = traces\n  | where message == \"voice.azure_error\"\n  | summarize azure_errors = count(), avatar_rate_limited = countif(tostring(customDimensions.avatar_rate_limited) =~ \"true\") by parent = operation_ParentId;\nbrowser\n| join kind=leftouter server on $left.b_id == $right.s_parent\n| join kind=leftouter children on $left.s_id == $right.parent\n| join kind=leftouter azure_errors on $left.s_id == $right.parent\n| project b_time, call, call_type, result, browser_ms = round(browser_ms), server_ms = round(server_ms),\n    network_ms = round(browser_ms - server_ms), breakdown, azure_errors, avatar_rate_limited, operation_Id\n| order by b_time asc",
+        "query": "let iv = \"{Interview}\";\n// The interview's voice sockets, found through the backend session span that names it.\nlet ws_ids = dependencies\n  | where name == \"voice.session\" and tostring(customDimensions[\"voice.interview_id\"]) == iv\n  | distinct operation_ParentId;\nlet browser = dependencies\n  | where isnotempty(iv) and client_Type == \"Browser\" and (name has iv or (type == \"WebSocket\" and id in (ws_ids)))\n  | project b_time = timestamp, call = tostring(split(name, \"?\")[0]), call_type = type, browser_ms = duration, b_id = id, operation_Id, result = resultCode;\nlet server = union requests, (dependencies | where name == \"voice.session\")\n  | where client_Type != \"Browser\"\n  | project s_id = id, s_parent = operation_ParentId, server_ms = duration;\nlet children = dependencies\n  | where client_Type != \"Browser\" and not(name endswith \" http send\" or name endswith \" http receive\")\n  | summarize ms = round(sum(duration)), n = count() by parent = operation_ParentId, name\n  | summarize breakdown = make_bag(bag_pack(strcat(name, iff(n > 1, strcat(\" x\", tostring(n)), \"\")), ms)) by parent;\nlet azure_errors = traces\n  | where message == \"voice.azure_error\"\n  | summarize azure_errors = count(), avatar_rate_limited = countif(tostring(customDimensions.avatar_rate_limited) =~ \"true\") by parent = operation_ParentId;\nbrowser\n| join kind=leftouter server on $left.b_id == $right.s_parent\n| join kind=leftouter children on $left.s_id == $right.parent\n| join kind=leftouter azure_errors on $left.s_id == $right.parent\n// A socket is open for the whole session on both sides: there is no network share to subtract.\n| project b_time, call, call_type, result, browser_ms = round(browser_ms), server_ms = round(server_ms),\n    network_ms = iff(call_type == \"WebSocket\", real(null), round(browser_ms - server_ms)), breakdown, azure_errors, avatar_rate_limited, operation_Id\n| order by b_time asc",
         "size": 0,
         "title": "Request chain: browser call → backend → its children",
         "timeContextFromParameter": "TimeRange",
@@ -89,6 +89,19 @@
             }
           ]
         }
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "title": "Backend voice sessions of this interview (also those opened before the page's SDK was up)",
+        "query": "let iv = \"{Interview}\";\nlet errors = traces | where message == \"voice.azure_error\"\n  | summarize azure_errors = count(), avatar_rate_limited = countif(tostring(customDimensions.avatar_rate_limited) =~ \"true\") by parent = operation_ParentId;\ndependencies\n| where isnotempty(iv) and name == \"voice.session\" and tostring(customDimensions[\"voice.interview_id\"]) == iv\n| join kind=leftouter errors on $left.id == $right.parent\n| project timestamp, minutes = round(duration / 60000.0, 1), success, realtime = tostring(customDimensions[\"voice.realtime\"]),\n    mode = tostring(customDimensions[\"voice.mode\"]), azure_errors, avatar_rate_limited, linked_to_browser = isnotempty(operation_ParentId), operation_Id\n| order by timestamp asc",
+        "size": 0,
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table"
       }
     },
     {

@@ -289,6 +289,8 @@ export function useAvatarStream(
     pendingStreamRef.current = null;
     stopAudibleRef.current?.();
     stopAudibleRef.current = null;
+    mediaWindowRef.current?.finish();
+    mediaWindowRef.current = null;
     if (pcRef.current) {
       void handshakesRef.current.get(pcRef.current)?.finish("closed");
       pcRef.current.close();
@@ -400,6 +402,8 @@ export function useAvatarStream(
     (pc: RTCPeerConnection) => {
       stopSampling();
       windowCountRef.current = 0;
+      // A new connection's counters start from zero: close the previous one's window first.
+      mediaWindowRef.current?.finish();
       mediaWindowRef.current = new MediaQualityWindow();
       const gen = genRef.current;
       statsTimerRef.current = setInterval(() => {
@@ -414,7 +418,7 @@ export function useAvatarStream(
             const now = Date.now();
             const { snapshot, health } = readHealth(snapshotRef.current, report, now);
             snapshotRef.current = snapshot;
-            mediaWindowRef.current?.sample(report, now, decisionRef.current.mode);
+            mediaWindowRef.current?.sample(report, performance.now(), decisionRef.current.mode);
             if (!health) return; // first sample: no window to judge yet.
 
             const before = decisionRef.current;

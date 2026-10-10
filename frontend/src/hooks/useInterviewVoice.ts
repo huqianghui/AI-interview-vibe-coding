@@ -572,6 +572,8 @@ export function useInterviewVoice(
                 doomed.onclose = null;
                 doomed.close();
               }
+              // Its close handler is detached: the trace ends here, as the failure it is.
+              wsTraceRef.current?.end(1008, false, "mic_rate_mismatch");
               audio.cleanupMic();
               setConn("error");
               optionsRef.current.onError?.(mismatch);
@@ -602,6 +604,7 @@ export function useInterviewVoice(
           const iceServers = toRtcIceServers(avatarConf?.ice_servers);
 
           sessionLiveRef.current = true;
+          wsTraceRef.current?.markLive();
           voiceMetrics.setup("session_updated");
           // A session that reached `session.updated` works, whatever it took to get here.
           policy.noteLive();
@@ -990,8 +993,9 @@ export function useInterviewVoice(
 
       // Step 3: open the Voice Live WS proxy and wait for `session.updated` (connected) or an
       // error/timeout.
-      // The previous socket's trace (a reconnect replaces it) ends here if its close never reported.
-      wsTraceRef.current?.end(1000, true);
+      // The previous socket's trace ends here if no close path reported it (a deliberate replacement:
+      // a success if its session had gone live, see WebSocketTrace).
+      wsTraceRef.current?.end(1000, true, "replaced");
       const wsTrace = beginWebSocketTrace("WS /api/voice-live/ws", window.location.host);
       wsTraceRef.current = wsTrace;
       const wsUrl = buildWsUrl(
@@ -1035,8 +1039,15 @@ export function useInterviewVoice(
         ws.onclose = (event?: CloseEvent) => {
           const wasConnected = resolved;
           const code = event?.code ?? 1005;
-          // Clean: opened, and closed normally (1000), by navigation (1001) or with no status (1005).
-          wsTrace.end(code, wasConnected && (code === 1000 || code === 1001 || code === 1005));
+          const reason = event?.reason ?? "";
+          // Clean: a normal close (1000), by navigation (1001) or with no status (1005), that is not
+          // the backend reporting Azure's end of the stream, nor a session already latched fatal.
+          // (Success also needs the session to have gone live: see WebSocketTrace.)
+          const clean =
+            (code === 1000 || code === 1001 || code === 1005) &&
+            reason !== "azure_stream_ended" &&
+            !policy.isFatal();
+          wsTrace.end(code, clean, reason);
           wsRef.current = null;
           if (!wasConnected) {
             rejectOnce(
@@ -1199,7 +1210,7 @@ export function useInterviewVoice(
         wsRef.current.close();
         wsRef.current = null;
         // Its close handler is detached, so its trace ends here: a deliberate rebuild, not a failure.
-        wsTraceRef.current?.end(1000, true);
+        wsTraceRef.current?.end(1000, true, "rebuilt");
       }
       audio.cleanupMic();
       avatarStartedRef.current = false;
@@ -1501,6 +1512,14 @@ export function useInterviewVoice(
     // shape that once tore the avatar connection down mid-handshake — an effect that re-ran because it
     // depended on something rebuilt per render. The omission is the safer statement of intent.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // A tab closed mid-interview never runs onclose: report its socket on the way out, so the longest
+  // sessions are not the ones missing from the workbook.
+  useEffect(() => {
+    const onPageHide = () => wsTraceRef.current?.end(1001, true, "pagehide");
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
   }, []);
 
   // Every voice timing event carries the interview it belongs to ("playground" for the editor).

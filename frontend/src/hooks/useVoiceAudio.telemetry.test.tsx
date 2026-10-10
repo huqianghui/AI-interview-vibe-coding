@@ -69,7 +69,7 @@ describe("playback started → first_audible", () => {
     expect(turn).toHaveBeenCalledTimes(1);
   });
 
-  it("counts each playback gap, with its length, once it ends", async () => {
+  it("counts gaps and their total length from the worklet's running totals", async () => {
     const count = vi.spyOn(voiceMetrics, "count");
     const { result } = renderHook(() => useVoiceAudio());
     await act(async () => {
@@ -78,19 +78,21 @@ describe("playback started → first_audible", () => {
       await Promise.resolve();
     });
     const port = FakeNode.last!.port;
-    const stats = (lastGapMs: number) =>
+    const stats = (underruns: number, lastGapMs: number, totalGapMs: number) =>
       act(() =>
         port.onmessage?.({
-          data: { eventType: "stats", underruns: 1, bufferedMs: 80, lastGapMs, state: "playing" },
+          data: { eventType: "stats", underruns, bufferedMs: 80, lastGapMs, totalGapMs, state: "playing" },
         }),
       );
-    stats(0); // no gap yet
-    stats(240); // a gap of 240 ms just ended
-    stats(240); // the same gap, reported again
+    stats(0, 0, 0); // nothing yet
+    stats(1, 240, 240); // one gap of 240 ms
+    stats(1, 240, 240); // the same report again: nothing new
+    stats(2, 240, 480); // a SECOND gap of exactly the same length is still counted
     expect(count.mock.calls).toEqual([
-      ["playback_gaps"],
+      ["playback_gaps", 1],
+      ["playback_gap_ms_total", 240],
+      ["playback_gaps", 1],
       ["playback_gap_ms_total", 240],
     ]);
   });
 });
-

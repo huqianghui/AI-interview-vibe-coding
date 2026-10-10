@@ -12,6 +12,24 @@ import { voiceMetrics } from "./voiceTimeline";
 
 export const MEDIA_WINDOW_MS = 15_000;
 
+/** Every measurement a `voice.media` window can carry (the docs and the workbook are pinned to it). */
+export const MEDIA_MEASUREMENTS = [
+  "window_s",
+  "rtt_ms",
+  "audio_jitter_ms",
+  "available_in_kbps",
+  "audio_loss_pct",
+  "audio_concealed_pct",
+  "jitter_buffer_ms",
+  "audio_kbps",
+  "video_loss_pct",
+  "video_kbps",
+  "video_fps",
+  "video_frames_dropped",
+  "video_freezes",
+  "video_freeze_ms",
+] as const;
+
 type Row = Record<string, unknown>;
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 
@@ -124,8 +142,21 @@ type Emit = typeof trackEvent;
 
 /** Windows over one peer connection's stats. `sample()` on every health tick; it sends a window
  * once MEDIA_WINDOW_MS have passed since the window began. */
+/** A partial window shorter than this is not worth sending when a connection ends. */
+export const MIN_PARTIAL_WINDOW_MS = 5_000;
+
+/** A cumulative counter went DOWN: the stream restarted (e.g. a new SSRC on the same connection). */
+function restarted(a: Counters, b: Counters): boolean {
+  return (Object.keys(a) as (keyof Counters)[]).some((k) => k !== "at" && b[k] < a[k]);
+}
+
+/** Windows over one peer connection's stats. `sample()` on every health tick (with a monotonic
+ * clock: `performance.now()`); it sends a window once MEDIA_WINDOW_MS have passed since the window
+ * began. `finish()` when the connection ends sends the partial window, which is often the degraded
+ * stretch that made it end. */
 export class MediaQualityWindow {
   private start: Counters | null = null;
+  private last: { counters: Counters; gauges: Gauges; mode: string } | null = null;
   private index = 0;
 
   constructor(private readonly emit: Emit = trackEvent) {}
@@ -133,23 +164,47 @@ export class MediaQualityWindow {
   sample(report: { forEach(cb: (row: Row) => void): void }, at: number, mode: string): void {
     try {
       const { counters, gauges } = readMediaStats(report, at);
-      if (!this.start) {
+      if (!this.start || restarted(this.start, counters)) {
+        // A rate across a counter reset would be invented: start a fresh window instead.
         this.start = counters;
+        this.last = null;
         return;
       }
-      if (at - this.start.at < MEDIA_WINDOW_MS) return;
-      const props: Record<string, string | number | boolean> = {
-        ...voiceMetrics.contextSnapshot,
-        mode,
-        window_index: this.index,
-      };
-      if (gauges.resolution) props.resolution = gauges.resolution;
-      // Periodic: rides the SDK's next batch rather than flushing on every window.
-      this.emit("voice.media", windowMeasurements(this.start, counters, gauges), props, false);
-      this.index += 1;
-      this.start = counters;
+      this.last = { counters, gauges, mode };
+      if (at - this.start.at >= MEDIA_WINDOW_MS) this.send();
     } catch (err) {
       console.debug("[telemetry] media sample failed", err);
     }
+  }
+
+  /** The connection is ending: send what the current window has, if it is long enough to mean
+   * anything. */
+  finish(): void {
+    try {
+      if (this.start && this.last && this.last.counters.at - this.start.at >= MIN_PARTIAL_WINDOW_MS) {
+        this.send(true);
+      }
+      this.start = null;
+      this.last = null;
+    } catch (err) {
+      console.debug("[telemetry] media finish failed", err);
+    }
+  }
+
+  private send(partial = false): void {
+    if (!this.start || !this.last) return;
+    const { counters, gauges, mode } = this.last;
+    const props: Record<string, string | number | boolean> = {
+      ...voiceMetrics.contextSnapshot,
+      mode,
+      window_index: this.index,
+      partial,
+    };
+    if (gauges.resolution) props.resolution = gauges.resolution;
+    // Periodic: rides the SDK's next batch rather than flushing on every window.
+    this.emit("voice.media", windowMeasurements(this.start, counters, gauges), props, false);
+    this.index += 1;
+    this.start = counters;
+    this.last = null;
   }
 }

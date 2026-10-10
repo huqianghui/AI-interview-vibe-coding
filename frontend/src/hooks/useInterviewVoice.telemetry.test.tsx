@@ -13,10 +13,22 @@ const wsEnds: [number, boolean][] = [];
 vi.mock("../telemetry/appInsights", () => ({
   trackEvent: (name: string, m: Record<string, number>, p: Record<string, unknown>) =>
     tracked.push({ name, m, p }),
-  beginWebSocketTrace: () => ({
-    traceparent: TRACEPARENT,
-    end: (code: number, ok: boolean) => wsEnds.push([code, ok]),
-  }),
+  // Like the real one: each socket's trace ends once, however many paths try to end it.
+  beginWebSocketTrace: () => {
+    let ended = false;
+    let live = false;
+    return {
+      traceparent: TRACEPARENT,
+      markLive: () => {
+        live = true;
+      },
+      // Records what the real one reports as `success`: a live session AND a clean close.
+      end: (code: number, clean: boolean) => {
+        if (!ended) wsEnds.push([code, live && clean]);
+        ended = true;
+      },
+    };
+  },
 }));
 
 vi.mock("./useAvatarStream", () => ({
@@ -176,7 +188,30 @@ describe("voice timings → App Insights", () => {
     expect(wsEnds).toEqual([[1005, true]]);
   });
 
-  it("counts the WS-path playback gaps on the turn the candidate heard them in", async () => {
+  it("an abnormal close is a failed socket, and the reconnect opens a new traced one", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { ws, unmount } = await connected();
+    act(() => (ws.onclose as ((e: unknown) => void) | null)?.({ code: 1006, reason: "" }));
+    expect(wsEnds).toEqual([[1006, false]]);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_500); // the first reconnect backoff
+    });
+    const reconnected = FakeWebSocket.last!;
+    expect(reconnected).not.toBe(ws);
+    expect(new URL(reconnected.url).searchParams.get("traceparent")).toBe(TRACEPARENT);
+    act(() => {
+      reconnected.receive({ type: "proxy.connected", avatar_enabled: false, input_audio_sampling_rate: MIC_SAMPLE_RATE });
+      reconnected.receive({ type: "session.updated", session: {} });
+    });
+    unmount();
+    expect(wsEnds).toEqual([
+      [1006, false],
+      [1005, true],
+    ]);
+    vi.useRealTimers();
+  });
+
+  it("sends the turn's playback-gap counters with the turn", async () => {
     const { ws, unmount } = await connected();
     act(() => {
       ws.receive({ type: "response.created", response: { id: "r1" } });

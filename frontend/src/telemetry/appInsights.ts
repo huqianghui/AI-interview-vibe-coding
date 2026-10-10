@@ -36,6 +36,7 @@ interface Sink {
     success: boolean;
     responseCode: number;
     startTime: Date;
+    properties: Record<string, string | boolean>;
   }): void;
   /** The page's current trace id (32 hex), or null. */
   traceId?(): string | null;
@@ -118,8 +119,11 @@ const randomHex = (bytes: number): string =>
 export interface WebSocketTrace {
   /** W3C `traceparent` for the backend to parent its session span on, or null before the SDK is up. */
   traceparent: string | null;
-  /** Report the socket as a dependency once it closes. Idempotent. */
-  end(code: number, success: boolean): void;
+  /** The session went live on this socket (`session.updated`): only then can its end be a success. */
+  markLive(): void;
+  /** Report the socket as a dependency. `clean` = the close itself was normal; success needs that AND
+   * a session that went live. Idempotent: the first path to end a socket decides. */
+  end(code: number, clean: boolean, reason?: string): void;
 }
 
 /**
@@ -127,41 +131,68 @@ export interface WebSocketTrace {
  * socket (a WebSocket cannot carry headers, so it rides the query string), the backend starts its
  * span as a child of it, and `end()` records the socket as a dependency with that same id: in App
  * Insights the browser's socket and the backend's session become one parent/child pair in the page's
- * trace. Opened before the SDK has loaded, the socket is still recorded at `end()`, just unlinked.
+ * trace. The dependency is pinned to the trace it OPENED in (`trace_id`, applied by the telemetry
+ * initializer), even if the page has moved to another route by the time it closes. Opened before the
+ * SDK has loaded, the socket is still recorded at `end()`, just unlinked.
  */
 export function beginWebSocketTrace(name: string, target: string): WebSocketTrace {
-  const id = randomHex(8);
-  let traceparent: string | null = null;
+  let id = "";
+  let traceId: string | null = null;
   try {
-    const traceId = sink?.traceId?.() ?? null;
-    if (traceId && /^[0-9a-f]{32}$/.test(traceId)) traceparent = `00-${traceId}-${id}-01`;
+    id = randomHex(8);
+    const current = sink?.traceId?.() ?? null;
+    if (current && /^[0-9a-f]{32}$/.test(current)) traceId = current;
   } catch (err) {
     console.debug("[telemetry] no trace context", err);
   }
+  const traceparent = traceId && id ? `00-${traceId}-${id}-01` : null;
   const startTime = new Date();
   const started = performance.now();
+  let live = false;
   let ended = false;
   return {
     traceparent,
-    end(code, success) {
+    markLive() {
+      live = true;
+    },
+    end(code, clean, reason) {
       if (ended) return;
       ended = true;
       try {
+        const properties: Record<string, string | boolean> = { live };
+        if (reason) properties.close_reason = reason.slice(0, 64);
+        if (traceId) properties.trace_id = traceId;
         sink?.trackDependency?.({
-          id,
+          id: id || randomHex(8),
           name,
           target,
           type: "WebSocket",
           duration: performance.now() - started,
-          success,
+          success: live && clean,
           responseCode: code,
           startTime,
+          properties,
         });
       } catch (err) {
         console.debug("[telemetry] WebSocket dependency failed", err);
       }
     },
   };
+}
+
+/** A WebSocket dependency carries the trace it opened in; put it back on the item, where App Insights
+ * reads the operation from (exported for tests). */
+export function pinOperation(item: {
+  baseData?: Record<string, unknown>;
+  tags?: Record<string, unknown>;
+}): void {
+  const data = item.baseData;
+  const props = data?.properties as Record<string, unknown> | undefined;
+  const traceId = props?.trace_id;
+  if (data?.type !== "WebSocket" || typeof traceId !== "string") return;
+  // Set in place: the SDK's `tags` may be its legacy array-backed object, which a spread would break.
+  if (!item.tags) item.tags = {};
+  item.tags["ai.operation.id"] = traceId;
 }
 
 /** Resolve when the main thread is idle (or after `timeoutMs`), so the SDK's download, parse and
@@ -246,6 +277,7 @@ async function loadSdk(connectionString: string): Promise<void> {
   ai.loadAppInsights();
   ai.addTelemetryInitializer((item) => {
     scrubItem(item as { baseData?: Record<string, unknown> });
+    pinOperation(item as { baseData?: Record<string, unknown>; tags?: Record<string, unknown> });
   });
   ai.trackPageView();
   sink = {

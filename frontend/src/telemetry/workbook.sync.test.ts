@@ -7,6 +7,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { MEDIA_MEASUREMENTS } from "./mediaQuality";
 import { AVATAR_SPANS, SETUP_SPANS, TURN_SPANS, type SpanDef } from "./voiceTimeline";
 
 const ROOT = resolve(__dirname, "../../..");
@@ -42,5 +43,27 @@ describe.each([
 
   it("every span is defined in the metric reference", () => {
     for (const name of [...names(spans), ...extra]) expect(doc).toContain(`\`${name}\``);
+  });
+});
+
+describe("voice.media and the turn counters", () => {
+  const queries = workbook.items.map((item) => item.content.query ?? "");
+  const measuredIn = (event: string) =>
+    new Set(
+      queries
+        .filter((q) => q.includes(`"${event}"`))
+        .flatMap((q) => [...q.matchAll(/customMeasurements\.(\w+)/g)].map((m) => m[1])),
+    );
+
+  it("every voice.media measurement the workbook reads is one the page sends", () => {
+    const read = measuredIn("voice.media");
+    expect(read.size).toBeGreaterThan(0);
+    for (const name of read) expect(MEDIA_MEASUREMENTS as readonly string[]).toContain(name);
+  });
+
+  it("every voice.media measurement and turn counter is defined in the metric reference", () => {
+    for (const name of [...MEDIA_MEASUREMENTS, "playback_gaps", "playback_gap_ms_total"]) {
+      expect(doc).toContain(`\`${name}\``);
+    }
   });
 });

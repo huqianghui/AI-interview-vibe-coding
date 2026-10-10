@@ -58,8 +58,12 @@ headers. So the page does it by hand (`beginWebSocketTrace` in `telemetry/appIns
    (`telemetry.parent_context`; a malformed value is ignored, never trusted), and tags it with
    `voice.interview_id`.
 3. When the socket closes, the page records it as a `WebSocket` dependency with that same span id:
-   duration = session length, result code = the close code (clean = opened, then 1000 / 1001 /
-   1005).
+   duration = session length, result code = the close code, `close_reason` and `live` as
+   properties. It counts as a success only if its session went live (`session.updated`) AND it
+   closed normally (1000 / 1001 / 1005, not the backend's `azure_stream_ended`, not a latched fatal
+   such as `mic_rate_mismatch`). A tab closed mid-interview is reported on `pagehide`; a socket
+   replaced by a reconnect or a media-mode rebuild ends as `replaced` / `rebuilt`. The dependency is
+   pinned to the trace it opened in, even if the page changed route before it closed.
 
 In App Insights the browser's socket and the backend's session are then one parent / child pair in
 the page's trace, and Azure Voice Live errors raised in the session (`voice.azure_error`, avatar
@@ -186,6 +190,7 @@ rates over the window, gauges the window's last reading. Properties: the event c
 
 | Measurement | What |
 |---|---|
+| `window_s` | the window's length (about 15 s) |
 | `rtt_ms` | RTT of the selected candidate pair |
 | `audio_jitter_ms` | interarrival jitter of the audio stream |
 | `jitter_buffer_ms` | average time audio waited in the jitter buffer |
@@ -197,13 +202,18 @@ rates over the window, gauges the window's last reading. Properties: the event c
 | `video_frames_dropped`, `video_freezes`, `video_freeze_ms` | in the window |
 
 A measurement the connection cannot provide (video on an audio-only connection, RTT before ICE
-reports one) is left out rather than sent as 0.
+reports one) is left out rather than sent as 0. A cumulative counter that goes down (the stream
+restarted) starts a fresh window instead of producing an invented rate. When the connection ends
+(teardown, recovery rebuild, media-mode switch) the partial window is sent if it is at least 5 s
+long, marked `partial = true`: it is often the degraded stretch that made the connection end.
 
 ### Voice-only playback gaps (on `voice.turn`)
 
 Without an avatar, the interviewer's audio is PCM on the WebSocket and plays through the page's
 jitter buffer. Each time it runs dry mid-speech the turn the candidate heard it in counts it:
-`playback_gaps` (how many) and `playback_gap_ms_total` (how long, summed).
+`playback_gaps` (how many) and `playback_gap_ms_total` (how long, summed), from the playback
+worklet's own running totals. Gap time is only the silence between a gap's start and playback
+resuming; the normal pause between utterances is not part of it.
 
 ## The workbook
 
