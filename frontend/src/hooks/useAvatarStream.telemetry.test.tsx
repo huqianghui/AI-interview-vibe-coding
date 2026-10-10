@@ -8,9 +8,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 
 const tracked: { name: string; m: Record<string, number>; p: Record<string, unknown> }[] = [];
+const unloadFlushes = { n: 0 };
 vi.mock("../telemetry/appInsights", () => ({
   trackEvent: (name: string, m: Record<string, number>, p: Record<string, unknown>) =>
     tracked.push({ name, m, p }),
+  flushForUnload: () => {
+    unloadFlushes.n += 1;
+  },
 }));
 
 import { useAvatarStream } from "./useAvatarStream";
@@ -327,6 +331,36 @@ describe("voice.avatar wiring", () => {
     expect(media[0].m.video_fps).toBe(25);
     expect(media[0].m.rtt_ms).toBe(50);
     expect(media[0].p).toMatchObject({ mode: "video", window_index: 0 });
+  });
+
+  it("a tab closed mid-call sends the quality window it was in", async () => {
+    const { result, pc } = await connected();
+    await completeHandshake(pc, result.current.handleServerSdp);
+    let frames = 0;
+    const rows = () => [
+      { id: "V", type: "inbound-rtp", kind: "video", framesDecoded: frames, bytesReceived: frames * 1000 },
+      ...SELECTED_RELAY_PAIR,
+    ];
+    pc.statsRows = rows();
+    await act(async () => {
+      pc.fireIce("connected");
+      await Promise.resolve();
+    });
+    for (let i = 0; i < 4; i++) {
+      frames += 50;
+      pc.statsRows = rows();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000); // 8 s in: no full 15 s window yet
+      });
+    }
+    expect(tracked.filter((e) => e.name === "voice.media")).toHaveLength(0);
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+    const media = tracked.filter((e) => e.name === "voice.media");
+    expect(media).toHaveLength(1);
+    expect(media[0].p.partial).toBe(true);
+    expect(unloadFlushes.n).toBeGreaterThan(0);
   });
 });
 

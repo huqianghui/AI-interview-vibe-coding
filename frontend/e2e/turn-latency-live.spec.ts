@@ -201,5 +201,11 @@ test.describe(`Per-turn speak-start, MODE=${MODE} (real Azure)`, () => {
 
     expect(coldStartMs, "the first question never became audible").not.toBeNull();
     results.forEach((r) => expect(r.ms, `turn ${r.turn} never became audible`).not.toBeNull());
+
+    // Leave the way a candidate closing the tab does. Navigating fires `pagehide`, which
+    // `page.close()` may skip, so this is what proves the voice socket's App Insights record and the
+    // last WebRTC quality window survive the page going away (docs/voice-performance-telemetry.md).
+    await page.goto("about:blank");
+    await page.waitForTimeout(2_000);
   });
 });

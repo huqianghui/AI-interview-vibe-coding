@@ -74,6 +74,7 @@ import {
   watchAudibleOnsets,
 } from "../telemetry/voiceTimeline";
 import { MediaQualityWindow } from "../telemetry/mediaQuality";
+import { flushForUnload } from "../telemetry/appInsights";
 
 /** All candidates gathered within this window before falling back to sending whatever we have. */
 const ICE_GATHERING_TIMEOUT_MS = 8000;
@@ -982,6 +983,18 @@ export function useAvatarStream(
     }, 1_000);
     return () => clearInterval(id);
   }, [canEnableVideo]);
+
+  // A tab closed mid-call never tears the connection down: send the quality window it was in (often
+  // the bad stretch that made the candidate leave) on the way out. `voice.media` is queued without an
+  // immediate send, so the unload flush carries it.
+  useEffect(() => {
+    const onPageHide = () => {
+      mediaWindowRef.current?.finish();
+      flushForUnload();
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, []);
 
   // Re-attach the avatar stream if the <video> element mounts AFTER `ontrack` already fired. The
   // editor Playground mounts <video> only while voice is live, which can race the async handshake;

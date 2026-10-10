@@ -61,7 +61,8 @@ headers. So the page does it by hand (`beginWebSocketTrace` in `telemetry/appIns
    duration = session length, result code = the close code, `close_reason` and `live` as
    properties. It counts as a success only if its session went live (`session.updated`) AND it
    closed normally (1000 / 1001 / 1005, not the backend's `azure_stream_ended`, not a latched fatal
-   such as `mic_rate_mismatch`). A tab closed mid-interview is reported on `pagehide`; a socket
+   such as `mic_rate_mismatch`). A tab closed mid-interview is reported on `pagehide`, sent with the SDK's unload transport (a
+beacon), because an ordinary request started while the page is going away is cancelled with it; a socket
    replaced by a reconnect or a media-mode rebuild ends as `replaced` / `rebuilt`. The dependency is
    pinned to the trace it opened in, even if the page changed route before it closed.
 
@@ -204,7 +205,7 @@ rates over the window, gauges the window's last reading. Properties: the event c
 A measurement the connection cannot provide (video on an audio-only connection, RTT before ICE
 reports one) is left out rather than sent as 0. A cumulative counter that goes down (the stream
 restarted) starts a fresh window instead of producing an invented rate. When the connection ends
-(teardown, recovery rebuild, media-mode switch) the partial window is sent if it is at least 5 s
+(teardown, recovery rebuild, media-mode switch, or the tab closing) the partial window is sent if it is at least 5 s
 long, marked `partial = true`: it is often the degraded stretch that made the connection end.
 
 ### Voice-only playback gaps (on `voice.turn`)

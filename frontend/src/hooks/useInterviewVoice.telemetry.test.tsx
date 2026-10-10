@@ -10,6 +10,8 @@ import { voiceMetrics } from "../telemetry/voiceTimeline";
 const tracked: { name: string; m: Record<string, number>; p: Record<string, unknown> }[] = [];
 const TRACEPARENT = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
 const wsEnds: [number, boolean][] = [];
+const unloadFlushes = { n: 0 };
+const unloadingEnds: boolean[] = [];
 vi.mock("../telemetry/appInsights", () => ({
   trackEvent: (name: string, m: Record<string, number>, p: Record<string, unknown>) =>
     tracked.push({ name, m, p }),
@@ -23,11 +25,17 @@ vi.mock("../telemetry/appInsights", () => ({
         live = true;
       },
       // Records what the real one reports as `success`: a live session AND a clean close.
-      end: (code: number, clean: boolean) => {
-        if (!ended) wsEnds.push([code, live && clean]);
+      end: (code: number, clean: boolean, _reason?: string, unloading = false) => {
+        if (!ended) {
+          wsEnds.push([code, live && clean]);
+          unloadingEnds.push(unloading);
+        }
         ended = true;
       },
     };
+  },
+  flushForUnload: () => {
+    unloadFlushes.n += 1;
   },
 }));
 
@@ -123,6 +131,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
   tracked.length = 0;
   wsEnds.length = 0;
+  unloadingEnds.length = 0;
+  unloadFlushes.n = 0;
 });
 
 describe("voice timings → App Insights", () => {
@@ -222,6 +232,18 @@ describe("voice timings → App Insights", () => {
     unmount();
     const turn = tracked.find((e) => e.name === "voice.turn");
     expect(turn!.m).toMatchObject({ playback_gaps: 1, playback_gap_ms_total: 180 });
+  });
+
+  it("a tab closed mid-interview reports its socket on pagehide, through the unload flush", async () => {
+    const { unmount } = await connected();
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+    expect(wsEnds).toEqual([[1001, true]]);
+    expect(unloadingEnds).toEqual([true]); // queued only, not sent the ordinary way
+    expect(unloadFlushes.n).toBeGreaterThan(0);
+    unmount();
+    expect(wsEnds).toHaveLength(1); // the later close does not report it twice
   });
 });
 
