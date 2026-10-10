@@ -60,11 +60,13 @@ class Candidate:
 # Reciprocal Rank Fusion's constant (the usual 60), and how deep each ranking is read.
 _RRF_K = 60
 _DEPTH = 50
-# The least cosine similarity a unit needs to be proposed by meaning. Measured 2026-10-10 on
-# text-embedding-3-small with SOP-style text: a question and the passage answering it scored
-# 0.59-0.72, the same question and another SOP topic 0.19-0.45, unrelated text 0.04-0.36. Below
-# the floor a unit is not "found by meaning", so a query nothing answers still finds nothing.
-VECTOR_MIN_COSINE = 0.5
+# The least cosine similarity a unit needs to be proposed by meaning. Measured 2026-10-10 on the
+# live units (474, text-embedding-3-small, 500-4,000 characters each): the passages answering a
+# question scored 0.42-0.59, the median unit for an SOP question 0.29-0.35, the best unit for an
+# unrelated question ("how to cook pasta") 0.10. (Short test sentences score higher, 0.59-0.72
+# for a match: a first 0.5 floor, set on those, kept out real answers at 0.43.) Below the floor a
+# unit is not "found by meaning", so a query nothing answers still finds nothing.
+VECTOR_MIN_COSINE = 0.4
 
 
 @dataclass

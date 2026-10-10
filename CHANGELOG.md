@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.64.0.1 (2026-10-10)
+
+### Fixed
+- **The similarity floor for search by meaning is 0.4, measured on the live units.** The first
+  floor (0.5) was set on short test sentences; real units of 500-4,000 characters score lower,
+  so it kept out the passages answering a question (0.42-0.44). Measured on the 474 live units:
+  answering passages 0.42-0.59, the median unit for an SOP question 0.29-0.35, the best unit for
+  an unrelated question 0.10.
+
 ## 0.64.0.0 (2026-10-10)
 
 ### Added
