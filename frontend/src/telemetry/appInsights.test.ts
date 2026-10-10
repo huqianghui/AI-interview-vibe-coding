@@ -109,6 +109,50 @@ describe("start-up", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
+  it("a sign-in during a start that is then refused gets its turn, in the same start", async () => {
+    sdk.events.length = 0;
+    let release!: () => void;
+    const tokens: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const bearer = new Headers(init.headers).get("Authorization") ?? "";
+        tokens.push(bearer);
+        if (bearer === "Bearer stale") {
+          await new Promise<void>((r) => (release = r));
+          return new Response("expired", { status: 401 });
+        }
+        return new Response(JSON.stringify({ app_insights_connection_string: "InstrumentationKey=k" }));
+      }),
+    );
+    const first = startTelemetry("stale"); // a stored session, checked on load
+    await Promise.resolve();
+    const second = startTelemetry("fresh"); // the candidate signs in meanwhile
+    release();
+    expect(await first).toBe(true);
+    expect(await second).toBe(true);
+    expect(tokens).toEqual(["Bearer stale", "Bearer fresh"]);
+  });
+
+  it("stops buffering once the deployment turns out to have no App Insights", async () => {
+    sdk.events.length = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ app_insights_connection_string: null }))),
+    );
+    expect(await startTelemetry("tok")).toBe(false);
+    for (let i = 0; i < 5; i++) trackEvent("never-sent", {});
+    expect(await startTelemetry("tok2")).toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(1); // known to be off: no more config reads
+  });
+
+  it("waits for the next sign-in when the backend refuses the token (403)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("no", { status: 403 })));
+    expect(await startTelemetry("tok")).toBe(false);
+    expect(await startTelemetry("tok2")).toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(2); // not latched off, and no 10 s retry
+  });
+
   it("waits for the next sign-in when a stored session has expired", async () => {
     sdk.events.length = 0;
     let calls = 0;

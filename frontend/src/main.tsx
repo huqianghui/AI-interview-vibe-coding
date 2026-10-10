@@ -10,8 +10,11 @@ import { startTelemetry } from "./telemetry/appInsights";
 const queryClient = new QueryClient();
 
 // A reload with a stored session starts telemetry right away; otherwise sign-in does (api/auth.ts).
-// Not awaited: telemetry must never hold up the first paint.
-void startTelemetry(getCandidateToken() || getAdminToken());
+// A tab can hold both sessions: when the candidate's has expired, the admin's is tried. Not awaited:
+// telemetry must never hold up the first paint.
+void startTelemetry(getCandidateToken()).then(
+  (on) => on || (getAdminToken() !== "" && startTelemetry(getAdminToken())),
+);
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

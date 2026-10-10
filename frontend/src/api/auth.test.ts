@@ -3,6 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "../i18n";
 import * as auth from "./auth";
 
+const telemetry = vi.hoisted(() => ({ startTelemetry: vi.fn(async () => false) }));
+vi.mock("../telemetry/appInsights", () => telemetry);
+
 afterEach(() => {
   vi.restoreAllMocks();
   sessionStorage.clear();
@@ -119,6 +122,34 @@ describe("candidate auth (#102)", () => {
     auth.clearCandidateToken();
     expect(auth.getCandidateToken()).toBe("");
     expect(auth.getAdminToken()).toBe("admin-jwt"); // unaffected
+  });
+});
+
+describe("sign-in starts telemetry", () => {
+  // The backend hands the App Insights connection string only to a signed-in user, so each sign-in
+  // is what starts browser telemetry, with that user's token.
+  beforeEach(() => telemetry.startTelemetry.mockClear());
+
+  it("an admin sign-in starts it with the admin's token", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ access_token: "jwt-admin" }), { status: 200 }),
+    );
+    await auth.login("admin", "pw");
+    expect(telemetry.startTelemetry).toHaveBeenCalledWith("jwt-admin");
+  });
+
+  it("a candidate sign-in starts it with the candidate's token", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ access_token: "jwt-cand" }), { status: 200 }),
+    );
+    await auth.loginCandidate("user1", "pw");
+    expect(telemetry.startTelemetry).toHaveBeenCalledWith("jwt-cand");
+  });
+
+  it("a refused sign-in does not", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 401 }));
+    await expect(auth.loginCandidate("user1", "bad")).rejects.toBeInstanceOf(auth.AuthError);
+    expect(telemetry.startTelemetry).not.toHaveBeenCalled();
   });
 });
 
