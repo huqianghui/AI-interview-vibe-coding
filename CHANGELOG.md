@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.64.0.0 (2026-10-10)
+
+### Added
+- **Hybrid SOP search: keywords and meaning.** Every unit of an SOP (the sections the SOP tab
+  shows) gets an embedding from `text-embedding-3-small` on the Foundry resource, called with the
+  managed identity, stored in a plain column (new table `sop_unit_embeddings`, a JSON vector per
+  unit). Search ranks units by BM25 and by cosine similarity and fuses the two rankings with
+  Reciprocal Rank Fusion (1 / (60 + rank)), all in the backend: relocation, AI drafting and every
+  other caller of the SOP search get it. A unit is embedded once per text: a re-split re-embeds only
+  the units that changed, and vectors of units that no longer exist are removed; every boot embeds
+  whatever is missing. Without an embedding deployment (or if a call fails) search falls back to
+  keywords alone.
+- **`SOP_EMBEDDING_DEPLOYMENT`** (default `text-embedding-3-small`) and `SOP_EMBEDDING_API_VERSION`
+  in `.env` / `.env.example` and the infra template (`sopEmbeddingDeployment`); empty turns
+  embeddings off.
+
 ## 0.63.2.0 (2026-10-10)
 
 ### Changed

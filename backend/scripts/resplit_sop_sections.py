@@ -22,6 +22,7 @@ from sqlalchemy import select
 
 from app.db import async_session_factory
 from app.models.sop import SopDocument
+from app.services import sop_embeddings
 from app.services.sop_section_service import resplit
 
 
@@ -31,6 +32,8 @@ async def main() -> None:
         documents = (await db.execute(query)).scalars().all()
         for n, document in enumerate(documents, 1):
             print(f"doc{n:02d}: {await resplit(db, document)} sections")
+    # The units changed with the split: their search vectors follow (only changed texts).
+    print(f"embedded {await sop_embeddings.refresh_all(async_session_factory)} units")
 
 
 if __name__ == "__main__":

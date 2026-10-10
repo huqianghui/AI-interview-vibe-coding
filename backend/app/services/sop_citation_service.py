@@ -33,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.checklist import Checklist, ChecklistItem
 from app.models.question import Question, QuestionBank
 from app.models.sop import CitationRun, SopDocument, SopSection
-from app.services import sop_citation
+from app.services import sop_citation, sop_embeddings
 from app.services.agents.base import LLMAdapter
 from app.services.agents.registry import get_llm_adapter
 from app.services.sop_citation import CitedSection, SectionRef
@@ -242,7 +242,11 @@ async def candidates_for(
     """The units most relevant to ``text`` (optionally within some documents), full text: each
     one read through the citation it would be given, so what the model is shown is what a choice
     of it cites."""
-    found = index.search(text, limit=SEARCH_CANDIDATES, document_ids=document_ids)
+    # Hybrid: by meaning as well, when the units have vectors (sop_embeddings).
+    vector = await sop_embeddings.embed_query(text) if index.has_vectors else None
+    found = index.search(
+        text, limit=SEARCH_CANDIDATES, document_ids=document_ids, query_vector=vector
+    )
     return await sop_citation.resolve(
         db, [SectionRef(c.document_id, c.number, c.through, c.own, c.piece) for c in found]
     )

@@ -87,6 +87,9 @@ param voiceLiveDefaultModel string = 'gpt-5-mini'
 @description('Voice Live realtime api-version (VOICE_LIVE_API_VERSION).')
 param voiceLiveApiVersion string = '2026-01-01-preview'
 
+@description('Embedding model deployment for SOP hybrid search (SOP_EMBEDDING_DEPLOYMENT), on the Foundry resource. Empty = keyword search only.')
+param sopEmbeddingDeployment string = 'text-embedding-3-small'
+
 @description('GitHub repository owner/org for OIDC federation.')
 param githubOwner string = 'huqianghui'
 
@@ -262,6 +265,7 @@ module containerApps './modules/container-apps.bicep' = {
     foundryAgentModel: foundryAgentModel
     voiceLiveDefaultModel: voiceLiveDefaultModel
     voiceLiveApiVersion: voiceLiveApiVersion
+    sopEmbeddingDeployment: sopEmbeddingDeployment
     databaseUrl: postgres.outputs.databaseUrl
     databaseAuth: 'entra'
   }
