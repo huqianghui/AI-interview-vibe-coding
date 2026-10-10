@@ -104,7 +104,7 @@ acknowledgement, never a local report.
 |---|---|---|---|
 | Backend OpenTelemetry: requests, outbound calls, SQL, business spans (`voice.session`, `judge.call`, `external_brain.turn`, `scoring.question`, `voice.azure_error`) | ✅ Done | v0.57.0.0 / PR #206, v0.57.0.1 / PR #207 | ✅ verified (health excluded, no `token=` URLs) |
 | Browser telemetry: App Insights JS SDK, `voice.setup` / `voice.avatar` (ICE, STUN, TURN, SDP, first frame) / `voice.turn` (VAD, STT, `/answer`, read, first audible), `GET /client-config` (signed-in users only since v0.65.1.0) | ✅ Done | v0.65.0.0, v0.65.0.1, v0.65.1.0 | ✅ verified 2026-10-10 (3-turn avatar run on the public deployment: all three events arrive; browser and backend requests share an operation id) |
-| Voice WebSocket traced end to end (browser `traceparent` → backend `voice.session` child), WebRTC quality samples (`voice.media`), voice-only playback gaps | ✅ Done | v0.66.0.0 | pending |
+| Voice WebSocket traced end to end (browser `traceparent` → backend `voice.session` child), WebRTC quality samples (`voice.media`), voice-only playback gaps | ✅ Done | v0.66.0.0, v0.66.0.1 | ✅ verified 2026-10-10 (live avatar interview: socket ↔ backend session joined, close by tab via beacon, quality windows, full request chain in the workbook) |
 | "AI Interview — Voice performance" workbook (`modules/voice-workbook.bicep`) | ✅ Done | v0.65.0.0 | ✅ deployed to `appi-aiinterview-public`; all 16 queries run |
 
 ## End-to-end tests (v0.14.0.0)
