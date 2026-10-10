@@ -263,6 +263,10 @@ customEvents
 `kind` and `last` are reserved words in KQL: read the dimension as `customDimensions.kind`, but do
 not name an output column `kind`. And `countif(success)` is refused: write `countif(success == true)`.
 
+The SDK stores the WebSocket dependency's id with a trailing `.` (measured live: `e9e6b8eb0e1a4ad0.`),
+while the backend's `voice.session` names it as its parent without one: join on
+`trim_end(@"\.", id)`, as the workbook does.
+
 For the server side of a slow `answer_http_ms`, the `/answer` request and its child spans
 (`judge.call`, `external_brain.turn`, Azure OpenAI and SQL dependencies) are one trace in
 **Transaction search**, joined to the browser's request by the same operation id.
