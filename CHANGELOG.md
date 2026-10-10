@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.65.0.1 (2026-10-10)
+
+### Fixed
+- **Voice timing events reach App Insights even if the tab closes right after an answer.** Each
+  one is now sent at once instead of with the SDK's next 15 s batch; on the first live run the
+  last turn's event was lost that way.
+- **`first_track_ms` is measured from the SDP answer's arrival.** The browser delivers the
+  avatar's tracks while applying the answer, so measured from "answer applied" it came out
+  negative (-1 ms on the live run).
+
 ## 0.65.0.0 (2026-10-10)
 
 ### Added

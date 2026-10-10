@@ -4,6 +4,7 @@ const sdk = vi.hoisted(() => ({
   config: null as Record<string, unknown> | null,
   events: [] as { event: { name: string; measurements?: Record<string, number> }; props?: unknown }[],
   initializers: [] as ((item: unknown) => void)[],
+  flushes: 0,
 }));
 vi.mock("@microsoft/applicationinsights-web", () => ({
   DistributedTracingModes: { W3C: 2 },
@@ -18,6 +19,9 @@ vi.mock("@microsoft/applicationinsights-web", () => ({
     }
     trackEvent(event: { name: string }, props?: unknown) {
       sdk.events.push({ event, props });
+    }
+    flush() {
+      sdk.flushes += 1;
     }
   },
 }));
@@ -71,6 +75,7 @@ describe("start-up", () => {
     trackEvent("late", { y: 2 });
     expect(sdk.config).toMatchObject({ connectionString: "InstrumentationKey=k", disableCookiesUsage: true });
     expect(sdk.events.map((e) => e.event.name)).toEqual(["early", "late"]);
+    expect(sdk.flushes).toBe(2); // each event leaves at once, not with the next 15 s batch
     expect(sdk.events[0]).toEqual({ event: { name: "early", measurements: { x: 1 } }, props: { k: "v" } });
     // The scrubber is installed on every item the SDK sends.
     const item = { baseData: { uri: "https://h/p?token=1" } };

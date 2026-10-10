@@ -87,7 +87,7 @@ a media-mode switch is a new voice session, so its handshake is a new `initial`.
 | `sdp_answer_ms` | offer sent → Azure's SDP answer | signalling round trip through the backend + Azure avatar setup |
 | `ice_connect_ms` | answer applied → ICE `connected` | connectivity checks |
 | `pc_connect_ms` | answer applied → peer connection `connected` | ICE + DTLS |
-| `first_track_ms` | answer applied → first media track | |
+| `first_track_ms` | SDP answer received → first media track | the browser fires it while applying the answer |
 | `first_frame_ms` | ICE connected → first painted frame | decode + first keyframe |
 | `total_ms` | handshake start → first painted frame | the avatar's whole handshake, without the hold |
 | `total_audio_ms` | handshake start → connection up | audio-only sessions |

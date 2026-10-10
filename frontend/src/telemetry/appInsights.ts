@@ -124,8 +124,13 @@ export async function startTelemetry(attempt = 1): Promise<boolean> {
     });
     ai.trackPageView();
     sink = {
-      trackEvent: (name, measurements, properties) =>
-        ai.trackEvent({ name, measurements }, properties),
+      // Sent at once rather than with the SDK's next batch (15 s): there is about one voice event
+      // per turn, and a candidate closing the tab right after an answer would otherwise lose it
+      // (measured live: the last turn of a run went missing that way).
+      trackEvent: (name, measurements, properties) => {
+        ai.trackEvent({ name, measurements }, properties);
+        ai.flush();
+      },
     };
     for (const event of buffered) sink.trackEvent(event.name, event.measurements, event.properties);
     buffered = [];
