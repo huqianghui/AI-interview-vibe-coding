@@ -2,7 +2,8 @@ targetScope = 'resourceGroup'
 
 // Log Analytics workspace + Application Insights. The workspace backs the Container Apps managed
 // environment's log sink; the App Insights connection string is injected into the backend so its
-// OpenTelemetry traces land in the same resource group.
+// OpenTelemetry traces land in the same resource group. The "Voice performance" workbook sits on top
+// of the App Insights resource (voice-workbook.bicep).
 
 param namePrefix string
 param environmentName string
@@ -42,10 +43,20 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
   }
 }
 
+module voiceWorkbook './voice-workbook.bicep' = {
+  name: '${deployment().name}-voice-workbook'
+  params: {
+    appInsightsName: appInsights.name
+    location: location
+    tags: tags
+  }
+}
+
 output summary object = {
   module: 'monitoring'
   logAnalyticsWorkspaceName: workspace.name
   applicationInsightsName: appInsights.name
+  voiceWorkbookId: voiceWorkbook.outputs.workbookId
   applicationInsightsConnectionString: appInsights.properties.ConnectionString
   logAnalyticsWorkspaceId: workspace.id
   environmentName: environmentName
