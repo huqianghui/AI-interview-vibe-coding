@@ -15,7 +15,7 @@ throws into the interview: every call from a WebSocket or WebRTC handler is guar
 | Side | What | Where |
 |---|---|---|
 | Backend | OpenTelemetry via `azure-monitor-opentelemetry`: requests, outbound calls, SQL, plus business spans (`voice.session`, `judge.call`, `external_brain.turn`, `scoring.question`) and the `voice.azure_error` span event | `backend/app/telemetry.py` |
-| Browser | App Insights JS SDK: page views, the page's `/api` calls (correlated with the backend's traces through W3C `traceparent`), uncaught errors, and three voice timing events | `frontend/src/telemetry/` |
+| Browser | App Insights JS SDK: page views and page-load timings, the page's `/api` calls (correlated with the backend's traces through W3C `traceparent`), the voice WebSocket (same correlation, see below), uncaught errors, three voice timing events and the WebRTC quality samples | `frontend/src/telemetry/` |
 | Dashboard | Azure Workbook on the App Insights resource | `infra/azure/workbooks/voice-performance.json`, deployed by `infra/azure/modules/voice-workbook.bicep` |
 
 The connection string is configured once, by the deployment: `monitoring.bicep` creates App
@@ -47,7 +47,30 @@ ad blocker that blocks `*.applicationinsights.azure.com` drops the browser event
 interview itself is unaffected. If a client network needs it, ask for that host to be allowlisted.
 Backend telemetry does not depend on the candidate's network.
 
-## The three browser events
+## Tracing the voice WebSocket
+
+App Insights instruments `fetch` and XHR by itself, not WebSockets, and a WebSocket cannot carry
+headers. So the page does it by hand (`beginWebSocketTrace` in `telemetry/appInsights.ts`):
+
+1. When it opens `/api/voice-live/ws` it adds `traceparent` (the page's trace id and a new span id)
+   to the query string.
+2. The backend starts its `voice.session` span as a child of that context
+   (`telemetry.parent_context`; a malformed value is ignored, never trusted), and tags it with
+   `voice.interview_id`.
+3. When the socket closes, the page records it as a `WebSocket` dependency with that same span id:
+   duration = session length, result code = the close code (clean = opened, then 1000 / 1001 /
+   1005).
+
+In App Insights the browser's socket and the backend's session are then one parent / child pair in
+the page's trace, and Azure Voice Live errors raised in the session (`voice.azure_error`, avatar
+rate limit included) hang under it. A socket opened before the SDK has loaded is still recorded,
+just not linked; the session is still findable by `voice.interview_id`.
+
+The WebRTC media itself (avatar video and voice) runs browser ↔ Azure's TURN relay and never passes
+the backend, so no server-side trace of it is possible: it is measured in the browser instead
+(`voice.media`, below).
+
+## The browser events
 
 Every event carries `interview_id` (`playground` in the editor), `avatar`, `audio_path`
 (`webrtc` when the interviewer's voice rides the avatar's WebRTC track, `ws` for voice-only PCM
@@ -154,13 +177,57 @@ Two rules keep the turn honest, both unit-tested in `voiceTimeline.test.ts`:
 * A turn is sent when its first audible sample and `response.done` have both happened, or 8 s after
   `response.done` if nothing is heard, or as soon as the candidate starts the next turn.
 
+### `voice.media`: WebRTC quality, every 15 s
+
+Sampled from the avatar connection's `getStats()` (the health sampler already reads it every 2 s;
+`telemetry/mediaQuality.ts` adds no polling) and sent with the SDK's normal batch. Counters are
+rates over the window, gauges the window's last reading. Properties: the event context above plus
+`mode` (`video` / `audio-only`), `window_index` and `resolution`.
+
+| Measurement | What |
+|---|---|
+| `rtt_ms` | RTT of the selected candidate pair |
+| `audio_jitter_ms` | interarrival jitter of the audio stream |
+| `jitter_buffer_ms` | average time audio waited in the jitter buffer |
+| `audio_loss_pct` / `video_loss_pct` | packets lost / (lost + received) in the window |
+| `audio_concealed_pct` | audio invented by AUDIBLE loss concealment (silence fill excluded) |
+| `audio_kbps` / `video_kbps` | received bitrate |
+| `available_in_kbps` | the browser's estimate of the downlink |
+| `video_fps` | frames decoded per second |
+| `video_frames_dropped`, `video_freezes`, `video_freeze_ms` | in the window |
+
+A measurement the connection cannot provide (video on an audio-only connection, RTT before ICE
+reports one) is left out rather than sent as 0.
+
+### Voice-only playback gaps (on `voice.turn`)
+
+Without an avatar, the interviewer's audio is PCM on the WebSocket and plays through the page's
+jitter buffer. Each time it runs dry mid-speech the turn the candidate heard it in counts it:
+`playback_gaps` (how many) and `playback_gap_ms_total` (how long, summed).
+
 ## The workbook
 
 Azure portal → the App Insights resource → **Workbooks** → **AI Interview — Voice performance**.
-Sections: connection setup, avatar handshake (stages, selected candidate path, outcomes, first-frame
-trend), turns (answered-turn stages, opening reads, the candidate-felt latency trend, a per-turn
-table for one interview picked from the **Interview** parameter), and the backend spans, routes,
-outbound calls and Azure errors.
+Sections:
+
+* **End to end for one interview** (picked from the **Interview** parameter): every browser call,
+  REST and the voice WebSocket, with the backend request or session it caused, the network gap
+  (browser time minus server time), the backend's direct children (Azure OpenAI, SQL, judge,
+  external brain), the Azure errors in the voice session, and the `operation_Id` for
+  **Transaction search**; the interview's voice events in order; its WebRTC RTT / jitter, loss and
+  video charts over the session.
+* **Connection setup**, **avatar handshake** (stages, selected candidate path, outcomes,
+  first-frame trend) and **turns** (answered-turn stages, opening reads, the candidate-felt latency
+  trend, a per-turn table).
+* **Voice WebSocket sessions**: by close code, how many are linked to a backend session, session
+  length; backend sessions with Azure errors and avatar rate-limit hits.
+* **WebRTC media quality**: p50 / p95 per media mode, freezes and dropped frames, RTT and loss
+  trends, resolution received.
+* **Voice-only playback gaps**, **page load** (browser timings), **API latency as the browser sees
+  it** (browser vs server vs network, per route).
+* **Scoring, judge and external brain**: per-question scoring trend, whole-report times, judge
+  verdicts and latency, external brain turns; plus the backend spans, slowest routes, outbound
+  calls and Azure errors.
 
 `main.bicep` deploys it with the monitoring module. To deploy or update only the workbook, against
 an existing App Insights resource:
@@ -183,7 +250,7 @@ customEvents
 ```
 
 `kind` and `last` are reserved words in KQL: read the dimension as `customDimensions.kind`, but do
-not name an output column `kind`.
+not name an output column `kind`. And `countif(success)` is refused: write `countif(success == true)`.
 
 For the server side of a slow `answer_http_ms`, the `/answer` request and its child spans
 (`judge.call`, `external_brain.turn`, Azure OpenAI and SQL dependencies) are one trace in
