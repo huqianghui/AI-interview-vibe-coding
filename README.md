@@ -31,6 +31,19 @@ The app is deployed on Azure Container Apps. Every page needs an account; ask th
 This frontend URL is the only public address. The backend has internal ingress and is reached only
 through the frontend's `/api` proxy, so it has no URL of its own.
 
+### Performance and traces (Application Insights)
+
+The browser and the backend both report to the deployment's Application Insights
+(`appi-aiinterview-public`). Both links need Azure access to that resource.
+
+| What | Link |
+|---|---|
+| **Voice performance workbook**: per interview, the trace waterfall (A → B → C → D with each step's duration, linking to App Insights' end-to-end transaction view), every browser call with the backend work it caused, the voice WebSocket and its backend session, WebRTC quality; across sessions, connection setup, avatar handshake (ICE / STUN / TURN / first frame), turn latency, page load, API latency, scoring and judge | [Open the workbook](https://portal.azure.com/#@16b3c013-d300-468d-ac64-7eda0820b6d3/resource/subscriptions/7a03e9b8-18d6-48e7-b186-0ec68da9e86f/resourceGroups/rg-aiinterview-public-swedencentral/providers/Microsoft.Insights/workbooks/79286b13-2e6f-53d2-834e-64274d49d7be/workbook) |
+| **One interview's raw trace log** in Logs: every telemetry item of one operation, browser and backend, in time order (an example operation; change the id in the query to look at another) | [Open in Logs](https://portal.azure.com/#@16b3c013-d300-468d-ac64-7eda0820b6d3/blade/Microsoft_OperationsManagementSuite_Workspace/Logs.ReactView/resourceId/%2Fsubscriptions%2F7a03e9b8-18d6-48e7-b186-0ec68da9e86f%2FresourceGroups%2Frg-aiinterview-public-swedencentral%2Fproviders%2FMicrosoft.Insights%2Fcomponents%2Fappi-aiinterview-public/source/LogsBlade.AnalyticsShareLinkToQuery/q/H4sIAHUuymoC%2F02PMVPDMAyFd36FLhPceWjapL0MWeAYujFwrD3HfqGGxjayTegdPx6FDu0mvSc9fSreBU%2BMr4KUkyKLCG%2FhjYN0pqQcpudv%2BMWL%2Bh1vDrOUmbVZBvBjELNEpLtfmo9gUIhgvUiHvaW%2Bp6rejfV6tV7VGzRNh52udbvttrprhmEztG0lq5HDB0ym7Cbh0FNU5DKm13OEouQsqCc3jvfm5ITlsOj%2F2Y8c5gSuFFXDTanNp3xRPSjyepIEWy5IklWMgAs5I5VTfgpWbGfVDfaLZrmxt4IV2IJpOF%2B5SCfzB02Rar80AQAA/timespan/P2D) |
+
+In the workbook, pick an interview (the newest is selected by default) or paste an **Operation id**.
+What each metric means: [`docs/voice-performance-telemetry.md`](docs/voice-performance-telemetry.md).
+
 ## Key scenarios
 
 > Most screenshots are captured on the mock stack the test suite uses, so the scores, rubric items
