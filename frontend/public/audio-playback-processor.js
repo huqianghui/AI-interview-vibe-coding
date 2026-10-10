@@ -174,6 +174,9 @@ class PlaybackProcessor extends AudioWorkletProcessor {
       this.lastGapSamples = this.gapSamples;
       this.state = "playing";
       this.fadeIn = this.rampSamples;
+      // Sent at once, not with the next stats tick (up to 250 ms later): the page times "the
+      // candidate starts hearing the interviewer" from this message (voiceTimeline.ts).
+      this.port.postMessage({ eventType: "started" });
     }
 
     if (this.state === "playing") {

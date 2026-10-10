@@ -66,6 +66,13 @@ import {
   resetStreaks,
   type HealthSnapshot,
 } from "./avatarHealth";
+import {
+  AvatarHandshakeMetrics,
+  candidateType,
+  selectedPair,
+  voiceMetrics,
+  watchAudibleOnsets,
+} from "../telemetry/voiceTimeline";
 
 /** All candidates gathered within this window before falling back to sending whatever we have. */
 const ICE_GATHERING_TIMEOUT_MS = 8000;
@@ -147,6 +154,10 @@ export function useAvatarStream(
   const onModeSwitchRequestRef = useRef(options.onModeSwitchRequest);
   onModeSwitchRequestRef.current = options.onModeSwitchRequest;
   const pcRef = useRef<RTCPeerConnection | null>(null);
+  // Timing of each peer connection's handshake (`voice.avatar`), keyed by the connection so a
+  // superseded one's late events land on its own record.
+  const handshakesRef = useRef(new WeakMap<RTCPeerConnection, AvatarHandshakeMetrics>());
+  const stopAudibleRef = useRef<(() => void) | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const sdpResolverRef = useRef<((sdp: string) => void) | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
@@ -271,7 +282,10 @@ export function useAvatarStream(
     iceServersRef.current = [];
     sdpResolverRef.current = null;
     pendingStreamRef.current = null;
+    stopAudibleRef.current?.();
+    stopAudibleRef.current = null;
     if (pcRef.current) {
+      void handshakesRef.current.get(pcRef.current)?.finish("closed");
       pcRef.current.close();
       pcRef.current = null;
     }
@@ -317,6 +331,13 @@ export function useAvatarStream(
         if (hasFrames && !settled) {
           settled = true;
           stopPolling();
+          const handshake = pcRef.current && handshakesRef.current.get(pcRef.current);
+          if (handshake && !handshake.finished) {
+            handshake.mark("first_frame");
+            void handshake.finish("frame");
+          }
+          voiceMetrics.setup("first_video_frame");
+          voiceMetrics.setup("media_ready");
           console.info(`[avatar-stream] video HAS frames: ${videoEl.videoWidth}x${videoEl.videoHeight}`);
           // Real frames are painting again → this drop (if any) is fully recovered; hand the next
           // independent drop a fresh recovery budget.
@@ -459,11 +480,26 @@ export function useAvatarStream(
     (pc: RTCPeerConnection) => {
       pc.onconnectionstatechange = () => {
         console.info("[avatar-stream] connectionState:", pc.connectionState);
+        if (pc.connectionState === "connected") handshakesRef.current.get(pc)?.mark("pc_connected");
       };
       pc.oniceconnectionstatechange = () => {
         if (pc !== pcRef.current) return;
         const state = pc.iceConnectionState;
         console.info("[avatar-stream] iceConnectionState:", state);
+        const handshake = handshakesRef.current.get(pc);
+        if (state === "checking") handshake?.mark("ice_checking");
+        if ((state === "connected" || state === "completed") && handshake && !handshake.finished) {
+          handshake.mark("ice_connected");
+          // Which path won (host / srflx / relay over udp / tcp / tls) and its RTT. Held by the
+          // handshake record, because the first frame can arrive before getStats answers.
+          handshake.waitFor(
+            pc.getStats().then((report) => {
+              const pair = selectedPair(report);
+              if (pair) handshake.set(pair);
+            }),
+          );
+        }
+        if (state === "failed") void handshake?.finish("ice_failed");
         if (state === "connected" || state === "completed") {
           // Recovered (or never really lost) — cancel any pending grace/rebuild.
           if (graceTimerRef.current) {
@@ -497,6 +533,7 @@ export function useAvatarStream(
 
       pc.ontrack = (event) => {
         console.info("[avatar-stream] ontrack kind=", event.track.kind, "streams=", event.streams.length);
+        handshakesRef.current.get(pc)?.mark("first_track");
         if (event.track.kind === "video") {
           const stream = event.streams[0] ?? new MediaStream([event.track]);
           event.track.onended = () => {
@@ -523,6 +560,18 @@ export function useAvatarStream(
         }
         audioElRef.current = audio;
         setAudioTrackLive(true);
+        // The interviewer's voice rides this track, so this is where "the candidate hears it" is
+        // timed for an avatar session (voiceTimeline.watchAudibleOnsets).
+        stopAudibleRef.current?.();
+        stopAudibleRef.current = watchAudibleOnsets(event.receiver, () =>
+          voiceMetrics.turn("first_audible"),
+        );
+        if (!wantVideoRef.current) {
+          const handshake = handshakesRef.current.get(pc);
+          handshake?.mark("audio_live");
+          void handshake?.finish("audio");
+          voiceMetrics.setup("media_ready");
+        }
         // Audio-only sessions never paint a frame, so `reflectDimensions` — which is where a normal
         // session clears the recovery bookkeeping and declares itself settled — never runs. The live
         // audio track is the equivalent milestone here: without this the recovery budget would stay
@@ -539,11 +588,13 @@ export function useAvatarStream(
   /** Build a PeerConnection from the stashed ICE servers and wire its handlers. One place, so a future
    * config change (ICE transport policy, a new field) cannot land on only one of the two call sites. */
   const createPeerConnection = useCallback(
-    (iceServers: RTCIceServer[]) => {
+    (iceServers: RTCIceServer[], label: string) => {
+      if (pcRef.current) void handshakesRef.current.get(pcRef.current)?.finish("superseded");
       const pc = new RTCPeerConnection({
         iceServers: iceServers.length > 0 ? iceServers : undefined,
         bundlePolicy: "max-bundle",
       });
+      handshakesRef.current.set(pc, new AvatarHandshakeMetrics({ label }));
       pcRef.current = pc;
       wirePc(pc);
       return pc;
@@ -571,6 +622,8 @@ export function useAvatarStream(
       // Placement is load-bearing: this MUST precede `serverSdpPromise` below, whose 15 s timeout is
       // armed before the offer is sent. Waiting after that point would guarantee an SDP timeout.
       const handshakeGen = genRef.current;
+      const handshake = handshakesRef.current.get(pc);
+      handshake?.set({ video: wantVideo });
       const budgetWait = avatarRequestWaitMs();
       if (budgetWait > 0) {
         console.info(
@@ -581,6 +634,7 @@ export function useAvatarStream(
           // Someone started a newer handshake while we waited. Sending now would spend a real Azure
           // request on a dead peer connection. The caller's catch treats this as non-fatal, resets its
           // one-shot guard and keeps the voice, so a later `session.updated` can try again.
+          void handshake?.finish("superseded");
           throw new Error("avatar handshake superseded while waiting for the rate-limit allowance");
         }
       }
@@ -615,6 +669,9 @@ export function useAvatarStream(
           resolve(btoa(JSON.stringify({ type: "offer", sdp: pc.localDescription.sdp })));
         };
         pc.onicecandidate = (e) => {
+          // first_host / first_srflx (the STUN answer) / first_relay (the TURN allocation).
+          const type = candidateType(e.candidate?.candidate);
+          if (type) handshake?.mark(`first_${type}`);
           if (!e.candidate) {
             sendOnce();
             return;
@@ -632,6 +689,7 @@ export function useAvatarStream(
       const offer = await pc.createOffer();
       console.info("[avatar-stream] createOffer resolved; calling setLocalDescription()");
       await pc.setLocalDescription(offer);
+      handshake?.mark("offer_created");
       console.info("[avatar-stream] setLocalDescription done; gathering ICE for offer");
 
       const serverSdpPromise = new Promise<string>((resolve, reject) => {
@@ -646,16 +704,21 @@ export function useAvatarStream(
       // in the middle of a recovery the user can already see failing. Attaching an observer here does
       // not consume the rejection — the real `await` still receives it — it only stops the orphan case
       // from looking like a crash.
-      serverSdpPromise.catch(() => undefined);
+      serverSdpPromise.catch(() => {
+        void handshake?.finish("sdp_timeout");
+      });
 
       const encodedOffer = await offerReadyPromise;
       console.info("[avatar-stream] offer ready, sending session.avatar.connect");
       noteAvatarRequest();
+      handshake?.mark("offer_sent");
       await sendSdpOffer(encodedOffer);
 
       const serverSdp = await serverSdpPromise;
+      handshake?.mark("answer_received");
       sdpResolverRef.current = null;
       await pc.setRemoteDescription({ type: "answer", sdp: serverSdp });
+      handshake?.mark("answer_applied");
       console.info("[avatar-stream] setRemoteDescription success; awaiting first video frame");
     },
     [avatarRequestWaitMs, noteAvatarRequest],
@@ -683,7 +746,7 @@ export function useAvatarStream(
       setAudioTrackLive(false);
       wantVideoRef.current = wantVideo;
 
-      const pc = createPeerConnection(iceServersRef.current);
+      const pc = createPeerConnection(iceServersRef.current, label);
       console.info(`[avatar-stream] ${label}: RTCPeerConnection rebuilt (video=${wantVideo ? "on" : "off"})`);
 
       runHandshake(pc, sendSdpOffer, wantVideo)
@@ -863,7 +926,7 @@ export function useAvatarStream(
       pendingStreamRef.current = null;
       if (videoRef.current) videoRef.current.srcObject = null;
 
-      const pc = createPeerConnection(iceServers);
+      const pc = createPeerConnection(iceServers, "initial");
       console.info("[avatar-stream] RTCPeerConnection created");
       avatarConnectedAtRef.current = Date.now();
       setCanEnableVideo(false);

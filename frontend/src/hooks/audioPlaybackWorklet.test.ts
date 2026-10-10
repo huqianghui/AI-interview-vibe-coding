@@ -30,9 +30,12 @@ interface Stats {
 function load(rate = RATE) {
   const src = readFileSync(resolve(__dirname, "../../public/audio-playback-processor.js"), "utf8");
   const stats: Stats[] = [];
+  // "started" (the first rendered sample of a response) is not a stats frame: kept apart so the
+  // stats helpers below still see only stats.
+  const starts: Stats[] = [];
   const port = {
     onmessage: null as ((e: { data: unknown }) => void) | null,
-    postMessage: (m: Stats) => stats.push(m),
+    postMessage: (m: Stats) => (m.eventType === "started" ? starts.push(m) : stats.push(m)),
   };
   class FakeProcessor {
     port = port;
@@ -49,6 +52,7 @@ function load(rate = RATE) {
   const out: number[] = [];
   return {
     stats,
+    starts,
     /** Push `n` samples all equal to `value` (Int16 domain), as one `response.audio.delta` would. */
     push: (n: number, value = 16384) => {
       const pcm = new Int16Array(n).fill(value);
@@ -286,6 +290,24 @@ describe("playback flush", () => {
     w.push(leadSamples * 2, 32767);
     w.render(Math.ceil(leadSamples / QUANTUM) + 2);
     expect(w.out.slice(before).some((s) => s !== 0)).toBe(true);
+  });
+});
+
+describe("playback started", () => {
+  it("is posted once per utterance, the moment the first sample renders", () => {
+    const w = load();
+    w.push(leadSamples - 1);
+    w.render(4);
+    expect(w.starts).toHaveLength(0); // still filling the cushion: nothing audible yet
+    w.push(leadSamples * 2);
+    w.end();
+    w.render(1);
+    expect(w.starts).toHaveLength(1);
+    w.render(Math.ceil((leadSamples * 4) / QUANTUM)); // drains, ramps out, back to filling
+    expect(w.starts).toHaveLength(1);
+    w.push(leadSamples * 2);
+    w.render(1);
+    expect(w.starts).toHaveLength(2);
   });
 });
 
