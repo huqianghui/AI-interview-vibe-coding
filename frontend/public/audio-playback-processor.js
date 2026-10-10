@@ -104,6 +104,12 @@ class PlaybackProcessor extends AudioWorkletProcessor {
      * interviewer was silent is the number that says whether it was a click or a dropout. */
     this.gapSamples = 0;
     this.lastGapSamples = 0;
+    /** A counted gap is open (from the underrun until playback resumes). Only then is silence gap
+     * time: without it, every pause between utterances after the session's first underrun was
+     * measured as part of that gap, and the next utterance's start reported it as a long one. */
+    this.inGap = false;
+    /** All gap time so far, so the page can add up gaps without pairing each one to its report. */
+    this.totalGapSamples = 0;
     this.sinceStats = 0;
     /** Set by the main thread when Azure says the response's audio is complete
      * (`response.audio.done`). Cleared by the next chunk that arrives.
@@ -139,6 +145,9 @@ class PlaybackProcessor extends AudioWorkletProcessor {
         this.offset = 0;
         this.queued = 0;
         this.underruns = 0;
+        this.inGap = false;
+        this.gapSamples = 0;
+        this.totalGapSamples = 0;
         this.endOfStream = true;
         if (this.state === "playing") {
           this.state = "ramping-out";
@@ -168,10 +177,14 @@ class PlaybackProcessor extends AudioWorkletProcessor {
     if (this.state === "filling") {
       if (this.queued < this.targetSamples) {
         // Silence while refilling after a counted gap is part of that gap, so measure it here.
-        if (this.underruns > 0) this.gapSamples++;
+        if (this.inGap) this.gapSamples++;
         return 0;
       }
-      this.lastGapSamples = this.gapSamples;
+      if (this.inGap) {
+        this.lastGapSamples = this.gapSamples;
+        this.totalGapSamples += this.gapSamples;
+        this.inGap = false;
+      }
       this.state = "playing";
       this.fadeIn = this.rampSamples;
       // Sent at once, not with the next stats tick (up to 250 ms later): the page times "the
@@ -195,6 +208,7 @@ class PlaybackProcessor extends AudioWorkletProcessor {
       if (!this.endOfStream) {
         this.underruns++;
         this.gapSamples = 0;
+        this.inGap = true;
       }
       this.state = "ramping-out";
       this.fadeOut = this.rampSamples;
@@ -230,6 +244,7 @@ class PlaybackProcessor extends AudioWorkletProcessor {
         underruns: this.underruns,
         bufferedMs: (this.queued / sampleRate) * 1000,
         lastGapMs: (this.lastGapSamples / sampleRate) * 1000,
+        totalGapMs: (this.totalGapSamples / sampleRate) * 1000,
         state: this.state,
       });
     }
