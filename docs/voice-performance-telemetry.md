@@ -253,7 +253,12 @@ az deployment group create -g <resource-group> \
 
 ## One interview's full trace
 
-In the workbook: pick the interview, read **Full trace of this interview**. In App Insights itself:
+In the workbook: pick the interview, or paste an **Operation id** (it overrides the interview).
+**Trace waterfall** is the A → B → C → D view: each step's start (seconds into the operation) and
+duration, with the calls it made nested under it (page view → browser call → backend request →
+Azure OpenAI / blob / SQL; the voice socket → its backend `voice.session`); its **open trace**
+links open App Insights' own end-to-end transaction view (a Gantt chart). **Full trace of this
+interview** is the same items as a flat list. In App Insights itself:
 
 1. Find the interview's operation id: **Logs**, then
    `customEvents | where tostring(customDimensions.interview_id) == "<interview id>" | distinct operation_Id`
