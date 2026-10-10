@@ -11,7 +11,11 @@
   other caller of the SOP search get it. A unit is embedded once per text: a re-split re-embeds only
   the units that changed, and vectors of units that no longer exist are removed; every boot embeds
   whatever is missing. Without an embedding deployment (or if a call fails) search falls back to
-  keywords alone.
+  keywords alone. A unit is proposed by meaning only above a similarity floor (0.5, measured:
+  matching passages 0.59-0.72, other SOP topics up to 0.45), so a query nothing answers still
+  finds nothing. Vectors are stored batch by batch (one unit the model refuses is skipped, not the
+  whole document), belong to one model (switching the deployment re-embeds instead of mixing
+  spaces), and a relocation run embeds all its queries in one batched call.
 - **`SOP_EMBEDDING_DEPLOYMENT`** (default `text-embedding-3-small`) and `SOP_EMBEDDING_API_VERSION`
   in `.env` / `.env.example` and the infra template (`sopEmbeddingDeployment`); empty turns
   embeddings off.

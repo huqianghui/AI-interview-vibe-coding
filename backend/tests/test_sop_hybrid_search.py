@@ -78,10 +78,19 @@ async def test_fusion_ranks_a_unit_both_lists_agree_on_first():
     # Keywords: 1 first ("deviation" 300 times), 2 second ("archived" once). Meaning: 2, 3, 1.
     assert [c.number for c in index.search("deviation archived")] == ["1", "2"]
     got = index.search("deviation archived", limit=3, query_vector=[0.0, 0.9, 0.1])
-    assert [c.number for c in got] == ["2", "1", "3"]
+    # 3 is not close enough in meaning (cosine 0.11 < VECTOR_MIN_COSINE) and has no keyword.
+    assert [c.number for c in got] == ["2", "1"]
     # RRF: 1 / (60 + rank), summed over the lists a unit is in.
     assert got[0].score == pytest.approx(1 / 62 + 1 / 61, abs=1e-3)
-    assert got[1].score == pytest.approx(1 / 61 + 1 / 63, abs=1e-3)
+    assert got[1].score == pytest.approx(1 / 61, abs=1e-3)
+
+
+async def test_a_query_nothing_answers_still_finds_nothing():
+    """Review, 2026-10-10: without a floor every query got the nearest units, related or not."""
+    rows = _rows()
+    index = SectionIndex(rows, {"d": "SOP.pdf"}, _vectors(rows))
+    # A vector pointing away from every unit, and no keyword in common.
+    assert index.search("newcomer onboarding", query_vector=[-1.0, -1.0, -1.0]) == []
 
 
 async def test_without_vectors_it_is_keyword_search():
@@ -180,3 +189,69 @@ async def test_the_real_embedding_model_puts_related_text_closer(monkeypatch):
 
     assert len(query) == 1536
     assert cos(query, near) > cos(query, far)
+
+
+async def _doc(db_session):
+    doc = SopDocument(name="SOP.md", status="chunked", markdown_source="text", markdown=MD)
+    db_session.add(doc)
+    await db_session.commit()
+    await sop_section_service.resplit(db_session, doc)
+    return doc
+
+
+async def _stored(db_session, doc):
+    return (
+        (
+            await db_session.execute(
+                select(SopUnitEmbedding).where(SopUnitEmbedding.document_id == doc.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def test_one_unit_the_model_refuses_does_not_cost_the_others(db_session, monkeypatch):
+    """Review: one refused batch used to store nothing for the whole document."""
+    _enable(monkeypatch)
+
+    async def picky(texts):
+        if len(texts) > 1 or "archive" in texts[0]:
+            raise RuntimeError("400: too many tokens")
+        return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr(sop_embeddings, "embed", picky)
+    doc = await _doc(db_session)
+    assert await sop_embeddings.refresh(db_session, doc.id) == 2  # 1 and 3; 2 skipped
+    assert len(await _stored(db_session, doc)) == 2
+
+
+async def test_another_model_s_vectors_are_replaced_not_compared(db_session, monkeypatch):
+    _enable(monkeypatch)
+
+    async def fake(texts):
+        return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr(sop_embeddings, "embed", fake)
+    doc = await _doc(db_session)
+    await sop_embeddings.refresh(db_session, doc.id)
+    monkeypatch.setattr(sop_embeddings.get_settings(), "sop_embedding_deployment", "other-model")
+    assert await sop_embeddings.vectors_for(db_session, [doc.id]) == {}  # never mixed in
+    assert await sop_embeddings.refresh(db_session, doc.id) == 3
+    assert {r.model for r in await _stored(db_session, doc)} == {"other-model"}
+
+
+async def test_prefetched_query_vectors_are_reused(monkeypatch):
+    _enable(monkeypatch)
+    sop_embeddings._QUERY_CACHE.clear()
+    calls: list[int] = []
+
+    async def fake(texts):
+        calls.append(len(texts))
+        return [[float(i), 1.0] for i, _ in enumerate(texts)]
+
+    monkeypatch.setattr(sop_embeddings, "embed", fake)
+    await sop_embeddings.prefetch(["q1", "q2", "q1"])
+    assert await sop_embeddings.embed_query("q2") == [1.0, 1.0]
+    assert calls == [2]  # one batched call, no call per query
+    sop_embeddings._QUERY_CACHE.clear()

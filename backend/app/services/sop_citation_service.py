@@ -528,6 +528,9 @@ async def relocate(
             await db.commit()
         return it, located
 
+    if index.has_vectors:
+        # Every item's search query embedded in one batched call, not one call per item.
+        await sop_embeddings.prefetch([f"{it.question}\n{it.text}" for it in work])
     results = await asyncio.gather(*(one(it) for it in work))
 
     rows = []

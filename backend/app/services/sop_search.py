@@ -60,6 +60,11 @@ class Candidate:
 # Reciprocal Rank Fusion's constant (the usual 60), and how deep each ranking is read.
 _RRF_K = 60
 _DEPTH = 50
+# The least cosine similarity a unit needs to be proposed by meaning. Measured 2026-10-10 on
+# text-embedding-3-small with SOP-style text: a question and the passage answering it scored
+# 0.59-0.72, the same question and another SOP topic 0.19-0.45, unrelated text 0.04-0.36. Below
+# the floor a unit is not "found by meaning", so a query nothing answers still finds nothing.
+VECTOR_MIN_COSINE = 0.5
 
 
 @dataclass
@@ -74,8 +79,8 @@ class _Indexed:
 
 
 def _cosine(a: list[float], norm_a: float, b: list[float], norm_b: float) -> float:
-    if not norm_a or not norm_b:
-        return 0.0
+    if not norm_a or not norm_b or len(a) != len(b):
+        return 0.0  # another model's vector (another size) is never compared
     return sum(x * y for x, y in zip(a, b, strict=False)) / (norm_a * norm_b)
 
 
@@ -122,7 +127,8 @@ class SectionIndex:
         query_vector: list[float] | None = None,
     ) -> list[Candidate]:
         """The best-scoring units for ``text``, at most ``limit``, optionally only within some
-        documents. Units scoring nothing are never returned."""
+        documents. A unit is returned only if its keywords score or, with ``query_vector``, its
+        meaning is close enough (``VECTOR_MIN_COSINE``)."""
         query = set(tokens(text))
         allowed = set(document_ids) if document_ids is not None else None
         scored: list[tuple[float, _Indexed]] = []
@@ -166,13 +172,13 @@ class SectionIndex:
     ) -> list[tuple[float, _Indexed]]:
         """Keyword and vector rankings fused by rank: RRF, sum of 1 / (60 + rank)."""
         norm_q = math.sqrt(sum(x * x for x in query_vector))
+        scored = (
+            (_cosine(query_vector, norm_q, i.vector, i.norm), i)
+            for i in self._items
+            if i.vector and (allowed is None or i.document_id in allowed)
+        )
         by_meaning = sorted(
-            (
-                (_cosine(query_vector, norm_q, i.vector, i.norm), i)
-                for i in self._items
-                if i.vector and (allowed is None or i.document_id in allowed)
-            ),
-            key=lambda pair: -pair[0],
+            ((c, i) for c, i in scored if c >= VECTOR_MIN_COSINE), key=lambda pair: -pair[0]
         )
         fused: dict[int, float] = {}
         items: dict[int, _Indexed] = {}
