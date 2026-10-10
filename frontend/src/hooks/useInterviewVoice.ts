@@ -45,7 +45,7 @@ import {
 } from "./useVoiceAudio";
 import { useAvatarStream } from "./useAvatarStream";
 import { voiceMetrics } from "../telemetry/voiceTimeline";
-import { beginWebSocketTrace, type WebSocketTrace } from "../telemetry/appInsights";
+import { beginWebSocketTrace, flushForUnload, type WebSocketTrace } from "../telemetry/appInsights";
 import type {
   AudioState,
   TranscriptSegment,
@@ -1517,7 +1517,10 @@ export function useInterviewVoice(
   // A tab closed mid-interview never runs onclose: report its socket on the way out, so the longest
   // sessions are not the ones missing from the workbook.
   useEffect(() => {
-    const onPageHide = () => wsTraceRef.current?.end(1001, true, "pagehide");
+    const onPageHide = () => {
+      wsTraceRef.current?.end(1001, true, "pagehide", true);
+      flushForUnload();
+    };
     window.addEventListener("pagehide", onPageHide);
     return () => window.removeEventListener("pagehide", onPageHide);
   }, []);

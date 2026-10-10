@@ -37,7 +37,9 @@ interface Sink {
     responseCode: number;
     startTime: Date;
     properties: Record<string, string | boolean>;
-  }): void;
+  }, urgent: boolean): void;
+  /** Send everything queued with the page-unload transport (a beacon), which survives the page. */
+  unloadFlush?(): void;
   /** The page's current trace id (32 hex), or null. */
   traceId?(): string | null;
 }
@@ -122,8 +124,9 @@ export interface WebSocketTrace {
   /** The session went live on this socket (`session.updated`): only then can its end be a success. */
   markLive(): void;
   /** Report the socket as a dependency. `clean` = the close itself was normal; success needs that AND
-   * a session that went live. Idempotent: the first path to end a socket decides. */
-  end(code: number, clean: boolean, reason?: string): void;
+   * a session that went live. Idempotent: the first path to end a socket decides. `unloading`: the
+   * page is going away, so the record is only queued and {@link flushForUnload} sends it. */
+  end(code: number, clean: boolean, reason?: string, unloading?: boolean): void;
 }
 
 /**
@@ -155,7 +158,7 @@ export function beginWebSocketTrace(name: string, target: string): WebSocketTrac
     markLive() {
       live = true;
     },
-    end(code, clean, reason) {
+    end(code, clean, reason, unloading = false) {
       if (ended) return;
       ended = true;
       try {
@@ -172,12 +175,27 @@ export function beginWebSocketTrace(name: string, target: string): WebSocketTrac
           responseCode: code,
           startTime,
           properties,
-        });
+        }, !unloading);
       } catch (err) {
         console.debug("[telemetry] WebSocket dependency failed", err);
       }
     },
   };
+}
+
+/**
+ * The page is being hidden for good (`pagehide`: tab closed, navigated away): send what is queued
+ * with the SDK's unload transport. An ordinary send started now is cancelled with the page, which is
+ * how a tab closed mid-interview lost its socket record and its last quality window (measured live).
+ * Call it after queueing the last events, and queue those WITHOUT their usual immediate send, which
+ * would move them into a request that dies with the page.
+ */
+export function flushForUnload(): void {
+  try {
+    sink?.unloadFlush?.();
+  } catch (err) {
+    console.debug("[telemetry] unload flush failed", err);
+  }
 }
 
 /** A WebSocket dependency carries the trace it opened in; put it back on the item, where App Insights
@@ -288,10 +306,11 @@ async function loadSdk(connectionString: string): Promise<void> {
       ai.trackEvent({ name, measurements }, properties);
       if (urgent) ai.flush();
     },
-    trackDependency: (dependency) => {
+    trackDependency: (dependency, urgent) => {
       ai.trackDependencyData(dependency);
-      ai.flush();
+      if (urgent) ai.flush();
     },
+    unloadFlush: () => ai.onunloadFlush(),
     traceId: () => ai.getTraceCtx()?.getTraceId() ?? null,
   };
   for (const event of buffered) {

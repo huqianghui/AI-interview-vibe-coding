@@ -6,6 +6,7 @@ const sdk = vi.hoisted(() => ({
   initializers: [] as ((item: unknown) => void)[],
   flushes: 0,
   dependencies: [] as Record<string, unknown>[],
+  unloadFlushes: 0,
 }));
 vi.mock("@microsoft/applicationinsights-web", () => ({
   DistributedTracingModes: { W3C: 2 },
@@ -27,6 +28,9 @@ vi.mock("@microsoft/applicationinsights-web", () => ({
     getTraceCtx() {
       return { getTraceId: () => "4bf92f3577b34da6a3ce929d0e0e4736" };
     }
+    onunloadFlush() {
+      sdk.unloadFlushes += 1;
+    }
     flush() {
       sdk.flushes += 1;
     }
@@ -35,6 +39,7 @@ vi.mock("@microsoft/applicationinsights-web", () => ({
 
 import {
   beginWebSocketTrace,
+  flushForUnload,
   pinOperation,
   resetTelemetryForTests,
   scrubItem,
@@ -116,6 +121,26 @@ describe("start-up", () => {
         responseCode: 1006,
       }),
     ]);
+  });
+
+  it("a page going away queues its last records and sends them by the unload transport", async () => {
+    sdk.dependencies.length = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ app_insights_connection_string: "InstrumentationKey=k" }))),
+    );
+    expect(await startTelemetry("tok")).toBe(true);
+    const flushesBefore = sdk.flushes;
+    const trace = beginWebSocketTrace("WS /api/voice-live/ws", "example.test");
+    trace.markLive();
+    trace.end(1001, true, "pagehide", true);
+    trackEvent("voice.media", { video_fps: 25 }, {}, false);
+    // Neither started an ordinary send, which the closing page would cancel...
+    expect(sdk.flushes).toBe(flushesBefore);
+    expect(sdk.dependencies).toHaveLength(1);
+    // ...the unload flush carries both.
+    flushForUnload();
+    expect(sdk.unloadFlushes).toBe(1);
   });
 
   it("stays off and drops the buffer when the deployment has no App Insights", async () => {

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.66.0.1 (2026-10-10)
+
+### Fixed
+- **A tab closed mid-interview still reports its voice socket and its last WebRTC quality
+  window.** On `pagehide` both are queued and sent with the App Insights SDK's unload transport
+  (a beacon); the ordinary send they used before was cancelled with the page, so on the first live
+  check the browser's WebSocket record and the final `voice.media` window never arrived (the
+  backend session and every other event did).
+
 ## 0.66.0.0 (2026-10-10)
 
 ### Added
