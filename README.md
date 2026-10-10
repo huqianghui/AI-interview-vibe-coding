@@ -34,7 +34,7 @@ through the frontend's `/api` proxy, so it has no URL of its own.
 ### Performance and traces (Application Insights)
 
 The browser and the backend both report to the deployment's Application Insights
-(`appi-aiinterview-public`). Both links need Azure access to that resource.
+(`appi-aiinterview-public`). All three links need Azure access to that resource.
 
 | What | Link |
 |---|---|
