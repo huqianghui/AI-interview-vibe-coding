@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.68.1.0 (2026-10-11)
+
+### Changed
+- **The backend scales out: 3 uvicorn workers per replica, up to 2 replicas.** `UVICORN_WORKERS`
+  (default 1, so dev is unchanged; the Container App sets 3) and a scale rule that adds the second
+  replica at 20 concurrent requests per replica (an open voice socket counts as one); minimum 1.
+  Each process's PostgreSQL pool is 5 + 5, so (3 workers + the job runner) × 2 replicas stays far
+  inside B2s's connections even while a revision swap runs both. Checked against PostgreSQL 16 with
+  3 workers booting at once: one admin, one default bank, one persona, and each boot job queued once
+  and run by the job process.
+
 ## 0.68.0.0 (2026-10-11)
 
 ### Added

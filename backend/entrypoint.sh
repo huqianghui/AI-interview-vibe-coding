@@ -60,4 +60,7 @@ else
 fi
 
 echo "[entrypoint] starting uvicorn..."
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+# UVICORN_WORKERS processes (default 1; the Container App sets 3). Each runs the app's lifespan; the
+# boot seeds take turns under a database lock, and nothing a request relies on lives in one
+# process only (docs/planning/spec-jobs-and-scale-out.md).
+exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers "${UVICORN_WORKERS:-1}"
