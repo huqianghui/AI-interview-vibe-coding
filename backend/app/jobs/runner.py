@@ -212,6 +212,10 @@ class Runner:
                 await self._release(job.id)
                 raise
             span.set_attribute("job.outcome", outcome)
+            logger.info(
+                "Job %s %s (%s, attempt %d) %s",
+                *(job.kind, job.target_id, job.id, job.attempts, outcome),
+            )
 
     async def _supervise(self, job_id: str, work: asyncio.Task) -> str:
         # A heartbeat that cannot reach the database is retried; once the lease would have run
@@ -335,6 +339,9 @@ async def _main() -> None:
 
     telemetry.configure()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    # The Azure SDK logs every HTTP request and response at INFO, and App Insights' live metrics
+    # talks to Azure every second: at INFO the job container's log is nothing else.
+    logging.getLogger("azure").setLevel(logging.WARNING)
     await wait_for_schema()
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()

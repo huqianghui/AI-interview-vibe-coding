@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.67.0.1 (2026-10-11)
+
+### Fixed
+- **The job container's log is readable.** At INFO the Azure SDK logged every HTTP request, and App
+  Insights' live metrics calls Azure every second, so the log held nothing else; the `azure`
+  loggers are at WARNING in the job process now. Each finished job logs one line (kind, target,
+  attempt, outcome).
+
 ## 0.67.0.0 (2026-10-11)
 
 ### Changed
