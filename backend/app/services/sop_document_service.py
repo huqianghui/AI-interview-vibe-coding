@@ -133,7 +133,8 @@ async def delete_document(db: AsyncSession, document_id: str) -> bool:
     from app.models.sop import SopSection
     from app.services import sop_section_service, sop_summary_service
 
-    if sop_section_service.converting(document_id) or sop_summary_service.drafting(document_id):
+    busy = await sop_section_service.converting_ids(db) | await sop_summary_service.drafting_ids(db)
+    if document_id in busy:
         raise DocumentBusy(document_id)
     # The row is locked for the check and the delete (PostgreSQL; a no-op on SQLite), so a rubric
     # saved meanwhile that cites it either waits or is refused by the foreign key below.

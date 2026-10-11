@@ -127,3 +127,54 @@ async def test_report_stream_enforces_ownership(client):
         f"/candidate/interview/{interview_id}/report/stream", headers=headers_b
     )
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_a_scoring_job_that_breaks_is_an_error_line_and_a_500(client, monkeypatch):
+    from app.jobs import handlers
+
+    async def broken(_ctx):
+        raise RuntimeError("model unreachable")
+
+    monkeypatch.setitem(handlers.HANDLERS, "score_interview", broken)
+    headers = await _new_candidate_headers(client)
+    interview_id, _ = await _complete_interview(client, headers)
+    resp = await client.post(f"/candidate/interview/{interview_id}/report/stream", headers=headers)
+    assert resp.status_code == 200  # the error is in-band: the 200 was already sent
+    assert _parse_ndjson(resp.text)[-1] == {
+        "type": "error",
+        "detail": "Scoring failed: RuntimeError",
+    }
+    batch = await client.post(f"/candidate/interview/{interview_id}/report", headers=headers)
+    assert (batch.status_code, batch.json()["detail"]) == (500, "Scoring failed: RuntimeError")
+
+
+@pytest.mark.asyncio
+async def test_a_scoring_job_that_refuses_is_a_409(client, monkeypatch):
+    from app.jobs import handlers
+    from app.jobs.handlers import JobFailed
+
+    async def refuse(_ctx):
+        raise JobFailed("Interview session no longer exists")
+
+    monkeypatch.setitem(handlers.HANDLERS, "score_interview", refuse)
+    headers = await _new_candidate_headers(client)
+    interview_id, _ = await _complete_interview(client, headers)
+    batch = await client.post(f"/candidate/interview/{interview_id}/report", headers=headers)
+    assert (batch.status_code, batch.json()["detail"]) == (
+        409,
+        "Interview session no longer exists",
+    )
+
+
+@pytest.mark.asyncio
+async def test_scoring_that_no_job_process_takes_is_a_503_not_a_hang(client, monkeypatch):
+    from app.api import interview as interview_api
+    from app.config import get_settings
+
+    headers = await _new_candidate_headers(client)
+    interview_id, _ = await _complete_interview(client, headers)
+    monkeypatch.setattr(get_settings(), "job_runner_mode", "off")  # nobody runs it
+    monkeypatch.setattr(interview_api, "SCORING_QUEUE_LIMIT_SECONDS", 0.0)
+    batch = await client.post(f"/candidate/interview/{interview_id}/report", headers=headers)
+    assert batch.status_code == 503

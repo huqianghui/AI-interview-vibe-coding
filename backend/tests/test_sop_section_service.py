@@ -3,13 +3,27 @@
 Spec: docs/planning/spec-sop-section-grounding.md.
 """
 
-import asyncio
-
 import pytest
 
-from app.api import admin_sop
 from app.models.sop import DEFAULT_LIBRARY_ID, SopDocument
 from app.services import sop_ingestion, sop_markdown, sop_section_service, storage
+
+
+async def _backfill(db_session) -> int:
+    """Run the boot backfill job; how many documents its ``sop_build`` jobs converted."""
+    from sqlalchemy import select
+
+    from app.jobs import queue, runner
+    from app.models.job import Job
+
+    before = set((await db_session.execute(select(Job.id))).scalars())
+    job, _ = await queue.enqueue(db_session, "sop_backfill", "all")
+    await runner.kick(db_session._test_factory, job)
+    builds = (await db_session.execute(select(Job).where(Job.kind == "sop_build"))).scalars()
+    return sum(
+        1 for j in builds if j.id not in before and (queue.result_of(j) or {}).get("converted")
+    )
+
 
 pytestmark = pytest.mark.asyncio
 
@@ -90,34 +104,26 @@ async def test_a_document_without_stored_bytes_fails_cleanly(db_session):
     assert (result.source, result.error) == ("failed", "no stored file to convert")
 
 
-async def test_build_missing_converts_only_unconverted_documents(db_session):
+async def test_the_backfill_converts_only_unconverted_documents(db_session):
     first = await _ingest(db_session, "a.md")
     second = await _ingest(db_session, "b.md")
     await sop_section_service.build(db_session, first)
-    assert await sop_section_service.build_missing(db_session._test_factory) == 1
+    assert await _backfill(db_session) == 1
     await db_session.refresh(second)
     assert second.markdown_source == "text"
-    assert await sop_section_service.build_missing(db_session._test_factory) == 0
+    assert await _backfill(db_session) == 0
 
 
-async def test_build_missing_retries_a_failed_conversion(db_session, monkeypatch):
+async def test_the_backfill_retries_a_failed_conversion(db_session, monkeypatch):
     doc = await _ingest(db_session)
     real = sop_section_service.to_markdown
     await _fail(monkeypatch, "429")
     await sop_section_service.build(db_session, doc)
     assert doc.markdown_source == "failed"
     monkeypatch.setattr(sop_section_service, "to_markdown", real)
-    assert await sop_section_service.build_missing(db_session._test_factory) == 1
+    assert await _backfill(db_session) == 1
     await db_session.refresh(doc)
     assert (doc.markdown_source, doc.markdown_error) == ("text", "")
-
-
-async def test_build_missing_never_raises(caplog):
-    def broken_factory():
-        raise ConnectionError("database is stopped")
-
-    assert await sop_section_service.build_missing(broken_factory) == 0
-    assert "Converting SOP documents to sections failed" in caplog.text
 
 
 async def test_full_lengths_match_each_full_text():
@@ -156,7 +162,7 @@ async def test_admin_section_api(client, db_session, admin_auth):
     rebuilt = await client.post(f"/admin/sop/documents/{doc.id}/rebuild", headers=admin_auth)
     assert rebuilt.status_code == 202
     assert (rebuilt.json()["converting"], rebuilt.json()["section_count"]) == (True, 5)
-    await asyncio.gather(*admin_sop._BUILDS)
+    # The conversion ran inside the request (JOB_RUNNER_MODE=inline): the list shows it done.
     listed = (await client.get("/admin/sop/documents", headers=admin_auth)).json()
     row = next(d for d in listed if d["document_id"] == doc.id)
     assert (row["converting"], row["section_count"]) == (False, 5)
@@ -181,7 +187,6 @@ async def test_an_upload_is_converted_to_sections_in_the_background(client, admi
         data={"library_id": DEFAULT_LIBRARY_ID},
     )
     assert resp.status_code == 201
-    await asyncio.gather(*admin_sop._BUILDS)
     listed = (await client.get("/admin/sop/documents", headers=admin_auth)).json()
     row = next(d for d in listed if d["document_id"] == resp.json()["document_id"])
     assert (row["markdown_source"], row["section_count"]) == ("text", 5)
@@ -191,11 +196,11 @@ async def test_an_outdated_converter_version_is_converted_again(db_session):
     doc = await _ingest(db_session)
     await sop_section_service.build(db_session, doc)
     assert doc.markdown_converter_version == 1
-    assert await sop_section_service.build_missing(db_session._test_factory) == 0
+    assert await _backfill(db_session) == 0
     monkeypatch_versions = {**sop_section_service.CONVERTER_VERSIONS, "text": 2}
     sop_section_service.CONVERTER_VERSIONS.update(monkeypatch_versions)
     try:
-        assert await sop_section_service.build_missing(db_session._test_factory) == 1
+        assert await _backfill(db_session) == 1
         await db_session.refresh(doc)
         assert doc.markdown_converter_version == 2
     finally:
@@ -208,7 +213,7 @@ async def test_an_outdated_conversion_whose_file_is_gone_keeps_its_sections(db_s
     doc.markdown_converter_version = 0  # an older converter produced it
     doc.blob_path = "/nowhere/widget.md"
     await db_session.commit()
-    assert await sop_section_service.build_missing(db_session._test_factory) == 1
+    assert await _backfill(db_session) == 1
     await db_session.refresh(doc)
     assert (doc.markdown_source, doc.markdown_converter_version) == ("text", 0)
     assert len(await sop_section_service.list_sections(db_session, doc.id)) == 5

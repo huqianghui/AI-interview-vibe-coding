@@ -1,7 +1,8 @@
 """Async SQLAlchemy engine, session factory, and declarative base."""
 
 import asyncio
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from sqlalchemy import event, make_url
@@ -141,3 +142,68 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
     handlers pointed at the same database the tests override ``get_db`` with.
     """
     return async_session_factory
+
+
+# Any fixed number, distinct from Alembic's migration lock (alembic/env.py).
+_BOOT_LOCK_ID = 7_187_050_002
+
+
+@asynccontextmanager
+async def boot_lock(target: AsyncEngine | None = None) -> AsyncIterator[None]:
+    """Hold a database-wide lock for boot work every process does (seeds, the client bank import).
+
+    Each uvicorn worker of each replica runs the boot seeds; they are create-only, but two running
+    at once can both see a row missing and both create it. On PostgreSQL this takes a session-level
+    advisory lock on one dedicated connection for the duration, so the others wait and then find
+    the work done; the server releases it if the process dies. A no-op on SQLite (one process).
+    """
+    target = target or engine
+    if target.url.get_backend_name() != "postgresql":
+        yield
+        return
+    async with target.connect() as conn:
+        await conn.exec_driver_sql(f"SELECT pg_advisory_lock({_BOOT_LOCK_ID})")
+        await conn.commit()
+        try:
+            yield
+        finally:
+            await conn.exec_driver_sql(f"SELECT pg_advisory_unlock({_BOOT_LOCK_ID})")
+            await conn.commit()
+
+
+def _scripts():  # noqa: ANN202 — alembic's ScriptDirectory
+    from pathlib import Path
+
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    backend = Path(__file__).resolve().parent.parent
+    config = Config(str(backend / "alembic.ini"))
+    config.set_main_option("script_location", str(backend / "alembic"))  # not relative to the cwd
+    return ScriptDirectory.from_config(config)
+
+
+def _migration_heads() -> set[str]:
+    return set(_scripts().get_heads())
+
+
+async def wait_for_schema(poll_seconds: float = 5.0) -> None:
+    """Until the database is at the migrations' head: the job process starts beside the web
+    container, which is the one that runs ``alembic upgrade head`` (entrypoint.sh)."""
+    from sqlalchemy import text
+
+    scripts = _scripts()
+    heads = set(scripts.get_heads())
+    known = {rev.revision for rev in scripts.walk_revisions()}
+    while True:
+        try:
+            async with engine.connect() as conn:
+                rows = await conn.execute(text("SELECT version_num FROM alembic_version"))
+                versions = set(rows.scalars().all())
+            # At head, or AHEAD of this image (a newer web container migrated; an older job image
+            # rolled back to): either way there is nothing to wait for.
+            if versions == heads or (versions and not versions <= known):
+                return
+        except Exception:  # noqa: BLE001 — no table yet, or the database is starting
+            pass
+        await asyncio.sleep(poll_seconds)

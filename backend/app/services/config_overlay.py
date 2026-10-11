@@ -24,18 +24,68 @@ from app.utils.encryption import decrypt_value
 
 logger = logging.getLogger(__name__)
 
+# The master row as this process last applied it. Every process (each uvicorn worker, the job
+# runner) holds its own settings, so a save reaches the others through :func:`ensure_current`.
+_applied: tuple | None = None
+# Web workers look for a save made in another process this often.
+REFRESH_SECONDS = 30.0
+
+
+def _stamp(master) -> tuple | None:  # noqa: ANN001 — a ServiceConfig row
+    if master is None:
+        return None
+    return (
+        master.updated_at,
+        master.is_active,
+        master.endpoint,
+        master.api_key_encrypted,
+        master.default_project,
+        master.model_or_deployment,
+        master.knowledge_base,
+        master.knowledge_source,
+    )
+
+
+async def ensure_current(db: AsyncSession) -> bool:
+    """Apply the master row if it changed since this process last applied it (a save in another
+    worker or replica). Cheap when nothing changed: one row read. Returns whether it applied."""
+    try:
+        master = await config_service.get_master_config(db)
+    except Exception:  # noqa: BLE001 — table missing on a first boot; the boot overlay handles it
+        return False
+    if _stamp(master) == _applied:
+        return False
+    return await apply_master_config_to_settings(db)
+
+
+async def refresh_forever() -> None:
+    """A web worker's background check for saves made elsewhere (never raises)."""
+    import asyncio
+
+    from app.db import async_session_factory
+
+    while True:
+        await asyncio.sleep(REFRESH_SECONDS)
+        try:
+            async with async_session_factory() as db:
+                await ensure_current(db)
+        except Exception:  # noqa: BLE001 — e.g. the database is restarting; try next round
+            logger.warning("Config refresh failed", exc_info=True)
+
 
 async def apply_master_config_to_settings(db: AsyncSession) -> bool:
     """Overlay the active master config onto settings + re-register adapters.
 
     Returns True when an active master row was applied, False otherwise (no row / inactive / error).
     """
+    global _applied
     try:
         master = await config_service.get_master_config(db)
     except Exception:  # noqa: BLE001 — table may not exist yet on first boot
         logger.warning("Service config overlay skipped (table missing?)", exc_info=True)
         return False
 
+    _applied = _stamp(master)
     if master is None or not master.is_active or not master.endpoint:
         return False
 

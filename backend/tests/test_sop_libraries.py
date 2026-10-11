@@ -1,10 +1,7 @@
 """SOP libraries (spec-sop-libraries): every document in one library, chosen before upload."""
 
-import asyncio
-
 import pytest
 
-from app.api import admin_sop
 from app.models.sop import DEFAULT_LIBRARY_ID, SopDocument, SopLibrary
 from app.services import sop_ingestion, sop_library_service
 
@@ -20,11 +17,9 @@ def _upload(name: str, library_id: str | None) -> dict:
 
 
 async def _post_upload(client, auth, name: str, library_id: str | None):  # noqa: ANN001
-    """Upload, then wait for the background conversion it starts: it shares the test database,
-    and a request racing it on the one SQLite connection fails ("SQL statements in progress")."""
-    resp = await client.post("/admin/sop/documents", headers=auth, **_upload(name, library_id))
-    await asyncio.gather(*admin_sop._BUILDS)
-    return resp
+    """Upload. The conversion it queues runs inside the request in tests (JOB_RUNNER_MODE=inline),
+    so it is done when this returns."""
+    return await client.post("/admin/sop/documents", headers=auth, **_upload(name, library_id))
 
 
 async def test_libraries_are_created_renamed_and_listed_with_their_counts(client, admin_auth):

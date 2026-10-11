@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     # while a revision swap runs both, must stay under max_connections minus Azure's 15 reserved.
     db_pool_size: int = 10
     db_max_overflow: int = 15
+    # Where background jobs run (app/jobs, docs/planning/spec-jobs-and-scale-out.md). "embedded":
+    # inside this process, a job started here runs here at once and a poller picks up the rest (dev,
+    # e2e). "off": this process only enqueues; the job process (`python -m app.jobs.runner`, the
+    # `jobs` container) runs them, so no web worker carrying voice sockets does heavy work.
+    # "inline" (pytest only): the request runs the job to completion itself.
+    job_runner_mode: str = "embedded"
+    # Jobs one runner process works on at once.
+    job_runner_concurrency: int = 4
 
     # Auth. REQUIRED — no code default on purpose: SECRET_KEY signs every JWT AND (since #102) is
     # the key the seeded candidate passwords are derived from, so a well-known default would make

@@ -9,6 +9,7 @@ from app.models.anonymous_session import AnonymousCandidateSession
 from app.models.bank_version import BankVersion
 from app.models.checklist import Checklist, ChecklistItem
 from app.models.interview import InterviewRecording, InterviewSession, InterviewTurn
+from app.models.job import Job
 from app.models.judge_event import JudgeEvent
 from app.models.persona import InterviewerPersona
 from app.models.persona_knowledge import PersonaKnowledgeConfig
@@ -26,6 +27,7 @@ __all__ = [
     "InterviewSession",
     "InterviewTurn",
     "InterviewRecording",
+    "Job",
     "JudgeEvent",
     "InterviewerPersona",
     "PersonaKnowledgeConfig",

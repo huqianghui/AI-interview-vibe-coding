@@ -42,7 +42,8 @@ if [[ -n "${CLIENT_BUNDLE_BLOB:-}" ]]; then
     if [[ -f "${BUNDLE_DIR}/import_rfcsm_bank.py" ]]; then
       cp "${BUNDLE_DIR}/import_rfcsm_bank.py" scripts/import_rfcsm_bank.py
       echo "[entrypoint] running rf-CSM bank importer..."
-      if python scripts/import_rfcsm_bank.py \
+      # Under the database boot lock: with several replicas, one imports and the rest find it done.
+      if python scripts/with_boot_lock.py python scripts/import_rfcsm_bank.py \
           --source-dir "${BUNDLE_DIR}/EU_avatar_inspector_interview"; then
         echo "[entrypoint] client bank import complete."
       else

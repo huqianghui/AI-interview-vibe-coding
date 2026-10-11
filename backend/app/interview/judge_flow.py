@@ -11,8 +11,9 @@ invisible background pacing, so the page simply stays quiet.
 """
 
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.interview import judge as judge_mod
@@ -26,10 +27,39 @@ from app.services import bank_version_service, persona_service
 # discarded because the candidate kept talking still cost a call; this bounds a very chatty answer).
 JUDGE_LLM_CALLS_PER_APPLIED = 3
 
-# One in-flight judge per session (single-process guard; a second concurrent request is a 409 the
-# page treats as "wait"). Cleared in a finally block, so a crash can never wedge a session. Valid
-# only while the backend runs ONE replica (maxReplicas=1): a second replica would not see it.
-_JUDGE_IN_FLIGHT: set[str] = set()
+# One in-flight judge per session, across every process and replica: a judge call takes a lease on
+# the session row (``judge_lease_until``) with a guarded UPDATE, and a second concurrent request is
+# a 409 the page treats as "wait". Cleared in a finally block; a lease left by a crashed process
+# expires after this long, so it can never wedge a session for more than one judge timeout.
+JUDGE_LEASE = timedelta(seconds=30)
+
+
+async def _take_judge_lease(db: AsyncSession, session_id: str) -> bool:
+    t = datetime.now(UTC).replace(tzinfo=None)
+    result = await db.execute(
+        update(InterviewSession)
+        .where(
+            InterviewSession.id == session_id,
+            or_(
+                InterviewSession.judge_lease_until.is_(None),
+                InterviewSession.judge_lease_until < t,
+            ),
+        )
+        .values(judge_lease_until=t + JUDGE_LEASE)
+        .execution_options(synchronize_session=False)
+    )
+    await db.commit()
+    return result.rowcount == 1
+
+
+async def _drop_judge_lease(db: AsyncSession, session_id: str) -> None:
+    await db.execute(
+        update(InterviewSession)
+        .where(InterviewSession.id == session_id)
+        .values(judge_lease_until=None)
+        .execution_options(synchronize_session=False)
+    )
+    await db.commit()
 
 
 class InterviewNotLive(InterviewStateError):
@@ -130,9 +160,8 @@ async def judge(
     if llm_used >= max_calls * JUDGE_LLM_CALLS_PER_APPLIED:
         return WAIT  # raw LLM-call bound (speculative prefetch cost guard)
 
-    if session.id in _JUDGE_IN_FLIGHT:
+    if not await _take_judge_lease(db, session.id):
         raise JudgeInFlight("A judge call is already in flight")
-    _JUDGE_IN_FLIGHT.add(session.id)
     try:
         items = await bank_version_service.rubric_rows(
             db, question_id=current.id, bank_version_id=session.bank_version_id
@@ -185,7 +214,7 @@ async def judge(
             verdict=result.verdict, speech_text=result.speech_text, event_id=event.id
         )
     finally:
-        _JUDGE_IN_FLIGHT.discard(session.id)
+        await _drop_judge_lease(db, session.id)
 
 
 async def apply(

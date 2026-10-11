@@ -4,12 +4,10 @@ approved summary is ever handed to scoring (spec-sop-section-grounding §2).
 Synthetic SOP text only: this repo is public.
 """
 
-import asyncio
 import json
 
 import pytest
 
-from app.api import admin_sop
 from app.models.sop import SopDocument
 from app.services import sop_section_service, sop_summary_service
 from tests.conftest import ScriptedJudgeAdapter, _real_judge_adapter
@@ -101,16 +99,19 @@ async def test_an_unconverted_document_or_the_mock_llm_drafts_nothing(db_session
     mock = Named("{}")
     mock.name = "mock"
     assert await sop_summary_service.generate(db_session, converted, mock) is False
-    assert await sop_summary_service.summarize_missing(db_session._test_factory, mock) == 0
+    assert await sop_summary_service.ids_needing_draft(db_session._test_factory, mock) == []
     assert converted.summary_status == ""
 
 
-async def test_summarize_missing_drafts_converted_documents_without_a_summary(db_session):
+async def test_converted_documents_without_a_summary_are_drafted(db_session, monkeypatch):
     waiting = await _doc(db_session)
     done = await _doc(db_session, summary="kept", summary_status="reviewed")
     await _doc(db_session, markdown="", markdown_source="")
     llm = Named(json.dumps(GOOD))
-    assert await sop_summary_service.summarize_missing(db_session._test_factory, llm) == 1
+    monkeypatch.setattr(sop_summary_service, "get_llm_adapter", lambda: llm)
+    factory = db_session._test_factory
+    assert await sop_summary_service.ids_needing_draft(factory) == [waiting.id]
+    assert await sop_summary_service.draft_document(factory, waiting.id) is True
     await db_session.refresh(waiting)
     await db_session.refresh(done)
     assert (waiting.summary_status, done.summary) == ("draft", "kept")
@@ -156,8 +157,7 @@ async def test_the_summary_api(client, db_session, admin_auth, monkeypatch):
     monkeypatch.setattr(sop_summary_service, "get_llm_adapter", lambda: llm)
     drafted = await client.post(f"{base}/draft", headers=admin_auth)
     assert drafted.status_code == 202 and drafted.json()["summarizing"] is True
-    await asyncio.gather(*admin_sop._BUILDS)
-    db_session.expire_all()  # the draft was written by the background task's own session
+    db_session.expire_all()  # the draft was written by the job's own session
     after = (await client.get(base, headers=admin_auth)).json()
     assert (after["status"], after["summarizing"]) == ("draft", False)
     assert "Quarantine" in after["summary"]
@@ -177,12 +177,15 @@ async def test_the_summary_api_is_admin_only(client, db_session, candidate_auth)
     assert resp.status_code == 403
 
 
-async def test_build_missing_drafts_summaries_after_converting(db_session, monkeypatch):
+async def test_a_conversion_queues_the_summary_draft_after_it(db_session, monkeypatch):
+    from app.jobs import queue, runner
+
     doc = await _doc(db_session, markdown="", markdown_source="")
     monkeypatch.setattr(sop_section_service.storage, "load", lambda _p: WIDGET_SOP.encode())
     llm = Named(json.dumps(GOOD))
     monkeypatch.setattr(sop_summary_service, "get_llm_adapter", lambda: llm)
-    assert await sop_section_service.build_missing(db_session._test_factory) == 1
+    job, _ = await queue.enqueue(db_session, "sop_build", doc.id)
+    await runner.kick(db_session._test_factory, job)  # inline: the chained sop_summary runs too
     await db_session.refresh(doc)
     assert (doc.markdown_source, doc.summary_status) == ("text", "draft")
 
@@ -238,26 +241,18 @@ async def test_an_admin_save_during_drafting_wins_over_the_draft(db_session):
     assert (doc.summary, doc.summary_status) == ("Admin's own text.", "reviewed")
 
 
-async def test_two_queued_drafts_keep_the_document_drafting_until_both_end():
-    sop_summary_service.mark_drafting("d")
-    sop_summary_service.mark_drafting("d")
-    sop_summary_service.unmark_drafting("d")
-    assert sop_summary_service.drafting("d")
-    sop_summary_service.unmark_drafting("d")
-    assert not sop_summary_service.drafting("d")
-
-
 async def test_saving_is_refused_while_drafting_and_drafting_without_a_model(
     client, db_session, admin_auth
 ):
     doc = await _doc(db_session)
     base = f"/admin/sop/documents/{doc.id}/summary"
-    sop_summary_service.mark_drafting(doc.id)
-    try:
-        busy = await client.put(base, headers=admin_auth, json={"summary": "S.", "approve": True})
-        assert busy.status_code == 409
-    finally:
-        sop_summary_service.unmark_drafting(doc.id)
+    from app.jobs import queue
+
+    job, _ = await queue.enqueue(db_session, "sop_summary", doc.id)  # a draft in progress
+    busy = await client.put(base, headers=admin_auth, json={"summary": "S.", "approve": True})
+    assert busy.status_code == 409
+    assert (await client.get(base, headers=admin_auth)).json()["summarizing"] is True
+    await queue.request_cancel(db_session, job)
     # The test default LLM is the mock: drafting is refused, not silently a no-op.
     no_model = await client.post(f"{base}/draft", headers=admin_auth)
     assert no_model.status_code == 409 and "No AI model" in no_model.json()["detail"]

@@ -26,7 +26,7 @@ from app import telemetry
 from app.config import get_settings
 from app.db import async_session_factory
 from app.interview.state_machine import find_resumable_interview
-from app.services import config_service, persona_service, user_service
+from app.services import config_overlay, config_service, persona_service, user_service
 from app.services.agents.voice_live_metadata import FALLBACK_LOCALE
 from app.services.anonymous_session_service import AnonymousSessionError, verify_anonymous_token
 from app.services.recording_service import QuestionRecorder, recording_enabled
@@ -194,6 +194,8 @@ async def voice_live_websocket(ws: WebSocket) -> None:
         return
 
     async with async_session_factory() as db:
+        # A config save in another worker or replica: the proxy reads endpoint/key from settings.
+        await config_overlay.ensure_current(db)
         interview_id = None
         if persona_id:
             try:

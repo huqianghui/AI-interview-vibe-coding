@@ -133,6 +133,108 @@ resource managedEnvironment 'Microsoft.App/managedEnvironments@2023-05-01' = {
   }
 }
 
+// The backend's environment, shared by its two containers: the web server and the job runner
+// (docs/planning/spec-jobs-and-scale-out.md). Same image, same settings; only the command differs.
+var backendEnv = [
+  {
+    name: 'DATABASE_URL'
+    value: databaseUrl
+  }
+  {
+    name: 'DATABASE_AUTH'
+    value: databaseAuth
+  }
+  {
+    name: 'MATERIAL_STORAGE_PATH'
+    value: materialStoragePath
+  }
+  {
+    name: 'DEBUG'
+    value: 'false'
+  }
+  {
+    name: 'SECRET_KEY'
+    secretRef: 'secret-key'
+  }
+  {
+    name: 'ENCRYPTION_KEY'
+    secretRef: 'encryption-key'
+  }
+  {
+    name: 'SEED_ADMIN_PASSWORD'
+    secretRef: 'seed-admin-password'
+  }
+  // Fresh boot has no saved DB master config, so pin providers to azure here; the app
+  // reaches Foundry / Voice Live via the MI (DefaultAzureCredential + AZURE_CLIENT_ID).
+  {
+    name: 'DEFAULT_LLM_PROVIDER'
+    value: 'azure'
+  }
+  {
+    name: 'DEFAULT_RETRIEVAL_PROVIDER'
+    value: 'azure'
+  }
+  {
+    name: 'DEFAULT_AGENT_SYNC_PROVIDER'
+    value: 'azure'
+  }
+  {
+    name: 'AZURE_FOUNDRY_ENDPOINT'
+    value: azureFoundryEndpoint
+  }
+  {
+    name: 'FOUNDRY_PROJECT_ENDPOINT'
+    value: foundryProjectEndpoint
+  }
+  {
+    name: 'AZURE_FOUNDRY_DEFAULT_PROJECT'
+    value: azureFoundryDefaultProject
+  }
+  {
+    name: 'FOUNDRY_AGENT_MODEL'
+    value: foundryAgentModel
+  }
+  {
+    name: 'VOICE_LIVE_DEFAULT_MODEL'
+    value: voiceLiveDefaultModel
+  }
+  {
+    name: 'VOICE_LIVE_API_VERSION'
+    value: voiceLiveApiVersion
+  }
+  {
+    name: 'SOP_EMBEDDING_DEPLOYMENT'
+    value: sopEmbeddingDeployment
+  }
+  // Selects the user-assigned MI for DefaultAzureCredential (the app has one identity but
+  // this is required to disambiguate from any system-assigned identity).
+  {
+    name: 'AZURE_CLIENT_ID'
+    value: backendIdentityClientId
+  }
+  // Client-bundle fetch (entrypoint.sh). Empty CLIENT_BUNDLE_BLOB → public-demo mode.
+  {
+    name: 'AZURE_STORAGE_ACCOUNT_URL'
+    value: storageAccountBlobEndpoint
+  }
+  {
+    // SOP originals go to the `materials` blob container, never the revision's own disk.
+    name: 'DEFAULT_STORAGE_PROVIDER'
+    value: 'azure'
+  }
+  {
+    name: 'CLIENT_BUNDLE_CONTAINER'
+    value: clientBundleContainerName
+  }
+  {
+    name: 'CLIENT_BUNDLE_BLOB'
+    value: clientBundleBlob
+  }
+  {
+    name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+    value: applicationInsightsConnectionString
+  }
+]
 resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
   name: backendAppName
   location: location
@@ -184,109 +286,41 @@ resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
         {
           name: 'backend'
           image: effectiveBackendImage
-          env: [
+          env: concat(backendEnv, [
             {
-              name: 'DATABASE_URL'
-              value: databaseUrl
+              // This process only queues jobs; the jobs container runs them.
+              name: 'JOB_RUNNER_MODE'
+              value: 'off'
             }
-            {
-              name: 'DATABASE_AUTH'
-              value: databaseAuth
-            }
-            {
-              name: 'MATERIAL_STORAGE_PATH'
-              value: materialStoragePath
-            }
-            {
-              name: 'DEBUG'
-              value: 'false'
-            }
-            {
-              name: 'SECRET_KEY'
-              secretRef: 'secret-key'
-            }
-            {
-              name: 'ENCRYPTION_KEY'
-              secretRef: 'encryption-key'
-            }
-            {
-              name: 'SEED_ADMIN_PASSWORD'
-              secretRef: 'seed-admin-password'
-            }
-            // Fresh boot has no saved DB master config, so pin providers to azure here; the app
-            // reaches Foundry / Voice Live via the MI (DefaultAzureCredential + AZURE_CLIENT_ID).
-            {
-              name: 'DEFAULT_LLM_PROVIDER'
-              value: 'azure'
-            }
-            {
-              name: 'DEFAULT_RETRIEVAL_PROVIDER'
-              value: 'azure'
-            }
-            {
-              name: 'DEFAULT_AGENT_SYNC_PROVIDER'
-              value: 'azure'
-            }
-            {
-              name: 'AZURE_FOUNDRY_ENDPOINT'
-              value: azureFoundryEndpoint
-            }
-            {
-              name: 'FOUNDRY_PROJECT_ENDPOINT'
-              value: foundryProjectEndpoint
-            }
-            {
-              name: 'AZURE_FOUNDRY_DEFAULT_PROJECT'
-              value: azureFoundryDefaultProject
-            }
-            {
-              name: 'FOUNDRY_AGENT_MODEL'
-              value: foundryAgentModel
-            }
-            {
-              name: 'VOICE_LIVE_DEFAULT_MODEL'
-              value: voiceLiveDefaultModel
-            }
-            {
-              name: 'VOICE_LIVE_API_VERSION'
-              value: voiceLiveApiVersion
-            }
-            {
-              name: 'SOP_EMBEDDING_DEPLOYMENT'
-              value: sopEmbeddingDeployment
-            }
-            // Selects the user-assigned MI for DefaultAzureCredential (the app has one identity but
-            // this is required to disambiguate from any system-assigned identity).
-            {
-              name: 'AZURE_CLIENT_ID'
-              value: backendIdentityClientId
-            }
-            // Client-bundle fetch (entrypoint.sh). Empty CLIENT_BUNDLE_BLOB → public-demo mode.
-            {
-              name: 'AZURE_STORAGE_ACCOUNT_URL'
-              value: storageAccountBlobEndpoint
-            }
-            {
-              // SOP originals go to the `materials` blob container, never the revision's own disk.
-              name: 'DEFAULT_STORAGE_PROVIDER'
-              value: 'azure'
-            }
-            {
-              name: 'CLIENT_BUNDLE_CONTAINER'
-              value: clientBundleContainerName
-            }
-            {
-              name: 'CLIENT_BUNDLE_BLOB'
-              value: clientBundleBlob
-            }
-            {
-              name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
-              value: applicationInsightsConnectionString
-            }
-          ]
+          ])
           resources: {
             cpu: json('2.0')
             memory: '4Gi'
+          }
+        }
+        {
+          // The job runner: scoring, SOP conversion and summaries, citation runs, persona sync.
+          // Its own process, so none of that work shares an event loop with a live voice socket.
+          name: 'jobs'
+          image: effectiveBackendImage
+          // `args`, not `command`: it replaces the image's CMD and keeps its ENTRYPOINT (tini), so
+          // the LibreOffice processes SOP conversion leaves behind are reaped, not left as zombies.
+          args: [
+            'python'
+            '-m'
+            'app.jobs.runner'
+          ]
+          // Its own follow-up jobs (a summary after a conversion) are claimed by its poller, never
+          // started beside it: one claim path, so no job waits on a lock after its lease began.
+          env: concat(backendEnv, [
+            {
+              name: 'JOB_RUNNER_MODE'
+              value: 'off'
+            }
+          ])
+          resources: {
+            cpu: json('1.0')
+            memory: '2Gi'
           }
         }
       ]

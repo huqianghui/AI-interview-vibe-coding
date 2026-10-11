@@ -107,6 +107,15 @@ acknowledgement, never a local report.
 | Voice WebSocket traced end to end (browser `traceparent` → backend `voice.session` child), WebRTC quality samples (`voice.media`), voice-only playback gaps | ✅ Done | v0.66.0.0, v0.66.0.1 | ✅ verified 2026-10-10 (live avatar interview: socket ↔ backend session joined, close by tab via beacon, quality windows, full request chain in the workbook) |
 | "AI Interview — Voice performance" workbook (`modules/voice-workbook.bicep`) | ✅ Done | v0.65.0.0 | ✅ deployed to `appi-aiinterview-public`; all 16 queries run |
 
+## Background jobs + scale-out ([`planning/spec-jobs-and-scale-out.md`](planning/spec-jobs-and-scale-out.md))
+
+| Capability | Status | Shipped | Live |
+|---|---|---|---|
+| Larger containers (backend 2 vCPU / 4 GiB, frontend 1 / 2), PostgreSQL B2s + `max_connections` 429, per-process pool settings | ✅ Done | v0.66.1.0 / PR #249 | ✅ applied 2026-10-11 (`/api/health/db` 200) |
+| `jobs` table + job runner process (`jobs` sidecar container); scoring, SOP conversion / summaries / backfill, citation runs and persona sync run as jobs; judge lease, boot lock and config refresh across processes | ✅ Done | v0.67.0.0 | pending |
+| Admin Jobs tab | ⏳ Next | — | — |
+| 3 uvicorn workers × max 2 replicas | ⏳ After the Jobs tab | — | — |
+
 ## End-to-end tests (v0.14.0.0)
 
 Real-browser Playwright coverage of the winning-demo path, on top of the unit/component tests.

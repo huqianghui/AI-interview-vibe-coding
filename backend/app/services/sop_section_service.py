@@ -3,8 +3,9 @@
 Spec: docs/planning/spec-sop-section-grounding.md. Conversion calls Azure Document Intelligence
 (~15 s per 20-page PDF), so it never runs inside a request or before startup: the client importer
 ingests ~24 documents BEFORE uvicorn starts (entrypoint.sh), and converting them there would blow
-the container's startup probe. :func:`build_missing` runs as a background task after startup and
-after each upload, converting every document that has not been converted yet.
+the container's startup probe. Conversion is a ``sop_build`` job (app/jobs): one per document,
+queued by an upload, an admin's "Convert again", or the boot backfill for every document that has
+not been converted yet, and run by the job process.
 """
 
 from __future__ import annotations
@@ -18,18 +19,12 @@ from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.sop import SopDocument, SopSection
-from app.services import sop_embeddings, sop_summary_service, storage
+from app.services import sop_embeddings, storage
 from app.services.sop_markdown import CONVERTER_VERSIONS, MarkdownResult, to_markdown
 from app.sop.sections import heading_block, parse_sections
 
 logger = logging.getLogger(__name__)
 
-# One build at a time per process: two overlapping runs (boot, an upload, an admin's "Convert
-# again") would convert the same document twice and race on its section rows. Every build goes
-# through :func:`build_missing` or :func:`rebuild`, both of which hold this lock.
-_BUILD_LOCK = asyncio.Lock()
-# Documents queued for or in conversion right now, so the admin list can say so.
-_CONVERTING: set[str] = set()
 # Sources a document still needs converting from: never tried, or tried and failed (a throttled or
 # timed-out call at boot must not stay failed until someone notices).
 _NEEDS_CONVERTING = ("", "failed")
@@ -52,15 +47,6 @@ def needs_converting(document: SopDocument) -> bool:
         return True
     current = CONVERTER_VERSIONS.get(document.markdown_source, 0)
     return document.markdown_converter_version < current
-
-
-def converting(document_id: str) -> bool:
-    return document_id in _CONVERTING
-
-
-def mark_converting(document_id: str) -> None:
-    """Show a document as converting as soon as a rebuild is asked for, before its task runs."""
-    _CONVERTING.add(document_id)
 
 
 @dataclass(frozen=True)
@@ -158,25 +144,21 @@ async def build(
     )
 
 
-async def _build_one(session_factory, doc_id: str, *, only_if_needed: bool) -> bool:  # noqa: ANN001
-    _CONVERTING.add(doc_id)
-    try:
-        async with session_factory() as db:
-            document = await db.get(SopDocument, doc_id)
-            if document is None:
-                return False
-            if only_if_needed and not needs_converting(document):
-                return False
-            await build(db, document)
-        # Its units' vectors for hybrid search (only the units whose text changed); a failure
-        # leaves keyword search for this document.
-        await _embed(session_factory, doc_id)
-        return True
-    except Exception:  # noqa: BLE001 — background work: log, keep going
-        logger.exception("Converting SOP %s to sections failed", doc_id)
-        return False
-    finally:
-        _CONVERTING.discard(doc_id)
+async def build_document(session_factory, doc_id: str, *, force: bool = False) -> bool:  # noqa: ANN001
+    """Convert one document (only if it needs it, unless ``force``: an admin's "Convert again")
+    and embed its units. The ``sop_build`` job: one live job per document is what keeps two
+    conversions of it from racing on its section rows. Returns whether it was converted."""
+    async with session_factory() as db:
+        document = await db.get(SopDocument, doc_id)
+        if document is None:
+            return False
+        if not force and not needs_converting(document):
+            return False
+        await build(db, document)
+    # Its units' vectors for hybrid search (only the units whose text changed); a failure
+    # leaves keyword search for this document.
+    await _embed(session_factory, doc_id)
+    return True
 
 
 async def _embed(session_factory, doc_id: str) -> None:  # noqa: ANN001
@@ -189,52 +171,22 @@ async def _embed(session_factory, doc_id: str) -> None:  # noqa: ANN001
         logger.warning("Embedding SOP %s failed; it is searched by keywords", doc_id, exc_info=True)
 
 
-async def build_missing(session_factory) -> int:  # noqa: ANN001 — async_sessionmaker
-    """Convert every document not converted yet, whose last conversion failed, or that an older
-    converter version produced; then draft the missing summaries. Each document in its own
-    session, failures logged and skipped, so one bad file cannot stop the rest; never raises (it
-    runs as a fire-and-forget task). Returns how many were converted."""
-    queued: list[str] = []
-    try:
-        async with _BUILD_LOCK:
-            async with session_factory() as db:
-                ids = (
-                    (await db.execute(select(SopDocument.id).where(_needs_converting_clause())))
-                    .scalars()
-                    .all()
-                )
-            # Shown as "drafting" from now: their summary follows their conversion.
-            queued = sop_summary_service.queue_drafting(ids)
-            done = 0
-            for doc_id in ids:
-                done += await _build_one(session_factory, doc_id, only_if_needed=True)
-        # Then, OUTSIDE the build lock (drafting touches only the summary columns, and takes
-        # ~25 s per document), draft every converted document's missing summary (spec §2).
-        await sop_summary_service.summarize_missing(session_factory)
-        # Every document's search vectors, for the units that have none yet (the first boot after
-        # hybrid search came in embeds them all; later boots find nothing to do).
-        await sop_embeddings.refresh_all(session_factory)
-        return done
-    except asyncio.CancelledError:
-        raise
-    except Exception:  # noqa: BLE001 — e.g. the database is down at boot; the next run retries
-        logger.exception("Converting SOP documents to sections failed")
-        return 0
-    finally:
-        sop_summary_service.unqueue_drafting(queued)
+async def ids_needing_conversion(session_factory) -> list[str]:  # noqa: ANN001
+    """Documents never converted, whose last conversion failed, or converted by an older
+    version of their converter (the boot backfill queues one ``sop_build`` for each)."""
+    async with session_factory() as db:
+        return list(
+            (await db.execute(select(SopDocument.id).where(_needs_converting_clause())))
+            .scalars()
+            .all()
+        )
 
 
-async def rebuild(session_factory, document_id: str) -> None:  # noqa: ANN001
-    """An admin's "Convert again": convert one document whatever its state, in the background,
-    after any build already running. Never raises."""
-    _CONVERTING.add(document_id)
-    try:
-        async with _BUILD_LOCK:
-            await _build_one(session_factory, document_id, only_if_needed=False)
-    finally:
-        _CONVERTING.discard(document_id)
-    # A document converted for the first time this way gets its summary drafted too.
-    await sop_summary_service.summarize_missing(session_factory)
+async def converting_ids(db: AsyncSession) -> set[str]:
+    """Documents queued for or in conversion right now, in any process."""
+    from app.jobs import queue
+
+    return await queue.live_targets(db, "sop_build")
 
 
 async def list_sections(db: AsyncSession, document_id: str) -> Sequence[SopSection]:
