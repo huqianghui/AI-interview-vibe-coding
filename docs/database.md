@@ -135,7 +135,7 @@ SQLite 同一时刻只允许一个写操作，很多「先查再写」的代码�
 
 ## 八、后台任务表 `jobs` 与数据库锁（v0.67.0.0）
 
-设计见 [`planning/spec-jobs-and-scale-out.md`](planning/spec-jobs-and-scale-out.md)。耗时的工作不再由 Web 进程里的 `asyncio.create_task` 执行，而是写进 `jobs` 表，由单独的任务进程（`python -m app.jobs.runner`，后端应用里的 `jobs` 容器）领取执行。这样评分、SOP 转换等工作不会和正在进行的语音 WebSocket 共用一个事件循环。
+设计见 [`planning/spec-jobs-and-scale-out.md`](planning/spec-jobs-and-scale-out.md)；任务怎么运行、每种锁锁什么、为什么任务进程单独一个容器，见 [`background-jobs.md`](background-jobs.md)。耗时的工作不再由 Web 进程里的 `asyncio.create_task` 执行，而是写进 `jobs` 表，由单独的任务进程（`python -m app.jobs.runner`，后端应用里的 `jobs` 容器）领取执行。这样评分、SOP 转换等工作不会和正在进行的语音 WebSocket 共用一个事件循环。
 
 | 任务类型 | 做什么 |
 |---|---|

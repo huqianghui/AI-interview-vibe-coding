@@ -194,6 +194,10 @@ model. Which models are realtime, and the measurements behind this table:
   login disabled: the backend signs in with its managed identity's Entra token. Boot migrations and
   seeds are idempotent and never replace existing rows, so a deploy or restart changes no data.
   Details: [`docs/database.md`](docs/database.md).
+- **Background jobs** — scoring, SOP conversion and summaries, citation runs and interviewer sync
+  are rows in a `jobs` table, run by a separate job-runner container beside the web server (3
+  uvicorn workers per replica, up to 2 replicas); every cross-process guard is a database lease or
+  a unique index. Details: [`docs/background-jobs.md`](docs/background-jobs.md).
 - **Observability** — the backend (OpenTelemetry) and the candidate's browser (App Insights JS
   SDK) both report to the deployment's Application Insights: every voice turn is broken into its
   stages, down to the first sample the candidate hears, and charted by the **Voice performance**
