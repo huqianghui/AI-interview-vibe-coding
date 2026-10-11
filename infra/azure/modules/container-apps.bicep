@@ -255,7 +255,8 @@ resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
         targetPort: 8000
         transport: 'auto'
         allowInsecure: false
-        // Single replica → pin sessions so a Voice Live WS stays on the one backend instance.
+        // Sticky: a browser's requests stay on one replica. Nothing needs it for correctness any
+        // more (state is in the database), but it keeps a candidate's calls on a warm process.
         stickySessions: {
           affinity: 'sticky'
         }
@@ -292,6 +293,21 @@ resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
               name: 'JOB_RUNNER_MODE'
               value: 'off'
             }
+            {
+              name: 'UVICORN_WORKERS'
+              value: '3'
+            }
+            // Every process has its own pool against one server limit (B2s: 414 user
+            // connections): (3 web workers + 1 job runner) x 10 x 2 replicas = 80, doubled while a
+            // revision swap runs both = 160.
+            {
+              name: 'DB_POOL_SIZE'
+              value: '5'
+            }
+            {
+              name: 'DB_MAX_OVERFLOW'
+              value: '5'
+            }
           ])
           resources: {
             cpu: json('2.0')
@@ -317,6 +333,14 @@ resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
               name: 'JOB_RUNNER_MODE'
               value: 'off'
             }
+            {
+              name: 'DB_POOL_SIZE'
+              value: '5'
+            }
+            {
+              name: 'DB_MAX_OVERFLOW'
+              value: '5'
+            }
           ])
           resources: {
             cpu: json('1.0')
@@ -324,9 +348,22 @@ resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
           }
         }
       ]
+      // Up to two replicas (owner, 2026-10-11: min 1 for a demo). A second one starts at 20
+      // concurrent requests per replica; an open voice WebSocket counts as one. Safe because no
+      // request relies on state in one process (docs/planning/spec-jobs-and-scale-out.md).
       scale: {
         minReplicas: 1
-        maxReplicas: 1
+        maxReplicas: 2
+        rules: [
+          {
+            name: 'http-concurrency'
+            http: {
+              metadata: {
+                concurrentRequests: '20'
+              }
+            }
+          }
+        ]
       }
     }
   }

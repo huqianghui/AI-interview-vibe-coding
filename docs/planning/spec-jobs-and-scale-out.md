@@ -2,7 +2,7 @@
 
 Status: approved direction (owner, 2026-10-11), implementation in four PRs. PR 1 (sizing) shipped
 v0.66.1.0; PR 2 (jobs core) v0.67.0.0; PR 3 (Jobs tab) v0.68.0.0 (as built: targets are shown by
-name, not linked). "As built" notes below record where PR 2 differs from the
+name, not linked); PR 4 (scale-out) v0.68.1.0 (as built: second replica at 20 concurrent requests). "As built" notes below record where PR 2 differs from the
 first draft of this spec.
 
 ## Why
