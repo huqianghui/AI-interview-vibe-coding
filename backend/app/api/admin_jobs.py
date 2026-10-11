@@ -20,6 +20,7 @@ from app.models.persona import InterviewerPersona
 from app.models.question import QuestionBank
 from app.models.sop import SopDocument
 from app.models.user import User
+from app.services import sop_citation_service
 
 router = APIRouter(
     prefix="/admin/jobs",
@@ -35,6 +36,8 @@ class JobOut(BaseModel):
     # What the target is, for people: the candidate, the document, the bank, the interviewer.
     target_label: str
     status: str
+    # A running job asked to stop; it does at its next heartbeat (~15 s).
+    cancel_requested: bool
     attempts: int
     max_attempts: int
     # Scoring's last progress (questions graded of all), when the job reports it.
@@ -105,6 +108,7 @@ def _out(job: Job, label: str) -> JobOut:
         target_id=job.target_id,
         target_label=label,
         status=job.status,
+        cancel_requested=job.cancel_requested,
         attempts=job.attempts,
         max_attempts=job.max_attempts,
         done=progress.get("done") if progress else None,
@@ -170,12 +174,38 @@ async def retry_job(
     """Queue the same work again as a new job. 409 unless it failed or was cancelled, or when the
     same work is already queued or running (that job is the retry)."""
     job = await _job(db, job_id)
-    try:
-        again, new = await queue.retry(db, job, created_by="admin")
-    except queue.JobNotRetryable as exc:
+    if job.status not in ("failed", "cancelled"):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail=f"Cannot retry a {job.status} job"
-        ) from exc
+        )
+    if job.kind == "citation_run":
+        # A citation run's job points at its CitationRun row, which has ended: retrying means a
+        # new run (and a new row the bank's page shows), started the way the page starts one.
+        try:
+            run = await sop_citation_service.start_relocation(
+                db,
+                session_factory,
+                job.target_id,
+                fresh=bool(queue.payload_of(job).get("fresh")),
+                created_by="admin",
+            )
+        except sop_citation_service.BankHasNoLibrary as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="The bank has no SOP library now"
+            ) from exc
+        again = await queue.live_job(db, "citation_run", job.target_id)
+        if again is None or queue.payload_of(again).get("run_id") != run.id:
+            # Already done (inline in tests), or another run was going: show the newest job.
+            again = (
+                await db.execute(
+                    select(Job)
+                    .where(Job.kind == "citation_run", Job.target_id == job.target_id)
+                    .order_by(Job.created_at.desc(), Job.id.desc())
+                    .limit(1)
+                )
+            ).scalar_one()
+        return await _one_out(db, again)
+    again, new = await queue.retry(db, job, created_by="admin")
     if not new:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="The same work is already queued"
@@ -193,5 +223,11 @@ async def cancel_job(job_id: str, db: AsyncSession = Depends(get_db)) -> JobOut:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail=f"Cannot cancel a {job.status} job"
         )
-    cancelled = await queue.request_cancel(db, job)
-    return await _one_out(db, cancelled or job)
+    after = await queue.request_cancel(db, job)
+    if after is None or not (after.status == "cancelled" or after.cancel_requested):
+        # It ended between the check and the write: nothing was cancelled.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot cancel a {after.status if after else 'missing'} job",
+        )
+    return await _one_out(db, after)

@@ -16,6 +16,7 @@ function job(over: Partial<admin.JobItem>): admin.JobItem {
     target_id: "iv-1",
     target_label: "user1",
     status: "running",
+    cancel_requested: false,
     attempts: 1,
     max_attempts: 3,
     done: 2,
@@ -131,5 +132,14 @@ describe("JobsTab", () => {
     const running = job({ started_at: "2026-10-11T06:00:00", finished_at: null });
     expect(duration(running, Date.parse("2026-10-11T06:00:42Z"))).toBe("42 s");
     expect(duration(job({ started_at: null }))).toBe("—");
+  });
+});
+
+describe("parseUtc", () => {
+  it("reads a backend timestamp without a zone as UTC, and one with a zone as given", async () => {
+    const { parseUtc } = await import("../../components/transcriptText");
+    expect(parseUtc("2026-10-11T06:00:00").toISOString()).toBe("2026-10-11T06:00:00.000Z");
+    expect(parseUtc("2026-10-11T06:00:00Z").toISOString()).toBe("2026-10-11T06:00:00.000Z");
+    expect(parseUtc("2026-10-11T14:00:00+08:00").toISOString()).toBe("2026-10-11T06:00:00.000Z");
   });
 });

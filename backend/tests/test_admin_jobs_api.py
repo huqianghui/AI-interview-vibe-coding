@@ -82,3 +82,51 @@ async def test_a_queued_job_is_cancelled_and_a_finished_one_cannot_be(
 
 async def test_the_jobs_api_is_admin_only(client, candidate_auth):
     assert (await client.get(BASE, headers=candidate_auth)).status_code == 403
+
+
+async def test_retrying_a_citation_run_starts_a_new_run(
+    client, db_session, admin_auth, monkeypatch
+):
+    from types import SimpleNamespace
+
+    from app.services import sop_citation_service
+
+    started = []
+
+    async def start(db, _factory, bank_id, *, fresh=False, created_by="system"):  # noqa: ANN001
+        started.append((bank_id, fresh, created_by))
+        await queue.enqueue(db, "citation_run", bank_id, {"run_id": "run-2", "fresh": fresh})
+        return SimpleNamespace(id="run-2")
+
+    monkeypatch.setattr(sop_citation_service, "start_relocation", start)
+    old = await _job(
+        db_session, "citation_run", "bank-1", status="failed", payload='{"run_id": "run-1"}'
+    )
+    again = await client.post(f"{BASE}/{old.id}/retry", headers=admin_auth)
+    assert again.status_code == 202
+    # A new run, not the old job's payload again (its run row has ended: replaying it does nothing).
+    assert started == [("bank-1", False, "admin")]
+    assert again.json()["job_id"] != old.id
+
+
+async def test_cancelling_a_job_that_ended_meanwhile_is_a_409(
+    client, db_session, admin_auth, monkeypatch
+):
+    job = await _job(db_session)
+
+    async def ended_meanwhile(db, j):  # noqa: ANN001
+        j.status = "succeeded"
+        return j
+
+    monkeypatch.setattr(queue, "request_cancel", ended_meanwhile)
+    assert (await client.post(f"{BASE}/{job.id}/cancel", headers=admin_auth)).status_code == 409
+
+
+async def test_a_running_job_asked_to_stop_says_so(client, db_session, admin_auth):
+    job = await _job(db_session, status="running", lease_owner="r", attempts=1)
+    resp = await client.post(f"{BASE}/{job.id}/cancel", headers=admin_auth)
+    assert (resp.status_code, resp.json()["status"], resp.json()["cancel_requested"]) == (
+        200,
+        "running",
+        True,
+    )

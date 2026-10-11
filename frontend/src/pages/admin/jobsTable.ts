@@ -1,14 +1,13 @@
 /** Formatting for the admin Jobs table. */
 import type { JobItem } from "../../api/admin";
+import { parseUtc } from "../../components/transcriptText";
 
-/** A naive UTC timestamp from the backend ("2026-10-11T06:00:00") as epoch milliseconds. */
-function utc(text: string): number {
-  return Date.parse(/[Zz]|[+-]\d\d:\d\d$/.test(text) ? text : `${text}Z`);
-}
+const utc = (text: string) => parseUtc(text).getTime();
 
 /** How long it ran, or has been running: "42 s", "3 min 5 s". */
 export function duration(job: JobItem, now: number = Date.now()): string {
-  if (!job.started_at) return "—";
+  // A queued job has not started (again: one requeued after its runner died keeps the old start).
+  if (!job.started_at || job.status === "queued") return "—";
   const start = utc(job.started_at);
   const end = job.finished_at ? utc(job.finished_at) : now;
   const s = Math.max(0, Math.round((end - start) / 1000));

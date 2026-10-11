@@ -11,6 +11,11 @@
   outcome is the one line above the table. The list refreshes every 5 s while a job is going.
   API: `GET /admin/jobs`, `POST /admin/jobs/{id}/retry`, `POST /admin/jobs/{id}/cancel`.
 
+### Fixed
+- **Times in admin tables and the transcript download were off by the viewer's UTC offset** (8
+  hours in China). The backend sends UTC without a zone and the page read it as local time; a
+  timestamp without a zone is read as UTC now (`parseUtc`).
+
 ## 0.67.0.1 (2026-10-11)
 
 ### Fixed

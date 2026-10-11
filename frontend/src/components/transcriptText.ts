@@ -2,14 +2,21 @@
 import type { TFunction } from "i18next";
 import type { InterviewDetail } from "../api/client";
 
+/** A backend timestamp as a Date. The backend stores and sends UTC without a zone
+ * ("2026-10-11T06:00:00"), which `new Date` would read as the VIEWER's local time, putting every
+ * time off by their offset (8 hours in China); one without a zone is read as UTC. */
+export function parseUtc(iso: string): Date {
+  return new Date(/(?:[Zz]|[+-]\d\d:?\d\d)$/.test(iso) ? iso : `${iso}Z`);
+}
+
 export function formatWhen(iso: string | null, locale: string): string {
-  return iso ? new Date(iso).toLocaleString(locale) : "—";
+  return iso ? parseUtc(iso).toLocaleString(locale) : "—";
 }
 
 /** The same moment for a table cell: to the minute, 24-hour, so a row stays one short line. */
 export function formatWhenShort(iso: string | null, locale: string): string {
   return iso
-    ? new Date(iso).toLocaleString(locale, {
+    ? parseUtc(iso).toLocaleString(locale, {
         year: "numeric",
         month: "2-digit",
         day: "2-digit",

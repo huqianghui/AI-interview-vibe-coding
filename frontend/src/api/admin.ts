@@ -666,6 +666,8 @@ export interface JobItem {
   /** The candidate, document, bank or interviewer the job works on; "" when unknown. */
   target_label: string;
   status: JobStatus;
+  /** A running job asked to stop; it does within one heartbeat (~15 s). */
+  cancel_requested: boolean;
   attempts: number;
   max_attempts: number;
   /** Scoring's progress: questions graded of all. */

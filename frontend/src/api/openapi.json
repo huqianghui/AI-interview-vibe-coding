@@ -1519,6 +1519,10 @@
             "title": "Attempts",
             "type": "integer"
           },
+          "cancel_requested": {
+            "title": "Cancel Requested",
+            "type": "boolean"
+          },
           "created_at": {
             "anyOf": [
               {
@@ -1616,6 +1620,7 @@
           "target_id",
           "target_label",
           "status",
+          "cancel_requested",
           "attempts",
           "max_attempts",
           "error",

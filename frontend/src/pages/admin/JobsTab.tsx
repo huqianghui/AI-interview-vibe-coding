@@ -78,7 +78,9 @@ export function JobsTab({ state }: { state: JobsTabState }) {
           color={STATUS_COLOR[j.status]}
           data-testid={`job-status-${j.job_id}`}
         >
-          {t(`admin.jobs.status.${j.status}`)}
+          {j.cancel_requested && j.status === "running"
+            ? t("admin.jobs.cancelling")
+            : t(`admin.jobs.status.${j.status}`)}
         </Badge>
       ),
     },
@@ -133,7 +135,7 @@ export function JobsTab({ state }: { state: JobsTabState }) {
           <Button
             size="small"
             appearance="subtle"
-            disabled={state.busyId === j.job_id}
+            disabled={state.busyId === j.job_id || j.cancel_requested}
             onClick={() => void state.cancel(j)}
             data-testid={`job-cancel-${j.job_id}`}
           >

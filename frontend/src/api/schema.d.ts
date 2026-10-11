@@ -2247,6 +2247,8 @@ export interface components {
         JobOut: {
             /** Attempts */
             attempts: number;
+            /** Cancel Requested */
+            cancel_requested: boolean;
             /** Created At */
             created_at: string | null;
             /** Created By */
