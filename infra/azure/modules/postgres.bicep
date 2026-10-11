@@ -29,8 +29,14 @@ param backendIdentityName string
 @description('Object (principal) id of the backend managed identity.')
 param backendIdentityPrincipalId string
 
-@description('Compute SKU. Burstable B1ms is enough for this app (one backend replica).')
-param skuName string = 'Standard_B1ms'
+@description('Compute SKU. Burstable B2s: B1ms allows only 35 user connections, too few once the backend runs several processes and replicas (docs/planning/spec-jobs-and-scale-out.md).')
+param skuName string = 'Standard_B2s'
+
+// Azure computes max_connections from the SKU only when the server is CREATED; resizing an existing
+// server keeps the old value (B1ms: 50). So it is set explicitly to the B2s default, and must be
+// raised with the SKU. A static parameter: it takes effect after a server restart.
+@description('max_connections, matching the SKU (B2s default: 429).')
+param maxConnections int = 429
 
 param storageSizeGB int = 32
 
@@ -90,6 +96,18 @@ resource database 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2024-08-0
   properties: {
     charset: 'UTF8'
     collation: 'en_US.utf8'
+  }
+}
+
+resource maxConnectionsConfig 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2024-08-01' = {
+  parent: server
+  name: 'max_connections'
+  dependsOn: [
+    database
+  ]
+  properties: {
+    value: string(maxConnections)
+    source: 'user-override'
   }
 }
 

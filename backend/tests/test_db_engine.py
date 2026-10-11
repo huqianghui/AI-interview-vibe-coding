@@ -74,6 +74,17 @@ def test_password_postgres_is_left_alone(monkeypatch):
     assert engine.url.password == "pw"
 
 
+def test_the_postgres_pool_is_sized_by_settings(monkeypatch):
+    # Every process (each uvicorn worker, the job runner) opens its own pool against one shared
+    # server limit, so the size is per deployment, not a constant.
+    monkeypatch.setattr(db._settings, "database_auth", "password")
+    monkeypatch.setattr(db._settings, "db_pool_size", 5)
+    monkeypatch.setattr(db._settings, "db_max_overflow", 3)
+    engine = db.make_engine("postgresql+asyncpg://u:pw@localhost/ai_interview")
+    assert engine.pool.size() == 5
+    assert engine.pool._max_overflow == 3
+
+
 def test_entra_token_uses_the_postgres_scope_and_one_credential(monkeypatch):
     made: list = []
 

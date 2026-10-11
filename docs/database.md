@@ -18,7 +18,7 @@
 | 项目 | 取值 |
 |---|---|
 | 服务 | Azure Database for PostgreSQL 灵活服务器 `psql-aiinterview-public` |
-| 版本 / 规格 | PostgreSQL 16，Burstable **B1ms**，存储 32 GiB（自动增长），备份保留 7 天 |
+| 版本 / 规格 | PostgreSQL 16，Burstable **B2s**，存储 32 GiB（自动增长），备份保留 7 天；`max_connections` 显式设为 429 |
 | 网络 | 放在 VNet 内专门委派的子网 `snet-aiinterview-public-pg`（10.10.3.0/28），配私有 DNS 区域 `aiinterview-public.private.postgres.database.azure.com`；**公网访问关闭**，只有 Container Apps 环境能连 |
 | 登录 | **只允许 Microsoft Entra 登录**，密码登录关闭 |
 | 管理员 | 后端的用户托管身份 `id-aiinterview-public-backend` 是 Entra 管理员，应用和数据库迁移都用它登录 |
@@ -42,7 +42,7 @@ DATABASE_AUTH = entra
 - **token 有效期约一小时：** 所以不能在启动时写死进 URL，只能在建连接时现取。
 - **取 token 放在后台线程：** 取 token 可能要走网络，放在后台线程里取，不阻塞同时在处理语音 WebSocket 的事件循环。
 - **专用的长期凭据：** 数据库用一个单独的、不会被重建的凭据对象，token 缓存得以保留，绝大多数新连接不需要再走网络。
-- **连接池：** 显式设为 10 个常驻、最多再加 15 个（共 25 个）。B1ms 的 `max_connections` 是 50，其中 10 个保留，应用能用约 40 个，余量留给迁移，以及版本切换时短暂并存的第二个实例。
+- **连接池：** 每个进程一个池，大小由 `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` 设置（默认 10 个常驻、最多再加 15 个）。服务器的上限由所有进程共享：进程数 × 副本数 × 每池上限，版本切换时还要再乘 2，必须低于 `max_connections` 减去 Azure 保留的 15 个。B2s 的 `max_connections` 是 429（用户可用 414）。注意：Azure 只在**创建**服务器时按规格计算 `max_connections`，之后改规格不会自动改它，所以 `postgres.bicep` 显式设置，改完需要重启服务器。
 - **保持在线：** 连接最多复用 30 分钟就重建，复用前先探测一下是否还活着。
 
 本地开发：不设 `DATABASE_AUTH`（默认 `password`），`DATABASE_URL` 指向 SQLite 或本地 PostgreSQL 即可。

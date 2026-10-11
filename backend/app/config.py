@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     # connection gets a fresh Microsoft Entra token for the managed identity (AZURE_CLIENT_ID) as
     # its password, over TLS. DATABASE_URL then names only the host, database and Entra user.
     database_auth: str = "password"
+    # PostgreSQL connection pool, PER PROCESS (each uvicorn worker and the job runner has its own).
+    # The server's limit is shared by all of them: processes × replicas × (size + overflow), doubled
+    # while a revision swap runs both, must stay under max_connections minus Azure's 15 reserved.
+    db_pool_size: int = 10
+    db_max_overflow: int = 15
 
     # Auth. REQUIRED — no code default on purpose: SECRET_KEY signs every JWT AND (since #102) is
     # the key the seeded candidate passwords are derived from, so a well-known default would make
