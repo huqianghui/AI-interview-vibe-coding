@@ -1,0 +1,2 @@
+ContainerAppSystemLogs_CL | where ContainerAppName_s in ("ca-aiinterview-public-backend","ca-aiinterview-public-frontend")
+| summarize n=count(),first_seen=min(TimeGenerated),latest=max(TimeGenerated) by ContainerAppName_s,Reason_s,Type_s | order by n desc

@@ -1,0 +1,3 @@
+customEvents | where name startswith "voice."
+| summarize n=count(), interviews=dcount(tostring(customDimensions.interview_id)), ops=dcount(operation_Id), first_seen=min(timestamp), latest=max(timestamp), sampled=max(itemCount) by name, audio_path=tostring(customDimensions.audio_path), outcome=tostring(customDimensions.outcome), turn_kind=tostring(customDimensions.kind), mode=tostring(customDimensions.mode)
+| order by name asc,n desc

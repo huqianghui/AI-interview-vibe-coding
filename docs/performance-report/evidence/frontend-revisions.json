@@ -1,0 +1,1214 @@
+[
+  {
+    "name": "ca-aiinterview-public-frontend--0000068",
+    "createdTime": "2026-10-03T04:18:06+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:4f83ba4d00db53d514e40e30d9f7315c239a4ef0"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000069",
+    "createdTime": "2026-10-03T08:17:34+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:c3d29acb9109b7aa7b9ce719ecd09e3195ae2fb9"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000070",
+    "createdTime": "2026-10-03T09:26:19+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:af5175ade9022b352f7c2d50eeb24732c471522a"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000071",
+    "createdTime": "2026-10-03T09:43:28+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:956a2da3c64bc5069963e70ad6c91ef1c4b7ef84"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000072",
+    "createdTime": "2026-10-03T10:07:54+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:5884046f28d1e749ad319134133a45b41986ad98"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000073",
+    "createdTime": "2026-10-03T11:38:49+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:ef64a1b6ad3f1c986ce4ec6c036664b6bdcf46d8"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000074",
+    "createdTime": "2026-10-03T16:10:19+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:16d2ccf61bdce9cefbb7eb1edb993457f209fb86"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000075",
+    "createdTime": "2026-10-04T01:15:32+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:7c2de75bc75d9b966e54d25d5b951f481d5efaf7"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000076",
+    "createdTime": "2026-10-04T03:09:01+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:8e70e7c0e7d07f463aa93106ce5463d597517d27"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000077",
+    "createdTime": "2026-10-04T05:34:21+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:5707b7d012cfe703c6c398837d0bf25ddb4eeb44"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000078",
+    "createdTime": "2026-10-04T05:55:18+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:bf16e23cc1072eb4aa9143947cd1737088caf263"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000079",
+    "createdTime": "2026-10-04T06:19:20+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:991a6ffc5f05e21a22c50faccac4829b8a2c1769"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000080",
+    "createdTime": "2026-10-04T06:44:13+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:048975a11cbfdbdfd4b4574c48f6eec43cb5c583"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000081",
+    "createdTime": "2026-10-04T07:47:48+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:4d33c065f9eb2dc1db0cb3549411c512a8c9c442"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000082",
+    "createdTime": "2026-10-04T12:41:30+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:2e79df1ed7cf56224b277e190b6a1ec69b9a13a4"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000083",
+    "createdTime": "2026-10-04T13:14:30+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:97ef0721ee8d60877ac874b5e991b1d1bc8b7aba"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000084",
+    "createdTime": "2026-10-04T13:37:34+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:df6fa910e0330edf5c8f1074369fac8e95928def"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000085",
+    "createdTime": "2026-10-05T01:44:06+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:e31ba340bade2b29105f5208f21cf2cdfe7fb666"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000086",
+    "createdTime": "2026-10-05T04:38:54+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:15ed8ed78e9c991ac080b564cdfc63a2a4ae4514"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000087",
+    "createdTime": "2026-10-05T05:54:50+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:cc642ece5d8ba271cd5bbf9f55f13f0172151adc"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000088",
+    "createdTime": "2026-10-05T08:20:15+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:17ba3ffdedec05736c0595a85c739a0ce63c0da4"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000089",
+    "createdTime": "2026-10-05T09:51:26+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:a3bff58c1e88f79308ae7cc9ed72e837104a4117"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000090",
+    "createdTime": "2026-10-05T10:53:18+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:3fc04e8e62a93e0e8c3c99a6c8f835a9c4b9456a"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000091",
+    "createdTime": "2026-10-05T11:43:47+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:b8d81dbd1e4fa55e0108d1ee41aa1ab16be9d948"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000092",
+    "createdTime": "2026-10-05T12:02:00+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:05210552f6d04fc6613ed20aa96947ad85a417e6"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000093",
+    "createdTime": "2026-10-05T16:03:54+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:637b617149b2bd73ab41b96a19941e5126ec9d3f"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000094",
+    "createdTime": "2026-10-06T01:22:41+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:76cccf7254ee4a4bf78d46598d2651febdd1d097"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000095",
+    "createdTime": "2026-10-06T02:05:24+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:fa55fced0d2d2740e585a51d751407b9197ba9fe"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000096",
+    "createdTime": "2026-10-06T08:32:25+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:bd1cbdff78f6c7bddb768310f55f9dad01ea55d0"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000097",
+    "createdTime": "2026-10-06T09:13:54+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:7eecc207769178ee8fa60e179b307b23391dcb3b"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000098",
+    "createdTime": "2026-10-06T09:22:24+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:05afc387662cd578419d235b3d971ab4ffc807ff"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000099",
+    "createdTime": "2026-10-06T10:46:51+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:d682b983bbf7a4447e4ca9f263b2ea96ce521c70"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000100",
+    "createdTime": "2026-10-06T10:57:29+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:dc62c6c162ee44426b2946d8abcef15943a9b019"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000101",
+    "createdTime": "2026-10-06T11:09:15+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:4c46b3e24db0f021ea10a74eb4b444214d157000"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000102",
+    "createdTime": "2026-10-06T11:18:04+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:4a3e79e1c381b1e80cbd171ed4abb91db58297c5"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000103",
+    "createdTime": "2026-10-06T11:30:02+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:ba0c3713746b83ddeb6db029fabbfd7da136bd17"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000104",
+    "createdTime": "2026-10-06T14:33:29+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:1c1e5cbe1b8b2da6e2b07ba1b923540fdcee9826"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000105",
+    "createdTime": "2026-10-06T15:25:06+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:b8486f06fe15b4bde7299e5d1f0f9f1791df273d"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000106",
+    "createdTime": "2026-10-07T01:01:30+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:10a3567ad3929dcd70ce88d27f291452ab65f0c5"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000107",
+    "createdTime": "2026-10-07T01:37:18+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:f5326e9faf465d9b53b6193c44ba8f19902eee8f"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000108",
+    "createdTime": "2026-10-07T05:02:32+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:fd2e1d85d34b99e49ab50caf7915355ee93e9282"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000109",
+    "createdTime": "2026-10-07T05:40:07+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:ba59431cbdd215d9ac1dbf8fd7304757eafd770e"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000110",
+    "createdTime": "2026-10-07T06:29:24+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:0d6662344f739469191b80c7fe575562bdda9193"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000111",
+    "createdTime": "2026-10-07T06:59:00+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:6471ba620027c72ab69c8055ff01c8e3cde86ad3"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000112",
+    "createdTime": "2026-10-07T08:43:02+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:27ace13e15a31436587eabf14a6ac92d73aa5d83"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000113",
+    "createdTime": "2026-10-07T10:10:00+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:11d5b36cd3e4724c8217013c8e2f88797ca4ced0"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000114",
+    "createdTime": "2026-10-08T03:32:57+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:1ed328489f52aa035690bd12a62749e83b3354f4"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000115",
+    "createdTime": "2026-10-08T03:56:59+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:f67341635285c623ad60d7542a1b52c9f6895a37"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000116",
+    "createdTime": "2026-10-08T05:39:36+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:7293290238f186795e414ef5d95e0cafd3b8a422"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000117",
+    "createdTime": "2026-10-08T05:40:41+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:7293290238f186795e414ef5d95e0cafd3b8a422"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000118",
+    "createdTime": "2026-10-08T06:51:04+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:08ae44456952f8cc89263540ae94311e1bd18281"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000119",
+    "createdTime": "2026-10-08T08:08:17+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:981ea0d1a563cc70c16ec33ad5fbf890695a5ebb"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000120",
+    "createdTime": "2026-10-08T09:45:44+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:49a8174fc72109973e60553fd544cf5eb8d7194a"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000121",
+    "createdTime": "2026-10-08T12:14:18+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:c15412646bdbd7d6fc8d5392afddc3aa79637017"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000122",
+    "createdTime": "2026-10-08T12:51:19+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:8e3bcae3dd7f9b1251b4dc5ea332327ec6915134"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000123",
+    "createdTime": "2026-10-08T14:29:27+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:278a518898da731b854034643705c0898b34c73f"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000124",
+    "createdTime": "2026-10-08T15:01:22+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:0dbc2dd02ad62ca8b7d6961f62af3024d72739b4"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000125",
+    "createdTime": "2026-10-08T15:47:06+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:c1616d8e9a35b7e2f05bf5872ab50ddc0cbaa693"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000126",
+    "createdTime": "2026-10-08T16:16:43+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:a10d31ddcb0349cab092018a9fe89d745789a7fa"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000127",
+    "createdTime": "2026-10-08T16:54:00+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:6f7fa6b4968179e1d53a52e3f3d3ab2cee552070"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000128",
+    "createdTime": "2026-10-08T17:13:51+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:0dfef3f732d8274d786a35d25eb8132c2076cfb1"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000129",
+    "createdTime": "2026-10-08T17:57:01+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:574f390bd5fd82893eb82db5d6b8cdff2a7c2780"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000130",
+    "createdTime": "2026-10-08T18:28:02+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:66154d47082bc41283343db4bb11334dbce4cc1d"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000131",
+    "createdTime": "2026-10-08T19:32:26+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:5738027e70c532e63b7e81c57eeef745478f3f10"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000132",
+    "createdTime": "2026-10-08T22:47:21+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:afdd4b4b1b4b89892d83fcfc213540e779fbf68b"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000133",
+    "createdTime": "2026-10-08T22:57:50+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:22f8fa77e00ee3c55d4da609d0e762ba22656b22"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000134",
+    "createdTime": "2026-10-08T23:26:44+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:b852f54932b1df1b2765bf553d59d8f99122bfc4"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000135",
+    "createdTime": "2026-10-08T23:35:52+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:de85f55324d09b7b1599047603cac1beae6c9c43"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000136",
+    "createdTime": "2026-10-08T23:59:34+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:e91e4507a858c24491240b4cebc7c14058077218"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000137",
+    "createdTime": "2026-10-09T00:09:18+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:2c199356b4f69c6dfcaed47a84772ecf3962643d"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000138",
+    "createdTime": "2026-10-09T00:17:47+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:ffcc5bcc67a6a3e33f5c74d1c8242e9c699b8f39"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000139",
+    "createdTime": "2026-10-09T02:32:45+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:1952c1b9812c8f53adde2e135e774d80b682cfcb"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000140",
+    "createdTime": "2026-10-09T04:47:58+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:60d1500cb92c7c5215a5caa824bf842724ecec8d"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000141",
+    "createdTime": "2026-10-09T06:26:12+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:ad9aa6c11812385a9f3fd1e1701e944903f29564"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000142",
+    "createdTime": "2026-10-09T06:49:57+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:c6cd41297d722257f543682f56b979329886153a"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000143",
+    "createdTime": "2026-10-09T07:56:15+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:bdcf7eb99ad5f784f160e66a0fa8143db768880b"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000144",
+    "createdTime": "2026-10-09T08:10:33+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:a7cfda08543ca7550b4daf8bec40f2aeac7635e6"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000145",
+    "createdTime": "2026-10-09T09:38:36+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:bc896415293d36a05abf10b07e21f75effe86368"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000146",
+    "createdTime": "2026-10-09T10:06:19+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:6d8ab540da4e4fb973133637be978c325cb72915"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000147",
+    "createdTime": "2026-10-09T11:04:08+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:bcd59a0e0fb5e3a9058d262cd723307d16c8050c"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000148",
+    "createdTime": "2026-10-09T11:19:35+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:7318474f0adb2e9ad7fee79723426c154330b6a4"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000149",
+    "createdTime": "2026-10-09T11:31:57+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:b37c2a0f165b8b4f8398174a81e39638814f79a1"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000150",
+    "createdTime": "2026-10-09T12:33:09+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:ac20f0553468ce5cad188032b0b492bc6713290b"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000151",
+    "createdTime": "2026-10-09T12:44:21+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:dea5cc3e0a23385649ad0929d399cea528f24c79"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000152",
+    "createdTime": "2026-10-09T12:53:27+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:9c868c18af034f33a5b3ddd0a48d3e1adc10907d"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000153",
+    "createdTime": "2026-10-09T13:21:12+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:64bb5089a1537e1b242e7f37ddafe86a008be5f1"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000154",
+    "createdTime": "2026-10-09T14:28:25+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:3f4d252b982f827d546f63272ee5bc8300839301"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000155",
+    "createdTime": "2026-10-09T14:57:56+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:1b3692283eedc8a665d654db5ff3db613d4ea458"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000156",
+    "createdTime": "2026-10-09T15:39:12+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:5ab19a8603923a72df2ef6f9dbe8a8f529a1575a"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000157",
+    "createdTime": "2026-10-09T17:17:24+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:d44c54d802565f0a9c3cb76557ad77d491155e8e"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000158",
+    "createdTime": "2026-10-09T21:33:45+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:2a310c34ee9964d994560ba58a3d6b946add7790"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000159",
+    "createdTime": "2026-10-09T21:48:01+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:a4f8d07be6a30cd7f24b3b7f4631650cc12b8ebe"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000160",
+    "createdTime": "2026-10-09T23:45:46+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:084b428c7baf7a3cc9107b497281c2d46d106414"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000161",
+    "createdTime": "2026-10-10T01:17:05+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:1a64f5f1c3ef95548e3baacd2ac232597d425927"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000162",
+    "createdTime": "2026-10-10T01:33:12+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:b953351e8905e7be61c083779e4025726f73b7b8"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000163",
+    "createdTime": "2026-10-10T03:49:23+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:e64191bf0d743a1be93767b792484068c9f02237"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000164",
+    "createdTime": "2026-10-10T04:03:54+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:f9ef26b97f05aa7623a9f2c22c0749afee561962"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000165",
+    "createdTime": "2026-10-10T04:08:50+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:9b49adb16a92749397d5b1c0aad5f90d81bc829d"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000166",
+    "createdTime": "2026-10-10T05:32:12+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:b17ae7212d1b9644bdcd778b1727893c980333ca"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000167",
+    "createdTime": "2026-10-10T06:07:09+00:00",
+    "active": false,
+    "replicas": 0,
+    "healthState": "Healthy",
+    "runningState": "Stopped",
+    "trafficWeight": 0,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:2d0e645b60ef49f0e3fc650a7c659ff7a9a6161f"
+    ]
+  },
+  {
+    "name": "ca-aiinterview-public-frontend--0000168",
+    "createdTime": "2026-10-10T06:38:48+00:00",
+    "active": true,
+    "replicas": 1,
+    "healthState": "Healthy",
+    "runningState": "RunningAtMaxScale",
+    "trafficWeight": 100,
+    "images": [
+      "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:dc17e27cb823d59b43c64b0b1abb1b5b36402358"
+    ]
+  }
+]

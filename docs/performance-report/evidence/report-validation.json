@@ -1,0 +1,117 @@
+{
+  "offline_data_checks": [
+    {
+      "name": "98 voice events",
+      "passed": true
+    },
+    {
+      "name": "103 exact Fetch pairs",
+      "passed": true
+    },
+    {
+      "name": "negative metric count",
+      "passed": true
+    },
+    {
+      "name": "all 4 handshakes relay UDP",
+      "passed": true
+    },
+    {
+      "name": "answer cohort 7",
+      "passed": true
+    },
+    {
+      "name": "answer pair median browser_ms",
+      "passed": true
+    },
+    {
+      "name": "answer pair median server_ms",
+      "passed": true
+    },
+    {
+      "name": "answer pair median outside_server_ms",
+      "passed": true
+    },
+    {
+      "name": "all 7 pair sums",
+      "passed": true
+    },
+    {
+      "name": "media samples by interview",
+      "passed": true
+    },
+    {
+      "name": "two score requests",
+      "passed": true
+    },
+    {
+      "name": "9 tasks each",
+      "passed": true
+    },
+    {
+      "name": "second report 9 additional HTTP",
+      "passed": true
+    },
+    {
+      "name": "no unreplaced placeholders",
+      "passed": true
+    },
+    {
+      "name": "unique static IDs",
+      "passed": true
+    }
+  ],
+  "browser_status": "passed",
+  "desktop": {
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "passed": 59,
+    "total": 59
+  },
+  "mobile": {
+    "viewport": {
+      "width": 375,
+      "height": 812
+    },
+    "passed": 59,
+    "total": 59
+  },
+  "tablet": {
+    "viewport": {
+      "width": 768,
+      "height": 1024
+    },
+    "document_width": 768,
+    "no_page_horizontal_overflow": true
+  },
+  "console_errors": 0,
+  "visual_checks": [
+    "Desktop overview, network diagram, selected real-turn waterfall and scoring timelines viewed",
+    "Mobile overview, turn waterfall and media chart viewed",
+    "Wide mobile plots and tables intentionally scroll within their containers",
+    "Overview and paired-request clarification card",
+    "Eight-step logical workflow at desktop, 375 px and 320 px",
+    "Measured answer clock and response.done before first audible",
+    "Overlapping ICE/PC intervals and Judge/answer spans",
+    "Nine concurrent scoring tasks and separate follow-up batch",
+    "Same-session RTT comparison and full 7 HTTP pairs",
+    "Inline fragment rendered in the sandboxed preview"
+  ],
+  "final_text_recheck": [
+    "Audio-only explains full Voice Live / WebRTC session rebuild",
+    "Low audio bitrate is not asserted as a direct observation of silence",
+    "56 ms explicitly describes the 7 matched requests",
+    "136 seconds describes revision creation, not traffic switching",
+    "Deployed-image evidence points to the original snapshots",
+    "Avatar chart states PC-created zero point vs offer_start-based total_ms, at most 1 ms difference in this cohort.",
+    "263 ms is explicitly the median of per-pair Fetch minus Server differences.",
+    "The independent click-to-audible P50 is 1234 ms, not the 1217 ms sum of stage medians.",
+    "WebRTC RTT and HTTP residual comparisons retain different paths, cohorts and instants."
+  ],
+  "validated_html_sha256": "a4095d5f04ec6eb7caa6259ffcea9731c72a2dc7eb229db8794ca8a2168d3eb2",
+  "validated_at_utc": "2026-10-11T07:14:28.457133+00:00",
+  "last_change": "Added dynamic interview workflow and protocol/RTT explanations; see flow-validation.json for current checks.",
+  "flow_enhancement": "flow-validation.json"
+}

@@ -1,0 +1,80 @@
+[
+  {
+    "path": "frontend/src/hooks/useInterviewVoice.ts",
+    "commit": "dc17e27cb823d59b43c64b0b1abb1b5b36402358",
+    "sha256": "fbea9f8316568eed518eb0d2260e60b0c4f111378901b6c84d0c1526d8808b25",
+    "url": "https://github.com/huqianghui/AI-interview-vibe-coding/blob/dc17e27cb823d59b43c64b0b1abb1b5b36402358/frontend/src/hooks/useInterviewVoice.ts"
+  },
+  {
+    "path": "frontend/src/hooks/useAvatarStream.ts",
+    "commit": "dc17e27cb823d59b43c64b0b1abb1b5b36402358",
+    "sha256": "9743cf2c6974b6152d00a0b4abfeb9b8bd50df088be12f4255c27ccb370909db",
+    "url": "https://github.com/huqianghui/AI-interview-vibe-coding/blob/dc17e27cb823d59b43c64b0b1abb1b5b36402358/frontend/src/hooks/useAvatarStream.ts"
+  },
+  {
+    "path": "frontend/src/telemetry/voiceTimeline.ts",
+    "commit": "dc17e27cb823d59b43c64b0b1abb1b5b36402358",
+    "sha256": "e6ec1fa680adca1b552d0b83e88c2c6b2176cb0a6da26fa30c36a0df0fdc7740",
+    "url": "https://github.com/huqianghui/AI-interview-vibe-coding/blob/dc17e27cb823d59b43c64b0b1abb1b5b36402358/frontend/src/telemetry/voiceTimeline.ts"
+  },
+  {
+    "path": "frontend/src/telemetry/appInsights.ts",
+    "commit": "dc17e27cb823d59b43c64b0b1abb1b5b36402358",
+    "sha256": "60d4df62d75df051636a0b338c737a7226eae101185e7e64e19c54f487e73f96",
+    "url": "https://github.com/huqianghui/AI-interview-vibe-coding/blob/dc17e27cb823d59b43c64b0b1abb1b5b36402358/frontend/src/telemetry/appInsights.ts"
+  },
+  {
+    "path": "frontend/src/telemetry/mediaQuality.ts",
+    "commit": "dc17e27cb823d59b43c64b0b1abb1b5b36402358",
+    "sha256": "1a7a16028a39cc1eee2d81ee9bc69025ed83addf232f011c4634c80022e5fdce",
+    "url": "https://github.com/huqianghui/AI-interview-vibe-coding/blob/dc17e27cb823d59b43c64b0b1abb1b5b36402358/frontend/src/telemetry/mediaQuality.ts"
+  },
+  {
+    "path": "frontend/nginx.conf",
+    "commit": "dc17e27cb823d59b43c64b0b1abb1b5b36402358",
+    "sha256": "57723baa8a487ebdaeb6a2cb2d96725c13bf8d8da891ee3783bc287094185c72",
+    "url": "https://github.com/huqianghui/AI-interview-vibe-coding/blob/dc17e27cb823d59b43c64b0b1abb1b5b36402358/frontend/nginx.conf"
+  },
+  {
+    "path": "backend/app/api/voice_live_ws.py",
+    "commit": "dc17e27cb823d59b43c64b0b1abb1b5b36402358",
+    "sha256": "8b2c084d69063e27ef4b2eba8baae7c02ca6b46b8e8795a4d31e4c5232da6881",
+    "url": "https://github.com/huqianghui/AI-interview-vibe-coding/blob/dc17e27cb823d59b43c64b0b1abb1b5b36402358/backend/app/api/voice_live_ws.py"
+  },
+  {
+    "path": "backend/app/services/voice_live_proxy.py",
+    "commit": "dc17e27cb823d59b43c64b0b1abb1b5b36402358",
+    "sha256": "576127175b6495ef7c0577dc68c656d44a701f22d5d0ef789884696662204081",
+    "url": "https://github.com/huqianghui/AI-interview-vibe-coding/blob/dc17e27cb823d59b43c64b0b1abb1b5b36402358/backend/app/services/voice_live_proxy.py"
+  },
+  {
+    "path": "backend/app/interview/state_machine.py",
+    "commit": "dc17e27cb823d59b43c64b0b1abb1b5b36402358",
+    "sha256": "a85a9e2dc61bdc1c3365a8e2b3b5c7a4ded386319c22ba05c94aade3b5e8f27e",
+    "url": "https://github.com/huqianghui/AI-interview-vibe-coding/blob/dc17e27cb823d59b43c64b0b1abb1b5b36402358/backend/app/interview/state_machine.py"
+  },
+  {
+    "path": "backend/app/services/agents/adapters/foundry_llm.py",
+    "commit": "dc17e27cb823d59b43c64b0b1abb1b5b36402358",
+    "sha256": "16bd8d5fea19a5bfedc0fc75e1d5eea209834c07346c2a12d85b20cb87545963",
+    "url": "https://github.com/huqianghui/AI-interview-vibe-coding/blob/dc17e27cb823d59b43c64b0b1abb1b5b36402358/backend/app/services/agents/adapters/foundry_llm.py"
+  },
+  {
+    "path": "backend/app/db.py",
+    "commit": "dc17e27cb823d59b43c64b0b1abb1b5b36402358",
+    "sha256": "b05e1fc76f2845c534a78bd5c135d3657c66b424a48fe451f590e1d408dcb47c",
+    "url": "https://github.com/huqianghui/AI-interview-vibe-coding/blob/dc17e27cb823d59b43c64b0b1abb1b5b36402358/backend/app/db.py"
+  },
+  {
+    "path": "backend/app/config.py",
+    "commit": "dc17e27cb823d59b43c64b0b1abb1b5b36402358",
+    "sha256": "2c3554f219c5ddc60e0af73dc175e50167f3b4c143a5a58da6e3b58277d73cc0",
+    "url": "https://github.com/huqianghui/AI-interview-vibe-coding/blob/dc17e27cb823d59b43c64b0b1abb1b5b36402358/backend/app/config.py"
+  },
+  {
+    "path": ".github/workflows/deploy-app.yml",
+    "commit": "dc17e27cb823d59b43c64b0b1abb1b5b36402358",
+    "sha256": "bf1bda1b5f8efa314b28cb60ae619cb2a7c6e14edd1dc24d4595e4c0ca7f2270",
+    "url": "https://github.com/huqianghui/AI-interview-vibe-coding/blob/dc17e27cb823d59b43c64b0b1abb1b5b36402358/.github/workflows/deploy-app.yml"
+  }
+]

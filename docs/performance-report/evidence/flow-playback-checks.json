@@ -1,0 +1,34 @@
+{
+  "total": 6,
+  "passed": 6,
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "checks": [
+    {
+      "name": "Playback advances the measured-time cursor",
+      "passed": true
+    },
+    {
+      "name": "Pause clears playing state",
+      "passed": true
+    },
+    {
+      "name": "Paused cursor stays fixed across a real delay",
+      "passed": true
+    },
+    {
+      "name": "Playback finishes at exactly 100 percent",
+      "passed": true
+    },
+    {
+      "name": "No automatic loop at completion",
+      "passed": true
+    },
+    {
+      "name": "Completion label and replay button update",
+      "passed": true
+    }
+  ]
+}

@@ -1,0 +1,199 @@
+{
+  "counts": {
+    "requests": 2484,
+    "browser_fetch": 103,
+    "matched_fetch": 103,
+    "browser_ws": 5,
+    "voice_events": 98,
+    "voice_operations": 4,
+    "answered_turns": 7,
+    "voice_sessions": 7,
+    "media_windows": 73,
+    "media_interviews": 3,
+    "duplicate_event_ids": 0,
+    "negative_durations": 2,
+    "five_xx": 0
+  },
+  "turn": {
+    "click_to_audible_ms": {
+      "n": 7,
+      "p50": 1234,
+      "p95": 1449,
+      "min": 1147,
+      "max": 1449,
+      "mean": 1263.142857142857
+    },
+    "commit_wait_ms": {
+      "n": 7,
+      "p50": 2,
+      "p95": 2,
+      "min": 1,
+      "max": 2,
+      "mean": 1.5714285714285714
+    },
+    "answer_http_ms": {
+      "n": 7,
+      "p50": 324,
+      "p95": 339,
+      "min": 303,
+      "max": 339,
+      "mean": 322.7142857142857
+    },
+    "answer_to_read_ms": {
+      "n": 7,
+      "p50": 1,
+      "p95": 1,
+      "min": 1,
+      "max": 1,
+      "mean": 1.0
+    },
+    "read_to_created_ms": {
+      "n": 7,
+      "p50": 259,
+      "p95": 274,
+      "min": 257,
+      "max": 274,
+      "mean": 262.42857142857144
+    },
+    "created_to_audible_ms": {
+      "n": 7,
+      "p50": 631,
+      "p95": 861,
+      "min": 563,
+      "max": 861,
+      "mean": 675.5714285714286
+    },
+    "stt_ms": {
+      "n": 7,
+      "p50": 1047,
+      "p95": 1082,
+      "min": 935,
+      "max": 1082,
+      "mean": 1030.5714285714287
+    },
+    "stop_to_audible_ms": {
+      "n": 7,
+      "p50": 2977,
+      "p95": 3524,
+      "min": 2533,
+      "max": 3524,
+      "mean": 2940.0
+    }
+  },
+  "setup": {
+    "ws_open_ms": {
+      "n": 4,
+      "p50": 787.5,
+      "p95": 893,
+      "min": 766,
+      "max": 893,
+      "mean": 808.5
+    },
+    "proxy_connected_ms": {
+      "n": 4,
+      "p50": 928.5,
+      "p95": 1413,
+      "min": 895,
+      "max": 1413,
+      "mean": 1041.25
+    },
+    "session_updated_ms": {
+      "n": 4,
+      "p50": 1887.5,
+      "p95": 2330,
+      "min": 1638,
+      "max": 2330,
+      "mean": 1935.75
+    },
+    "first_video_frame_ms": {
+      "n": 4,
+      "p50": 4521.0,
+      "p95": 5148,
+      "min": 4022,
+      "max": 5148,
+      "mean": 4553.0
+    },
+    "first_audible_ms": {
+      "n": 4,
+      "p50": 5561.5,
+      "p95": 6163,
+      "min": 4980,
+      "max": 6163,
+      "mean": 5566.5
+    }
+  },
+  "avatar": {
+    "total_ms": {
+      "n": 4,
+      "p50": 2561.0,
+      "p95": 3084,
+      "min": 2193,
+      "max": 3084,
+      "mean": 2599.75
+    },
+    "ice_gather_ms": {
+      "n": 4,
+      "p50": 548.5,
+      "p95": 678,
+      "min": 476,
+      "max": 678,
+      "mean": 562.75
+    },
+    "sdp_answer_ms": {
+      "n": 4,
+      "p50": 332.5,
+      "p95": 400,
+      "min": 295,
+      "max": 400,
+      "mean": 340.0
+    },
+    "ice_connect_ms": {
+      "n": 4,
+      "p50": 482.5,
+      "p95": 596,
+      "min": 373,
+      "max": 596,
+      "mean": 483.5
+    },
+    "pc_connect_ms": {
+      "n": 4,
+      "p50": 1306.5,
+      "p95": 1554,
+      "min": 1067,
+      "max": 1554,
+      "mean": 1308.5
+    },
+    "first_frame_ms": {
+      "n": 4,
+      "p50": 1182.0,
+      "p95": 1390,
+      "min": 1019,
+      "max": 1390,
+      "mean": 1193.25
+    },
+    "rtt_ms": {
+      "n": 4,
+      "p50": 329.5,
+      "p95": 413,
+      "min": 251,
+      "max": 413,
+      "mean": 330.75
+    }
+  },
+  "negative_samples": [
+    {
+      "name": "voice.avatar",
+      "operation_Id": "3a840de59c2c4de6a8bc814e0bdfc6fe",
+      "timestamp": "2026-10-10T03:52:21.653Z",
+      "metric": "first_track_ms",
+      "value": -1
+    },
+    {
+      "name": "voice.turn",
+      "operation_Id": "17f1202013e449e7a1a5696a94bb3b55",
+      "timestamp": "2026-10-10T12:00:33.667Z",
+      "metric": "stt_ms",
+      "value": -763163
+    }
+  ]
+}

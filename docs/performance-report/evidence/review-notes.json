@@ -1,0 +1,32 @@
+{
+  "scope": "Independent read-only review of report claims against saved evidence and fixed source revisions",
+  "resolved": [
+    {
+      "finding": "Distinguish all 50 answer server requests from 7 browser-matched server requests",
+      "resolution": "API table separates both cohorts; narrative labels the 56 ms median as matched cohort."
+    },
+    {
+      "finding": "Revision creation times do not prove traffic switch times",
+      "resolution": "136 seconds described only as creation gap; traffic switching remains unrecorded."
+    },
+    {
+      "finding": "Original image baseline must link to original evidence",
+      "resolution": "Deployment image row links backend-runtime.json and frontend-runtime.json."
+    },
+    {
+      "finding": "Audio-only switch is a session rebuild",
+      "resolution": "Protocol description explicitly states Voice Live and WebRTC recreation plus switching wait."
+    },
+    {
+      "finding": "Low audio bitrate does not prove per-window silence",
+      "resolution": "Silence / suppression is labelled a possible explanation; missing speaking state is stated."
+    }
+  ],
+  "confirmed_boundaries": [
+    "AUTH_FAILED occurred before Azure Voice Live session initialization",
+    "1006 root cause remains unknown",
+    "8+1 outbound timing pattern is measured; executor max_workers=8 is not proven",
+    "Coverage phase classification is a high-confidence source/trace inference",
+    "Phase offsets are from a single event; event timestamp is emission time"
+  ]
+}

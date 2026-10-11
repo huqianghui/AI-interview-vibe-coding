@@ -1,0 +1,3 @@
+ContainerAppConsoleLogs_CL | where ContainerAppName_s=="ca-aiinterview-public-backend" and Log_s has "Applied master AI Foundry config"
+| project TimeGenerated,RevisionName_s,model=extract(@"model=([^, )]+)",1,Log_s),project_name=extract(@"project=([^, )]+)",1,Log_s)
+| order by TimeGenerated desc | take 12

@@ -1,0 +1,56 @@
+{
+  "name": "ca-aiinterview-public-frontend",
+  "location": "Sweden Central",
+  "systemData": {
+    "createdAt": "2026-08-31T13:48:56.3732562",
+    "lastModifiedAt": "2026-10-10T06:38:41.7305666"
+  },
+  "workloadProfileName": "Consumption",
+  "latestRevisionName": "ca-aiinterview-public-frontend--0000168",
+  "latestReadyRevisionName": "ca-aiinterview-public-frontend--0000168",
+  "runningStatus": "Running",
+  "provisioningState": "Succeeded",
+  "revisionMode": "Single",
+  "ingress": {
+    "additionalPortMappings": null,
+    "allowInsecure": false,
+    "clientCertificateMode": null,
+    "corsPolicy": null,
+    "customDomains": null,
+    "exposedPort": 0,
+    "external": true,
+    "fqdn": "ca-aiinterview-public-frontend.victoriousocean-10de9a49.swedencentral.azurecontainerapps.io",
+    "ipSecurityRestrictions": null,
+    "stickySessions": null,
+    "targetPort": 8080,
+    "traffic": [
+      {
+        "latestRevision": true,
+        "weight": 100
+      }
+    ],
+    "transport": "Auto"
+  },
+  "scale": {
+    "maxReplicas": 1,
+    "minReplicas": 1,
+    "rules": null
+  },
+  "containers": [
+    {
+      "name": "frontend",
+      "image": "aiinterviewpublicacr.azurecr.io/ai-interview-frontend:dc17e27cb823d59b43c64b0b1abb1b5b36402358",
+      "resources": {
+        "cpu": 0.5,
+        "ephemeralStorage": "2Gi",
+        "memory": "1Gi"
+      },
+      "probes": null,
+      "command": null,
+      "args": null,
+      "env": {
+        "BACKEND_URL": "https://ca-aiinterview-public-backend.internal.victoriousocean-10de9a49.swedencentral.azurecontainerapps.io"
+      }
+    }
+  ]
+}

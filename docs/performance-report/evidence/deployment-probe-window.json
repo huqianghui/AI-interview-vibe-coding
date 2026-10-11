@@ -1,0 +1,75 @@
+{
+  "tables": [
+    {
+      "columns": [
+        {
+          "name": "TimeGenerated",
+          "type": "datetime"
+        },
+        {
+          "name": "Reason_s",
+          "type": "string"
+        },
+        {
+          "name": "Type_s",
+          "type": "string"
+        },
+        {
+          "name": "RevisionName_s",
+          "type": "string"
+        },
+        {
+          "name": "Count_d",
+          "type": "real"
+        },
+        {
+          "name": "detail",
+          "type": "string"
+        }
+      ],
+      "name": "PrimaryResult",
+      "rows": [
+        [
+          "2026-10-10T06:36:51.3146156Z",
+          "ContainerStarted",
+          "Normal",
+          "ca-aiinterview-public-backend--0000176",
+          1,
+          "Started container 'backend'"
+        ],
+        [
+          "2026-10-10T06:36:56.2705919Z",
+          "ProbeFailed",
+          "Warning",
+          "ca-aiinterview-public-backend--0000176",
+          1,
+          "Probe of StartUp failed with timeout in 1 seconds."
+        ],
+        [
+          "2026-10-10T06:36:56.2705919Z",
+          "ProbeFailed",
+          "Warning",
+          "ca-aiinterview-public-backend--0000176",
+          1,
+          "Probe of StartUp failed with status code: 1"
+        ],
+        [
+          "2026-10-10T06:36:57.3336869Z",
+          "ProbeFailed",
+          "Warning",
+          "ca-aiinterview-public-backend--0000176",
+          2,
+          "Probe of StartUp failed with status code: 1"
+        ],
+        [
+          "2026-10-10T06:36:58.2393318Z",
+          "ProbeFailed",
+          "Warning",
+          "ca-aiinterview-public-backend--0000176",
+          3,
+          "Probe of StartUp failed with status code: 1"
+        ]
+      ]
+    }
+  ]
+}

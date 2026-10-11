@@ -1,0 +1,53 @@
+{
+  "scope": {
+    "start_utc": "2026-10-04T04:08:21Z",
+    "end_utc": "2026-10-11T04:08:21Z",
+    "timezone": "Asia/Shanghai",
+    "app_name": "appi-aiinterview-public",
+    "app_id": "bf33b70e-c9fd-4841-af32-2b689fafb00b",
+    "resource_group": "rg-aiinterview-public-swedencentral",
+    "workspace_name": "law-aiinterview-public",
+    "workspace_id": "6c017bad-ecac-4cb2-b803-ca257bdeb673",
+    "queried_at_utc": "2026-10-11T04:14:03.939282+00:00"
+  },
+  "input_files": [
+    "requests.json",
+    "browser-dependencies.json",
+    "backend-dependencies.json",
+    "voice-events.json"
+  ],
+  "pairing": {
+    "normalize_id": "Remove trailing dots from browser span id and server operation_ParentId",
+    "exact_match": [
+      "browser.operation_Id = server.operation_Id",
+      "normalize(browser.id) = normalize(server.operation_ParentId)"
+    ],
+    "outside_server_ms": "browser.duration - server.duration, computed per matched request before aggregation",
+    "result": "103 Fetch entries matched to 103 server requests; 7 matched /answer entries",
+    "interpretation": "The difference includes network, proxy, connection, client scheduling and response reading; it is not a pure network RTT."
+  },
+  "statistics": {
+    "filter": "Only finite numeric values >= 0; preserve missing values as missing, exclude negative metric only, do not zero-fill",
+    "p50": "Median of sorted valid raw samples",
+    "p95": "Nearest rank x[ceil(0.95*N)-1]",
+    "small_n": "Report N and range; P95 of N=4 and N=7 equals observed maximum",
+    "turn_cohort": "voice.turn and kind=answer (7 records, all heard=true)",
+    "setup_cohort": "voice.setup and outcome=heard (4 records)",
+    "media_cohort": "voice.media grouped by interview_id; windows from same interview are correlated"
+  },
+  "timelines": {
+    "voice": "Use offsets inside the same event t_*; event.timestamp is emit time, not stage start",
+    "trace": "Span timestamp + duration; inter-host wall clocks are not calibrated; default excludes long-lived WS, voice.session and page loading",
+    "score_pre_http_ms": "child HTTP start timestamp - parent scoring.question start timestamp",
+    "extra_http_span_ms": "max(HTTP start + duration) - min(HTTP start) for report-child Responses spans outside scoring.question",
+    "extra_work_classification": "High confidence inference from historical source and trace topology; no explicit sop_coverage_check dimension was recorded."
+  },
+  "platform_metrics": {
+    "backend_voice_window": "2026-10-10T03:45:00Z/2026-10-10T12:05:00Z, PT1M",
+    "seven_day": "scope start/end, PT15M",
+    "cpu_units": "1,000,000,000 NanoCores = 1 core",
+    "memory_units": "1,048,576 Bytes = 1 MiB",
+    "average_summary": "Arithmetic mean of available bucket averages; not a concurrency benchmark",
+    "restart_count": "Counter peak, never sum across buckets"
+  }
+}

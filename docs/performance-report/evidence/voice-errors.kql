@@ -1,0 +1,1 @@
+traces | where message=="voice.azure_error" | project timestamp,operation_Id,operation_ParentId,code=tostring(customDimensions.code),avatar_rate_limited=tostring(customDimensions.avatar_rate_limited),severityLevel | order by timestamp asc

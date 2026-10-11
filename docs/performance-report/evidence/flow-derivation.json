@@ -1,0 +1,46 @@
+{
+  "created_at_utc": "2026-10-11T06:52:55.356327+00:00",
+  "input": "report-data.json",
+  "source_data_changed": false,
+  "new_cloud_queries": false,
+  "code_baseline": "dc17e27cb823d59b43c64b0b1abb1b5b36402358",
+  "cohorts": {
+    "setup": 4,
+    "avatar": 4,
+    "complete_answer": 7,
+    "exact_answer_pairs": 7,
+    "judge_calls": 11,
+    "judge_answer_overlaps": 7,
+    "score_operations": 2
+  },
+  "clocks": {
+    "overview": "Logical sequence only. Column or row distance is not elapsed time; stage medians come from independent cohorts.",
+    "setup": "One voice.setup event, origin t_connect_start. Mic permission/preparation is not fully covered by this timer.",
+    "avatar": "One voice.avatar event, origin t_pc_created. total_ms starts at offer_start; differences of up to 1 ms are expected.",
+    "turn": "One voice.turn event, origin t_speech_stopped by default; optional full speaking interval uses t_speech_started. Named *_ms fields retain original high-resolution derived durations; endpoints t_* are rounded independently.",
+    "judge": "One backend clock: /answer start and duration lie within judge.call in the same operation. No alignment to browser monotonic offsets is claimed.",
+    "score": "One backend request clock. 10/09 samples are distinct from the 10/10 voice sessions; no synthetic full-interview latency is produced."
+  },
+  "statistics": {
+    "stage_p50": "Median of the named nonnegative duration field when available; setup adjacent intervals and transcript-to-click are differences within each event before median.",
+    "http_outside": "median_i(Fetch_i - Server_i) = 263 ms. median(Fetch)=323; median(Server)=56; subtraction of these medians gives 267 ms and is a different statistic.",
+    "click_total": "P50 of click_to_audible_ms = 1234 ms; sum of the five separate stage medians = 1217 ms. Never label the latter as an observed whole-turn median.",
+    "rtt": "Compare same-interview WebRTC candidate-pair RTT windows with matched HTTP residuals, without claiming equal endpoints, instants, clocks or sample counts."
+  },
+  "code_supported_dependencies": [
+    "Microphone preparation and WebSocket opening run in parallel; recording requires micReady and session.updated.",
+    "Avatar starts after a session.updated frame supplies ICE servers; first read waits for media ready or the first-read timeout fallback.",
+    "Microphone upload and partial ASR output can overlap; no packet-level upload or ASR compute duration is reconstructed.",
+    "All seven observed final transcripts precede click; code also supports click then waiting for final transcript.",
+    "BANK /answer does not await Judge; stale Judge results can be discarded using draft/submit generation guards.",
+    "/answer completes before the next read request; response.created precedes first audible detection.",
+    "response.done is not playback completion.",
+    "After final question: disconnect voice, review answers, user submits review, generate report."
+  ],
+  "limitations": [
+    "No complete independently instrumented microphone-init, per-hop, answer-review or same-session final-score timing.",
+    "The cause of 8+1 outbound scheduling is not established by the traces; no fixed worker limit is asserted.",
+    "All measured voice records use Avatar + WebRTC. No pure WS or audio-only performance comparison is inferred.",
+    "First audible is the browser detector, not physical speaker output; response playback end and user comprehension are unmeasured."
+  ]
+}

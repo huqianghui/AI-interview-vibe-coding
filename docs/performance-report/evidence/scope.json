@@ -1,0 +1,11 @@
+{
+  "start_utc": "2026-10-04T04:08:21Z",
+  "end_utc": "2026-10-11T04:08:21Z",
+  "timezone": "Asia/Shanghai",
+  "app_name": "appi-aiinterview-public",
+  "app_id": "bf33b70e-c9fd-4841-af32-2b689fafb00b",
+  "resource_group": "rg-aiinterview-public-swedencentral",
+  "workspace_name": "law-aiinterview-public",
+  "workspace_id": "6c017bad-ecac-4cb2-b803-ca257bdeb673",
+  "queried_at_utc": "2026-10-11T04:14:03.939282+00:00"
+}

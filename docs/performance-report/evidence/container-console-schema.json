@@ -1,0 +1,111 @@
+{
+  "tables": [
+    {
+      "columns": [
+        {
+          "name": "ColumnName",
+          "type": "string"
+        },
+        {
+          "name": "DataType",
+          "type": "string"
+        }
+      ],
+      "name": "PrimaryResult",
+      "rows": [
+        [
+          "TenantId",
+          "System.String"
+        ],
+        [
+          "SourceSystem",
+          "System.String"
+        ],
+        [
+          "MG",
+          "System.String"
+        ],
+        [
+          "ManagementGroupName",
+          "System.String"
+        ],
+        [
+          "TimeGenerated",
+          "System.DateTime"
+        ],
+        [
+          "Computer",
+          "System.String"
+        ],
+        [
+          "RawData",
+          "System.String"
+        ],
+        [
+          "ContainerJobName_s",
+          "System.String"
+        ],
+        [
+          "_timestamp_d",
+          "System.Double"
+        ],
+        [
+          "Category",
+          "System.String"
+        ],
+        [
+          "EnvironmentName_s",
+          "System.String"
+        ],
+        [
+          "Log_s",
+          "System.String"
+        ],
+        [
+          "Stream_s",
+          "System.String"
+        ],
+        [
+          "ContainerImage_s",
+          "System.String"
+        ],
+        [
+          "time_t",
+          "System.DateTime"
+        ],
+        [
+          "ContainerName_s",
+          "System.String"
+        ],
+        [
+          "ContainerGroupId_g",
+          "System.String"
+        ],
+        [
+          "RevisionName_s",
+          "System.String"
+        ],
+        [
+          "ContainerGroupName_s",
+          "System.String"
+        ],
+        [
+          "ContainerAppName_s",
+          "System.String"
+        ],
+        [
+          "ContainerId_g",
+          "System.String"
+        ],
+        [
+          "Type",
+          "System.String"
+        ],
+        [
+          "_ResourceId",
+          "System.String"
+        ]
+      ]
+    }
+  ]
+}

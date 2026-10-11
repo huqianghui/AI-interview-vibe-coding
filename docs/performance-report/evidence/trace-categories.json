@@ -1,0 +1,28 @@
+{
+  "tables": [
+    {
+      "columns": [
+        {
+          "name": "severityLevel",
+          "type": "int"
+        },
+        {
+          "name": "message",
+          "type": "string"
+        },
+        {
+          "name": "n",
+          "type": "long"
+        }
+      ],
+      "name": "PrimaryResult",
+      "rows": [
+        [
+          2,
+          "An embedding batch of 5 failed; trying each alone",
+          1
+        ]
+      ]
+    }
+  ]
+}

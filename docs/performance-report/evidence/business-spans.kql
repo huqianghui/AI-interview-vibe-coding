@@ -1,0 +1,3 @@
+dependencies | where name in ("voice.session","scoring.question","judge.call","external_brain.turn")
+| project timestamp,itemId,id,operation_Id,operation_ParentId,name,duration,success,resultCode,itemCount,instance=cloud_RoleInstance,interview_id=tostring(customDimensions["voice.interview_id"]),realtime=tostring(customDimensions["voice.realtime"]),voice_mode=tostring(customDimensions["voice.mode"]),playground=tostring(customDimensions["voice.playground"]),persona_id=tostring(customDimensions["voice.persona_id"]),judge_verdict=tostring(customDimensions["judge.verdict"]),external_attempt=tostring(customDimensions["external.attempt"]),external_outcome=tostring(customDimensions["external.outcome"])
+| order by timestamp asc

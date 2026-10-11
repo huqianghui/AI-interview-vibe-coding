@@ -1,0 +1,1 @@
+traces | summarize n=count() by severityLevel,message=substring(message,0,180)

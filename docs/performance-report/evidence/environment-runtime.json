@@ -1,0 +1,19 @@
+{
+  "name": "cae-aiinterview-public",
+  "location": "Sweden Central",
+  "provisioningState": "Succeeded",
+  "vnetConfiguration": {
+    "dockerBridgeCidr": null,
+    "infrastructureSubnetId": "/subscriptions/7a03e9b8-18d6-48e7-b186-0ec68da9e86f/resourceGroups/rg-aiinterview-public-swedencentral/providers/Microsoft.Network/virtualNetworks/vnet-aiinterview-public/subnets/snet-aiinterview-public-infra",
+    "internal": false,
+    "platformReservedCidr": null,
+    "platformReservedDnsIP": null
+  },
+  "zoneRedundant": false,
+  "workloadProfiles": [
+    {
+      "name": "Consumption",
+      "workloadProfileType": "Consumption"
+    }
+  ]
+}

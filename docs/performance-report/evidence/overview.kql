@@ -1,0 +1,3 @@
+union withsource=tableName requests,dependencies,customEvents,pageViews,browserTimings,traces,exceptions
+| summarize rows=count(), weighted=sum(itemCount), first_seen=min(timestamp), latest=max(timestamp), operations=dcount(operation_Id), maxItemCount=max(itemCount) by tableName
+| order by rows desc

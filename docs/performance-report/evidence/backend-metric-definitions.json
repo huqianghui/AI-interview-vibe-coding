@@ -1,0 +1,710 @@
+[
+  {
+    "name": "UsageNanoCores",
+    "label": "CPU Usage",
+    "unit": "NanoCores",
+    "aggregations": [
+      "Total",
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      },
+      {
+        "localizedValue": "Replica",
+        "value": "podName"
+      }
+    ]
+  },
+  {
+    "name": "WorkingSetBytes",
+    "label": "Memory Working Set Bytes",
+    "unit": "Bytes",
+    "aggregations": [
+      "Total",
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      },
+      {
+        "localizedValue": "Replica",
+        "value": "podName"
+      }
+    ]
+  },
+  {
+    "name": "TxBytes",
+    "label": "Network Out Bytes",
+    "unit": "Bytes",
+    "aggregations": [
+      "Average",
+      "Total",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      },
+      {
+        "localizedValue": "Replica",
+        "value": "podName"
+      }
+    ]
+  },
+  {
+    "name": "RxBytes",
+    "label": "Network In Bytes",
+    "unit": "Bytes",
+    "aggregations": [
+      "Average",
+      "Total",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      },
+      {
+        "localizedValue": "Replica",
+        "value": "podName"
+      }
+    ]
+  },
+  {
+    "name": "Requests",
+    "label": "Requests",
+    "unit": "Count",
+    "aggregations": [
+      "Average",
+      "Total",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      },
+      {
+        "localizedValue": "Replica",
+        "value": "podName"
+      },
+      {
+        "localizedValue": "Status Code Category",
+        "value": "statusCodeCategory"
+      },
+      {
+        "localizedValue": "Status Code",
+        "value": "statusCode"
+      }
+    ]
+  },
+  {
+    "name": "RestartCount",
+    "label": "Total Replica Restart Count",
+    "unit": "Count",
+    "aggregations": [
+      "Average",
+      "Total",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      },
+      {
+        "localizedValue": "Replica",
+        "value": "podName"
+      }
+    ]
+  },
+  {
+    "name": "Replicas",
+    "label": "Replica Count",
+    "unit": "Count",
+    "aggregations": [
+      "Average",
+      "Total",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      }
+    ]
+  },
+  {
+    "name": "GpuUtilizationPercentage",
+    "label": "GPU Utilization Percentage (Preview)",
+    "unit": "Percent",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      },
+      {
+        "localizedValue": "Replica",
+        "value": "podName"
+      }
+    ]
+  },
+  {
+    "name": "CoresQuotaUsed",
+    "label": "Reserved Cores",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      }
+    ]
+  },
+  {
+    "name": "TotalCoresQuotaUsed",
+    "label": "Total Reserved Cores",
+    "unit": "Count",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": null
+  },
+  {
+    "name": "ResiliencyConnectTimeouts",
+    "label": "Resiliency Connection Timeouts",
+    "unit": "Count",
+    "aggregations": [
+      "Total",
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      }
+    ]
+  },
+  {
+    "name": "ResiliencyRequestRetries",
+    "label": "Resiliency Request Retries",
+    "unit": "Count",
+    "aggregations": [
+      "Total",
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      }
+    ]
+  },
+  {
+    "name": "ResiliencyRequestTimeouts",
+    "label": "Resiliency Request Timeouts",
+    "unit": "Count",
+    "aggregations": [
+      "Total",
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      }
+    ]
+  },
+  {
+    "name": "ResiliencyRequestsPendingConnectionPool",
+    "label": "Resiliency Requests Pending Connection Pool",
+    "unit": "Count",
+    "aggregations": [
+      "Total",
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      }
+    ]
+  },
+  {
+    "name": "ResiliencyEjectedHosts",
+    "label": "Resiliency Ejected Hosts",
+    "unit": "Count",
+    "aggregations": [
+      "Total",
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      }
+    ]
+  },
+  {
+    "name": "ResiliencyEjectionsAborted",
+    "label": "Resiliency Ejections Aborted",
+    "unit": "Count",
+    "aggregations": [
+      "Total",
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      }
+    ]
+  },
+  {
+    "name": "JvmMemoryTotalUsed",
+    "label": "jvm.memory.total.used",
+    "unit": "Bytes",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      },
+      {
+        "localizedValue": "Replica",
+        "value": "podName"
+      },
+      {
+        "localizedValue": "Container",
+        "value": "container"
+      },
+      {
+        "localizedValue": "PoolType",
+        "value": "poolType"
+      }
+    ]
+  },
+  {
+    "name": "JvmMemoryTotalCommitted",
+    "label": "jvm.memory.total.committed",
+    "unit": "Bytes",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      },
+      {
+        "localizedValue": "Replica",
+        "value": "podName"
+      },
+      {
+        "localizedValue": "Container",
+        "value": "container"
+      },
+      {
+        "localizedValue": "PoolType",
+        "value": "poolType"
+      }
+    ]
+  },
+  {
+    "name": "JvmMemoryTotalLimit",
+    "label": "jvm.memory.total.limit",
+    "unit": "Bytes",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      },
+      {
+        "localizedValue": "Replica",
+        "value": "podName"
+      },
+      {
+        "localizedValue": "Container",
+        "value": "container"
+      },
+      {
+        "localizedValue": "PoolType",
+        "value": "poolType"
+      }
+    ]
+  },
+  {
+    "name": "JvmMemoryUsed",
+    "label": "jvm.memory.used",
+    "unit": "Bytes",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      },
+      {
+        "localizedValue": "Replica",
+        "value": "podName"
+      },
+      {
+        "localizedValue": "Container",
+        "value": "container"
+      },
+      {
+        "localizedValue": "PoolName",
+        "value": "poolName"
+      },
+      {
+        "localizedValue": "PoolType",
+        "value": "poolType"
+      }
+    ]
+  },
+  {
+    "name": "JvmMemoryCommitted",
+    "label": "jvm.memory.committed",
+    "unit": "Bytes",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      },
+      {
+        "localizedValue": "Replica",
+        "value": "podName"
+      },
+      {
+        "localizedValue": "Container",
+        "value": "container"
+      },
+      {
+        "localizedValue": "PoolName",
+        "value": "poolName"
+      },
+      {
+        "localizedValue": "PoolType",
+        "value": "poolType"
+      }
+    ]
+  },
+  {
+    "name": "JvmMemoryLimit",
+    "label": "jvm.memory.limit",
+    "unit": "Bytes",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      },
+      {
+        "localizedValue": "Replica",
+        "value": "podName"
+      },
+      {
+        "localizedValue": "Container",
+        "value": "container"
+      },
+      {
+        "localizedValue": "PoolName",
+        "value": "poolName"
+      },
+      {
+        "localizedValue": "PoolType",
+        "value": "poolType"
+      }
+    ]
+  },
+  {
+    "name": "JvmGcCount",
+    "label": "jvm.gc.count",
+    "unit": "Count",
+    "aggregations": [
+      "Total",
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      },
+      {
+        "localizedValue": "Replica",
+        "value": "podName"
+      },
+      {
+        "localizedValue": "Container",
+        "value": "container"
+      },
+      {
+        "localizedValue": "GcName",
+        "value": "gcName"
+      }
+    ]
+  },
+  {
+    "name": "JvmGcDuration",
+    "label": "jvm.gc.duration",
+    "unit": "MilliSeconds",
+    "aggregations": [
+      "Total",
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      },
+      {
+        "localizedValue": "Replica",
+        "value": "podName"
+      },
+      {
+        "localizedValue": "Container",
+        "value": "container"
+      },
+      {
+        "localizedValue": "GcName",
+        "value": "gcName"
+      }
+    ]
+  },
+  {
+    "name": "JvmThreadCount",
+    "label": "jvm.thread.count",
+    "unit": "Count",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      },
+      {
+        "localizedValue": "Replica",
+        "value": "podName"
+      },
+      {
+        "localizedValue": "Container",
+        "value": "container"
+      },
+      {
+        "localizedValue": "Daemon",
+        "value": "daemon"
+      },
+      {
+        "localizedValue": "ThreadState",
+        "value": "threadState"
+      }
+    ]
+  },
+  {
+    "name": "JvmBufferMemoryUsage",
+    "label": "jvm.buffer.memory.usage",
+    "unit": "Bytes",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      },
+      {
+        "localizedValue": "Replica",
+        "value": "podName"
+      },
+      {
+        "localizedValue": "Container",
+        "value": "container"
+      },
+      {
+        "localizedValue": "PoolName",
+        "value": "poolName"
+      }
+    ]
+  },
+  {
+    "name": "JvmBufferMemoryLimit",
+    "label": "jvm.buffer.memory.limit",
+    "unit": "Bytes",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      },
+      {
+        "localizedValue": "Replica",
+        "value": "podName"
+      },
+      {
+        "localizedValue": "Container",
+        "value": "container"
+      },
+      {
+        "localizedValue": "PoolName",
+        "value": "poolName"
+      }
+    ]
+  },
+  {
+    "name": "JvmBufferCount",
+    "label": "jvm.buffer.count",
+    "unit": "Count",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Revision",
+        "value": "revisionName"
+      },
+      {
+        "localizedValue": "Replica",
+        "value": "podName"
+      },
+      {
+        "localizedValue": "Container",
+        "value": "container"
+      },
+      {
+        "localizedValue": "PoolName",
+        "value": "poolName"
+      }
+    ]
+  },
+  {
+    "name": "ResponseTime",
+    "label": "Average Response Time (Preview)",
+    "unit": "MilliSeconds",
+    "aggregations": [
+      "Average",
+      "Total",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Status Code Category",
+        "value": "statusCodeCategory"
+      },
+      {
+        "localizedValue": "Status Code",
+        "value": "statusCode"
+      }
+    ]
+  },
+  {
+    "name": "CpuPercentage",
+    "label": "CPU Usage Percentage (Preview)",
+    "unit": "Percent",
+    "aggregations": [
+      "Total",
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Replica",
+        "value": "podName"
+      }
+    ]
+  },
+  {
+    "name": "MemoryPercentage",
+    "label": "Memory Percentage (Preview)",
+    "unit": "Percent",
+    "aggregations": [
+      "Total",
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Replica",
+        "value": "podName"
+      }
+    ]
+  }
+]

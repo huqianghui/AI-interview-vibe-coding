@@ -1,0 +1,1 @@
+dependencies | where client_Type=="Browser" | project timestamp,itemId,id,operation_Id,operation_ParentId,name=tostring(split(name,"?")[0]),type,target=tostring(split(target,"?")[0]),duration,success,resultCode,itemCount,live=tostring(customDimensions.live),close_reason=tostring(customDimensions.close_reason),role=cloud_RoleName | order by timestamp asc

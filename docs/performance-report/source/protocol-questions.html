@@ -1,0 +1,20 @@
+<div id="protocol-questions">
+  <h3>围绕一次回答，把容易混淆的概念放在一起</h3>
+  <div class="tablewrap"><table><thead><tr><th>用户所处阶段</th><th>连接与方向</th><th>实际工作与路径</th></tr></thead><tbody>
+    <tr><td>正在说话</td><td>WebSocket 上行</td><td>麦克风音频持续上传：浏览器 → Nginx → 应用后端 → Azure Voice Live。PCM16、单声道、16 kHz；并非等点击完成才上传。</td></tr>
+    <tr><td>识别过程中</td><td>WebSocket 下行</td><td>返回转写、VAD 开始 / 停止说话、响应事件等；流式转写可以与音频上传交叠。</td></tr>
+    <tr><td>点击“完成回答”</td><td>HTTP POST</td><td><code>/api/candidate/interview/{interview_id}/answer</code> 通过 Fetch 提交已确认的文本和业务字段。后端保存答案、推进面试状态，返回下一题相关信息。</td></tr>
+    <tr><td>要求读下一题</td><td>WebSocket 上行及事件下行</td><td>前端收到业务结果后发出读题指令，经代理与后端进入 Voice Live；收到 <code>response.created</code>。这段不在前一个 HTTP Fetch 的 323 ms 里。</td></tr>
+    <tr><td>听到 / 看到数字人读题</td><td>WebRTC 下行</td><td>本次 Avatar 模式的音视频由 Azure 媒体侧经 TURN 中继到浏览器，媒体不穿过应用容器；SDP 等信令仍经 WS 交换。</td></tr>
+  </tbody></table></div>
+  <details open><summary>263 ms 到底怎么算？为什么不是 56 + 323，或者 323 − 56？</summary><div>
+    <p><b>浏览器 Fetch 已经包含服务器处理时间。</b> 对单个配对请求：<code>后端计时之外 = 浏览器 Fetch 总时长 − 后端处理时长</code>。例如同一条请求 Fetch <b>326 ms</b>、后端 <b>63 ms</b>，差额就是 <b>263 ms</b>，不能再把后端时间加到 Fetch 上。</p>
+    <p>概览卡片的 <b>323 ms</b>、<b>56 ms</b> 是各自样本列的中位数；<b>263 ms</b> 则是先算 7 对差额、再取中位数。<code>median(Fetch − Server)</code> 不必等于 <code>median(Fetch) − median(Server)</code>。后者在这里是 267 ms，回答的是另一项统计。</p>
+    <div class="tablewrap"><table id="flow-http-pairs"><thead><tr><th>北京时间 / operation</th><th>Fetch 总时长</th><th>后端处理</th><th>逐对相减</th></tr></thead><tbody>__PAIR_ROWS__</tbody><tfoot><tr><th>各列独立中位数 · N7</th><th>323 ms</th><th>56 ms</th><th>263 ms</th></tr></tfoot></table></div>
+  </div></details>
+  <details><summary>263 ms 可以叫 RTT 吗？是单向、一次往返，还是每一跳？</summary><div><p><b>它是一次 HTTP 请求从浏览器发出到返回期间，落在后端计时范围以外的合计时间。</b> 它涉及请求上行、响应下行，以及可能的连接、代理、调度和读取开销。现有记录没有把这些部分逐一拆开。</p><p>因此可以把它理解为“这次 HTTP 往返的非后端处理部分”，不能称为纯网络 RTT，也不能当作单向延迟或某一跳延迟；除以二也得不到可靠的单程时间。这个 263 ms 还是 7 个差额的中位数，并不是每次请求都固定多 263 ms。</p></div></details>
+  <details><summary>Fetch 是 WebSocket 吗？HTTP 会不会也一路转发到 Voice Live？</summary><div><p><b>Fetch 是浏览器发 HTTP 请求的 API，WebSocket 是另一条连接。</b> 这里测量的是 HTTP <code>POST /answer</code>：浏览器 ↔ Nginx ↔ 应用后端。保存与推进面试状态属于这条业务请求。其完成之后，另发 WS 读题指令到 Voice Live，才进入后面的读题计时。</p><p>麦克风上传和 Voice Live 控制确实经过更长的应用代理路径：浏览器 ↔ Nginx ↔ 应用后端 ↔ Azure Voice Live。但不能把这段 WS 路径加到已经结束的 Fetch 请求里，也不能仅凭转发节点个数推断它一定比媒体路径慢。</p><p><code>voice.turn.answer_http_ms</code> 的 P50 为 324 ms，而自动采集的 Fetch dependency 为 323 ms。两者来自不同埋点边界；浏览器事件端点还会独立取整。这 1 ms 差异不意味着另一段网络路径。</p></div></details>
+  <details><summary>WebSocket 只管语音上传吗？下行是不是始终都走 WebRTC？</summary><div><p><b>本次数字人模式：</b> WS 同时承担麦克风上行、转写与 VAD 下行、读题控制、响应事件、错误与协商信令；数字人的声音和画面通过 WebRTC 下行。控制消息与媒体数据可以同时流动。</p><p><b>实现还支持其他模式：</b> 不启用 Avatar 时可通过 WS 接收 PCM 音频；Avatar 的 audio-only 模式仍涉及 Voice Live 与 WebRTC 会话重建，不是直接把原来的视频静音。本次没有纯 WS 音频或 audio-only 的可比实测样本，不能用当前数据给它们排名。</p></div></details>
+  <details><summary>为什么 Judge 2.218 秒没有加到提交答案的 1.234 秒里？</summary><div><p><b>它不是题库正式提交必须等待的前置步骤。</b> 最终转写到达后可预取 Judge 判断，并与静默窗口、候选人确认以及后续提交并行。前端用提交代次等条件检查结果是否过期，过时结果可丢弃。</p><p>7 对匹配的答案请求都有直接的后端重叠证据。例如北京时间 14:09:15.110 的 Judge 运行 2,220 ms；同场 <code>/answer</code> 在 14:09:15.886 开始，只运行 41 ms，结束时 Judge 仍在进行。上方回放选择“真实并行”即可查看。配置中的静默窗口应以实际 persona 配置为准，不能把代码默认值当成已验证的线上值。</p></div></details>
+  <details><summary>response.done、首帧、起音、播放结束是不是同一个时刻？</summary><div><p><code>response.done</code> 表示服务响应生成结束，并不表示浏览器已播完。本次多条记录里它甚至早于起音检测。首帧依据 video 元素状态检测；起音依据接收音量检测。它们是有用的观测点，但不能替代扬声器实际出声、完整播放结束或用户听清的测量。</p></div></details>
+</div>

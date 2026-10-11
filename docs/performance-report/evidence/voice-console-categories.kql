@@ -1,0 +1,3 @@
+ContainerAppConsoleLogs_CL | where ContainerAppName_s=="ca-aiinterview-public-backend"
+| extend cat=case(Log_s has "AUTH_FAILED","AUTH_FAILED",Log_s has "voice.azure_error","voice.azure_error",Log_s has "rate_limit_exceeded","rate_limit_exceeded",Log_s has "Session expired","Session expired",Log_s has "not supported" and Log_s has "model","model_not_supported",Log_s has "Application startup complete","app_startup",Log_s has "out of memory" or Log_s has "OOMKilled","memory_error",Log_s has "Shutting down","app_shutdown",Log_s has "Exception in ASGI application","ASGI_exception","")
+| where isnotempty(cat) | summarize n=count(),first_seen=min(TimeGenerated),last_seen=max(TimeGenerated) by cat,RevisionName_s | order by last_seen desc

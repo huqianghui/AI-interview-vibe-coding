@@ -1,0 +1,58 @@
+name: Publish performance report
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/performance-report/**"
+      - ".github/workflows/performance-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: performance-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Publish static analysis to GitHub Pages
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify the saved report package
+        shell: python
+        run: |
+          from pathlib import Path
+          import hashlib
+          import json
+
+          root = Path("docs/performance-report")
+          manifest = json.loads((root / "evidence/manifest.json").read_text())
+          for entry in manifest["files"]:
+              path = root / entry["path"]
+              assert path.is_file(), f"Missing report file: {path}"
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              assert digest == entry["sha256"], f"Report checksum mismatch: {path}"
+          assert (root / "index.html").is_file()
+          assert (root / "flow.html").is_file()
+          print(f"Verified {len(manifest['files'])} saved report files")
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload the static report
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/performance-report
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

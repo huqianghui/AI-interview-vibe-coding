@@ -1,0 +1,39 @@
+{
+  "name": "psql-aiinterview-public",
+  "location": "Sweden Central",
+  "sku": {
+    "name": "Standard_B1ms",
+    "tier": "Burstable"
+  },
+  "state": "Ready",
+  "version": "16",
+  "storage": {
+    "autoGrow": "Enabled",
+    "iops": 120,
+    "storageSizeGB": 32,
+    "tier": "P4",
+    "type": "Premium_LRS"
+  },
+  "highAvailability": {
+    "mode": "Disabled",
+    "state": "NotEnabled"
+  },
+  "backup": {
+    "backupRetentionDays": 7,
+    "earliestRestoreDate": "2026-10-07T06:14:18.2559413+00:00",
+    "geoRedundantBackup": "Disabled"
+  },
+  "network": {
+    "delegatedSubnetResourceId": "/subscriptions/7a03e9b8-18d6-48e7-b186-0ec68da9e86f/resourceGroups/rg-aiinterview-public-swedencentral/providers/Microsoft.Network/virtualNetworks/vnet-aiinterview-public/subnets/snet-aiinterview-public-pg",
+    "privateDnsZoneArmResourceId": "/subscriptions/7a03e9b8-18d6-48e7-b186-0ec68da9e86f/resourceGroups/rg-aiinterview-public-swedencentral/providers/Microsoft.Network/privateDnsZones/aiinterview-public.private.postgres.database.azure.com",
+    "publicNetworkAccess": "Disabled"
+  },
+  "authConfig": {
+    "activeDirectoryAuth": "Enabled",
+    "passwordAuth": "Disabled",
+    "tenantId": "16b3c013-d300-468d-ac64-7eda0820b6d3"
+  },
+  "systemData": {
+    "createdAt": "2026-10-07T06:07:01.9388724Z"
+  }
+}

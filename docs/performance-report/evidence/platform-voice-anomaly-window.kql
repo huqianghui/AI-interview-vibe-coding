@@ -1,0 +1,3 @@
+ContainerAppSystemLogs_CL | where ContainerAppName_s in ("ca-aiinterview-public-backend","ca-aiinterview-public-frontend")
+| where TimeGenerated between(datetime(2026-10-10T08:10:00Z)..datetime(2026-10-10T12:05:00Z))
+| summarize n=count() by Reason_s,Type_s,RevisionName_s

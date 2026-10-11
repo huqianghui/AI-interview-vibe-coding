@@ -45,6 +45,22 @@ The browser and the backend both report to the deployment's Application Insights
 In the workbook, pick an interview (the newest is selected by default) or paste an **Operation id**.
 What each metric means: [`docs/voice-performance-telemetry.md`](docs/voice-performance-telemetry.md).
 
+### Interactive performance report (2026-10-11)
+
+**[Open the performance report](https://huqianghui.github.io/AI-interview-vibe-coding/)** ·
+**[Play the interview flow](https://huqianghui.github.io/AI-interview-vibe-coding/flow.html)**
+
+A Chinese-language analysis of the saved Application Insights and workbook records, with
+frontend/backend paths, Voice Live, Avatar, HTTP, WebSocket, WebRTC, deployment context and
+optimization opportunities. The report includes playable timelines, stage medians, same-session
+RTT comparisons and links to the underlying evidence. Reading it does not require Azure access.
+
+The whole-interview diagram explains ordering and concurrency; measured replays keep each
+record's own clock. The data window ends on **2026-10-11 at 12:08:21 Beijing time**; this is a
+saved performance snapshot, not a live dashboard.
+
+[![A real answer replay: transcription, answer submission, WebSocket response and WebRTC audio onset](docs/performance-report/screenshots/flow-turn-desktop.png)](https://huqianghui.github.io/AI-interview-vibe-coding/#stages)
+
 ## Key scenarios
 
 > Most screenshots are captured on the mock stack the test suite uses, so the scores, rubric items

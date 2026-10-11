@@ -1,0 +1,1 @@
+browserTimings | project timestamp,operation_Id,name,networkDuration,sendDuration,receiveDuration,processingDuration,totalDuration,client_Browser,client_OS | order by timestamp asc

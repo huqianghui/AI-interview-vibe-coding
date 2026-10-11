@@ -1,0 +1,22 @@
+{
+  "name": "ca-aiinterview-public-backend",
+  "captured_at": "2026-10-11T04:24:19.807658+00:00",
+  "latest": "ca-aiinterview-public-backend--0000177",
+  "ready": "ca-aiinterview-public-backend--0000176",
+  "running": "Running",
+  "scale": {
+    "maxReplicas": 1,
+    "minReplicas": 1,
+    "rules": null
+  },
+  "containers": [
+    {
+      "image": "aiinterviewpublicacr.azurecr.io/ai-interview-backend:7ff52f9241287c098b4818b103a4becf6b16ee45",
+      "resources": {
+        "cpu": 1.0,
+        "ephemeralStorage": "4Gi",
+        "memory": "2Gi"
+      }
+    }
+  ]
+}

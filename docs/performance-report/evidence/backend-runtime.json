@@ -1,0 +1,126 @@
+{
+  "name": "ca-aiinterview-public-backend",
+  "location": "Sweden Central",
+  "systemData": {
+    "createdAt": "2026-08-31T13:48:33.998663",
+    "lastModifiedAt": "2026-10-10T06:36:25.2433108"
+  },
+  "workloadProfileName": "Consumption",
+  "latestRevisionName": "ca-aiinterview-public-backend--0000176",
+  "latestReadyRevisionName": "ca-aiinterview-public-backend--0000176",
+  "runningStatus": "Running",
+  "provisioningState": "Succeeded",
+  "revisionMode": "Single",
+  "ingress": {
+    "additionalPortMappings": null,
+    "allowInsecure": false,
+    "clientCertificateMode": null,
+    "corsPolicy": null,
+    "customDomains": null,
+    "exposedPort": 0,
+    "external": false,
+    "fqdn": "ca-aiinterview-public-backend.internal.victoriousocean-10de9a49.swedencentral.azurecontainerapps.io",
+    "ipSecurityRestrictions": null,
+    "stickySessions": {
+      "affinity": "sticky"
+    },
+    "targetPort": 8000,
+    "traffic": [
+      {
+        "latestRevision": true,
+        "weight": 100
+      }
+    ],
+    "transport": "Auto"
+  },
+  "scale": {
+    "maxReplicas": 1,
+    "minReplicas": 1,
+    "rules": null
+  },
+  "containers": [
+    {
+      "name": "backend",
+      "image": "aiinterviewpublicacr.azurecr.io/ai-interview-backend:dc17e27cb823d59b43c64b0b1abb1b5b36402358",
+      "resources": {
+        "cpu": 1.0,
+        "ephemeralStorage": "4Gi",
+        "memory": "2Gi"
+      },
+      "probes": null,
+      "command": null,
+      "args": null,
+      "env": {
+        "DATABASE_URL": {
+          "scheme": "postgresql+asyncpg",
+          "host": "psql-aiinterview-public.postgres.database.azure.com",
+          "database": "/ai_interview"
+        },
+        "MATERIAL_STORAGE_PATH": {
+          "configured": true
+        },
+        "DEBUG": {
+          "configured": true
+        },
+        "SECRET_KEY": {
+          "secret_reference": "secret-key"
+        },
+        "ENCRYPTION_KEY": {
+          "secret_reference": "encryption-key"
+        },
+        "SEED_ADMIN_PASSWORD": {
+          "secret_reference": "seed-admin-password"
+        },
+        "ADMIN_API_TOKEN": {
+          "secret_reference": "admin-api-token"
+        },
+        "DEFAULT_LLM_PROVIDER": {
+          "configured": true
+        },
+        "DEFAULT_VOICE_PROVIDER": {
+          "configured": true
+        },
+        "DEFAULT_RETRIEVAL_PROVIDER": {
+          "configured": true
+        },
+        "DEFAULT_AGENT_SYNC_PROVIDER": {
+          "configured": true
+        },
+        "AZURE_FOUNDRY_ENDPOINT": "https://ai-foundary-hu-sweden-central2.services.ai.azure.com/",
+        "FOUNDRY_PROJECT_ENDPOINT": "https://ai-foundary-hu-sweden-central2.services.ai.azure.com/",
+        "AZURE_FOUNDRY_DEFAULT_PROJECT": "avarda-demo-prj",
+        "FOUNDRY_AGENT_MODEL": "gpt-5-mini",
+        "VOICE_LIVE_DEFAULT_MODEL": "gpt-5-mini",
+        "VOICE_LIVE_API_VERSION": "2026-01-01-preview",
+        "AZURE_CLIENT_ID": {
+          "configured": true
+        },
+        "AZURE_STORAGE_ACCOUNT_URL": {
+          "configured": true
+        },
+        "CLIENT_BUNDLE_CONTAINER": {
+          "configured": true
+        },
+        "CLIENT_BUNDLE_BLOB": {
+          "configured": true
+        },
+        "APPLICATIONINSIGHTS_CONNECTION_STRING": {
+          "configured": true
+        },
+        "EXTERNAL_INTERVIEWER_ENDPOINT": {
+          "configured": true
+        },
+        "EXTERNAL_INTERVIEWER_API_KEY": {
+          "secret_reference": "external-interviewer-api-key"
+        },
+        "EXTERNAL_INTERVIEWER_USER_TAG": {
+          "configured": true
+        },
+        "DATABASE_AUTH": "entra",
+        "DEFAULT_STORAGE_PROVIDER": {
+          "configured": true
+        }
+      }
+    }
+  ]
+}

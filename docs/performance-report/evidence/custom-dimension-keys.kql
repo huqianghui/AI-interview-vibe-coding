@@ -1,0 +1,1 @@
+dependencies | where name in ("voice.session","scoring.question","judge.call","external_brain.turn") | mv-expand k=bag_keys(customDimensions) | summarize n=count() by name,k=tostring(k) | order by name asc,k asc

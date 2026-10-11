@@ -1,0 +1,1 @@
+requests | project timestamp,itemId,id,operation_Id,operation_ParentId,name=tostring(split(name,"?")[0]),duration,success,resultCode,itemCount,role=cloud_RoleName,instance=cloud_RoleInstance | order by timestamp asc

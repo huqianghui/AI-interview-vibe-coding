@@ -1,0 +1,93 @@
+{
+  "tables": [
+    {
+      "columns": [
+        {
+          "name": "type",
+          "type": "string"
+        },
+        {
+          "name": "client_Type",
+          "type": "string"
+        },
+        {
+          "name": "cloud_RoleName",
+          "type": "string"
+        },
+        {
+          "name": "n",
+          "type": "long"
+        },
+        {
+          "name": "failures",
+          "type": "long"
+        },
+        {
+          "name": "p50_ms",
+          "type": "real"
+        },
+        {
+          "name": "p95_ms",
+          "type": "real"
+        },
+        {
+          "name": "max_ms",
+          "type": "real"
+        }
+      ],
+      "name": "PrimaryResult",
+      "rows": [
+        [
+          "InProc",
+          "PC",
+          "ai-interview-backend",
+          6322,
+          0,
+          0,
+          10,
+          1053573
+        ],
+        [
+          "Azure blob",
+          "PC",
+          "ai-interview-backend",
+          1076,
+          0,
+          6,
+          25,
+          299
+        ],
+        [
+          "HTTP",
+          "PC",
+          "ai-interview-backend",
+          910,
+          1,
+          107.54421768707483,
+          11886,
+          33588
+        ],
+        [
+          "Fetch",
+          "Browser",
+          "",
+          103,
+          1,
+          325,
+          2418,
+          3644
+        ],
+        [
+          "WebSocket",
+          "Browser",
+          "",
+          5,
+          4,
+          4896,
+          1053878,
+          1053878
+        ]
+      ]
+    }
+  ]
+}

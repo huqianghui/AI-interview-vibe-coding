@@ -1,0 +1,191 @@
+<div id="interview-flow-v2">
+  <style>
+    #interview-flow-v2{color:var(--foreground);min-width:0;--flow-quiet:color-mix(in srgb,var(--foreground) 8%,transparent)}
+    #interview-flow-v2 .flow-head{display:flex;gap:16px;align-items:baseline;justify-content:space-between;flex-wrap:wrap;margin-bottom:12px}
+    #interview-flow-v2 .flow-head h3{margin:0}
+    #interview-flow-v2 .flow-selectors{margin-bottom:12px}
+    #interview-flow-v2 .flow-playback{display:grid;grid-template-columns:auto minmax(0,1fr);gap:12px;align-items:center;margin:14px 0}
+    #interview-flow-v2 .flow-range{display:grid;gap:4px;min-width:0}
+    #interview-flow-v2 .flow-range label{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+    #interview-flow-v2 .flow-range input{width:100%}
+    #interview-flow-v2 .flow-chart{width:100%;min-width:0}
+    #interview-flow-v2 .flow-svg{width:100%;height:auto;display:block;overflow:visible}
+    #interview-flow-v2 .flow-svg text{fill:var(--foreground);font-size:12px;font-weight:400;font-family:inherit}
+    #interview-flow-v2 .flow-svg .flow-heading{font-weight:500}
+    #interview-flow-v2 .flow-svg .flow-axis{fill:var(--muted-foreground)}
+    #interview-flow-v2 .flow-legend{display:flex;flex-wrap:wrap;gap:8px 18px;margin:12px 0}
+    #interview-flow-v2 .flow-legend span{display:inline-flex;align-items:center;gap:6px}
+    #interview-flow-v2 .flow-legend i{display:inline-block;width:14px;height:6px;border-radius:2px}
+    #interview-flow-v2 .flow-current{min-height:2.8em;overflow-wrap:anywhere;margin:8px 0}
+    #interview-flow-v2 .flow-meta{overflow-wrap:anywhere;margin-top:8px}
+    #interview-flow-v2 [hidden]{display:none!important}
+    @media(max-width:420px){#interview-flow-v2 .flow-playback{grid-template-columns:1fr}#interview-flow-v2 .flow-playback>button{justify-self:start}}
+  </style>
+  <div class="flow-head"><h3>一次面试：串行与并行</h3><span class="text-small text-muted" data-flow="cohort">真实数据 · 10/09–10/10</span></div>
+  <div class="viz-controls flow-selectors">
+    <label class="form-label" for="flow-view-v2">查看过程
+      <select class="form-select" id="flow-view-v2" data-flow="view">
+        <option value="overview">整场流程 · 阶段中位数</option>
+        <option value="turn">真实回答 · 停止说话到下一句</option>
+        <option value="speaking">真实回答 · 包含讲话时间</option>
+        <option value="setup">真实连接 · 发起连接到首次起音</option>
+        <option value="avatar">真实握手 · ICE 与媒体并行</option>
+        <option value="judge">真实并行 · Judge 与提交答案</option>
+        <option value="score">真实评分 · 9 题并行与第二批调用</option>
+      </select>
+    </label>
+    <label class="form-label" for="flow-sample-v2" data-flow="sample-label"><span data-flow="sample-caption">实际记录 · 北京时间</span>
+      <select class="form-select" id="flow-sample-v2" data-flow="sample"></select>
+    </label>
+  </div>
+  <div class="flow-playback">
+    <button class="btn btn-primary" type="button" data-flow="play" aria-pressed="false">播放过程</button>
+    <div class="flow-range"><label class="text-small" for="flow-progress-v2"><span data-flow="axis-caption">流程位置 · 非时间比例</span><output class="tabular-nums" for="flow-progress-v2" data-flow="clock">第 1 / 8 步</output></label><input class="form-range" type="range" id="flow-progress-v2" data-flow="progress" min="0" max="1000" step="1" value="0" aria-label="回放位置"></div>
+  </div>
+  <div class="flow-chart" data-flow="chart"></div>
+  <div class="flow-legend text-small" data-flow="legend"></div>
+  <div class="flow-current" data-flow="current" aria-live="polite" aria-atomic="true"></div>
+  <div class="flow-meta text-small text-muted" data-flow="meta"></div>
+  <script type="application/json" id="interview-flow-data-v2">__FLOW_DATA__</script>
+  <script>
+  (() => {
+    'use strict';
+    const root=document.getElementById('interview-flow-v2');
+    if(!root || root.dataset.ready==='true')return;
+    const data=JSON.parse(root.querySelector('#interview-flow-data-v2').textContent);
+    const q=key=>root.querySelector('[data-flow="'+key+'"]');
+    const ns='http://www.w3.org/2000/svg';
+    const number=n=>Number(n).toLocaleString('zh-CN',{maximumFractionDigits:1});
+    const ms=n=>n<1000?number(n)+' ms':(n/1000).toFixed(n%1?4:3).replace(/0+$/,'').replace(/\.$/,'')+' s';
+    const colors={user:'var(--viz-series-5)',http:'var(--viz-series-2)',ws:'var(--viz-series-3)',rtc:'var(--viz-series-1)',judge:'var(--viz-series-4)',wait:'var(--muted-foreground)'};
+    const names={user:'用户 / 浏览器',http:'HTTP 业务',ws:'WebSocket',rtc:'WebRTC 媒体',judge:'旁路 / 模型任务',wait:'HTTP 外呼前的等待'};
+    const med=data.medians;
+    const p=k=>ms(med.turn[k].p50);
+    const phases=[
+      {name:'进入面试：麦克风准备与 WS 建连并行',short:'准备连接',detail:'麦克风就绪和 session.updated 都满足后才开始录音；带 ICE servers 的配置消息启动 Avatar。',cells:[['user','麦克风准备','未独立计时'],null,['ws','会话配置就绪',ms(med.setup_cumulative.session_updated_ms.p50)+' · N4'],['rtc','随后媒体协商',ms(med.avatar.total_ms.p50)+' · N4']]},
+      {name:'首题：媒体就绪后发出读题指令',short:'首题播放',detail:'首题有媒体就绪门控，6 s 是超时回退条件。首次起音总时间从发起 WS 连接计，不是从进入页面或授权麦克风计。',cells:[['user','首题等待','就绪门控'],null,['ws','读题指令','预生成文本'],['rtc','首次起音',ms(med.setup_cumulative.first_audible_ms.p50)+' · N4']]},
+      {name:'回答：上传音频与接收流式转写交叠',short:'边说边转写',detail:'讲话期间 PCM 音频持续上行，转写与 VAD 事件经 WS 下行；不应画成先上传全部音频再开始识别。',cells:[['user','用户讲话',p('speaking_ms')+' · N7'],null,['ws','音频 ↑ 转写 ↓','同时进行'],['rtc','媒体连接','继续保持']]},
+      {name:'停止说话：转写收尾与用户确认',short:'收尾与确认',detail:'本次 7 条记录均为最终转写先到、随后点击；实现也允许先点击再等待转写。Judge 从转写触发，可与后续提交重叠。',cells:[['user','转写到点击',p('transcript_to_click_ms')+' · N7'],['judge','Judge 旁路',ms(med.judge.p50)+' · N11'],['ws','停止到最终转写',p('stt_ms')+' · N7'],null]},
+      {name:'点击完成：HTTP 提交文本并推进题目',short:'提交答案',detail:'点击后本地提交等待 '+p('commit_wait_ms')+'，/answer '+p('answer_http_ms')+'，返回后 '+p('answer_to_read_ms')+' 发出读题指令；BANK 流程不必等待 Judge。',cells:[['user','点击到提交',p('commit_wait_ms')+' · N7'],['http','POST /answer',p('answer_http_ms')+' · N7'],['judge','Judge 可继续','无需串行等待'],null]},
+      {name:'下一题：读题指令 → 创建响应 → 起音',short:'下一题播放',detail:'WS 指令到 response.created '+p('read_to_created_ms')+'；再到 WebRTC 起音 '+p('created_to_audible_ms')+'。点击到起音整体 P50 '+p('click_to_audible_ms')+'。按题重复回答与提交。',cells:[['user','点击到起音',p('click_to_audible_ms')+' · N7'],null,['ws','读题到响应创建',p('read_to_created_ms')+' · N7'],['rtc','创建后起音',p('created_to_audible_ms')+' · N7']]},
+      {name:'最后一题后：断开语音、回看答案、确认',short:'结束与回看',detail:'最后一题完成后断开语音，候选人回看答案并确认提交，才进入评分。回看时长属于用户操作，缺少完整实测。',cells:[['user','回看并提交','未独立计时'],['http','业务状态推进','最后一题后'],['ws','语音断开','代码确认'],['rtc','媒体释放','代码确认']]},
+      {name:'生成报告：逐题并行，之后可能附加审计',short:'评分与报告',detail:'两条评分 operation 为 10/09 的独立样本，46.536 s 与 70.417 s；较长的一条包含第二批 9 次外呼。它们不能接成 10/10 的某一场真实面试。',cells:[['user','等待报告','独立记录'],['http','报告请求','两条独立样本'],['judge','9 题并行评分','再做可选审计'],null]}
+    ];
+    let view='overview', sample=0, progress=0, playing=false, frame=0, previous=0, state, svg, cursor, activePhase=-1;
+    let reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const sampleMemory={turn:3,speaking:3,setup:1,avatar:1,judge:3,score:1};
+    const groups={turn:data.turns,speaking:data.turns,setup:data.setups,avatar:data.avatars,judge:data.judge_overlaps,score:data.scores};
+    const add=(tag,attrs={},parent=svg,txt)=>{const e=document.createElementNS(ns,tag);for(const[k,v]of Object.entries(attrs))e.setAttribute(k,v);if(txt!==undefined)e.textContent=txt;parent.appendChild(e);return e;};
+    const text=(txt,x,y,attrs={})=>add('text',{x,y,...attrs},svg,txt);
+    function splitText(txt,maxWidth){
+      const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');ctx.font='12px '+getComputedStyle(root).fontFamily;
+      const lines=[];let line='';for(const ch of txt){if(line && ctx.measureText(line+ch).width>maxWidth){lines.push(line);line=ch;}else line+=ch;}if(line)lines.push(line);return lines;
+    }
+    function wrap(txt,x,y,maxWidth,attrs={}){const lines=splitText(txt,maxWidth);lines.forEach((l,i)=>text(l,x,y+i*17,attrs));return lines.length;}
+    function row(label,start,end,type,value,detail,extra={}){return {label,start,end,type,value,detail,...extra};}
+    function buildState(){
+      if(view==='overview')return {max:8,rows:[],title:'整场流程关系图',caption:'流程位置 · 非时间比例',meta:'阶段中位数来自不同记录；方块大小与步骤间距不代表耗时。空白表示该步无主要活动，不表示连接已关闭。'};
+      const e=groups[view][sample],m=e.measurements;
+      if(view==='turn'||view==='speaking'){
+        const origin=view==='speaking'?m.t_speech_started:m.t_speech_stopped;
+        const r=(label,a,b,type,value,detail)=>row(label,m[a]-origin,m[b]-origin,type,value,detail);
+        const rows=[];
+        if(view==='speaking')rows.push(r('VAD 讲话跨度','t_speech_started','t_speech_stopped','user',m.speaking_ms,'用户讲话时长。此时音频经 WS 持续上行、流式转写可并行到达；没有逐包上传计时。'));
+        rows.push(r('最终转写 · WS ↓','t_speech_stopped','t_transcript','ws',m.stt_ms,'从 VAD 停止说话到最终转写抵达浏览器；不等于纯 ASR 计算时间。'),r('转写后确认 · 用户','t_transcript','t_answer_click','user',m.t_answer_click-m.t_transcript,'最终转写已经到达，等待用户点击；该间隔不全属于系统响应。'),r('点击 → 发起提交','t_answer_click','t_answer_submit','user',m.commit_wait_ms,'浏览器提交前的本地等待；本样本点击前已收到最终转写。'),r('提交答案 · HTTP','t_answer_submit','t_answer_response','http',m.answer_http_ms,'POST /api/candidate/interview/{id}/answer。发送业务文本、保存并推进状态。该计时已包含后端处理。'),r('返回 → 发读题指令','t_answer_response','t_read_request','user',m.answer_to_read_ms,'收到下一题相关信息后，前端安排 WS 读题指令。'),r('读题 → 响应创建 · WS','t_read_request','t_response_created','ws',m.read_to_created_ms,'浏览器经应用代理到 Voice Live，再收到 response.created；包括 Azure 接受处理，不是纯 WS RTT。'),r('响应创建 → 起音','t_response_created','t_first_audible','rtc',m.created_to_audible_ms,'从 response.created 到浏览器检测到 WebRTC 起音；综合生成、媒体传输、缓冲与检测。'),r('Azure response.done','t_response_done','t_response_done','ws',null,'响应生成完成事件；该记录中它早于起音，不等于浏览器播放完毕。'));
+        return {rows,max:m.t_first_audible-origin,caption:'相对'+(view==='speaking'?'开始说话':'停止说话')+'的时间',title:'实际回答回合 '+e.turn_index,meta:e.label+' · 点击到起音 '+ms(m.click_to_audible_ms)+' · 停止到起音 '+ms(m.stop_to_audible_ms)+'。同一 voice.turn 时钟；条形端点 t_* 与时长 *_ms 分别取整，可差 1–2 ms。',events:[{time:m.t_answer_click-origin,label:'点击完成'},{time:m.t_first_audible-origin,label:'起音'}]};
+      }
+      if(view==='setup'){
+        const spec=[['WS 握手到 open','t_connect_start','t_ws_open','ws'],['后端代理连接就绪','t_ws_open','t_proxy_connected','ws'],['Voice Live 配置确认','t_proxy_connected','t_session_updated','ws'],['媒体协商至首帧','t_session_updated','t_first_video_frame','rtc'],['首帧后首次起音','t_first_video_frame','t_first_audible','rtc']];
+        const rows=spec.map(([label,a,b,type])=>row(label,m[a],m[b],type,m[b]-m[a],label+'：'+ms(m[b]-m[a])+'。这是相邻观测点之间的整段时间，不是单个服务器的计算耗时。'));
+        return {rows,max:m.t_first_audible,caption:'相对发起 WS 连接的时间',title:'实际初始连接',meta:e.label+' · 首帧 '+ms(m.t_first_video_frame)+' · 首次起音 '+ms(m.first_audible_ms)+'。麦克风授权与准备没有完整独立计时；首帧到起音不能单独归因于 TTS。'};
+      }
+      if(view==='avatar'){
+        const r=(label,a,b,type,value,detail)=>row(label,m[a],m[b],type,value,detail);
+        const rows=[r('创建 SDP offer','t_offer_start','t_offer_created','ws',m.create_offer_ms,'浏览器创建 offer。'),r('ICE 候选收集门控','t_offer_created','t_offer_sent','rtc',m.ice_gather_ms,'收集 host / srflx / relay 候选；STUN 和 TURN 的可用时刻是并行收集中的里程碑。'),r('首个 srflx · STUN','t_first_srflx','t_first_srflx','rtc',null,'首个服务器反射候选；offer 创建后 '+ms(m.stun_srflx_ms)+'，不是前一候选之后追加的串行阶段。'),r('首个 relay · TURN','t_first_relay','t_first_relay','rtc',null,'首个中继候选；offer 创建后 '+ms(m.turn_relay_ms)+'。'),r('SDP answer · 经 WS','t_offer_sent','t_answer_received','ws',m.sdp_answer_ms,'SDP 信令经应用代理交换。'),r('ICE 连通','t_answer_applied','t_ice_connected','rtc',m.ice_connect_ms,'与 PC connected 计时共享 answer_applied 起点，不能相加。'),r('PC 连接就绪','t_answer_applied','t_pc_connected','rtc',m.pc_connect_ms,'与 ICE 连通计时交叠，不是 ICE 完成后才开始的第二段。'),r('ICE 后至首帧','t_ice_connected','t_first_frame','rtc',m.first_frame_ms,'这段还与 PC 连接建立交叠；综合连接与首帧就绪。')];
+        return {rows,max:m.t_first_frame,caption:'相对 RTCPeerConnection 创建的时间',title:'实际 Avatar 协商',meta:e.label+' · 总握手 '+ms(m.total_ms)+' · relay → srflx / UDP · 握手 RTT '+ms(m.rtt_ms)+'。总时长起点为 offer_start，与图中 PC-created 原点可差 1 ms。'};
+      }
+      if(view==='judge'){
+        return {rows:[row('Judge 模型判断',0,e.judge_ms,'judge',e.judge_ms,'judge.call 从 '+e.judge_timestamp+' 开始。'),row('同场 /answer 后端',e.answer_offset_ms,e.answer_offset_ms+e.answer_ms,'http',e.answer_ms,'后端 /answer 开始于 '+e.answer_timestamp+'，完成时 Judge 仍未结束。')],max:e.judge_ms,caption:'相对 Judge 开始的后端时间',title:'真实并行证据',meta:e.label+' · 同一 operation / 同一后端时间基准。答案处理在 Judge 内重叠；不将此图强行对齐到浏览器 voice.turn 时钟。'};
+      }
+      const s=e,rows=[];
+      for(let i=0;i<s.tasks.length;i++){
+        const task=s.tasks[i],segments=[];
+        if(task.http.length){segments.push({start:task.offset_ms,end:task.http[0].offset_ms,type:'wait'});for(const h of task.http)segments.push({start:h.offset_ms,end:h.offset_ms+h.duration,type:'judge'});}
+        rows.push(row('评分任务 '+(i+1),task.offset_ms,task.offset_ms+task.duration,'judge',task.duration,'任务跨度 '+ms(task.duration)+'；HTTP 外呼前 '+ms(task.pre_http_ms)+'。灰段含本地调度/准备，不足以证明固定线程数。',{segments}));
+      }
+      if(s.extra_http.length){for(let i=0;i<s.extra_http.length;i++){const h=s.extra_http[i];rows.push(row('第二批外呼 '+(i+1),h.offset_ms,h.offset_ms+h.duration,'http',h.duration,'逐题评分结束后的独立模型外呼；历史代码支持可选 coverage 审计归因，记录本身未显式标记。'));}}
+      rows.push(row('后端报告请求',0,s.request.duration,'http',s.request.duration,'请求总跨度已包含上面的并行与顺序工作，不相加。'));
+      return {rows,max:s.request.duration,caption:'相对报告请求开始的后端时间',title:'实际评分 / 报告',meta:s.label+' · 逐题评分结束 '+ms(s.last_scoring_ms)+(s.extra_http.length?' · 第二批跨度 '+ms(s.extra_span_ms):'')+'。10/09 的独立记录，与 10/10 语音场次不拼接。',events:[{time:s.last_scoring_ms,label:'逐题评分完成'}]};
+    }
+    function legend(){const types=view==='overview'?['user','http','ws','rtc','judge']:[...new Set(state.rows.flatMap(r=>r.segments?r.segments.map(s=>s.type):[r.type]))];q('legend').replaceChildren();for(const k of types){const span=document.createElement('span'),i=document.createElement('i');i.style.background=colors[k];span.append(i,document.createTextNode(names[k]));q('legend').append(span);}}
+    function newSvg(width,height){q('chart').replaceChildren();svg=document.createElementNS(ns,'svg');svg.setAttribute('class','flow-svg');svg.setAttribute('viewBox','0 0 '+width+' '+height);svg.setAttribute('role','img');svg.setAttribute('aria-label',state.title);q('chart').appendChild(svg);add('title',{},svg,state.title);}
+    function drawOverview(width){
+      const compact=width<560,pad=12,gap=8,cw=(width-pad*2-gap*3)/4;
+      const shortLabels={'麦克风准备':'麦克风','会话配置就绪':'会话就绪','随后媒体协商':'随后协商','首题等待':'首题门控','用户讲话':'用户讲话','音频 ↑ 转写 ↓':'上传转写','媒体连接':'媒体连接','转写到点击':'等待点击','Judge 旁路':'Judge','停止到最终转写':'最终转写','点击到提交':'发起提交','POST /answer':'/answer','Judge 可继续':'Judge','点击到起音':'点击起音','读题到响应创建':'指令创建','创建后起音':'创建起音','回看并提交':'回看确认','业务状态推进':'状态推进','语音断开':'断开语音','媒体释放':'释放媒体','等待报告':'等待报告','报告请求':'报告请求','9 题并行评分':'9题并行'};
+      const shortValues={'未独立计时':'未单测','预生成文本':'文本指令','无需串行等待':'不必等待','两条独立样本':'独立样本','再做可选审计':'可选审计','最后一题后':'题目结束'};
+      let y=49;const layouts=phases.map((p,i)=>{const lines=splitText((i+1)+' · '+p.name,width-24);const h=lines.length*17+65;const o={y,h,lines};y+=h;return o;});
+      newSvg(width,y+10);
+      ['浏览器 / 用户','应用 / HTTP','Azure / 模型','WebRTC / 媒体'].forEach((name,i)=>wrap(compact?['浏览器','应用业务','Azure','WebRTC'][i]:name,pad+i*(cw+gap)+cw/2,16,cw,{'text-anchor':'middle',class:'flow-heading'}));
+      add('desc',{},svg,'纵向为逻辑步骤，横向为参与方。麦克风与 WebSocket 建连并行，讲话上传与转写并行，Judge 可以和答案提交交叠。阶段中位数不是同一真实面试的时间线。');
+      phases.forEach((p,i)=>{const l=layouts[i];const group=add('g',{'data-phase':i});add('rect',{x:0,y:l.y-14,width,height:l.h-4,fill:'var(--flow-quiet)',opacity:0,'data-phase-bg':i},group);l.lines.forEach((line,j)=>add('text',{x:pad,y:l.y+j*17,class:'flow-heading'},group,line));const by=l.y+(l.lines.length-1)*17+12;
+        p.cells.forEach((cell,c)=>{if(!cell)return;const [type,label,value]=cell;const x=pad+c*(cw+gap);add('rect',{x,y:by,width:cw,height:43,rx:4,fill:colors[type],opacity:.13,'data-phase-mark':i,'data-tooltip':label+' · '+value},group);const ls=splitText(compact?(shortLabels[label]||label):label,cw-6);ls.slice(0,2).forEach((line,n)=>add('text',{x:x+cw/2,y:by+13+n*14,'text-anchor':'middle'},group,line));const shortValue=shortValues[value]||value;const valueText=compact?shortValue.replace(' · N4','').replace(' · N7','').replace(' · N11','').replace(' s','s').replace(' ms','ms'):value;if(ls.length<2){const vs=splitText(valueText,cw-6);vs.slice(0,1).forEach(v=>add('text',{x:x+cw/2,y:by+32,'text-anchor':'middle'},group,v));}else add('text',{x:x+cw/2,y:by+56,'text-anchor':'middle',class:'flow-axis'},group,valueText);});
+      });
+      state.overviewLayouts=layouts;
+      cursor=add('line',{x1:2,x2:width-2,y1:0,y2:0,stroke:'var(--foreground)','stroke-width':1.2,'data-cursor':'true',opacity:.55});
+      update(false);
+    }
+    function drawTimeline(width){
+      const pad=12,plotWidth=width-24,compact=width<540,rowH=compact?71:61,top=61,height=top+rowH*state.rows.length+33;
+      newSvg(width,height);state.x=n=>pad+n/state.max*plotWidth;state.rowH=rowH;state.top=top;
+      add('desc',{},svg,state.rows.map(r=>r.label+'，'+(r.value===null?'里程碑':ms(r.value))).join('；'));
+      const ticks=width<420?3:width<760?4:6;
+      for(let i=0;i<ticks;i++){const t=state.max*i/(ticks-1),x=state.x(t);add('line',{x1:x,x2:x,y1:39,y2:height-32,stroke:'var(--border)','stroke-width':1,opacity:.75});text((t/1000).toFixed(state.max<4000?2:1)+' s',x,21,{'text-anchor':i===0?'start':i===ticks-1?'end':'middle',class:'flow-axis'});}
+      state.rows.forEach((r,i)=>{const y=top+i*rowH;const group=add('g',{'data-row':i,'data-start':r.start,'data-end':r.end,'data-duration':r.value===null?'milestone':r.value});
+        const value=r.value===null?'@ '+ms(r.start):ms(r.value);const labelMax=width-112;const labelLines=splitText(r.label,labelMax);labelLines.slice(0,2).forEach((line,j)=>add('text',{x:pad,y:y+j*15,class:'flow-heading'},group,line));add('text',{x:width-pad,y:y,'text-anchor':'end'},group,value);
+        const by=y+19+(labelLines.length>1?13:0);add('rect',{x:pad,y:by,width:plotWidth,height:15,rx:3,fill:'var(--flow-quiet)'},group);
+        const segs=r.segments||[{start:r.start,end:r.end,type:r.type}];
+        for(const seg of segs){const x=state.x(seg.start),w=Math.max(1.7,state.x(seg.end)-x);add('rect',{x,y:by,width:w,height:15,rx:w>5?3:0,fill:colors[seg.type],opacity:.6,'data-segment-start':seg.start,'data-segment-end':seg.end,'data-tooltip':r.label+' · '+value+' · '+r.detail},group);}
+        if(r.start===r.end)add('circle',{cx:state.x(r.start),cy:by+7.5,r:4,fill:colors[r.type],'data-milestone':r.start},group);
+      });
+      cursor=add('g',{'data-cursor':'true'});add('line',{x1:0,x2:0,y1:31,y2:height-32,stroke:'var(--foreground)','stroke-width':1.4,opacity:.7},cursor);add('circle',{cx:0,cy:33,r:3.5,fill:'var(--foreground)'},cursor);
+      text('同一记录 · '+state.caption,pad,height-8,{class:'flow-axis'});
+      update(false);
+    }
+    function draw(){const width=Math.max(240,Math.floor(q('chart').getBoundingClientRect().width));if(view==='overview')drawOverview(width);else drawTimeline(width);root.dataset.view=view;root.dataset.sample=sample;}
+    function update(announce=true){
+      const t=progress*state.max;q('progress').value=String(Math.round(progress*1000));root.dataset.position=String(progress);root.dataset.playing=String(playing);
+      if(view==='overview'){
+        const phase=Math.min(7,Math.floor(t)),l=state.overviewLayouts[phase],frac=progress>=1?1:t-phase;
+        cursor.setAttribute('y1',l.y+8+frac*(l.h-23));cursor.setAttribute('y2',l.y+8+frac*(l.h-23));
+        root.querySelectorAll('[data-phase-bg]').forEach(e=>e.setAttribute('opacity',Number(e.dataset.phaseBg)===phase?1:0));
+        root.querySelectorAll('[data-phase-mark]').forEach(e=>e.setAttribute('opacity',Number(e.dataset.phaseMark)===phase?.28:.13));
+        q('clock').textContent='第 '+(phase+1)+' / 8 步';q('progress').setAttribute('aria-valuetext',phases[phase].short);
+        if(activePhase!==phase||!announce){q('current').textContent=phases[phase].detail;activePhase=phase;}
+      }else{
+        cursor.setAttribute('transform','translate('+state.x(t)+',0)');q('clock').textContent=(t/1000).toFixed(2)+' / '+(state.max/1000).toFixed(2)+' s';q('progress').setAttribute('aria-valuetext',q('clock').textContent);
+        root.querySelectorAll('[data-segment-start]').forEach(e=>{const a=Number(e.dataset.segmentStart),b=Number(e.dataset.segmentEnd);e.setAttribute('opacity',t>=a&&t<=b?.9:t>b?.6:.22);});
+        const active=state.rows.filter(r=>r.end>r.start && r.start<=t && r.end>t && r.label!=='后端报告请求');
+        let msg=active.length?active.map(r=>r.label).join(' ∥ '):progress>=1?'本条记录回放结束':'等待下一观测点';
+        if(active.length===1)msg+='：'+active[0].detail;
+        if(view==='turn'||view==='speaking'){const e=groups[view][sample],m=e.measurements,origin=view==='speaking'?m.t_speech_started:m.t_speech_stopped;if(t>=m.t_response_done-origin&&t<m.t_first_audible-origin)msg+=' response.done 已到，但尚未检测到起音。';}
+        if(q('current').textContent!==msg)q('current').textContent=msg;
+      }
+    }
+    function save(){if(window.openai&&window.openai.setWidgetState)window.openai.setWidgetState({modelContent:{view,sample,operation:groups[view]?.[sample]?.operation_Id||groups[view]?.[sample]?.request?.operation_Id||null},privateContent:{progress}}).catch(()=>{});}
+    function stop(){playing=false;cancelAnimationFrame(frame);q('play').textContent=progress>=1?'重新播放':'播放过程';q('play').setAttribute('aria-pressed','false');root.dataset.playing='false';}
+    function tick(now){if(!playing)return;if(!root.isConnected){stop();return;}const elapsed=Math.max(0,now-previous);if(reduced&&elapsed<900){frame=requestAnimationFrame(tick);return;}previous=now;const duration=view==='overview'?20000:view==='score'?20000:view==='speaking'?18000:14000;progress=Math.min(1,progress+elapsed/duration);update();if(progress>=1){stop();save();return;}frame=requestAnimationFrame(tick);}
+    function configure(){stop();activePhase=-1;state=buildState();q('meta').textContent=state.meta;q('axis-caption').textContent=state.caption;q('cohort').textContent=view==='overview'?'语音 N4 / N7 · Judge N11':view==='score'?'独立评分样本 · N2':'真实记录 · N'+groups[view].length;q('sample-label').hidden=view==='overview';q('sample-caption').textContent=view==='score'?'报告开始时刻 · 北京时间':view==='judge'?'答案请求开始 · 北京时间':'事件记录时刻 · 北京时间';legend();draw();}
+    function setView(next,selected){view=Object.hasOwn(groups,next)||next==='overview'?next:'overview';q('view').value=view;q('sample').replaceChildren();if(view!=='overview'){groups[view].forEach((e,i)=>{const o=document.createElement('option');o.value=String(i);o.textContent=e.label;q('sample').append(o);});sample=Math.max(0,Math.min(groups[view].length-1,selected??sampleMemory[view]??0));q('sample').value=String(sample);}else sample=0;progress=0;configure();}
+    q('view').addEventListener('change',()=>{sampleMemory[view]=sample;setView(q('view').value);save();});
+    q('sample').addEventListener('change',()=>{sample=Number(q('sample').value);sampleMemory[view]=sample;progress=0;configure();save();});
+    q('play').addEventListener('click',()=>{if(playing){stop();save();return;}if(progress>=1){progress=0;update(false);}playing=true;previous=performance.now();q('play').textContent='暂停';q('play').setAttribute('aria-pressed','true');root.dataset.playing='true';frame=requestAnimationFrame(tick);});
+    q('progress').addEventListener('input',()=>{stop();progress=Number(q('progress').value)/1000;update();if(progress>=1)q('play').textContent='重新播放';});q('progress').addEventListener('change',save);
+    document.addEventListener('visibilitychange',()=>{if(document.hidden&&playing)stop();});
+    function restore(saved){if(!saved)return;const s=saved.modelContent||saved,pv=saved.privateContent||saved;setView(s.view||'overview',Number.isInteger(s.sample)?s.sample:undefined);progress=Math.max(0,Math.min(1,Number(pv.progress)||0));update(false);}
+    setView('overview');restore(window.openai?.widgetState);
+    window.addEventListener('openai:set_globals',e=>{const s=e.detail?.globals?.widgetState;if(s)restore(s);});
+    let lastWidth=0;new ResizeObserver(entries=>{const w=entries[0].contentRect.width;if(Math.abs(w-lastWidth)>1){lastWidth=w;draw();}}).observe(q('chart'));
+    root.dataset.ready='true';
+  })();
+  </script>
+</div>

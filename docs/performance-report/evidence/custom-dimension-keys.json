@@ -1,0 +1,78 @@
+{
+  "tables": [
+    {
+      "columns": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "k",
+          "type": "string"
+        },
+        {
+          "name": "n",
+          "type": "long"
+        }
+      ],
+      "name": "PrimaryResult",
+      "rows": [
+        [
+          "judge.call",
+          "_MS.ResourceAttributeId",
+          11
+        ],
+        [
+          "judge.call",
+          "judge.verdict",
+          11
+        ],
+        [
+          "scoring.question",
+          "_MS.ResourceAttributeId",
+          18
+        ],
+        [
+          "scoring.question",
+          "scoring.items",
+          18
+        ],
+        [
+          "scoring.question",
+          "scoring.outcome",
+          18
+        ],
+        [
+          "voice.session",
+          "_MS.ResourceAttributeId",
+          7
+        ],
+        [
+          "voice.session",
+          "voice.interview_id",
+          3
+        ],
+        [
+          "voice.session",
+          "voice.mode",
+          7
+        ],
+        [
+          "voice.session",
+          "voice.persona_id",
+          7
+        ],
+        [
+          "voice.session",
+          "voice.playground",
+          7
+        ],
+        [
+          "voice.session",
+          "voice.realtime",
+          7
+        ]
+      ]
+    }
+  ]
+}

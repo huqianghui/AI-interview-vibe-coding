@@ -1,0 +1,233 @@
+{
+  "validated_at_utc": "2026-10-11T07:14:28.457133+00:00",
+  "html_sha256": "a4095d5f04ec6eb7caa6259ffcea9731c72a2dc7eb229db8794ca8a2168d3eb2",
+  "flow_html_sha256": "0f2e07ee6da807da31226fdaee3e1f546c6fe6a78d09cf273d848144a1bb26e4",
+  "inline_sha256": "96840bbd0ca3d922f89b7d790b64608ca3746c42e113b5da2912c8d4780569a3",
+  "data_sha256": "6068177b398ab2119d0948f03485d824c4784a128759a3978d3c03341832def5",
+  "offline_checks": [
+    {
+      "name": "Source query window unchanged",
+      "passed": true
+    },
+    {
+      "name": "Answer cohort 7, setup 4, avatar 4",
+      "passed": true
+    },
+    {
+      "name": "All 7 exact HTTP pair differences preserved",
+      "passed": true
+    },
+    {
+      "name": "HTTP medians 323 / 56 / 263",
+      "passed": true
+    },
+    {
+      "name": "Turn median verified: click_to_audible_ms",
+      "passed": true
+    },
+    {
+      "name": "Turn median verified: commit_wait_ms",
+      "passed": true
+    },
+    {
+      "name": "Turn median verified: answer_http_ms",
+      "passed": true
+    },
+    {
+      "name": "Turn median verified: answer_to_read_ms",
+      "passed": true
+    },
+    {
+      "name": "Turn median verified: read_to_created_ms",
+      "passed": true
+    },
+    {
+      "name": "Turn median verified: created_to_audible_ms",
+      "passed": true
+    },
+    {
+      "name": "Turn median verified: stt_ms",
+      "passed": true
+    },
+    {
+      "name": "Turn median verified: stop_to_audible_ms",
+      "passed": true
+    },
+    {
+      "name": "Turn median verified: speaking_ms",
+      "passed": true
+    },
+    {
+      "name": "Turn median verified: transcript_to_click_ms",
+      "passed": true
+    },
+    {
+      "name": "Independent click P50 1234 is not the 1217 stage-median sum",
+      "passed": true
+    },
+    {
+      "name": "All seven answer spans overlap an unfinished Judge",
+      "passed": true
+    },
+    {
+      "name": "Two score operations remain independent",
+      "passed": true
+    },
+    {
+      "name": "Inline fragment remains below 1 MB",
+      "passed": true
+    },
+    {
+      "name": "index.html has unique static IDs",
+      "passed": true
+    },
+    {
+      "name": "index.html has no unfilled placeholders",
+      "passed": true
+    },
+    {
+      "name": "flow.html has unique static IDs",
+      "passed": true
+    },
+    {
+      "name": "flow.html has no unfilled placeholders",
+      "passed": true
+    },
+    {
+      "name": "All local links and static anchors resolve",
+      "passed": true
+    },
+    {
+      "name": "Final pages have zero external runtime resources",
+      "passed": true
+    },
+    {
+      "name": "Original raw evidence and report data unchanged",
+      "passed": true
+    },
+    {
+      "name": "flow-desktop-checks.json all passed",
+      "passed": true
+    },
+    {
+      "name": "flow-mobile-checks.json all passed",
+      "passed": true
+    },
+    {
+      "name": "flow-narrow-checks.json all passed",
+      "passed": true
+    },
+    {
+      "name": "flow-tablet-checks.json all passed",
+      "passed": true
+    },
+    {
+      "name": "flow-standalone-checks.json all passed",
+      "passed": true
+    },
+    {
+      "name": "flow-inline-checks.json all passed",
+      "passed": true
+    },
+    {
+      "name": "flow-playback-checks.json all passed",
+      "passed": true
+    },
+    {
+      "name": "browser-interaction-checks.json all passed",
+      "passed": true
+    },
+    {
+      "name": "browser-mobile-checks.json all passed",
+      "passed": true
+    }
+  ],
+  "browser_checks": {
+    "flow-desktop-checks.json": {
+      "total": 69,
+      "passed": 69,
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      }
+    },
+    "flow-mobile-checks.json": {
+      "total": 69,
+      "passed": 69,
+      "viewport": {
+        "width": 375,
+        "height": 812
+      }
+    },
+    "flow-narrow-checks.json": {
+      "total": 69,
+      "passed": 69,
+      "viewport": {
+        "width": 320,
+        "height": 812
+      }
+    },
+    "flow-tablet-checks.json": {
+      "total": 69,
+      "passed": 69,
+      "viewport": {
+        "width": 768,
+        "height": 1024
+      }
+    },
+    "flow-standalone-checks.json": {
+      "total": 69,
+      "passed": 69,
+      "viewport": {
+        "width": 768,
+        "height": 1024
+      }
+    },
+    "flow-inline-checks.json": {
+      "total": 69,
+      "passed": 69,
+      "viewport": {
+        "width": 704,
+        "height": 968
+      }
+    },
+    "flow-playback-checks.json": {
+      "total": 6,
+      "passed": 6,
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      }
+    },
+    "browser-interaction-checks.json": {
+      "total": 59,
+      "passed": 59,
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      }
+    },
+    "browser-mobile-checks.json": {
+      "total": 59,
+      "passed": 59,
+      "viewport": {
+        "width": 375,
+        "height": 812
+      }
+    }
+  },
+  "console_errors": 0,
+  "visual_review": [
+    "Overview and paired-request clarification card",
+    "Eight-step logical workflow at desktop, 375 px and 320 px",
+    "Measured answer clock and response.done before first audible",
+    "Overlapping ICE/PC intervals and Judge/answer spans",
+    "Nine concurrent scoring tasks and separate follow-up batch",
+    "Same-session RTT comparison and full 7 HTTP pairs",
+    "Inline fragment rendered in the sandboxed preview"
+  ],
+  "original_evidence_files_verified": 73,
+  "original_evidence_hash_mismatches": [],
+  "scope": "Only report artifacts changed. No new Azure queries, product edits, deployment, configuration changes or model/audio traffic.",
+  "last_change": "After browser checks, the overview card wording was shortened to keep Fetch and Server P50 as two independent column statistics. Markup structure, CSS, JavaScript and datasets unchanged."
+}

@@ -1,0 +1,9 @@
+{
+  "captured_at": "2026-10-11T04:24:22.135657+00:00",
+  "name": "psql-aiinterview-public",
+  "sku": {
+    "name": "Standard_B1ms",
+    "tier": "Burstable"
+  },
+  "state": "Updating"
+}

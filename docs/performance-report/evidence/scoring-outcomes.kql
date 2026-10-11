@@ -1,0 +1,1 @@
+dependencies | where name=="scoring.question" | project timestamp,id,operation_Id,operation_ParentId,duration,success,scoring_items=toint(customDimensions["scoring.items"]),scoring_outcome=tostring(customDimensions["scoring.outcome"]) | order by timestamp asc

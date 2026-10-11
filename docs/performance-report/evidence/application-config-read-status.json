@@ -1,0 +1,9 @@
+{
+  "status": "not_obtained",
+  "attempted_scope": "Read-only, non-secret master application configuration fields in PostgreSQL",
+  "observation": "The database connection attempt timed out; no effective override values were returned.",
+  "concurrent_control_plane_snapshot": "postgres-runtime-followup.json reports state=Updating at 2026-10-11T04:24:22Z.",
+  "causality": "The concurrent Updating state is not proof of the timeout cause.",
+  "report_handling": "Container environment values are labelled defaults; historical actual models and current master overrides are not inferred from those defaults.",
+  "sensitive_values_read": false
+}

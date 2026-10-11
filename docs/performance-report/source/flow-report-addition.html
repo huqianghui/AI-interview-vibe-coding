@@ -1,0 +1,25 @@
+<div id="interview-flow" class="flow-report-block">
+  <p class="lead"><b>先沿流程看并行关系，再选择一条记录回放真实耗时。</b> “整场流程”串起准备、首题、回答、下一题、结束回看和评分；它是逻辑关系图。其余视图各自使用一条记录的时钟，播放速度经过缩放，横轴仍保留实际秒数。</p>
+  __FLOW_FRAGMENT__
+  <div class="callout"><b>点击“完成回答”后的主线：</b> 本地提交等待 <b>2 ms</b> → HTTP <code>/answer</code> <b>324 ms</b> → 返回后安排读题 <b>1 ms</b> → WS 指令到 <code>response.created</code> <b>259 ms</b> → WebRTC 起音检测 <b>631 ms</b>。这五个数字分别是 7 条记录的阶段中位数，合计 <b>1,217 ms</b>；完整“点击到起音”的独立中位数是 <b>1,234 ms</b>。不同阶段的中位数未必来自同一回合，不能用相加替代整体统计。</div>
+  <div class="grid2">
+    <div class="card"><h3>必须先后发生的依赖</h3><p>录音需要麦克风和会话都就绪。首题需要通过媒体就绪门控，才发出读题指令；6 秒是失败回退超时，不是正常流程固定等 6 秒。</p><p>本次题库流程中，<code>/answer</code> 返回下一题相关信息后，前端才发出 WS 读题请求。下一句起音发生在 <code>response.created</code> 之后。后续读题不重复首题的媒体门控。</p></div>
+    <div class="card"><h3>可以重叠的工作</h3><p>麦克风初始化与 WS 建连并行；音频上行与流式转写下行交叠；Judge 预判与静默等待、用户提交可重叠；数字人协商中 ICE 与 PC 的连接计时也有交叠。</p><p>评分阶段 9 个任务近乎同时启动，但外部 HTTP 呈现“前 8 个先发、第 9 个较晚发”的形态。动态图会分开显示任务跨度与真正的 HTTP 外呼，避免把已启动任务等同于已经在调用模型。</p></div>
+  </div>
+  <h3>一次回答：每个阶段的中位数</h3>
+  <div class="tablewrap"><table id="flow-turn-median-table"><thead><tr><th>阶段与计时边界</th><th>中位数</th><th>范围 / 样本数</th><th>如何理解</th></tr></thead><tbody>__TURN_MEDIAN_ROWS__</tbody></table></div>
+  <p class="footnote">“说话时长”取自 VAD 事件跨度；“起音”是浏览器接收音量检测，不是物理扬声器实录，检测轮询约每 50 ms 一次。真实回放使用各条 <code>t_*</code> 端点，统计表优先使用原始 <code>*_ms</code> 派生时长，分别取整会有 1–2 ms 差异。7 条样本都是转写先到、随后点击；这不是所有可能操作顺序的保证。</p>
+  <details><summary>连接建立与 Avatar：展开相邻阶段、并行里程碑与总时长</summary><div>
+    <h4>连接建立 · 4 条成功记录</h4><div class="tablewrap"><table><thead><tr><th>相邻观测点</th><th>中位数</th><th>范围</th></tr></thead><tbody>__SETUP_MEDIAN_ROWS__</tbody></table></div>
+    <p>完整“发起连接 → 首帧”的 P50 为 <b>4,521 ms</b>，“发起连接 → 首次起音”的 P50 为 <b>5,561.5 ms</b>。该计时从创建 WebSocket 前开始，没有覆盖全部麦克风权限准备。<code>session.updated → 首帧</code> 包含配置、信令、协商和媒体就绪，不能全称为 Azure 计算；首帧到起音也不能全称为 TTS。</p>
+    <h4>Avatar 协商 · 4 条成功记录</h4><div class="tablewrap"><table><thead><tr><th>计时项</th><th>中位数</th><th>关系与含义</th></tr></thead><tbody>__AVATAR_MEDIAN_ROWS__</tbody></table></div>
+    <p><b>STUN 与 TURN 是同一候选收集期间的可用里程碑；ICE connected 与 PC connected 共享起点。</b> 把这几项直接排成一串再相加，会重复计算。回放“真实握手”可以直接看到重叠。</p>
+  </div></details>
+  <details><summary>为什么不提供一个“整场面试总耗时中位数”？</summary><div><p>目前有 4 次完整建连、7 个完整回答、2 条独立评分 operation，但没有覆盖所有阶段、且同一时钟贯穿到底的完整面试样本。实际面试还包含用户思考、说话、回看、问题数量变化和失败恢复。把这些独立样本的中位数相加会产生一个没有真实记录对应的数字。</p><p>因此：整场图展示源码确认的顺序和并行关系；分段回放展示真实记录。阶段间没有独立埋点的耗时标为“未独立计时”。</p></div></details>
+  <details><summary>从这条流程看，优化应优先落在哪些地方？</summary><div>
+    <p><b>先区分“用户还没点击”和“已经点击却在等”。</b> 停止说话到最终转写的 P50 为 1,047 ms，转写到点击为 688 ms；后者包含用户确认。针对 ASR 收尾、静默策略或界面反馈的调整，需要用新的真实样本评估，不能把用户确认时间全视为可节省的系统开销。</p>
+    <p><b>点击后的最大阶段是创建响应到起音，P50 为 631 ms。</b> 它同时包含媒体生成、传输、缓冲和检测，现有数据不足以给每一跳分配毫秒数。后端配对处理 P50 为 56 ms，继续缩短它的收益上限较小；263 ms 的 HTTP 外部等待还需要靠连接、代理与网络证据进一步定位。</p>
+    <p><b>保留现有并行，检查可以减少的门控等待与本地队列。</b> 麦克风与 WS、Judge 与正式提交已能重叠。首题重点看配置完成到媒体就绪，评分重点看第 9 个外呼发出前的等待和可选第二批工作。这里列出分析方向，未改变应用行为或运行配置。</p>
+  </div></details>
+  <p class="footnote">证据：<a href="flow-data.json">回放使用的精简数据</a> · <a href="evidence/flow-derivation.json">统计方法、时钟与关联规则</a> · <a href="evidence/voice-events.json">语音原始事件</a> · <a href="evidence/business-spans.json">Judge / 评分业务跨度</a>。源码基于固定版本 <code>dc17e27</code>：<a href="https://github.com/huqianghui/AI-interview-vibe-coding/blob/dc17e27cb823d59b43c64b0b1abb1b5b36402358/frontend/src/hooks/useInterviewVoice.ts#L983">麦克风与 WS</a> · <a href="https://github.com/huqianghui/AI-interview-vibe-coding/blob/dc17e27cb823d59b43c64b0b1abb1b5b36402358/frontend/src/hooks/useFirstReadGate.ts#L59">首题门控</a> · <a href="https://github.com/huqianghui/AI-interview-vibe-coding/blob/dc17e27cb823d59b43c64b0b1abb1b5b36402358/frontend/src/pages/InterviewPage.tsx#L312">Judge 旁路</a> · <a href="https://github.com/huqianghui/AI-interview-vibe-coding/blob/dc17e27cb823d59b43c64b0b1abb1b5b36402358/frontend/src/pages/InterviewPage.tsx#L468">答案提交</a>。</p>
+</div>

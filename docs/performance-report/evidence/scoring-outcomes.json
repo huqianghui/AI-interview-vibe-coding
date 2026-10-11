@@ -1,0 +1,223 @@
+{
+  "tables": [
+    {
+      "columns": [
+        {
+          "name": "timestamp",
+          "type": "datetime"
+        },
+        {
+          "name": "id",
+          "type": "string"
+        },
+        {
+          "name": "operation_Id",
+          "type": "string"
+        },
+        {
+          "name": "operation_ParentId",
+          "type": "string"
+        },
+        {
+          "name": "duration",
+          "type": "real"
+        },
+        {
+          "name": "success",
+          "type": "string"
+        },
+        {
+          "name": "scoring_items",
+          "type": "int"
+        },
+        {
+          "name": "scoring_outcome",
+          "type": "string"
+        }
+      ],
+      "name": "PrimaryResult",
+      "rows": [
+        [
+          "2026-10-08T18:09:23.506971Z",
+          "cfda545aff89d71a",
+          "99f8fb5a3229ee32b266ade4ce1c9ee3",
+          "c2c5a0a063868654",
+          25139,
+          "True",
+          12,
+          "Meets Expectations"
+        ],
+        [
+          "2026-10-08T18:09:23.507198Z",
+          "2cea58f8ef036bc4",
+          "99f8fb5a3229ee32b266ade4ce1c9ee3",
+          "c2c5a0a063868654",
+          22469,
+          "True",
+          12,
+          "Meets Expectations"
+        ],
+        [
+          "2026-10-08T18:09:23.507389Z",
+          "e592fdbcf5c6e537",
+          "99f8fb5a3229ee32b266ade4ce1c9ee3",
+          "c2c5a0a063868654",
+          25969,
+          "True",
+          12,
+          "Meets Expectations"
+        ],
+        [
+          "2026-10-08T18:09:23.507567Z",
+          "0b7e1ab8a618b0ff",
+          "99f8fb5a3229ee32b266ade4ce1c9ee3",
+          "c2c5a0a063868654",
+          28810,
+          "True",
+          12,
+          "Meets Expectations"
+        ],
+        [
+          "2026-10-08T18:09:23.507731Z",
+          "dd4e576ea6877ad4",
+          "99f8fb5a3229ee32b266ade4ce1c9ee3",
+          "c2c5a0a063868654",
+          20295,
+          "True",
+          12,
+          "Meets Expectations"
+        ],
+        [
+          "2026-10-08T18:09:23.507867Z",
+          "b948772655b4c870",
+          "99f8fb5a3229ee32b266ade4ce1c9ee3",
+          "c2c5a0a063868654",
+          21144,
+          "True",
+          12,
+          "Meets Expectations"
+        ],
+        [
+          "2026-10-08T18:09:23.508039Z",
+          "200555fde3f51977",
+          "99f8fb5a3229ee32b266ade4ce1c9ee3",
+          "c2c5a0a063868654",
+          27067,
+          "True",
+          12,
+          "Meets Expectations"
+        ],
+        [
+          "2026-10-08T18:09:23.508195Z",
+          "fe8ae246f92948bd",
+          "99f8fb5a3229ee32b266ade4ce1c9ee3",
+          "c2c5a0a063868654",
+          26670,
+          "True",
+          12,
+          "Meets Expectations"
+        ],
+        [
+          "2026-10-08T18:09:23.508344Z",
+          "312881c0ef147b92",
+          "99f8fb5a3229ee32b266ade4ce1c9ee3",
+          "c2c5a0a063868654",
+          46087,
+          "True",
+          12,
+          "Meets Expectations"
+        ],
+        [
+          "2026-10-08T22:21:37.445581Z",
+          "93fb99777939c08a",
+          "9e3df9b32907b672bd6cc0961bbf5db3",
+          "f93ddf5302f52d61",
+          14759,
+          "True",
+          12,
+          "Does Not Meet"
+        ],
+        [
+          "2026-10-08T22:21:37.445811Z",
+          "abedf0e2eb8a0f6e",
+          "9e3df9b32907b672bd6cc0961bbf5db3",
+          "f93ddf5302f52d61",
+          12706,
+          "True",
+          12,
+          "Does Not Meet"
+        ],
+        [
+          "2026-10-08T22:21:37.446666Z",
+          "c22cbee91b395c02",
+          "9e3df9b32907b672bd6cc0961bbf5db3",
+          "f93ddf5302f52d61",
+          16027,
+          "True",
+          12,
+          "Does Not Meet"
+        ],
+        [
+          "2026-10-08T22:21:37.44689Z",
+          "a51c54c192ae93fe",
+          "9e3df9b32907b672bd6cc0961bbf5db3",
+          "f93ddf5302f52d61",
+          13784,
+          "True",
+          12,
+          "Does Not Meet"
+        ],
+        [
+          "2026-10-08T22:21:37.447044Z",
+          "009d575e58c6d2d3",
+          "9e3df9b32907b672bd6cc0961bbf5db3",
+          "f93ddf5302f52d61",
+          10619,
+          "True",
+          12,
+          "Does Not Meet"
+        ],
+        [
+          "2026-10-08T22:21:37.44717Z",
+          "f773daeb4069d317",
+          "9e3df9b32907b672bd6cc0961bbf5db3",
+          "f93ddf5302f52d61",
+          15720,
+          "True",
+          12,
+          "Does Not Meet"
+        ],
+        [
+          "2026-10-08T22:21:37.447334Z",
+          "d8654571b23632b6",
+          "9e3df9b32907b672bd6cc0961bbf5db3",
+          "f93ddf5302f52d61",
+          14354,
+          "True",
+          12,
+          "Does Not Meet"
+        ],
+        [
+          "2026-10-08T22:21:37.447575Z",
+          "9d5ff0a52b4ef50d",
+          "9e3df9b32907b672bd6cc0961bbf5db3",
+          "f93ddf5302f52d61",
+          14133,
+          "True",
+          12,
+          "Does Not Meet"
+        ],
+        [
+          "2026-10-08T22:21:37.447738Z",
+          "ceb77bc0da7f4915",
+          "9e3df9b32907b672bd6cc0961bbf5db3",
+          "f93ddf5302f52d61",
+          23032,
+          "True",
+          12,
+          "Does Not Meet"
+        ]
+      ]
+    }
+  ]
+}

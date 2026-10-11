@@ -1,0 +1,3 @@
+ContainerAppSystemLogs_CL | where ContainerAppName_s=="ca-aiinterview-public-backend" and RevisionName_s endswith "0000176"
+| where Reason_s in ("ProbeFailed","ContainerStarted","ContainerAppReady","ContainerTerminated")
+| project TimeGenerated,Reason_s,Type_s,RevisionName_s,Count_d,detail=substring(Log_s,0,220) | order by TimeGenerated asc

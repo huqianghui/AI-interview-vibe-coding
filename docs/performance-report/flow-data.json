@@ -1,0 +1,1328 @@
+{
+  "version": 2,
+  "scope": {
+    "start_utc": "2026-10-04T04:08:21Z",
+    "end_utc": "2026-10-11T04:08:21Z",
+    "timezone": "Asia/Shanghai",
+    "app_name": "appi-aiinterview-public",
+    "app_id": "bf33b70e-c9fd-4841-af32-2b689fafb00b",
+    "resource_group": "rg-aiinterview-public-swedencentral",
+    "workspace_name": "law-aiinterview-public",
+    "workspace_id": "6c017bad-ecac-4cb2-b803-ca257bdeb673",
+    "queried_at_utc": "2026-10-11T04:14:03.939282+00:00"
+  },
+  "baseline": "dc17e27cb823d59b43c64b0b1abb1b5b36402358",
+  "setups": [
+    {
+      "timestamp": "2026-10-10T03:52:22.606Z",
+      "itemId": "071b2099-c45e-11f1-a04b-3833c5d22da8",
+      "operation_Id": "3a840de59c2c4de6a8bc814e0bdfc6fe",
+      "interview_id": "130cef59-b2b4-4385-a948-375c24cc6528",
+      "turn_index": null,
+      "measurements": {
+        "t_connect_start": 0,
+        "t_ws_open": 893,
+        "t_proxy_connected": 1413,
+        "t_session_updated": 1638,
+        "t_first_video_frame": 4022,
+        "t_media_ready": 4022,
+        "t_first_audible": 4980,
+        "ws_open_ms": 893,
+        "proxy_connected_ms": 1413,
+        "session_updated_ms": 1638,
+        "first_video_frame_ms": 4022,
+        "media_ready_ms": 4022,
+        "first_audible_ms": 4980
+      },
+      "label": "10/10 11:52:22 · 3a840de5"
+    },
+    {
+      "timestamp": "2026-10-10T06:08:32.798Z",
+      "itemId": "050366a8-c471-11f1-b306-7c1e523fa04c",
+      "operation_Id": "7bff59c8010e4069bc39b9067ea3e42d",
+      "interview_id": "2e59fd58-3f84-463e-b687-0a0fb6e31a3d",
+      "turn_index": null,
+      "measurements": {
+        "t_connect_start": 0,
+        "t_ws_open": 766,
+        "t_proxy_connected": 927,
+        "t_session_updated": 1733,
+        "t_first_video_frame": 4494,
+        "t_media_ready": 4494,
+        "t_first_audible": 5416,
+        "ws_open_ms": 766,
+        "proxy_connected_ms": 927,
+        "session_updated_ms": 1733,
+        "first_video_frame_ms": 4494,
+        "media_ready_ms": 4494,
+        "first_audible_ms": 5416
+      },
+      "label": "10/10 14:08:32 · 7bff59c8"
+    },
+    {
+      "timestamp": "2026-10-10T06:39:55.168Z",
+      "itemId": "6701489b-c475-11f1-a04d-7ced8d2603b3",
+      "operation_Id": "48944196d9a3401fb10388e9b62f32ad",
+      "interview_id": "7981e284-a5eb-408d-a35a-c90a0d9b3162",
+      "turn_index": null,
+      "measurements": {
+        "t_connect_start": 0,
+        "t_ws_open": 784,
+        "t_proxy_connected": 930,
+        "t_session_updated": 2042,
+        "t_first_video_frame": 5148,
+        "t_media_ready": 5148,
+        "t_first_audible": 6163,
+        "ws_open_ms": 784,
+        "proxy_connected_ms": 930,
+        "session_updated_ms": 2042,
+        "first_video_frame_ms": 5148,
+        "media_ready_ms": 5148,
+        "first_audible_ms": 6163
+      },
+      "label": "10/10 14:39:55 · 48944196"
+    },
+    {
+      "timestamp": "2026-10-10T08:12:09.512Z",
+      "itemId": "49b47029-c482-11f1-a04b-3833c5d1f6da",
+      "operation_Id": "17f1202013e449e7a1a5696a94bb3b55",
+      "interview_id": "08c066f9-a113-4b33-b36a-996fdde0c132",
+      "turn_index": null,
+      "measurements": {
+        "t_connect_start": 0,
+        "t_ws_open": 791,
+        "t_proxy_connected": 895,
+        "t_session_updated": 2330,
+        "t_first_video_frame": 4548,
+        "t_media_ready": 4548,
+        "t_first_audible": 5707,
+        "ws_open_ms": 791,
+        "proxy_connected_ms": 895,
+        "session_updated_ms": 2330,
+        "first_video_frame_ms": 4548,
+        "media_ready_ms": 4548,
+        "first_audible_ms": 5707
+      },
+      "label": "10/10 16:12:09 · 17f12020"
+    }
+  ],
+  "avatars": [
+    {
+      "timestamp": "2026-10-10T03:52:21.653Z",
+      "itemId": "071b2095-c45e-11f1-a04b-3833c5d22da8",
+      "operation_Id": "3a840de59c2c4de6a8bc814e0bdfc6fe",
+      "interview_id": "130cef59-b2b4-4385-a948-375c24cc6528",
+      "turn_index": null,
+      "measurements": {
+        "t_pc_created": 0,
+        "t_offer_start": 0,
+        "t_offer_created": 17,
+        "t_first_host": 26,
+        "t_first_srflx": 274,
+        "t_first_relay": 351,
+        "t_offer_sent": 576,
+        "t_answer_received": 915,
+        "t_ice_checking": 922,
+        "t_first_track": 923,
+        "t_answer_applied": 924,
+        "t_ice_connected": 1297,
+        "t_pc_connected": 2085,
+        "t_first_frame": 2366,
+        "hold_ms": 0,
+        "create_offer_ms": 17,
+        "stun_srflx_ms": 257,
+        "turn_relay_ms": 333,
+        "first_host_ms": 8,
+        "ice_gather_ms": 558,
+        "sdp_answer_ms": 340,
+        "ice_connect_ms": 373,
+        "pc_connect_ms": 1161,
+        "first_track_ms": -1,
+        "first_frame_ms": 1069,
+        "total_ms": 2366,
+        "rtt_ms": 251
+      },
+      "local_candidate": "relay",
+      "remote_candidate": "srflx",
+      "protocol": "udp",
+      "relay_protocol": "udp",
+      "label": "10/10 11:52:21 · 3a840de5"
+    },
+    {
+      "timestamp": "2026-10-10T06:08:31.879Z",
+      "itemId": "0479b294-c471-11f1-a04b-7ced8d9d5d44",
+      "operation_Id": "7bff59c8010e4069bc39b9067ea3e42d",
+      "interview_id": "2e59fd58-3f84-463e-b687-0a0fb6e31a3d",
+      "turn_index": null,
+      "measurements": {
+        "t_pc_created": 0,
+        "t_offer_start": 1,
+        "t_offer_created": 7,
+        "t_first_host": 10,
+        "t_first_srflx": 241,
+        "t_first_relay": 393,
+        "t_offer_sent": 546,
+        "t_answer_received": 871,
+        "t_ice_checking": 872,
+        "t_first_track": 873,
+        "t_answer_applied": 873,
+        "t_ice_connected": 1462,
+        "t_pc_connected": 2325,
+        "t_first_frame": 2757,
+        "hold_ms": 1,
+        "create_offer_ms": 7,
+        "stun_srflx_ms": 233,
+        "turn_relay_ms": 386,
+        "first_host_ms": 3,
+        "ice_gather_ms": 539,
+        "sdp_answer_ms": 325,
+        "ice_connect_ms": 589,
+        "pc_connect_ms": 1452,
+        "first_track_ms": 2,
+        "first_frame_ms": 1295,
+        "total_ms": 2756,
+        "rtt_ms": 406
+      },
+      "local_candidate": "relay",
+      "remote_candidate": "srflx",
+      "protocol": "udp",
+      "relay_protocol": "udp",
+      "label": "10/10 14:08:31 · 7bff59c8"
+    },
+    {
+      "timestamp": "2026-10-10T06:39:54.158Z",
+      "itemId": "666b435d-c475-11f1-a04b-70a8a579634b",
+      "operation_Id": "48944196d9a3401fb10388e9b62f32ad",
+      "interview_id": "7981e284-a5eb-408d-a35a-c90a0d9b3162",
+      "turn_index": null,
+      "measurements": {
+        "t_pc_created": 0,
+        "t_offer_start": 0,
+        "t_offer_created": 14,
+        "t_first_host": 20,
+        "t_first_srflx": 391,
+        "t_first_relay": 542,
+        "t_offer_sent": 692,
+        "t_answer_received": 1091,
+        "t_ice_checking": 1096,
+        "t_first_track": 1097,
+        "t_answer_applied": 1098,
+        "t_ice_connected": 1694,
+        "t_pc_connected": 2651,
+        "t_first_frame": 3084,
+        "hold_ms": 0,
+        "create_offer_ms": 14,
+        "stun_srflx_ms": 377,
+        "turn_relay_ms": 528,
+        "first_host_ms": 6,
+        "ice_gather_ms": 678,
+        "sdp_answer_ms": 400,
+        "ice_connect_ms": 596,
+        "pc_connect_ms": 1554,
+        "first_track_ms": 6,
+        "first_frame_ms": 1390,
+        "total_ms": 3084,
+        "rtt_ms": 413
+      },
+      "local_candidate": "relay",
+      "remote_candidate": "srflx",
+      "protocol": "udp",
+      "relay_protocol": "udp",
+      "label": "10/10 14:39:54 · 48944196"
+    },
+    {
+      "timestamp": "2026-10-10T08:12:08.612Z",
+      "itemId": "49002460-c482-11f1-a04d-7c1e52222be3",
+      "operation_Id": "17f1202013e449e7a1a5696a94bb3b55",
+      "interview_id": "08c066f9-a113-4b33-b36a-996fdde0c132",
+      "turn_index": null,
+      "measurements": {
+        "t_pc_created": 0,
+        "t_offer_start": 1,
+        "t_offer_created": 17,
+        "t_first_host": 28,
+        "t_first_srflx": 192,
+        "t_first_relay": 269,
+        "t_offer_sent": 494,
+        "t_answer_received": 788,
+        "t_ice_checking": 796,
+        "t_first_track": 798,
+        "t_answer_applied": 799,
+        "t_ice_connected": 1175,
+        "t_pc_connected": 1866,
+        "t_first_frame": 2194,
+        "hold_ms": 1,
+        "create_offer_ms": 17,
+        "stun_srflx_ms": 175,
+        "turn_relay_ms": 251,
+        "first_host_ms": 10,
+        "ice_gather_ms": 476,
+        "sdp_answer_ms": 295,
+        "ice_connect_ms": 376,
+        "pc_connect_ms": 1067,
+        "first_track_ms": 10,
+        "first_frame_ms": 1019,
+        "total_ms": 2193,
+        "rtt_ms": 253
+      },
+      "local_candidate": "relay",
+      "remote_candidate": "srflx",
+      "protocol": "udp",
+      "relay_protocol": "udp",
+      "label": "10/10 16:12:08 · 17f12020"
+    }
+  ],
+  "turns": [
+    {
+      "timestamp": "2026-10-10T03:52:39.906Z",
+      "itemId": "11fc4f02-c45e-11f1-b306-7c1e523fa04c",
+      "operation_Id": "3a840de59c2c4de6a8bc814e0bdfc6fe",
+      "interview_id": "130cef59-b2b4-4385-a948-375c24cc6528",
+      "turn_index": 1,
+      "measurements": {
+        "t_first_audible": 13299,
+        "t_read_request": 12421,
+        "t_response_created": 12693,
+        "t_first_text": 12698,
+        "t_response_done": 12829,
+        "read_to_created_ms": 272,
+        "created_to_first_text_ms": 4,
+        "created_to_audible_ms": 606,
+        "response_ms": 136,
+        "turn_index": 1,
+        "t_speech_started": 0,
+        "t_speech_stopped": 10766,
+        "t_transcript": 11848,
+        "t_answer_click": 12097,
+        "t_answer_submit": 12099,
+        "t_answer_response": 12420,
+        "speaking_ms": 10766,
+        "stt_ms": 1082,
+        "commit_wait_ms": 2,
+        "answer_http_ms": 322,
+        "answer_to_read_ms": 1,
+        "click_to_audible_ms": 1202,
+        "stop_to_audible_ms": 2533
+      },
+      "label": "10/10 11:52:39 · 回合 1 · 3a840de5"
+    },
+    {
+      "timestamp": "2026-10-10T03:53:06.656Z",
+      "itemId": "21c4b1c1-c45e-11f1-b306-6045bdaa65be",
+      "operation_Id": "3a840de59c2c4de6a8bc814e0bdfc6fe",
+      "interview_id": "130cef59-b2b4-4385-a948-375c24cc6528",
+      "turn_index": 2,
+      "measurements": {
+        "t_first_audible": 13730,
+        "t_read_request": 12825,
+        "t_response_created": 13099,
+        "t_first_text": 13100,
+        "t_response_done": 13257,
+        "read_to_created_ms": 274,
+        "created_to_first_text_ms": 1,
+        "created_to_audible_ms": 631,
+        "response_ms": 158,
+        "turn_index": 2,
+        "t_speech_started": 0,
+        "t_speech_stopped": 10753,
+        "t_transcript": 11808,
+        "t_answer_click": 12496,
+        "t_answer_submit": 12497,
+        "t_answer_response": 12824,
+        "speaking_ms": 10753,
+        "stt_ms": 1055,
+        "commit_wait_ms": 1,
+        "answer_http_ms": 327,
+        "answer_to_read_ms": 1,
+        "click_to_audible_ms": 1234,
+        "stop_to_audible_ms": 2977
+      },
+      "label": "10/10 11:53:06 · 回合 2 · 3a840de5"
+    },
+    {
+      "timestamp": "2026-10-10T06:08:50.148Z",
+      "itemId": "0e23eb03-c471-11f1-a04b-7ced8d9d5912",
+      "operation_Id": "7bff59c8010e4069bc39b9067ea3e42d",
+      "interview_id": "2e59fd58-3f84-463e-b687-0a0fb6e31a3d",
+      "turn_index": 1,
+      "measurements": {
+        "t_first_audible": 13325,
+        "t_read_request": 12506,
+        "t_response_created": 12762,
+        "t_first_text": 12764,
+        "t_response_done": 12929,
+        "read_to_created_ms": 257,
+        "created_to_first_text_ms": 2,
+        "created_to_audible_ms": 563,
+        "response_ms": 167,
+        "turn_index": 1,
+        "t_speech_started": 0,
+        "t_speech_stopped": 10717,
+        "t_transcript": 11763,
+        "t_answer_click": 12179,
+        "t_answer_submit": 12180,
+        "t_answer_response": 12504,
+        "speaking_ms": 10717,
+        "stt_ms": 1047,
+        "commit_wait_ms": 2,
+        "answer_http_ms": 324,
+        "answer_to_read_ms": 1,
+        "click_to_audible_ms": 1147,
+        "stop_to_audible_ms": 2609
+      },
+      "label": "10/10 14:08:50 · 回合 1 · 7bff59c8"
+    },
+    {
+      "timestamp": "2026-10-10T06:09:16.997Z",
+      "itemId": "1f42ef0e-c471-11f1-a04b-7ced8d25a27e",
+      "operation_Id": "7bff59c8010e4069bc39b9067ea3e42d",
+      "interview_id": "2e59fd58-3f84-463e-b687-0a0fb6e31a3d",
+      "turn_index": 2,
+      "measurements": {
+        "t_first_audible": 13895,
+        "t_read_request": 12954,
+        "t_response_created": 13213,
+        "t_first_text": 13214,
+        "t_response_done": 13374,
+        "read_to_created_ms": 259,
+        "created_to_first_text_ms": 1,
+        "created_to_audible_ms": 683,
+        "response_ms": 162,
+        "turn_index": 2,
+        "t_speech_started": 0,
+        "t_speech_stopped": 10839,
+        "t_transcript": 11846,
+        "t_answer_click": 12649,
+        "t_answer_submit": 12650,
+        "t_answer_response": 12953,
+        "speaking_ms": 10839,
+        "stt_ms": 1006,
+        "commit_wait_ms": 1,
+        "answer_http_ms": 303,
+        "answer_to_read_ms": 1,
+        "click_to_audible_ms": 1247,
+        "stop_to_audible_ms": 3056
+      },
+      "label": "10/10 14:09:16 · 回合 2 · 7bff59c8"
+    },
+    {
+      "timestamp": "2026-10-10T06:09:43.295Z",
+      "itemId": "2f0022bc-c471-11f1-a04b-3833c5d2b73d",
+      "operation_Id": "7bff59c8010e4069bc39b9067ea3e42d",
+      "interview_id": "2e59fd58-3f84-463e-b687-0a0fb6e31a3d",
+      "turn_index": 3,
+      "measurements": {
+        "t_first_audible": 13834,
+        "t_read_request": 12954,
+        "t_response_created": 13215,
+        "t_first_text": 13216,
+        "t_response_done": 13347,
+        "read_to_created_ms": 260,
+        "created_to_first_text_ms": 1,
+        "created_to_audible_ms": 619,
+        "response_ms": 132,
+        "turn_index": 3,
+        "t_speech_started": 0,
+        "t_speech_stopped": 10840,
+        "t_transcript": 11775,
+        "t_answer_click": 12636,
+        "t_answer_submit": 12638,
+        "t_answer_response": 12953,
+        "speaking_ms": 10840,
+        "stt_ms": 935,
+        "commit_wait_ms": 2,
+        "answer_http_ms": 315,
+        "answer_to_read_ms": 1,
+        "click_to_audible_ms": 1197,
+        "stop_to_audible_ms": 2994
+      },
+      "label": "10/10 14:09:43 · 回合 3 · 7bff59c8"
+    },
+    {
+      "timestamp": "2026-10-10T06:40:11.868Z",
+      "itemId": "70a7c529-c475-11f1-a04b-70a8a578ee6d",
+      "operation_Id": "48944196d9a3401fb10388e9b62f32ad",
+      "interview_id": "7981e284-a5eb-408d-a35a-c90a0d9b3162",
+      "turn_index": 1,
+      "measurements": {
+        "t_first_audible": 13748,
+        "t_read_request": 12724,
+        "t_response_created": 12983,
+        "t_first_text": 12984,
+        "t_response_done": 13258,
+        "read_to_created_ms": 258,
+        "created_to_first_text_ms": 1,
+        "created_to_audible_ms": 766,
+        "response_ms": 275,
+        "turn_index": 1,
+        "t_speech_started": 0,
+        "t_speech_stopped": 10862,
+        "t_transcript": 11902,
+        "t_answer_click": 12383,
+        "t_answer_submit": 12384,
+        "t_answer_response": 12723,
+        "speaking_ms": 10862,
+        "stt_ms": 1040,
+        "commit_wait_ms": 2,
+        "answer_http_ms": 339,
+        "answer_to_read_ms": 1,
+        "click_to_audible_ms": 1366,
+        "stop_to_audible_ms": 2887
+      },
+      "label": "10/10 14:40:11 · 回合 1 · 48944196"
+    },
+    {
+      "timestamp": "2026-10-10T06:40:38.868Z",
+      "itemId": "80cd7ae9-c475-11f1-a04b-3833c5d1eb87",
+      "operation_Id": "48944196d9a3401fb10388e9b62f32ad",
+      "interview_id": "7981e284-a5eb-408d-a35a-c90a0d9b3162",
+      "turn_index": 2,
+      "measurements": {
+        "t_first_audible": 14274,
+        "t_read_request": 13156,
+        "t_response_created": 13413,
+        "t_first_text": 13415,
+        "t_response_done": 13683,
+        "read_to_created_ms": 257,
+        "created_to_first_text_ms": 2,
+        "created_to_audible_ms": 861,
+        "response_ms": 270,
+        "turn_index": 2,
+        "t_speech_started": 0,
+        "t_speech_stopped": 10749,
+        "t_transcript": 11798,
+        "t_answer_click": 12824,
+        "t_answer_submit": 12826,
+        "t_answer_response": 13155,
+        "speaking_ms": 10749,
+        "stt_ms": 1049,
+        "commit_wait_ms": 1,
+        "answer_http_ms": 329,
+        "answer_to_read_ms": 1,
+        "click_to_audible_ms": 1449,
+        "stop_to_audible_ms": 3524
+      },
+      "label": "10/10 14:40:38 · 回合 2 · 48944196"
+    }
+  ],
+  "pairs": [
+    {
+      "operation_Id": "3a840de59c2c4de6a8bc814e0bdfc6fe",
+      "browser_id": "8e3179e9df2b4bd7",
+      "server_id": "97868667b85650db",
+      "timestamp": "2026-10-10T03:52:38.705Z",
+      "route": "POST /candidate/interview/{interview_id}/answer",
+      "browser_ms": 320,
+      "server_ms": 60,
+      "outside_server_ms": 260,
+      "result": "200"
+    },
+    {
+      "operation_Id": "3a840de59c2c4de6a8bc814e0bdfc6fe",
+      "browser_id": "68842c852a8645b4",
+      "server_id": "09e282b0ae4c7ecf",
+      "timestamp": "2026-10-10T03:53:05.422Z",
+      "route": "POST /candidate/interview/{interview_id}/answer",
+      "browser_ms": 326,
+      "server_ms": 63,
+      "outside_server_ms": 263,
+      "result": "200"
+    },
+    {
+      "operation_Id": "7bff59c8010e4069bc39b9067ea3e42d",
+      "browser_id": "9598f471393442e0",
+      "server_id": "1b6d95e0f775bc6f",
+      "timestamp": "2026-10-10T06:08:49.002Z",
+      "route": "POST /candidate/interview/{interview_id}/answer",
+      "browser_ms": 323,
+      "server_ms": 56,
+      "outside_server_ms": 267,
+      "result": "200"
+    },
+    {
+      "operation_Id": "7bff59c8010e4069bc39b9067ea3e42d",
+      "browser_id": "492439f247b94ef4",
+      "server_id": "ac3ad552a82033c5",
+      "timestamp": "2026-10-10T06:09:15.75Z",
+      "route": "POST /candidate/interview/{interview_id}/answer",
+      "browser_ms": 303,
+      "server_ms": 41,
+      "outside_server_ms": 262,
+      "result": "200"
+    },
+    {
+      "operation_Id": "7bff59c8010e4069bc39b9067ea3e42d",
+      "browser_id": "93e86ed9da194b6d",
+      "server_id": "1c8be74dac43fd85",
+      "timestamp": "2026-10-10T06:09:42.099Z",
+      "route": "POST /candidate/interview/{interview_id}/answer",
+      "browser_ms": 314,
+      "server_ms": 51,
+      "outside_server_ms": 263,
+      "result": "200"
+    },
+    {
+      "operation_Id": "48944196d9a3401fb10388e9b62f32ad",
+      "browser_id": "af72b53d2cf3409f",
+      "server_id": "e77c5655f582b07a",
+      "timestamp": "2026-10-10T06:40:10.504Z",
+      "route": "POST /candidate/interview/{interview_id}/answer",
+      "browser_ms": 338,
+      "server_ms": 62,
+      "outside_server_ms": 276,
+      "result": "200"
+    },
+    {
+      "operation_Id": "48944196d9a3401fb10388e9b62f32ad",
+      "browser_id": "4e6f61600a9c46d0",
+      "server_id": "9521a123128e7413",
+      "timestamp": "2026-10-10T06:40:37.42Z",
+      "route": "POST /candidate/interview/{interview_id}/answer",
+      "browser_ms": 328,
+      "server_ms": 50,
+      "outside_server_ms": 278,
+      "result": "200"
+    }
+  ],
+  "judge_overlaps": [
+    {
+      "operation_Id": "3a840de59c2c4de6a8bc814e0bdfc6fe",
+      "judge_id": "7d60788f9d5249a6",
+      "answer_id": "97868667b85650db",
+      "judge_timestamp": "2026-10-10T03:52:38.645326Z",
+      "answer_timestamp": "2026-10-10T03:52:38.843583Z",
+      "judge_ms": 3319,
+      "answer_offset_ms": 198.257,
+      "answer_ms": 60,
+      "label": "10/10 11:52:38 · 3a840de5"
+    },
+    {
+      "operation_Id": "3a840de59c2c4de6a8bc814e0bdfc6fe",
+      "judge_id": "0d4a0ca83b532a8c",
+      "answer_id": "09e282b0ae4c7ecf",
+      "judge_timestamp": "2026-10-10T03:53:04.915572Z",
+      "answer_timestamp": "2026-10-10T03:53:05.564625Z",
+      "judge_ms": 1300,
+      "answer_offset_ms": 649.053,
+      "answer_ms": 63,
+      "label": "10/10 11:53:05 · 3a840de5"
+    },
+    {
+      "operation_Id": "7bff59c8010e4069bc39b9067ea3e42d",
+      "judge_id": "711e2c49dcdd781a",
+      "answer_id": "1b6d95e0f775bc6f",
+      "judge_timestamp": "2026-10-10T06:08:48.762453Z",
+      "answer_timestamp": "2026-10-10T06:08:49.143218Z",
+      "judge_ms": 2566,
+      "answer_offset_ms": 380.765,
+      "answer_ms": 56,
+      "label": "10/10 14:08:49 · 7bff59c8"
+    },
+    {
+      "operation_Id": "7bff59c8010e4069bc39b9067ea3e42d",
+      "judge_id": "4ebd73474aab3131",
+      "answer_id": "ac3ad552a82033c5",
+      "judge_timestamp": "2026-10-10T06:09:15.110246Z",
+      "answer_timestamp": "2026-10-10T06:09:15.886185Z",
+      "judge_ms": 2220,
+      "answer_offset_ms": 775.939,
+      "answer_ms": 41,
+      "label": "10/10 14:09:15 · 7bff59c8"
+    },
+    {
+      "operation_Id": "7bff59c8010e4069bc39b9067ea3e42d",
+      "judge_id": "3d2e919090d9ce71",
+      "answer_id": "1c8be74dac43fd85",
+      "judge_timestamp": "2026-10-10T06:09:41.401516Z",
+      "answer_timestamp": "2026-10-10T06:09:42.236701Z",
+      "judge_ms": 2633,
+      "answer_offset_ms": 835.185,
+      "answer_ms": 51,
+      "label": "10/10 14:09:42 · 7bff59c8"
+    },
+    {
+      "operation_Id": "48944196d9a3401fb10388e9b62f32ad",
+      "judge_id": "a24082f5bf2a672e",
+      "answer_id": "e77c5655f582b07a",
+      "judge_timestamp": "2026-10-10T06:40:10.188586Z",
+      "answer_timestamp": "2026-10-10T06:40:10.648402Z",
+      "judge_ms": 2934,
+      "answer_offset_ms": 459.816,
+      "answer_ms": 62,
+      "label": "10/10 14:40:10 · 48944196"
+    },
+    {
+      "operation_Id": "48944196d9a3401fb10388e9b62f32ad",
+      "judge_id": "fb6d72b6ff125476",
+      "answer_id": "9521a123128e7413",
+      "judge_timestamp": "2026-10-10T06:40:36.556652Z",
+      "answer_timestamp": "2026-10-10T06:40:37.567384Z",
+      "judge_ms": 1276,
+      "answer_offset_ms": 1010.732,
+      "answer_ms": 50,
+      "label": "10/10 14:40:37 · 48944196"
+    }
+  ],
+  "scores": [
+    {
+      "request": {
+        "timestamp": "2026-10-08T18:09:23.17336Z",
+        "id": "cf399149ad2375d2",
+        "operation_Id": "99f8fb5a3229ee32b266ade4ce1c9ee3",
+        "duration": 46536,
+        "name": "POST /candidate/interview/{interview_id}/report"
+      },
+      "tasks": [
+        {
+          "label": "评分任务 1",
+          "id": "cfda545aff89d71a",
+          "offset_ms": 333.611,
+          "duration": 25139,
+          "http": [
+            {
+              "offset_ms": 412.5,
+              "duration": 25058,
+              "id": "8e63d6afb6c9b2ca"
+            }
+          ],
+          "pre_http_ms": 78.88900000000001
+        },
+        {
+          "label": "评分任务 2",
+          "id": "2cea58f8ef036bc4",
+          "offset_ms": 333.838,
+          "duration": 22469,
+          "http": [
+            {
+              "offset_ms": 410.572,
+              "duration": 22391,
+              "id": "1c7c77841fde082a"
+            }
+          ],
+          "pre_http_ms": 76.73399999999998
+        },
+        {
+          "label": "评分任务 3",
+          "id": "e592fdbcf5c6e537",
+          "offset_ms": 334.029,
+          "duration": 25969,
+          "http": [
+            {
+              "offset_ms": 414.437,
+              "duration": 25886,
+              "id": "ffda789d6350fa24"
+            }
+          ],
+          "pre_http_ms": 80.40800000000002
+        },
+        {
+          "label": "评分任务 4",
+          "id": "0b7e1ab8a618b0ff",
+          "offset_ms": 334.207,
+          "duration": 28810,
+          "http": [
+            {
+              "offset_ms": 416.516,
+              "duration": 28725,
+              "id": "7d2f413f2c11ca7f"
+            }
+          ],
+          "pre_http_ms": 82.30900000000003
+        },
+        {
+          "label": "评分任务 5",
+          "id": "dd4e576ea6877ad4",
+          "offset_ms": 334.371,
+          "duration": 20295,
+          "http": [
+            {
+              "offset_ms": 418.643,
+              "duration": 20144,
+              "id": "8745c5b2d4672a73"
+            }
+          ],
+          "pre_http_ms": 84.27199999999999
+        },
+        {
+          "label": "评分任务 6",
+          "id": "b948772655b4c870",
+          "offset_ms": 334.507,
+          "duration": 21144,
+          "http": [
+            {
+              "offset_ms": 420.845,
+              "duration": 21056,
+              "id": "d7b5a1b32d023350"
+            }
+          ],
+          "pre_http_ms": 86.33800000000002
+        },
+        {
+          "label": "评分任务 7",
+          "id": "200555fde3f51977",
+          "offset_ms": 334.67900000000003,
+          "duration": 27067,
+          "http": [
+            {
+              "offset_ms": 422.92600000000004,
+              "duration": 26977,
+              "id": "ac1f55e7fe42f971"
+            }
+          ],
+          "pre_http_ms": 88.24700000000001
+        },
+        {
+          "label": "评分任务 8",
+          "id": "fe8ae246f92948bd",
+          "offset_ms": 334.835,
+          "duration": 26670,
+          "http": [
+            {
+              "offset_ms": 425.095,
+              "duration": 26577,
+              "id": "ca3ae52661ada1cd"
+            }
+          ],
+          "pre_http_ms": 90.26000000000005
+        },
+        {
+          "label": "评分任务 9",
+          "id": "312881c0ef147b92",
+          "offset_ms": 334.984,
+          "duration": 46087,
+          "http": [
+            {
+              "offset_ms": 20628.404,
+              "duration": 25791,
+              "id": "ae96114ffbb9ae7f"
+            }
+          ],
+          "pre_http_ms": 20293.42
+        }
+      ],
+      "extra_http": [],
+      "last_scoring_ms": 46421.984,
+      "extra_span_ms": 0,
+      "label": "10/09 02:09:23 · 46.536 s · 单批评分"
+    },
+    {
+      "request": {
+        "timestamp": "2026-10-08T22:21:37.162663Z",
+        "id": "f93ddf5302f52d61",
+        "operation_Id": "9e3df9b32907b672bd6cc0961bbf5db3",
+        "duration": 70417,
+        "name": "POST /candidate/interview/{interview_id}/report/stream"
+      },
+      "tasks": [
+        {
+          "label": "评分任务 1",
+          "id": "93fb99777939c08a",
+          "offset_ms": 282.918,
+          "duration": 14759,
+          "http": [
+            {
+              "offset_ms": 373.26599999999996,
+              "duration": 14667,
+              "id": "6eae47a22f80c1ad"
+            }
+          ],
+          "pre_http_ms": 90.34799999999996
+        },
+        {
+          "label": "评分任务 2",
+          "id": "abedf0e2eb8a0f6e",
+          "offset_ms": 283.148,
+          "duration": 12706,
+          "http": [
+            {
+              "offset_ms": 375.00600000000003,
+              "duration": 12612,
+              "id": "30b32f281f8e6f24"
+            }
+          ],
+          "pre_http_ms": 91.858
+        },
+        {
+          "label": "评分任务 3",
+          "id": "c22cbee91b395c02",
+          "offset_ms": 284.003,
+          "duration": 16027,
+          "http": [
+            {
+              "offset_ms": 376.56600000000003,
+              "duration": 15932,
+              "id": "73c859a05a0a8d88"
+            }
+          ],
+          "pre_http_ms": 92.56300000000005
+        },
+        {
+          "label": "评分任务 4",
+          "id": "a51c54c192ae93fe",
+          "offset_ms": 284.22700000000003,
+          "duration": 13784,
+          "http": [
+            {
+              "offset_ms": 371.57,
+              "duration": 13695,
+              "id": "c69de068c9e16864"
+            }
+          ],
+          "pre_http_ms": 87.34299999999996
+        },
+        {
+          "label": "评分任务 5",
+          "id": "009d575e58c6d2d3",
+          "offset_ms": 284.381,
+          "duration": 10619,
+          "http": [
+            {
+              "offset_ms": 378.909,
+              "duration": 10459,
+              "id": "1f6071ec79277d39"
+            }
+          ],
+          "pre_http_ms": 94.52800000000002
+        },
+        {
+          "label": "评分任务 6",
+          "id": "f773daeb4069d317",
+          "offset_ms": 284.507,
+          "duration": 15720,
+          "http": [
+            {
+              "offset_ms": 381.32899999999995,
+              "duration": 15621,
+              "id": "aae5d6e3a082e510"
+            }
+          ],
+          "pre_http_ms": 96.82199999999995
+        },
+        {
+          "label": "评分任务 7",
+          "id": "d8654571b23632b6",
+          "offset_ms": 284.671,
+          "duration": 14354,
+          "http": [
+            {
+              "offset_ms": 385.024,
+              "duration": 14252,
+              "id": "b40f6c972464a5f7"
+            }
+          ],
+          "pre_http_ms": 100.35300000000001
+        },
+        {
+          "label": "评分任务 8",
+          "id": "9d5ff0a52b4ef50d",
+          "offset_ms": 284.912,
+          "duration": 14133,
+          "http": [
+            {
+              "offset_ms": 386.986,
+              "duration": 14029,
+              "id": "bf0b996346602727"
+            }
+          ],
+          "pre_http_ms": 102.07400000000001
+        },
+        {
+          "label": "评分任务 9",
+          "id": "ceb77bc0da7f4915",
+          "offset_ms": 285.07500000000005,
+          "duration": 23032,
+          "http": [
+            {
+              "offset_ms": 10902.507,
+              "duration": 12413,
+              "id": "76e4d55c5a612e9f"
+            }
+          ],
+          "pre_http_ms": 10617.431999999999
+        }
+      ],
+      "extra_http": [
+        {
+          "id": "0f7e076c78b9a664",
+          "offset_ms": 23524.426,
+          "duration": 23301
+        },
+        {
+          "id": "eef180bf505ae289",
+          "offset_ms": 23526.466,
+          "duration": 31858
+        },
+        {
+          "id": "f372090e63b6a96b",
+          "offset_ms": 23528.289999999997,
+          "duration": 28222
+        },
+        {
+          "id": "6c0521775c3990ca",
+          "offset_ms": 23530.078,
+          "duration": 21414
+        },
+        {
+          "id": "2322dcf41b692517",
+          "offset_ms": 23531.814000000002,
+          "duration": 33588
+        },
+        {
+          "id": "f1e8c6a2706bd028",
+          "offset_ms": 23533.606,
+          "duration": 25957
+        },
+        {
+          "id": "c0c20f24cfe9400c",
+          "offset_ms": 23535.154,
+          "duration": 20964
+        },
+        {
+          "id": "3d05a04fbb32ad69",
+          "offset_ms": 23536.731,
+          "duration": 30722
+        },
+        {
+          "id": "c29c541c1c23cee2",
+          "offset_ms": 44502.025,
+          "duration": 25858
+        }
+      ],
+      "last_scoring_ms": 23317.075,
+      "extra_span_ms": 46835.598999999995,
+      "label": "10/09 06:21:37 · 70.417 s · 含第二批外呼"
+    }
+  ],
+  "medians": {
+    "setup": [
+      {
+        "key": "start_to_ws",
+        "label": "发起连接 → 浏览器 WS open",
+        "start": "t_connect_start",
+        "end": "t_ws_open",
+        "n": 4,
+        "p50": 787.5,
+        "min": 766,
+        "max": 893
+      },
+      {
+        "key": "ws_to_proxy",
+        "label": "WS open → proxy.connected",
+        "start": "t_ws_open",
+        "end": "t_proxy_connected",
+        "n": 4,
+        "p50": 153.5,
+        "min": 104,
+        "max": 520
+      },
+      {
+        "key": "proxy_to_updated",
+        "label": "proxy.connected → session.updated",
+        "start": "t_proxy_connected",
+        "end": "t_session_updated",
+        "n": 4,
+        "p50": 959.0,
+        "min": 225,
+        "max": 1435
+      },
+      {
+        "key": "updated_to_frame",
+        "label": "session.updated → 数字人首帧",
+        "start": "t_session_updated",
+        "end": "t_first_video_frame",
+        "n": 4,
+        "p50": 2572.5,
+        "min": 2218,
+        "max": 3106
+      },
+      {
+        "key": "frame_to_audible",
+        "label": "首帧 → 首次起音检测",
+        "start": "t_first_video_frame",
+        "end": "t_first_audible",
+        "n": 4,
+        "p50": 986.5,
+        "min": 922,
+        "max": 1159
+      }
+    ],
+    "setup_cumulative": {
+      "ws_open_ms": {
+        "n": 4,
+        "p50": 787.5,
+        "p95": 893,
+        "min": 766,
+        "max": 893,
+        "mean": 808.5
+      },
+      "proxy_connected_ms": {
+        "n": 4,
+        "p50": 928.5,
+        "p95": 1413,
+        "min": 895,
+        "max": 1413,
+        "mean": 1041.25
+      },
+      "session_updated_ms": {
+        "n": 4,
+        "p50": 1887.5,
+        "p95": 2330,
+        "min": 1638,
+        "max": 2330,
+        "mean": 1935.75
+      },
+      "first_video_frame_ms": {
+        "n": 4,
+        "p50": 4521.0,
+        "p95": 5148,
+        "min": 4022,
+        "max": 5148,
+        "mean": 4553.0
+      },
+      "first_audible_ms": {
+        "n": 4,
+        "p50": 5561.5,
+        "p95": 6163,
+        "min": 4980,
+        "max": 6163,
+        "mean": 5566.5
+      }
+    },
+    "avatar": {
+      "total_ms": {
+        "n": 4,
+        "p50": 2561.0,
+        "p95": 3084,
+        "min": 2193,
+        "max": 3084,
+        "mean": 2599.75
+      },
+      "ice_gather_ms": {
+        "n": 4,
+        "p50": 548.5,
+        "p95": 678,
+        "min": 476,
+        "max": 678,
+        "mean": 562.75
+      },
+      "sdp_answer_ms": {
+        "n": 4,
+        "p50": 332.5,
+        "p95": 400,
+        "min": 295,
+        "max": 400,
+        "mean": 340.0
+      },
+      "ice_connect_ms": {
+        "n": 4,
+        "p50": 482.5,
+        "p95": 596,
+        "min": 373,
+        "max": 596,
+        "mean": 483.5
+      },
+      "pc_connect_ms": {
+        "n": 4,
+        "p50": 1306.5,
+        "p95": 1554,
+        "min": 1067,
+        "max": 1554,
+        "mean": 1308.5
+      },
+      "first_frame_ms": {
+        "n": 4,
+        "p50": 1182.0,
+        "p95": 1390,
+        "min": 1019,
+        "max": 1390,
+        "mean": 1193.25
+      },
+      "rtt_ms": {
+        "n": 4,
+        "p50": 329.5,
+        "p95": 413,
+        "min": 251,
+        "max": 413,
+        "mean": 330.75
+      }
+    },
+    "avatar_candidates": {
+      "stun_srflx_ms": {
+        "n": 4,
+        "p50": 245.0,
+        "min": 175,
+        "max": 377
+      },
+      "turn_relay_ms": {
+        "n": 4,
+        "p50": 359.5,
+        "min": 251,
+        "max": 528
+      },
+      "create_offer_ms": {
+        "n": 4,
+        "p50": 15.5,
+        "min": 7,
+        "max": 17
+      }
+    },
+    "turn": {
+      "click_to_audible_ms": {
+        "n": 7,
+        "p50": 1234,
+        "p95": 1449,
+        "min": 1147,
+        "max": 1449,
+        "mean": 1263.142857142857
+      },
+      "commit_wait_ms": {
+        "n": 7,
+        "p50": 2,
+        "p95": 2,
+        "min": 1,
+        "max": 2,
+        "mean": 1.5714285714285714
+      },
+      "answer_http_ms": {
+        "n": 7,
+        "p50": 324,
+        "p95": 339,
+        "min": 303,
+        "max": 339,
+        "mean": 322.7142857142857
+      },
+      "answer_to_read_ms": {
+        "n": 7,
+        "p50": 1,
+        "p95": 1,
+        "min": 1,
+        "max": 1,
+        "mean": 1.0
+      },
+      "read_to_created_ms": {
+        "n": 7,
+        "p50": 259,
+        "p95": 274,
+        "min": 257,
+        "max": 274,
+        "mean": 262.42857142857144
+      },
+      "created_to_audible_ms": {
+        "n": 7,
+        "p50": 631,
+        "p95": 861,
+        "min": 563,
+        "max": 861,
+        "mean": 675.5714285714286
+      },
+      "stt_ms": {
+        "n": 7,
+        "p50": 1047,
+        "p95": 1082,
+        "min": 935,
+        "max": 1082,
+        "mean": 1030.5714285714287
+      },
+      "stop_to_audible_ms": {
+        "n": 7,
+        "p50": 2977,
+        "p95": 3524,
+        "min": 2533,
+        "max": 3524,
+        "mean": 2940.0
+      },
+      "speaking_ms": {
+        "n": 7,
+        "p50": 10766,
+        "min": 10717,
+        "max": 10862
+      },
+      "transcript_to_click_ms": {
+        "n": 7,
+        "p50": 688,
+        "min": 249,
+        "max": 1026
+      }
+    },
+    "judge": {
+      "n": 11,
+      "p50": 2218,
+      "min": 1186,
+      "max": 3319
+    },
+    "http": {
+      "browser_ms": {
+        "n": 7,
+        "p50": 323,
+        "min": 303,
+        "max": 338
+      },
+      "server_ms": {
+        "n": 7,
+        "p50": 56,
+        "min": 41,
+        "max": 63
+      },
+      "outside_server_ms": {
+        "n": 7,
+        "p50": 263,
+        "min": 260,
+        "max": 278
+      }
+    }
+  },
+  "media_comparison": [
+    {
+      "interview_id": "2e59fd58-3f84-463e-b687-0a0fb6e31a3d",
+      "operation_Id": "7bff59c8010e4069bc39b9067ea3e42d",
+      "label": "10/10 14:08:32 · 7bff59c8",
+      "rtt": {
+        "n": 4,
+        "p50": 405.0,
+        "p95": 405,
+        "min": 404,
+        "max": 405,
+        "mean": 404.75
+      },
+      "outside": {
+        "n": 3,
+        "p50": 263,
+        "min": 262,
+        "max": 267
+      }
+    },
+    {
+      "interview_id": "7981e284-a5eb-408d-a35a-c90a0d9b3162",
+      "operation_Id": "48944196d9a3401fb10388e9b62f32ad",
+      "label": "10/10 14:39:55 · 48944196",
+      "rtt": {
+        "n": 3,
+        "p50": 409,
+        "p95": 449,
+        "min": 409,
+        "max": 449,
+        "mean": 422.3333333333333
+      },
+      "outside": {
+        "n": 2,
+        "p50": 277.0,
+        "min": 276,
+        "max": 278
+      }
+    },
+    {
+      "interview_id": "08c066f9-a113-4b33-b36a-996fdde0c132",
+      "operation_Id": "17f1202013e449e7a1a5696a94bb3b55",
+      "label": "10/10 16:12:09 · 17f12020",
+      "rtt": {
+        "n": 66,
+        "p50": 250.0,
+        "p95": 333,
+        "min": 249,
+        "max": 508,
+        "mean": 272.1212121212121
+      },
+      "outside": null
+    }
+  ]
+}

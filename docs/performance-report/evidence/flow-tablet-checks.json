@@ -1,0 +1,355 @@
+{
+  "total": 69,
+  "passed": 69,
+  "viewport": {
+    "width": 768,
+    "height": 1024
+  },
+  "checks": [
+    {
+      "name": "Flow initialized",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Eight complete logical stages",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Overview explicitly not a proportional clock",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "turn sample count",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "turn sample 0 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "turn sample 1 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "turn sample 2 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "turn sample 3 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "turn sample 4 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "turn sample 5 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "turn sample 6 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "speaking sample count",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "speaking sample 0 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "speaking sample 1 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "speaking sample 2 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "speaking sample 3 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "speaking sample 4 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "speaking sample 5 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "speaking sample 6 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "setup sample count",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "setup sample 0 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "setup sample 1 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "setup sample 2 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "setup sample 3 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "avatar sample count",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "avatar sample 0 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "avatar sample 0 shared ICE/PC start",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "avatar sample 1 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "avatar sample 1 shared ICE/PC start",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "avatar sample 2 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "avatar sample 2 shared ICE/PC start",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "avatar sample 3 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "avatar sample 3 shared ICE/PC start",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "judge sample count",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "judge sample 0 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "judge sample 0 answer within Judge",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "judge sample 1 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "judge sample 1 answer within Judge",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "judge sample 2 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "judge sample 2 answer within Judge",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "judge sample 3 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "judge sample 3 answer within Judge",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "judge sample 4 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "judge sample 4 answer within Judge",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "judge sample 5 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "judge sample 5 answer within Judge",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "judge sample 6 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "judge sample 6 answer within Judge",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "score sample count",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "score sample 0 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "score sample 1 valid measured coordinates",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Measured turn uses named HTTP duration 303 ms",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Measured turn final audible 3056 ms from stop",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Scrub updates clock",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "End state detected",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Replay resets cursor",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "View switch pauses playback",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Overlapping work announced",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Scoring 9 plus 9 and containing request",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "overview chart sized from actual width",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "turn chart sized from actual width",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "speaking chart sized from actual width",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "setup chart sized from actual width",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "avatar chart sized from actual width",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "judge chart sized from actual width",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "score chart sized from actual width",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "No SVG text clipped horizontally",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "name": "SVG labels do not overlap",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "name": "No document horizontal overflow",
+      "passed": true,
+      "detail": "768 / 768"
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+union withsource=tableName requests,dependencies,customEvents,pageViews,browserTimings,traces,exceptions
+| summarize n=count(),first_seen=min(timestamp),latest=max(timestamp) by tableName | order by n desc

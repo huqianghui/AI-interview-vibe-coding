@@ -1,0 +1,1 @@
+pageViews | project timestamp,id,itemId,operation_Id,operation_ParentId,name,duration,url=tostring(split(url,"?")[0]),client_Browser,client_OS | order by timestamp asc

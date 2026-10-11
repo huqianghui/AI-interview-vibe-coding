@@ -1,0 +1,1 @@
+dependencies | summarize n=count(),failures=countif(success==false),p50_ms=percentile(duration,50),p95_ms=percentile(duration,95),max_ms=max(duration) by type,client_Type,cloud_RoleName | order by n desc

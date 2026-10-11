@@ -1,0 +1,1294 @@
+[
+  {
+    "name": "bloat_percent",
+    "label": "Bloat Percent (Preview)",
+    "unit": "Percent",
+    "aggregations": [
+      "Maximum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "database_size_bytes",
+    "label": "Database Size",
+    "unit": "Bytes",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "tps",
+    "label": "Transactions per second (Preview)",
+    "unit": "Count",
+    "aggregations": [
+      "Minimum",
+      "Maximum",
+      "Total"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "is_db_alive",
+    "label": "Database Is Alive",
+    "unit": "Count",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "backup_storage_used",
+    "label": "Backup Storage Used",
+    "unit": "Bytes",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "LogicalServerName"
+      }
+    ]
+  },
+  {
+    "name": "cpu_credits_consumed",
+    "label": "CPU Credits Consumed",
+    "unit": "Count",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "LogicalServerName"
+      }
+    ]
+  },
+  {
+    "name": "cpu_credits_remaining",
+    "label": "CPU Credits Remaining",
+    "unit": "Count",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "LogicalServerName"
+      }
+    ]
+  },
+  {
+    "name": "cpu_percent",
+    "label": "CPU percent",
+    "unit": "Percent",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "memory_percent",
+    "label": "Memory percent",
+    "unit": "Percent",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "iops",
+    "label": "IOPS",
+    "unit": "Count",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "disk_bandwidth_consumed_percentage",
+    "label": "Disk Bandwidth Consumed Percentage",
+    "unit": "Percent",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "LogicalServerName"
+      }
+    ]
+  },
+  {
+    "name": "disk_iops_consumed_percentage",
+    "label": "Disk IOPS Consumed Percentage",
+    "unit": "Percent",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "LogicalServerName"
+      }
+    ]
+  },
+  {
+    "name": "disk_queue_depth",
+    "label": "Disk Queue Depth",
+    "unit": "Count",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "LogicalServerName"
+      }
+    ]
+  },
+  {
+    "name": "read_throughput",
+    "label": "Read Throughput Bytes/Sec",
+    "unit": "Count",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "LogicalServerName"
+      }
+    ]
+  },
+  {
+    "name": "write_throughput",
+    "label": "Write Throughput Bytes/Sec",
+    "unit": "Count",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "LogicalServerName"
+      }
+    ]
+  },
+  {
+    "name": "read_iops",
+    "label": "Read IOPS",
+    "unit": "Count",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "LogicalServerName"
+      }
+    ]
+  },
+  {
+    "name": "write_iops",
+    "label": "Write IOPS",
+    "unit": "Count",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "LogicalServerName"
+      }
+    ]
+  },
+  {
+    "name": "storage_percent",
+    "label": "Storage percent",
+    "unit": "Percent",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "storage_used",
+    "label": "Storage used",
+    "unit": "Bytes",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "storage_free",
+    "label": "Storage Free",
+    "unit": "Bytes",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "txlogs_storage_used",
+    "label": "Transaction Log Storage Used",
+    "unit": "Bytes",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "xact_total",
+    "label": "Total Transactions",
+    "unit": "Count",
+    "aggregations": [
+      "Total"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "xact_commit",
+    "label": "Transactions Committed",
+    "unit": "Count",
+    "aggregations": [
+      "Total"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "xact_rollback",
+    "label": "Transactions Rolled Back",
+    "unit": "Count",
+    "aggregations": [
+      "Total"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "numbackends",
+    "label": "Backends",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum",
+      "Minimum",
+      "Average"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "deadlocks",
+    "label": "Deadlocks",
+    "unit": "Count",
+    "aggregations": [
+      "Total"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "tup_inserted",
+    "label": "Tuples Inserted",
+    "unit": "Count",
+    "aggregations": [
+      "Total"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "tup_deleted",
+    "label": "Tuples Deleted",
+    "unit": "Count",
+    "aggregations": [
+      "Total"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "tup_updated",
+    "label": "Tuples Updated",
+    "unit": "Count",
+    "aggregations": [
+      "Total"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "tup_returned",
+    "label": "Tuples Returned",
+    "unit": "Count",
+    "aggregations": [
+      "Total"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "tup_fetched",
+    "label": "Tuples Fetched",
+    "unit": "Count",
+    "aggregations": [
+      "Total"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "temp_files",
+    "label": "Temporary Files",
+    "unit": "Count",
+    "aggregations": [
+      "Total"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "temp_bytes",
+    "label": "Temporary Files Size",
+    "unit": "Bytes",
+    "aggregations": [
+      "Total"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "blks_read",
+    "label": "Disk Blocks Read",
+    "unit": "Count",
+    "aggregations": [
+      "Total"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "blks_hit",
+    "label": "Disk Blocks Hit",
+    "unit": "Count",
+    "aggregations": [
+      "Total"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "sessions_by_state",
+    "label": "Sessions by State",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum",
+      "Minimum",
+      "Average"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "State",
+        "value": "State"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "sessions_by_wait_event_type",
+    "label": "Sessions by WaitEventType",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum",
+      "Minimum",
+      "Average"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "WaitEventType",
+        "value": "WaitEventType"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "oldest_backend_time_sec",
+    "label": "Oldest Backend",
+    "unit": "Seconds",
+    "aggregations": [
+      "Maximum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "oldest_backend_xmin",
+    "label": "Oldest xmin",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "oldest_backend_xmin_age",
+    "label": "Oldest xmin Age",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "longest_query_time_sec",
+    "label": "Oldest Query",
+    "unit": "Seconds",
+    "aggregations": [
+      "Maximum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "longest_transaction_time_sec",
+    "label": "Oldest Transaction",
+    "unit": "Seconds",
+    "aggregations": [
+      "Maximum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "physical_replication_delay_in_seconds",
+    "label": "Read Replica Lag",
+    "unit": "Seconds",
+    "aggregations": [
+      "Maximum",
+      "Minimum",
+      "Average"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "physical_replication_delay_in_bytes",
+    "label": "Max Physical Replication Lag",
+    "unit": "Bytes",
+    "aggregations": [
+      "Maximum",
+      "Minimum",
+      "Average"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "logical_replication_delay_in_bytes",
+    "label": "Max Logical Replication Lag",
+    "unit": "Bytes",
+    "aggregations": [
+      "Maximum",
+      "Minimum",
+      "Average"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "logical_replication_slot_sync_status",
+    "label": "Logical Replication Slot Sync Status",
+    "unit": "Count",
+    "aggregations": [
+      "Total",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Logical Replication Slot",
+        "value": "ReplicationSlotName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "LogicalServerName"
+      }
+    ]
+  },
+  {
+    "name": "active_connections",
+    "label": "Active Connections",
+    "unit": "Count",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "cpu_limit",
+    "label": "CPU Limit",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "max_connections",
+    "label": "Max Connections",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "network_bytes_egress",
+    "label": "Network Out",
+    "unit": "Bytes",
+    "aggregations": [
+      "Total"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "network_bytes_ingress",
+    "label": "Network In",
+    "unit": "Bytes",
+    "aggregations": [
+      "Total"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "connections_failed",
+    "label": "Failed Connections",
+    "unit": "Count",
+    "aggregations": [
+      "Total"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "connections_succeeded",
+    "label": "Succeeded Connections",
+    "unit": "Count",
+    "aggregations": [
+      "Total"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "maximum_used_transactionIDs",
+    "label": "Maximum Used Transaction IDs",
+    "unit": "Count",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "analyze_count_user_tables",
+    "label": "Analyze Counter User Tables",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum",
+      "Minimum",
+      "Average"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "autoanalyze_count_user_tables",
+    "label": "AutoAnalyze Counter User Tables",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum",
+      "Minimum",
+      "Average"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "autovacuum_count_user_tables",
+    "label": "AutoVacuum Counter User Tables",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum",
+      "Minimum",
+      "Average"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "n_dead_tup_user_tables",
+    "label": "Estimated Dead Rows User Tables",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum",
+      "Minimum",
+      "Average"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "n_live_tup_user_tables",
+    "label": "Estimated Live Rows User Tables",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum",
+      "Minimum",
+      "Average"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "n_mod_since_analyze_user_tables",
+    "label": "Estimated Modifications User Tables",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum",
+      "Minimum",
+      "Average"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "tables_analyzed_user_tables",
+    "label": "User Tables Analyzed",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum",
+      "Minimum",
+      "Average"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "tables_autoanalyzed_user_tables",
+    "label": "User Tables AutoAnalyzed",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum",
+      "Minimum",
+      "Average"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "tables_autovacuumed_user_tables",
+    "label": "User Tables AutoVacuumed",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum",
+      "Minimum",
+      "Average"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "tables_counter_user_tables",
+    "label": "User Tables Counter",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum",
+      "Minimum",
+      "Average"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "tables_vacuumed_user_tables",
+    "label": "User Tables Vacuumed",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum",
+      "Minimum",
+      "Average"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "vacuum_count_user_tables",
+    "label": "Vacuum Counter User Tables",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum",
+      "Minimum",
+      "Average"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "client_connections_total",
+    "label": "Total client connections (Preview)",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum",
+      "Minimum",
+      "Average"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "client_connections_active",
+    "label": "Active client connections",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum",
+      "Minimum",
+      "Average"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "client_connections_waiting",
+    "label": "Waiting client connections",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum",
+      "Minimum",
+      "Average"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "server_connections_active",
+    "label": "Active server connections",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum",
+      "Minimum",
+      "Average"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "server_connections_idle",
+    "label": "Idle server connections",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum",
+      "Minimum",
+      "Average"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "total_pooled_connections",
+    "label": "Total pooled connections",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum",
+      "Minimum",
+      "Average"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "num_pools",
+    "label": "Number of connection pools",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum",
+      "Minimum",
+      "Average"
+    ],
+    "dimensions": [
+      {
+        "localizedValue": "Database Name",
+        "value": "DatabaseName"
+      },
+      {
+        "localizedValue": "Server Name",
+        "value": "ServerName"
+      }
+    ]
+  },
+  {
+    "name": "tcp_connection_backlog",
+    "label": "TCP Connection Backlog",
+    "unit": "Count",
+    "aggregations": [
+      "Maximum",
+      "Minimum",
+      "Average"
+    ],
+    "dimensions": null
+  },
+  {
+    "name": "postmaster_process_cpu_usage_percent",
+    "label": "Postmaster Process cpu usage",
+    "unit": "Percent",
+    "aggregations": [
+      "Average",
+      "Maximum",
+      "Minimum"
+    ],
+    "dimensions": null
+  }
+]

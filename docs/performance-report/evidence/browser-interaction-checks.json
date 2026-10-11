@@ -1,0 +1,306 @@
+{
+  "total": 59,
+  "passed": 59,
+  "stageSamplesChecked": 15,
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "checks": [
+    {
+      "name": "HTML initialized",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "All eleven sections rendered",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "All API routes visible",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "turn sample count",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "turn 1 rendered",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "turn 2 rendered",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "turn 3 rendered",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "turn 4 rendered",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "turn 5 rendered",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "turn 6 rendered",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "turn 7 rendered",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "setup sample count",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "setup 1 rendered",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "setup 2 rendered",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "setup 3 rendered",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "setup 4 rendered",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "avatar sample count",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "avatar 1 rendered",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "avatar 2 rendered",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "avatar 3 rendered",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "avatar 4 rendered",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Protocol avatar",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Protocol audioOnly",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Protocol ws",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Operation 3a840de5",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Lifecycle toggle 3a840de5",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Operation 7bff59c8",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Lifecycle toggle 7bff59c8",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Operation 48944196",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Lifecycle toggle 48944196",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Operation 17f12020",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Lifecycle toggle 17f12020",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Operation 99f8fb5a",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Lifecycle toggle 99f8fb5a",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Operation 9e3df9b3",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Lifecycle toggle 9e3df9b3",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Media 2e59fd58 delay",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Media 2e59fd58 loss",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Media 2e59fd58 video",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Media 2e59fd58 bitrate",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Media 7981e284 delay",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Media 7981e284 loss",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Media 7981e284 video",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Media 7981e284 bitrate",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Media 08c066f9 delay",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Media 08c066f9 loss",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Media 08c066f9 video",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Media 08c066f9 bitrate",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "API text filter",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "API empty result",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "API category filter",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Infra cpu",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Infra memory",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Infra pgcpu",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Infra pgconn",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Scoring cases rendered",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Primary deployment evidence points to original snapshot",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "No undefined visible text",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "No page horizontal overflow",
+      "passed": true,
+      "detail": "1440 / 1440"
+    }
+  ]
+}

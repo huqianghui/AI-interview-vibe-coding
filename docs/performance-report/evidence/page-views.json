@@ -1,0 +1,171 @@
+{
+  "tables": [
+    {
+      "columns": [
+        {
+          "name": "timestamp",
+          "type": "datetime"
+        },
+        {
+          "name": "id",
+          "type": "string"
+        },
+        {
+          "name": "itemId",
+          "type": "string"
+        },
+        {
+          "name": "operation_Id",
+          "type": "string"
+        },
+        {
+          "name": "operation_ParentId",
+          "type": "string"
+        },
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "duration",
+          "type": "real"
+        },
+        {
+          "name": "url",
+          "type": "string"
+        },
+        {
+          "name": "client_Browser",
+          "type": "string"
+        },
+        {
+          "name": "client_OS",
+          "type": "string"
+        }
+      ],
+      "name": "PrimaryResult",
+      "rows": [
+        [
+          "2026-10-10T03:52:16.587Z",
+          "3a840de59c2c4de6a8bc814e0bdfc6fe",
+          "fce4441a-c45d-11f1-a04d-7ced8d3ed170",
+          "3a840de59c2c4de6a8bc814e0bdfc6fe",
+          "3a840de59c2c4de6a8bc814e0bdfc6fe",
+          "AI Interview",
+          2207,
+          "https://ca-aiinterview-public-frontend.victoriousocean-10de9a49.swedencentral.azurecontainerapps.io/interview",
+          "Chrome 151.0",
+          "Windows 10"
+        ],
+        [
+          "2026-10-10T06:08:26.396Z",
+          "7bff59c8010e4069bc39b9067ea3e42d",
+          "026ad972-c471-11f1-a04b-7c1e521376b3",
+          "7bff59c8010e4069bc39b9067ea3e42d",
+          "7bff59c8010e4069bc39b9067ea3e42d",
+          "AI Interview",
+          2161,
+          "https://ca-aiinterview-public-frontend.victoriousocean-10de9a49.swedencentral.azurecontainerapps.io/interview",
+          "Chrome 151.0",
+          "Windows 10"
+        ],
+        [
+          "2026-10-10T06:39:48.006Z",
+          "48944196d9a3401fb10388e9b62f32ad",
+          "6341e312-c475-11f1-a04b-3833c5d1eb87",
+          "48944196d9a3401fb10388e9b62f32ad",
+          "48944196d9a3401fb10388e9b62f32ad",
+          "AI Interview",
+          2280,
+          "https://ca-aiinterview-public-frontend.victoriousocean-10de9a49.swedencentral.azurecontainerapps.io/interview",
+          "Chrome 151.0",
+          "Windows 10"
+        ],
+        [
+          "2026-10-10T08:06:21.786Z",
+          "d0ea203f5aac44a18c2695f3c65e10bb",
+          "823d39dd-c481-11f1-a04b-6045bdfdd1e3",
+          "d0ea203f5aac44a18c2695f3c65e10bb",
+          "d0ea203f5aac44a18c2695f3c65e10bb",
+          "AI Interview",
+          9187,
+          "https://ca-aiinterview-public-frontend.victoriousocean-10de9a49.swedencentral.azurecontainerapps.io/interview",
+          "Edge 155.0",
+          "Mac OS X 10.15"
+        ],
+        [
+          "2026-10-10T08:06:37.527Z",
+          "964853a9bc324f4c8b4fee01c5f85e0d",
+          "854a0190-c481-11f1-a04b-70a8a57907a1",
+          "964853a9bc324f4c8b4fee01c5f85e0d",
+          "964853a9bc324f4c8b4fee01c5f85e0d",
+          "AI Interview",
+          549,
+          "https://ca-aiinterview-public-frontend.victoriousocean-10de9a49.swedencentral.azurecontainerapps.io/admin",
+          "Edge 155.0",
+          "Mac OS X 10.15"
+        ],
+        [
+          "2026-10-10T08:09:53.474Z",
+          "3acde92e530c4391b0c939c2feee9c30",
+          "f942e967-c481-11f1-a04b-70a8a57907a1",
+          "3acde92e530c4391b0c939c2feee9c30",
+          "3acde92e530c4391b0c939c2feee9c30",
+          "AI Interview",
+          1138,
+          "https://ca-aiinterview-public-frontend.victoriousocean-10de9a49.swedencentral.azurecontainerapps.io/interview",
+          "Edge 155.0",
+          "Mac OS X 10.15"
+        ],
+        [
+          "2026-10-10T08:10:17.258Z",
+          "6f609bbb1c614a16aef223ed64281eb6",
+          "07054b9f-c482-11f1-a04b-6045bdfdd1e3",
+          "6f609bbb1c614a16aef223ed64281eb6",
+          "6f609bbb1c614a16aef223ed64281eb6",
+          "AI Interview",
+          555,
+          "https://ca-aiinterview-public-frontend.victoriousocean-10de9a49.swedencentral.azurecontainerapps.io/admin",
+          "Edge 155.0",
+          "Mac OS X 10.15"
+        ],
+        [
+          "2026-10-10T08:10:55.638Z",
+          "1e0f930a49e441b198ea7f2bc94f4913",
+          "1d64810d-c482-11f1-b306-6045bd74d285",
+          "1e0f930a49e441b198ea7f2bc94f4913",
+          "1e0f930a49e441b198ea7f2bc94f4913",
+          "AI Interview",
+          0,
+          "https://ca-aiinterview-public-frontend.victoriousocean-10de9a49.swedencentral.azurecontainerapps.io/admin/agent",
+          "Edge 155.0",
+          "Mac OS X 10.15"
+        ],
+        [
+          "2026-10-10T08:11:38.6Z",
+          "9bf73fc901a84c71999e4fa014a63d80",
+          "3722a824-c482-11f1-a04d-7c1e523f60bd",
+          "9bf73fc901a84c71999e4fa014a63d80",
+          "9bf73fc901a84c71999e4fa014a63d80",
+          "AI Interview",
+          0,
+          "https://ca-aiinterview-public-frontend.victoriousocean-10de9a49.swedencentral.azurecontainerapps.io/admin",
+          "Edge 155.0",
+          "Mac OS X 10.15"
+        ],
+        [
+          "2026-10-10T08:11:51.052Z",
+          "17f1202013e449e7a1a5696a94bb3b55",
+          "3df89da7-c482-11f1-a04b-7ced8d3e83c6",
+          "17f1202013e449e7a1a5696a94bb3b55",
+          "17f1202013e449e7a1a5696a94bb3b55",
+          "AI Interview",
+          516,
+          "https://ca-aiinterview-public-frontend.victoriousocean-10de9a49.swedencentral.azurecontainerapps.io/interview",
+          "Edge 155.0",
+          "Mac OS X 10.15"
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,159 @@
+{
+  "tables": [
+    {
+      "columns": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "audio_path",
+          "type": "string"
+        },
+        {
+          "name": "outcome",
+          "type": "string"
+        },
+        {
+          "name": "turn_kind",
+          "type": "string"
+        },
+        {
+          "name": "mode",
+          "type": "string"
+        },
+        {
+          "name": "n",
+          "type": "long"
+        },
+        {
+          "name": "interviews",
+          "type": "long"
+        },
+        {
+          "name": "ops",
+          "type": "long"
+        },
+        {
+          "name": "first_seen",
+          "type": "datetime"
+        },
+        {
+          "name": "latest",
+          "type": "datetime"
+        },
+        {
+          "name": "sampled",
+          "type": "int"
+        }
+      ],
+      "name": "PrimaryResult",
+      "rows": [
+        [
+          "voice.avatar",
+          "webrtc",
+          "frame",
+          "",
+          "",
+          4,
+          4,
+          4,
+          "2026-10-10T03:52:21.653Z",
+          "2026-10-10T08:12:08.612Z",
+          1
+        ],
+        [
+          "voice.media",
+          "webrtc",
+          "",
+          "",
+          "video",
+          73,
+          3,
+          3,
+          "2026-10-10T06:08:48.583Z",
+          "2026-10-10T08:29:37.69Z",
+          1
+        ],
+        [
+          "voice.setup",
+          "webrtc",
+          "heard",
+          "",
+          "",
+          4,
+          4,
+          4,
+          "2026-10-10T03:52:22.606Z",
+          "2026-10-10T08:12:09.512Z",
+          1
+        ],
+        [
+          "voice.setup",
+          "webrtc",
+          "superseded",
+          "",
+          "",
+          2,
+          1,
+          1,
+          "2026-10-10T12:00:23.145Z",
+          "2026-10-10T12:00:30.768Z",
+          1
+        ],
+        [
+          "voice.setup",
+          "webrtc",
+          "closed",
+          "",
+          "",
+          1,
+          1,
+          1,
+          "2026-10-10T12:00:33.669Z",
+          "2026-10-10T12:00:33.669Z",
+          1
+        ],
+        [
+          "voice.turn",
+          "webrtc",
+          "",
+          "answer",
+          "",
+          7,
+          3,
+          3,
+          "2026-10-10T03:52:39.906Z",
+          "2026-10-10T06:40:38.868Z",
+          1
+        ],
+        [
+          "voice.turn",
+          "webrtc",
+          "",
+          "opening",
+          "",
+          4,
+          4,
+          4,
+          "2026-10-10T03:52:22.606Z",
+          "2026-10-10T08:12:14.359Z",
+          1
+        ],
+        [
+          "voice.turn",
+          "webrtc",
+          "",
+          "aside",
+          "",
+          3,
+          1,
+          1,
+          "2026-10-10T08:12:09.513Z",
+          "2026-10-10T12:00:33.667Z",
+          1
+        ]
+      ]
+    }
+  ]
+}

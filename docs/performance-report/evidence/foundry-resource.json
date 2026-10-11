@@ -1,0 +1,16 @@
+[
+  {
+    "id": "/subscriptions/7a03e9b8-18d6-48e7-b186-0ec68da9e86f/resourceGroups/ai-foundary-rg/providers/Microsoft.CognitiveServices/accounts/ai-foundary-hu-sweden-central2",
+    "kind": "AIServices",
+    "location": "swedencentral",
+    "name": "ai-foundary-hu-sweden-central2",
+    "sku": {
+      "capacity": null,
+      "family": null,
+      "model": null,
+      "name": "S0",
+      "size": null,
+      "tier": null
+    }
+  }
+]
