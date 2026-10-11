@@ -647,3 +647,64 @@ export async function fetchInterviewRecording(
   );
   return URL.createObjectURL(await resp.blob());
 }
+
+// ── Background jobs (spec-jobs-and-scale-out §6) ───────────────────────
+
+export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+export type JobKind =
+  | "score_interview"
+  | "sop_build"
+  | "sop_summary"
+  | "sop_backfill"
+  | "citation_run"
+  | "persona_sync";
+
+export interface JobItem {
+  job_id: string;
+  kind: JobKind;
+  target_id: string;
+  /** The candidate, document, bank or interviewer the job works on; "" when unknown. */
+  target_label: string;
+  status: JobStatus;
+  attempts: number;
+  max_attempts: number;
+  /** Scoring's progress: questions graded of all. */
+  done?: number | null;
+  total?: number | null;
+  error: string;
+  created_by: string;
+  created_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface JobsPage {
+  items: JobItem[];
+  total: number;
+}
+
+export interface JobsQuery {
+  status?: JobStatus[];
+  kind?: JobKind[];
+  limit?: number;
+  offset?: number;
+}
+
+/** Background jobs, newest first. */
+export function listJobs(query: JobsQuery = {}) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null) continue;
+    if (Array.isArray(value)) value.forEach((v) => params.append(key, String(v)));
+    else params.set(key, String(value));
+  }
+  return adminRequest<JobsPage>(`/admin/jobs?${params.toString()}`);
+}
+
+/** Queue a failed or cancelled job's work again (a new job). */
+export const retryJob = (jobId: string) =>
+  adminRequest<JobItem>(`/admin/jobs/${jobId}/retry`, { method: "POST" });
+
+/** Cancel a queued job, or ask a running one to stop. */
+export const cancelJob = (jobId: string) =>
+  adminRequest<JobItem>(`/admin/jobs/${jobId}/cancel`, { method: "POST" });

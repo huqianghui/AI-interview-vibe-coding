@@ -26,15 +26,17 @@ import { useAdminStyles } from "./admin/shared";
 import { ConnectionTab } from "./admin/ConnectionTab";
 import { ContentTab } from "./admin/ContentTab";
 import { InterviewsTab } from "./admin/InterviewsTab";
+import { JobsTab } from "./admin/JobsTab";
 import { SopTab } from "./admin/SopTab";
 import { UsersTab } from "./admin/UsersTab";
 import { useConnectionTab } from "./admin/useConnectionTab";
 import { useInterviewsTab } from "./admin/useInterviewsTab";
+import { useJobsTab } from "./admin/useJobsTab";
 import { useSopTab } from "./admin/useSopTab";
 import { useContentTab } from "./admin/useContentTab";
 import { useUsersTab } from "./admin/useUsersTab";
 
-type AdminTab = "content" | "sop" | "connection" | "users" | "results";
+type AdminTab = "content" | "sop" | "connection" | "users" | "results" | "jobs";
 
 export function AdminPage() {
   const styles = useAdminStyles();
@@ -64,6 +66,7 @@ export function AdminPage() {
   const connection = useConnectionTab(guard);
   const users = useUsersTab(authed && tab === "users");
   const results = useInterviewsTab(authed && tab === "results");
+  const jobs = useJobsTab(authed && tab === "jobs");
   const sop = useSopTab(authed && tab === "sop");
   const { refreshBanks } = content;
   const { refreshConfig, refreshExternalConfig } = connection;
@@ -159,6 +162,9 @@ export function AdminPage() {
           <Tab value="results" data-testid="admin-tab-results">
             {t("admin.results.tab")}
           </Tab>
+          <Tab value="jobs" data-testid="admin-tab-jobs">
+            {t("admin.jobs.tab")}
+          </Tab>
         </TabList>
 
         {tab === "content" && <ContentTab state={content} guard={guard} />}
@@ -166,6 +172,7 @@ export function AdminPage() {
         {tab === "connection" && <ConnectionTab state={connection} guard={guard} />}
         {tab === "users" && <UsersTab state={users} />}
         {tab === "results" && <InterviewsTab state={results} />}
+        {tab === "jobs" && <JobsTab state={jobs} />}
 
         {error && (
           <Body1 role="alert" className={styles.errorText}>

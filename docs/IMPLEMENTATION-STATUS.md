@@ -112,8 +112,8 @@ acknowledgement, never a local report.
 | Capability | Status | Shipped | Live |
 |---|---|---|---|
 | Larger containers (backend 2 vCPU / 4 GiB, frontend 1 / 2), PostgreSQL B2s + `max_connections` 429, per-process pool settings | ✅ Done | v0.66.1.0 / PR #249 | ✅ applied 2026-10-11 (`/api/health/db` 200) |
-| `jobs` table + job runner process (`jobs` sidecar container); scoring, SOP conversion / summaries / backfill, citation runs and persona sync run as jobs; judge lease, boot lock and config refresh across processes | ✅ Done | v0.67.0.0 | pending |
-| Admin Jobs tab | ⏳ Next | — | — |
+| `jobs` table + job runner process (`jobs` sidecar container); scoring, SOP conversion / summaries / backfill, citation runs and persona sync run as jobs; judge lease, boot lock and config refresh across processes | ✅ Done | v0.67.0.0 / PR #250, v0.67.0.1 / PR #251 | ✅ verified 2026-10-11 (sidecar live; boot jobs queued once per boot and succeeded, read from the `jobs` table inside the container) |
+| Admin Jobs tab | ✅ Done | v0.68.0.0 | pending |
 | 3 uvicorn workers × max 2 replicas | ⏳ After the Jobs tab | — | — |
 
 ## End-to-end tests (v0.14.0.0)
