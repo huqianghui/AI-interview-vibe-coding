@@ -276,3 +276,9 @@ and `CHANGELOG.md`.
   then history: the candidate sees their own on the start page, the admin sees every user's
   (all statuses incl. in-progress and abandoned) inside the Users tab, with report, PDF and
   transcript download.
+- **[spec-jobs-and-scale-out.md](spec-jobs-and-scale-out.md)** — a `jobs` table and a separate job
+  process (sidecar container) for scoring, SOP builds, summaries, citation runs and persona sync;
+  process-local locks moved to the database (judge lease, boot/migration advisory lock); config
+  saves reach every process; an admin Jobs tab; then scale-out to 3 uvicorn workers × max 2
+  replicas with larger containers and PostgreSQL B2s (owner, 2026-10-11). Closes
+  architecture-review deferred item 3. Recordings deliberately stay in the web process.
