@@ -81,6 +81,9 @@ export type ApiContract = [
   Holds<Refines<Admin.Assignment, Schemas["AssignmentIn"]>>,
   Holds<Refines<Admin.InterviewResultItem, Schemas["InterviewResultItem"]>>,
   Holds<Refines<Admin.InterviewResultsPage, Schemas["InterviewResultsPage"]>>,
+  // Background jobs (spec-jobs-and-scale-out).
+  Holds<Refines<Admin.JobItem, Schemas["JobOut"]>>,
+  Holds<Refines<Admin.JobsPage, Schemas["JobsPage"]>>,
   // Runtime config for the browser (App Insights).
   Holds<Refines<Telemetry.ClientConfig, Schemas["ClientConfig"]>>,
 ];

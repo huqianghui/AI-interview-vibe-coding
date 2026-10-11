@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.68.0.0 (2026-10-11)
+
+### Added
+- **An admin Jobs tab.** Every background job (interview scoring, SOP conversion, summary drafts,
+  the boot SOP backfill, citation runs, interviewer sync), newest first: what it works on, its
+  status, scoring progress, attempts, when it was queued, how long it ran, who started it, and its
+  error. It opens on what is going on and what went wrong (queued, running, failed); filter by
+  status and kind. A failed or cancelled job can be retried, a queued or running one cancelled; the
+  outcome is the one line above the table. The list refreshes every 5 s while a job is going.
+  API: `GET /admin/jobs`, `POST /admin/jobs/{id}/retry`, `POST /admin/jobs/{id}/cancel`.
+
+### Fixed
+- **Times in admin tables and the transcript download were off by the viewer's UTC offset** (8
+  hours in China). The backend sends UTC without a zone and the page read it as local time; a
+  timestamp without a zone is read as UTC now (`parseUtc`).
+
 ## 0.67.0.1 (2026-10-11)
 
 ### Fixed
