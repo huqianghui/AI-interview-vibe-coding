@@ -382,7 +382,9 @@ async def test_the_job_process_waits_for_the_migrations(factory, monkeypatch):
 
     async with factory() as db:
         await db.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32))"))
-        await db.execute(text("INSERT INTO alembic_version VALUES ('older')"))
+        # The revision before the jobs migration: a real, known one (an unknown one reads as AHEAD
+        # of this image, and the wait would rightly return at once).
+        await db.execute(text("INSERT INTO alembic_version VALUES ('c1d2e3f4a5b6')"))
         await db.commit()
     monkeypatch.setattr(app.db, "engine", factory.kw["bind"])
     waiting = asyncio.create_task(app.db.wait_for_schema(poll_seconds=0.02))
