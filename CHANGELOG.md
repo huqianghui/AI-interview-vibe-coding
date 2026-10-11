@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.66.1.0 (2026-10-11)
+
+### Changed
+- **Larger containers and database, ready for more than one backend process.** Backend 2.0 vCPU /
+  4 GiB (was 1.0 / 2), frontend 1.0 vCPU / 2 GiB (was 0.5 / 1), PostgreSQL Burstable B2s (was
+  B1ms). B1ms allows 35 user connections, too few once the backend runs several workers and
+  replicas (docs/planning/spec-jobs-and-scale-out.md). `max_connections` is set to 429 explicitly:
+  Azure computes it only when a server is created, so a resized server keeps its old value.
+- **The PostgreSQL pool is sized per process by settings** (`DB_POOL_SIZE`, `DB_MAX_OVERFLOW`;
+  defaults unchanged at 10 + 15), because every uvicorn worker and the coming job runner opens its
+  own pool against one shared server limit.
+
 ## 0.66.0.1 (2026-10-10)
 
 ### Fixed

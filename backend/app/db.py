@@ -88,13 +88,13 @@ def make_engine(url: str, **kwargs: Any) -> AsyncEngine:
         kwargs.setdefault("pool_recycle", 1800)
         kwargs.setdefault("pool_pre_ping", True)
     if parsed.get_backend_name() == "postgresql" and kwargs.get("poolclass") is None:
-        # Sized explicitly rather than SQLAlchemy's 5 + 10: concurrent interviews, voice sessions
-        # and scoring all draw from it. 10 + 15 = 25 stays inside the Burstable B1ms server's ~40
-        # usable connections (max_connections 50, 10 reserved), leaving room for Alembic and a
-        # revision swap's second replica. Paths that wait on an LLM or the external brain end
-        # their transaction first, so a connection is held only for the queries themselves.
-        kwargs.setdefault("pool_size", 10)
-        kwargs.setdefault("max_overflow", 15)
+        # Sized by settings (DB_POOL_SIZE / DB_MAX_OVERFLOW), not SQLAlchemy's 5 + 10: concurrent
+        # interviews, voice sessions and scoring all draw from it, and the server's limit is
+        # shared by every process (see Settings.db_pool_size). Paths that wait on an LLM or the
+        # external brain end their transaction first, so a connection is held only for the
+        # queries themselves.
+        kwargs.setdefault("pool_size", _settings.db_pool_size)
+        kwargs.setdefault("max_overflow", _settings.db_max_overflow)
         kwargs.setdefault("pool_timeout", 30)
     built = create_async_engine(url, **kwargs)
     if built.url.get_backend_name() == "sqlite":
