@@ -619,34 +619,15 @@ async def relocate(
     )
 
 
-# Runs started by the admin API; held so they are not garbage-collected, cancelled at shutdown.
-RUNS: set[asyncio.Task] = set()
-# A running row whose heartbeat (``updated_at``, touched after every item) is older than this, and
-# that this process is not executing, was interrupted. Items take ~10 s; a model call is bounded at
-# 90 s with up to 3 attempts.
-STALE_AFTER = timedelta(minutes=10)
-
-
 def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-# Ids of the runs this process is executing: a "running" row not among them was interrupted (a
-# restart or a deploy) and must not block the next run.
-_LIVE: set[str] = set()
-
-
-async def _run(session_factory, run_id: str, fresh: bool = False) -> None:  # noqa: ANN001
-    try:
-        await _run_inner(session_factory, run_id, fresh)
-    finally:
-        _LIVE.discard(run_id)
-
-
-async def _run_inner(session_factory, run_id: str, fresh: bool) -> None:  # noqa: ANN001
+async def run_relocation(session_factory, run_id: str, *, fresh: bool = False) -> None:  # noqa: ANN001
+    """The ``citation_run`` job: relocate the run's bank, recording a failure on the run row."""
     async with session_factory() as db:
         run = await db.get(CitationRun, run_id)
-        if run is None:
+        if run is None or run.status != "running":
             return
         bank_id = run.bank_id
         try:
@@ -663,16 +644,39 @@ async def _run_inner(session_factory, run_id: str, fresh: bool) -> None:  # noqa
                 await db.commit()
 
 
+# A run row is committed a moment before its job; younger than this it is never "interrupted".
+_JOBLESS_GRACE = timedelta(seconds=30)
+
+
+async def _interrupted(db: AsyncSession, run: CitationRun) -> bool:
+    """A running row with no live job behind it: its process stopped (a restart or a deploy)."""
+    from app.jobs import queue
+
+    if run.status != "running" or _now() - run.created_at < _JOBLESS_GRACE:
+        return False
+    job = await queue.live_job(db, "citation_run", run.bank_id)
+    return job is None or queue.payload_of(job).get("run_id") != run.id
+
+
+async def _mark_interrupted(db: AsyncSession, run: CitationRun) -> None:
+    run.status = "failed"
+    run.error = "interrupted (the server restarted); run it again"
+    await db.commit()
+
+
 async def start_relocation(
     db: AsyncSession,
     session_factory,  # noqa: ANN001 — async_sessionmaker
     bank_id: str,
     *,
     fresh: bool = False,
+    created_by: str = "system",
 ) -> CitationRun:
-    """Start relocating a bank's citations in the background; one run per bank at a time.
+    """Start relocating a bank's citations as a ``citation_run`` job; one run per bank at a time.
     ``fresh`` discards earlier relocations: every item starts again from its original label.
     A bank bound to no SOP library has nothing to cite: :class:`BankHasNoLibrary`."""
+    from app.jobs import queue, runner
+
     if await bank_library(db, bank_id) is None:
         raise BankHasNoLibrary(bank_id)
     running = (
@@ -683,13 +687,9 @@ async def start_relocation(
         )
     ).scalar_one_or_none()
     if running is not None:
-        heartbeat = running.updated_at or running.created_at
-        alive = running.id in _LIVE or (heartbeat is not None and _now() - heartbeat < STALE_AFTER)
-        if alive:
+        if not await _interrupted(db, running):
             return running
-        running.status = "failed"
-        running.error = "interrupted (the server restarted); run it again"
-        await db.commit()
+        await _mark_interrupted(db, running)
     # Microsecond creation time: runs are ordered by it (the first run keeps the original labels),
     # and the database default has one-second resolution on SQLite.
     run = CitationRun(bank_id=bank_id, status="running", created_at=_now())
@@ -706,15 +706,25 @@ async def start_relocation(
                 )
             )
         ).scalar_one()
-    _LIVE.add(run.id)
-    task = asyncio.create_task(_run(session_factory, run.id, fresh))
-    RUNS.add(task)
-    task.add_done_callback(RUNS.discard)
+    # One attempt: a run interrupted part-way is reported as interrupted, not silently replayed.
+    job, new = await queue.enqueue(
+        db,
+        "citation_run",
+        bank_id,
+        {"run_id": run.id, "fresh": fresh},
+        created_by=created_by,
+        max_attempts=1,
+    )
+    if new:
+        await runner.kick(session_factory, job)
+    await db.refresh(run)
     return run
 
 
 async def latest_run(db: AsyncSession, bank_id: str) -> CitationRun | None:
-    return (
+    """The bank's newest run; one still marked running whose process stopped is reported (and
+    recorded) as interrupted rather than running forever."""
+    run = (
         await db.execute(
             select(CitationRun)
             .where(CitationRun.bank_id == bank_id)
@@ -722,3 +732,6 @@ async def latest_run(db: AsyncSession, bank_id: str) -> CitationRun | None:
             .limit(1)
         )
     ).scalar_one_or_none()
+    if run is not None and await _interrupted(db, run):
+        await _mark_interrupted(db, run)
+    return run

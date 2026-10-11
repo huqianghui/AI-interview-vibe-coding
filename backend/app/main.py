@@ -26,7 +26,7 @@ from app.api import (
     voice_live_ws,
 )
 from app.config import get_settings
-from app.db import DatabaseUnavailableError, engine
+from app.db import DatabaseUnavailableError, boot_lock, engine
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -110,33 +110,48 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         ("master config overlay", apply_master_config_to_settings),
         ("external interviewer config", _seed_external_config),
     )
-    for label, step in boot_steps:
-        await _best_effort(label, step, async_session_factory)
+    # Every uvicorn worker of every replica runs this lifespan: the lock makes them take turns, so
+    # create-only seeds never both see a row missing (the later ones find the work done).
+    async with boot_lock():
+        for label, step in boot_steps:
+            await _best_effort(label, step, async_session_factory)
+        # Slow boot work is queued for the job process, once however many processes boot:
+        # syncing the default persona to Foundry, and converting every SOP not yet split into
+        # sections (Document Intelligence takes ~15 s per document; the startup probe would fail).
+        await _best_effort("boot jobs", _queue_boot_jobs, async_session_factory)
 
-    prewarm_task = asyncio.create_task(_prewarm_azure_credential())
-    persona_sync_task = asyncio.create_task(_sync_default_persona())
+    from app.jobs import runner as job_runner
+    from app.services.config_overlay import refresh_forever
+
+    background = [
+        asyncio.create_task(_prewarm_azure_credential()),
+        # A config save made in another worker or replica reaches this one.
+        asyncio.create_task(refresh_forever()),
+    ]
+    stop_runner = asyncio.Event()
+    runner_task = None
+    if settings.job_runner_mode == "embedded":
+        # Dev, tests, e2e: this process runs jobs too. Production runs them in the job process.
+        runner = job_runner.runner_for(async_session_factory)
+        runner_task = asyncio.create_task(runner.run_forever(stop_runner))
     # Issue #114: pre-build the judge/scoring LLM client in the background so the first judge call
     # after boot doesn't pay the cold credential probe inline (it timed out live at 8 s).
     from app.interview.judge import warm_adapter
 
-    judge_warm_task = asyncio.create_task(warm_adapter())
-    # Convert every SOP not yet split into sections (spec-sop-section-grounding). Background, not a
-    # boot step: Document Intelligence takes ~15 s per document and the startup probe would fail.
-    from app.services.sop_section_service import build_missing
-
-    sections_task = asyncio.create_task(build_missing(async_session_factory))
+    background.append(asyncio.create_task(warm_adapter()))
     try:
         yield
     finally:
-        # Don't leave dangling tasks on shutdown; cancel any that haven't finished.
-        # Section builds started by uploads or "Convert again" too: a build is one transaction, so a
-        # cancelled one leaves the document as it was and the next boot converts it.
-        boot = (prewarm_task, persona_sync_task, judge_warm_task, sections_task)
-        from app.services.sop_citation_service import RUNS as citation_runs
-
-        for task in (*boot, *admin_sop._BUILDS, *citation_runs):
+        # Don't leave dangling tasks on shutdown. An embedded runner is STOPPED, not cancelled: a
+        # task cancelled before it first ran skips its cleanup, and the runner's cleanup hands its
+        # running jobs back to the queue so the next process starts them without waiting.
+        stop_runner.set()
+        if runner_task is not None:
+            await runner_task
+        for task in background:
             if not task.done():
                 task.cancel()
+        await asyncio.gather(*background, return_exceptions=True)
 
 
 async def _best_effort(label: str, step, session_factory) -> None:
@@ -168,21 +183,17 @@ async def _prewarm_azure_credential() -> None:
         pass
 
 
-async def _sync_default_persona() -> None:
-    """Sync the seeded default persona to Foundry in the background (never blocks boot).
+async def _queue_boot_jobs(session) -> None:
+    from app.db import async_session_factory
+    from app.jobs import queue
+    from app.jobs import runner as job_runner
+    from app.services.persona_seed import DEFAULT_PERSONA_ID
 
-    Voice's P5 gate needs ``agent_sync_status == "synced"``, so the seeded definition must be synced
-    for the digital human to speak. Best-effort: any failure (no Foundry creds, network) leaves the
-    persona ``failed`` — voice degrades to text — and is swallowed here. No-op when already synced.
-    """
-    try:
-        from app.db import async_session_factory
-        from app.services.persona_seed import sync_default_persona
-
-        async with async_session_factory() as session:
-            await sync_default_persona(session)
-    except Exception:  # noqa: BLE001 — background sync is best-effort; never surface at startup
-        pass
+    # Voice's P5 gate needs the seeded default persona synced to Foundry; a no-op once synced.
+    for kind, target in (("persona_sync", DEFAULT_PERSONA_ID), ("sop_backfill", "all")):
+        job, new = await queue.enqueue_once_per_boot(session, kind, target)
+        if new and job is not None:
+            await job_runner.kick(async_session_factory, job)
 
 
 # Application Insights, before the app exists so FastAPI is instrumented (app/telemetry.py). A no-op

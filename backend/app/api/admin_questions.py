@@ -373,7 +373,9 @@ async def relocate_citations(
     except QuestionBankNotFound as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bank not found") from exc
     try:
-        run = await sop_citation_service.start_relocation(db, session_factory, bank_id, fresh=fresh)
+        run = await sop_citation_service.start_relocation(
+            db, session_factory, bank_id, fresh=fresh, created_by="admin"
+        )
     except sop_citation_service.BankHasNoLibrary as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

@@ -1332,6 +1332,16 @@ async def test_judge_concurrent_call_is_409(client, db_session, scripted_judge):
         return '{"verdict": "wait", "speech_text": ""}'
 
     scripted_judge.responses.extend([slow, '{"verdict": "wait", "speech_text": ""}'])
+    # Each request its own session, as in production: the lease is a guarded UPDATE in the
+    # database now, and one AsyncSession cannot carry two concurrent requests' transactions.
+    from app.db import get_db
+    from app.main import app
+
+    async def _own_session():
+        async with db_session._test_factory() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = _own_session
     first, second = await asyncio.gather(
         client.post(f"/candidate/interview/{iv}/judge", headers=headers, json=_judge_body(qid)),
         client.post(f"/candidate/interview/{iv}/judge", headers=headers, json=_judge_body(qid)),

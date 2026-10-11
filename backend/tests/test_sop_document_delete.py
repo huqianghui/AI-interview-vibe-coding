@@ -119,12 +119,14 @@ async def test_an_sop_a_report_cites_cannot_be_deleted(client, db_session, admin
 async def test_a_document_being_converted_or_summarised_is_not_deleted(
     client, db_session, admin_auth, monkeypatch
 ):
-    from app.services import sop_section_service
+    from app.jobs import queue
 
-    doc_id = await _doc(db_session)
-    monkeypatch.setattr(sop_section_service, "converting", lambda d: d == doc_id)
-    busy = await client.delete(f"/admin/sop/documents/{doc_id}", headers=admin_auth)
-    assert busy.status_code == 409 and "converted" in busy.json()["detail"]
+    for kind in ("sop_build", "sop_summary"):
+        doc_id = await _doc(db_session)
+        # A live job for it, as the job process would hold while converting or drafting.
+        await queue.enqueue(db_session, kind, doc_id)
+        busy = await client.delete(f"/admin/sop/documents/{doc_id}", headers=admin_auth)
+        assert busy.status_code == 409 and "converted" in busy.json()["detail"], kind
 
 
 async def test_a_relocation_report_counts_as_a_citation_but_only_for_the_delete(

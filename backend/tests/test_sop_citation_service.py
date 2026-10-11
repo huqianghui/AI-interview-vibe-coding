@@ -4,7 +4,6 @@ sections, everything else found by search, nothing invented, results written to 
 Synthetic SOP text only: this repo is public.
 """
 
-import asyncio
 import json
 
 import pytest
@@ -220,10 +219,9 @@ async def test_the_relocation_api_runs_in_the_background_and_reports(
     assert (await client.get(base, headers=admin_auth)).json() is None
 
     started = await client.post(base, headers=admin_auth)
-    assert started.status_code == 202 and started.json()["status"] == "running"
-    again = await client.post(base, headers=admin_auth)  # one run at a time
-    assert again.json()["run_id"] == started.json()["run_id"]
-    await asyncio.gather(*sop_citation_service.RUNS)
+    # The run is a citation_run job; in tests it runs inside the request (JOB_RUNNER_MODE=inline).
+    # One run at a time: test_a_recent_run_from_another_process_is_not_taken_over.
+    assert started.status_code == 202
 
     latest = (await client.get(base, headers=admin_auth)).json()
     assert (latest["status"], latest["total"]) == ("done", 1)
@@ -245,7 +243,6 @@ async def test_a_run_counts_as_published_once_a_version_is_published_after_it(
     bank_id = bank.id
     base = f"/admin/question-banks/{bank_id}/relocate-citations"
     run_id = (await client.post(base, headers=admin_auth)).json()["run_id"]
-    await asyncio.gather(*sop_citation_service.RUNS)
     assert (await client.get(base, headers=admin_auth)).json()["published"] is False
 
     # SQLite keeps whole seconds (in UTC): put the run's finish clearly before the publish.
@@ -264,13 +261,11 @@ async def test_a_run_that_changes_nothing_leaves_nothing_to_publish(client, db_s
     )
     base = f"/admin/question-banks/{bank.id}/relocate-citations"
     await client.post(base, headers=admin_auth)
-    await asyncio.gather(*sop_citation_service.RUNS)
     first = (await client.get(base, headers=admin_auth)).json()
     assert [r["changed"] for r in first["rows"]] == [True]  # the label became a section
     assert first["published"] is False
 
     await client.post(base, headers=admin_auth)  # the same result again: nothing new
-    await asyncio.gather(*sop_citation_service.RUNS)
     second = (await client.get(base, headers=admin_auth)).json()
     assert second["run_id"] != first["run_id"]
     assert [r["changed"] for r in second["rows"]] == [False]
@@ -279,16 +274,18 @@ async def test_a_run_that_changes_nothing_leaves_nothing_to_publish(client, db_s
 
 async def test_a_run_interrupted_by_a_restart_does_not_block_the_next(db_session):
     bank, _ = await _bank(db_session, [("x", 100, "")])
-    stale = CitationRun(bank_id=bank.id, status="running")
+    # A run row with no live job behind it, older than the moment between the two commits.
+    stale = CitationRun(
+        bank_id=bank.id,
+        status="running",
+        created_at=sop_citation_service._now() - sop_citation_service._JOBLESS_GRACE * 2,
+    )
     db_session.add(stale)
-    await db_session.commit()
-    stale.updated_at = sop_citation_service._now() - sop_citation_service.STALE_AFTER * 2
     await db_session.commit()
     run = await sop_citation_service.start_relocation(db_session, db_session._test_factory, bank.id)
     assert run.id != stale.id
     await db_session.refresh(stale)
     assert stale.status == "failed" and "interrupted" in stale.error
-    await asyncio.gather(*sop_citation_service.RUNS)
 
 
 async def test_a_failed_run_is_recorded(db_session, monkeypatch):
@@ -301,7 +298,6 @@ async def test_a_failed_run_is_recorded(db_session, monkeypatch):
     run_id = (
         await sop_citation_service.start_relocation(db_session, db_session._test_factory, bank.id)
     ).id
-    await asyncio.gather(*sop_citation_service.RUNS)
     db_session.expire_all()
     run = await db_session.get(CitationRun, run_id)
     assert run.status == "failed" and "index unavailable" in run.error
@@ -417,11 +413,13 @@ async def test_the_database_allows_one_running_run_per_bank(db_session):
 
 async def test_a_recent_run_from_another_process_is_not_taken_over(db_session):
     bank, _ = await _bank(db_session, [("x", 100, "")])
-    other = CitationRun(bank_id=bank.id, status="running")
+    # Started a moment ago by another process: its job is live, so this one attaches to it.
+    other = CitationRun(bank_id=bank.id, status="running", created_at=sop_citation_service._now())
     db_session.add(other)
     await db_session.commit()
-    other.updated_at = sop_citation_service._now()  # heartbeat just now, not in this process
-    await db_session.commit()
+    from app.jobs import queue
+
+    await queue.enqueue(db_session, "citation_run", bank.id, {"run_id": other.id})
     again = await sop_citation_service.start_relocation(
         db_session, db_session._test_factory, bank.id
     )

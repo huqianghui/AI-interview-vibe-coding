@@ -92,11 +92,28 @@ jobs:
             backend/
 
       - name: Deploy backend Container App
+        # Two containers, one image (docs/planning/spec-jobs-and-scale-out.md): `backend` (the web
+        # server, which runs the migrations) and `jobs` (the job runner). The job runner goes first:
+        # the new one waits until the database is at the new head, which the new web container
+        # brings it to in the second update. An app without a `jobs` container gets the first only.
         run: |
+          image="$ACR_NAME.azurecr.io/$BACKEND_IMAGE_NAME:$IMAGE_TAG"
+          containers=$(az containerapp show \
+            --name "$BACKEND_APP_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "properties.template.containers[].name" -o tsv)
+          if grep -qx jobs <<<"$containers"; then
+            az containerapp update \
+              --name "$BACKEND_APP_NAME" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --container-name jobs \
+              --image "$image"
+          fi
           az containerapp update \
             --name "$BACKEND_APP_NAME" \
             --resource-group "$AZURE_RESOURCE_GROUP" \
-            --image "$ACR_NAME.azurecr.io/$BACKEND_IMAGE_NAME:$IMAGE_TAG"
+            --container-name backend \
+            --image "$image"
 
       - name: Update the database auto-start job image
         # The scheduled job that starts PostgreSQL when it is stopped runs a script from the backend

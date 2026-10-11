@@ -285,21 +285,22 @@ async def _until_scored(client, admin_auth, interview_id: str) -> dict:
 
 
 async def test_a_second_generate_while_scoring_is_a_409(client, db_session, admin_auth):
-    from app.api import admin_interviews
+    from app.jobs import queue
 
     await _bank(db_session, "Bank", ["Only question?"], is_default=True)
     headers = await mint_candidate_headers(client)
     interview_id = (await _start(client, headers))["interview_session_id"]
     await _finish(client, headers, interview_id)
 
-    admin_interviews._SCORING.add(interview_id)  # a run already in flight
-    try:
-        again = await client.post(f"/admin/interviews/{interview_id}/report", headers=admin_auth)
-        assert again.status_code == 409
-        detail = (await client.get(f"/admin/interviews/{interview_id}", headers=admin_auth)).json()
-        assert detail["scoring"] is True  # the page keeps polling while this is true
-    finally:
-        admin_interviews._SCORING.discard(interview_id)
+    # A run already in flight, in any process: a live score_interview job.
+    job, _ = await queue.enqueue(db_session, "score_interview", interview_id)
+    again = await client.post(f"/admin/interviews/{interview_id}/report", headers=admin_auth)
+    assert again.status_code == 409
+    detail = (await client.get(f"/admin/interviews/{interview_id}", headers=admin_auth)).json()
+    assert detail["scoring"] is True  # the page keeps polling while this is true
+    await queue.request_cancel(db_session, job)
+    detail = (await client.get(f"/admin/interviews/{interview_id}", headers=admin_auth)).json()
+    assert detail["scoring"] is False
 
 
 async def test_a_rescore_that_grades_nothing_keeps_the_saved_report(

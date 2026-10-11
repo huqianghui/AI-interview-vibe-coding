@@ -26,7 +26,8 @@ def boot(db_session, monkeypatch):
     """Run the lifespan against the test DB with the background warm-ups stubbed out."""
     import app.db
     import app.interview.judge
-    import app.services.sop_section_service
+    import app.services.config_overlay
+    from app.jobs import handlers
 
     monkeypatch.setattr(app.db, "async_session_factory", db_session._test_factory)
     started: list[asyncio.Event] = []
@@ -40,10 +41,15 @@ def boot(db_session, monkeypatch):
         return _wait()
 
     monkeypatch.setattr(main, "_prewarm_azure_credential", _forever)
-    monkeypatch.setattr(main, "_sync_default_persona", _forever)
+    monkeypatch.setattr(app.services.config_overlay, "refresh_forever", _forever)
     monkeypatch.setattr(app.interview.judge, "warm_adapter", _forever)
-    # SOP conversion calls Azure Document Intelligence: never from a test.
-    monkeypatch.setattr(app.services.sop_section_service, "build_missing", _forever)
+    # The boot jobs: the persona's Foundry sync, and SOP conversion (Azure Document Intelligence).
+    # Never from a test; boot only has to queue them.
+    monkeypatch.setitem(handlers.HANDLERS, "persona_sync", _forever)
+    monkeypatch.setitem(handlers.HANDLERS, "sop_backfill", _forever)
+    # Boot only has to QUEUE them; running jobs is tests/test_jobs.py's (cancelling a runner mid-
+    # query would also invalidate the in-memory test database's one connection).
+    monkeypatch.setattr(main.settings, "job_runner_mode", "off")
     return started
 
 
@@ -110,12 +116,23 @@ async def test_a_failing_seed_is_logged_and_the_rest_still_run(
 async def test_shutdown_cancels_the_background_warmups(db_session, boot):
     async with main.lifespan(main.app):
         await asyncio.sleep(0)  # let the three tasks start
-        assert len(boot) == 4
+        assert len(boot) == 3
         tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
     await asyncio.sleep(0)
     warmups = [t for t in tasks if "_wait" in repr(t.get_coro())]
-    assert len(warmups) == 4
+    assert len(warmups) == 3  # credential prewarm, config refresh, judge warm-up
     assert all(t.cancelled() for t in warmups)
+
+
+async def test_boot_queues_its_slow_work_as_jobs_once(db_session, boot):
+    from app.models.job import Job
+
+    async with main.lifespan(main.app):
+        pass
+    async with main.lifespan(main.app):  # a second process booting right after: nothing new
+        pass
+    jobs = (await db_session.execute(select(Job.kind, Job.target_id))).all()
+    assert sorted(jobs) == [("persona_sync", DEFAULT_PERSONA_ID), ("sop_backfill", "all")]
 
 
 async def test_best_effort_returns_normally_when_the_step_raises(caplog):
@@ -159,18 +176,6 @@ async def test_credential_prewarm_probes_the_cognitive_scope(monkeypatch):
     assert scopes == [azure_auth.COGNITIVE_SERVICES_SCOPE]
 
 
-async def test_background_persona_sync_swallows_a_failure(db_session, monkeypatch):
-    import app.db
-    import app.services.persona_seed as persona_seed
-
-    async def _down(_db):
-        raise ConnectionError("Foundry unreachable")
-
-    monkeypatch.setattr(app.db, "async_session_factory", db_session._test_factory)
-    monkeypatch.setattr(persona_seed, "sync_default_persona", _down)
-    await main._sync_default_persona()  # must not raise
-
-
 async def test_boot_steps_run_in_dependency_order(db_session, boot, monkeypatch):
     """The overlay reads the master config row, so it must run after that row is seeded; the
     default persona needs the banks and accounts seeded before it. Pin the order, since the
@@ -201,4 +206,6 @@ async def test_boot_steps_run_in_dependency_order(db_session, boot, monkeypatch)
         "master AI Foundry config",
         "master config overlay",
         "external interviewer config",
+        # Last: queues the persona sync and the SOP backfill, which read what the seeds wrote.
+        "boot jobs",
     ]

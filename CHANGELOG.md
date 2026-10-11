@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.67.0.0 (2026-10-11)
+
+### Changed
+- **Slow work runs in its own process.** Scoring an interview, converting an SOP to sections,
+  drafting its summary, the boot SOP backfill, relocating a bank's citations and syncing the
+  default persona are now rows in a new `jobs` table, run by `python -m app.jobs.runner` (the
+  backend app's new `jobs` container) instead of tasks inside the web process. None of that work
+  shares an event loop with a live voice socket any more. The web container only queues
+  (`JOB_RUNNER_MODE=off`); dev and the e2e run the runner inside the web process (`embedded`, the
+  default).
+- **Interrupted work resumes.** A job holds a 60 s lease renewed every 15 s; when its process dies
+  (a deploy, a restart) the lease expires and any runner takes it again, up to three attempts. A
+  scoring run cut off by a deploy used to leave the interview unscored until an admin noticed. A
+  job that fails on its own (a bad model name) fails at once, as before: only a dead process is
+  retried.
+- **The candidate's report and an admin's "Generate report" are one scoring job**: the second
+  follows the first instead of scoring again. The report stream reads the job's progress and sends
+  the same NDJSON lines as before.
+- **Locks that held only within one process now hold across processes**: one judge call per
+  interview (a lease on the interview row), boot seeds and the client bank import (a PostgreSQL
+  advisory lock), and a config save reaches every worker (re-applied at voice connect, at each job,
+  and every 30 s). A citation run whose process stopped reads as interrupted at once rather than
+  after a 10-minute guess.
+
 ## 0.66.1.0 (2026-10-11)
 
 ### Changed

@@ -8,6 +8,7 @@ Step 0 exposes just enough to prove ask → answer → placeholder report over t
 Voice sources (voice / verbal_cue) share the same answer_finalized event and are accepted here.
 """
 
+import asyncio
 import json
 import logging
 from urllib.parse import quote
@@ -22,8 +23,10 @@ from app.dependencies import get_anonymous_session
 from app.interview import external_runner, judge_flow, state_machine
 from app.interview.external_runner import ExternalTurnConflict
 from app.interview.state_machine import ANSWER_SOURCES, InterviewStateError
+from app.jobs import queue, runner
 from app.models.anonymous_session import AnonymousCandidateSession
 from app.models.interview import InterviewSession
+from app.models.job import Job
 from app.models.judge_event import JUDGE_TRIGGERS
 from app.services import (
     assignment_service,
@@ -567,6 +570,7 @@ async def report(
     options: ReportOptionsIn | None = None,
     candidate: AnonymousCandidateSession = Depends(get_anonymous_session),
     db: AsyncSession = Depends(get_db),
+    session_factory=Depends(get_session_factory),
 ) -> ReportOut:
     session = await _owned_interview(db, interview_id, candidate)
     if session.brain_mode == "external":
@@ -578,14 +582,97 @@ async def report(
                 detail=f"Cannot report in status {session.status!r}",
             )
         return _external_report_stub(session)
+    _scorable_or_409(session)
     sop_coverage_check = options.sop_coverage_check if options else False
+    job = await _scoring_job(db, session_factory, session.id, sop_coverage_check)
     try:
-        result = await state_machine.score_and_finalize(
-            db, session, sop_coverage_check=sop_coverage_check
+        async for event in _follow_scoring(session_factory, job.id):
+            if event["type"] == "report":
+                return ReportOut(**event["report"])
+    except ScoringJobFailed as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    raise HTTPException(status_code=500, detail="Scoring ended without a report")
+
+
+# How long a scoring job may wait for a job process before the candidate is told.
+SCORING_QUEUE_LIMIT_SECONDS = 600.0
+
+
+class ScoringJobFailed(Exception):
+    def __init__(self, job: Job) -> None:
+        super().__init__(job.error)
+        result = queue.result_of(job)
+        if job.status == "cancelled":
+            self.status_code, self.detail = status.HTTP_409_CONFLICT, "Scoring was cancelled"
+        elif isinstance(result, dict) and result.get("rejected"):
+            # The job refused the work (wrong status, interview gone): the request's fault, a 409.
+            self.status_code, self.detail = status.HTTP_409_CONFLICT, job.error
+        else:  # it broke: the exception's type only, as before jobs
+            kind = job.error.split(":")[0] or "no report"
+            self.status_code, self.detail = 500, f"Scoring failed: {kind}"
+
+
+def _scorable_or_409(session: InterviewSession) -> None:
+    if session.status not in ("completed", "scored"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot score in status {session.status!r}",
         )
-    except InterviewStateError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    return ReportOut(**result)
+
+
+async def _scoring_job(
+    db: AsyncSession, session_factory, interview_id: str, sop_coverage_check: bool
+) -> Job:  # noqa: ANN001
+    """The interview's scoring job: a new one, or the one already running (a reload, an admin's
+    rescore). Scoring runs in the job process, not in this request (spec-jobs-and-scale-out)."""
+    job, new = await queue.enqueue(
+        db,
+        "score_interview",
+        interview_id,
+        {"sop_coverage_check": sop_coverage_check},
+        created_by="candidate",
+    )
+    if new:
+        await runner.kick(session_factory, job)
+    return job
+
+
+async def _follow_scoring(session_factory, job_id: str):  # noqa: ANN001, ANN202
+    """The scoring job's events as the generator used to yield them: progress / question_error /
+    coverage as they land on the job row, a ``ping`` while nothing changes (the ingress idle
+    timeout), then the report. :class:`ScoringJobFailed` when the job ends without one."""
+    loop = asyncio.get_running_loop()
+    sent = 0
+    attempt = 0
+    last_sent = loop.time()
+    started = loop.time()
+    last: dict = {}
+    while True:
+        async with session_factory() as db:
+            job = await db.get(Job, job_id)
+        if job is None:
+            raise HTTPException(status_code=500, detail="The scoring job disappeared")
+        events = queue.events_of(job)
+        if queue.attempt_of_events(job) != attempt:  # a runner died and another started over
+            attempt, sent = queue.attempt_of_events(job), 0
+        for event in events[sent:]:
+            yield event
+            last = event
+            last_sent = loop.time()
+        sent = len(events)
+        if job.status == "succeeded" and isinstance(queue.result_of(job), dict):
+            yield {"type": "report", "report": queue.result_of(job)}
+            return
+        if job.status in ("succeeded", "failed", "cancelled"):  # succeeded without a report too
+            raise ScoringJobFailed(job)
+        if job.status == "queued" and loop.time() - started > SCORING_QUEUE_LIMIT_SECONDS:
+            # No job process took it (it is down, or busy far beyond normal): say so, rather
+            # than ping forever. The job stays queued; asking again follows the same one.
+            raise HTTPException(status_code=503, detail="Scoring has not started; try again soon")
+        if loop.time() - last_sent >= state_machine.SCORING_HEARTBEAT_SECONDS:
+            yield {"type": "ping", "done": last.get("done", 0), "total": last.get("total", 0)}
+            last_sent = loop.time()
+        await queue.wait_for_change(job_id)
 
 
 @router.post("/{interview_id}/report/stream")
@@ -610,11 +697,7 @@ async def report_stream(
     Pre-stream state errors (wrong status) still 409 like the batch endpoint.
     """
     session = await _owned_interview(db, interview_id, candidate)
-    if session.status not in ("completed", "scored"):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Cannot score in status {session.status!r}",
-        )
+    _scorable_or_409(session)
     if session.brain_mode == "external":
         # No local scoring for external sessions: emit the completion stub as a single report line
         # (the streaming contract's terminal frame) with no progress events. The scores live only in
@@ -631,30 +714,21 @@ async def report_stream(
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
     sop_coverage_check = options.sop_coverage_check if options else False
+    job = await _scoring_job(db, session_factory, session.id, sop_coverage_check)
 
     async def event_lines():
-        # FastAPI closes `Depends(get_db)`'s session when the route function RETURNS — before this
-        # generator body runs (yield-dependency teardown precedes response streaming since FastAPI
-        # 0.106). Scoring therefore opens its own session (from the injected factory, so tests that
-        # override it hit the test DB) and re-loads the interview row; ownership was already
-        # verified above with the request-scoped session.
+        # Scoring runs in the job process; this follows its row. The job, not this connection,
+        # owns the work: a candidate who reloads gets the same job's progress, not a second run.
         try:
-            async with session_factory() as stream_db:
-                stream_session = await stream_db.get(InterviewSession, session.id)
-                if stream_session is None:  # deleted between the check and the stream
-                    raise InterviewStateError("Interview session no longer exists")
-                async for event in state_machine.score_and_finalize_events(
-                    stream_db, stream_session, sop_coverage_check=sop_coverage_check
-                ):
-                    yield json.dumps(event, ensure_ascii=False) + "\n"
-        except InterviewStateError as exc:
-            yield json.dumps({"type": "error", "detail": str(exc)}) + "\n"
+            async for event in _follow_scoring(session_factory, job.id):
+                yield json.dumps(event, ensure_ascii=False) + "\n"
+        except ScoringJobFailed as exc:
+            yield json.dumps({"type": "error", "detail": exc.detail}) + "\n"
         except Exception as exc:  # noqa: BLE001
             # The 200 is already on the wire, so an exception escaping here does not become a 5xx:
             # it tears the connection down and the browser reports a bare network failure ("Failed
-            # to fetch") with nothing to show the candidate. Only InterviewStateError was caught
-            # before, so a scoring failure bypassed this endpoint's own documented in-band error
-            # contract. Everything terminal now leaves as `{"type":"error"}`.
+            # to fetch") with nothing to show the candidate. Everything terminal leaves as
+            # `{"type":"error"}`.
             logger.exception("Report stream failed for interview %s", interview_id)
             yield (
                 json.dumps({"type": "error", "detail": f"Scoring failed: {type(exc).__name__}"})

@@ -101,11 +101,12 @@ SQLite 同一时刻只允许一个写操作，很多「先查再写」的代码�
 - **一个账号只占一个登录席位：** 唯一索引兜底，冲突时复用已有的那个。
 - **进程内的防重：** 判断、评分「正在进行」的进程内集合，在检查和登记之间没有 await，所以在 asyncio 里是原子的。
   - **前提：** 后端只跑一个实例（maxReplicas=1）。将来要多实例，必须先把这两处换成数据库锁。
+  - **v0.67.0.0 起已换成数据库锁**，见第八节。
 - **语音 WebSocket：** 连接建立前就把数据库会话关掉了，代理语音期间不占数据库连接。
 
 **已知、暂不处理：**
 - **配置写入和启动初始化撞车：** 只会在启动初始化写配置的同一刻，恰好有管理员保存配置时出现。最坏结果是那次保存返回 500，重试即可，不会写坏数据。
-- **候选人提交评分与管理员「生成报告」同时触发：** 会多花一次 LLM 评分费用，最后写入的那份报告生效，不会损坏数据。
+- **候选人提交评分与管理员「生成报告」同时触发：** 会多花一次 LLM 评分费用，最后写入的那份报告生效，不会损坏数据。（v0.67.0.0 起两者是同一个评分任务，后来的一方直接跟随已有的任务，不再重复评分。）
 
 ## 七、数据库停机：检测与自动拉起（2026-10-08，2026-10-09 更新）
 
@@ -131,3 +132,30 @@ SQLite 同一时刻只允许一个写操作，很多「先查再写」的代码�
 **排查顺序**：线上登录异常时，先 `curl https://<frontend>/api/health/db`。返回 503 时，再执行
 `az postgres flexible-server show -g rg-aiinterview-public-swedencentral -n psql-aiinterview-public --query state`。
 如果是 `Stopped`，手动启动或运行 `infra/azure/scripts/ensure-db-running.sh <resource-group>` 都可以。
+
+## 八、后台任务表 `jobs` 与数据库锁（v0.67.0.0）
+
+设计见 [`planning/spec-jobs-and-scale-out.md`](planning/spec-jobs-and-scale-out.md)。耗时的工作不再由 Web 进程里的 `asyncio.create_task` 执行，而是写进 `jobs` 表，由单独的任务进程（`python -m app.jobs.runner`，后端应用里的 `jobs` 容器）领取执行。这样评分、SOP 转换等工作不会和正在进行的语音 WebSocket 共用一个事件循环。
+
+| 任务类型 | 做什么 |
+|---|---|
+| `score_interview` | 给一场面试打分。候选人提交和管理员「生成报告」是同一个任务；报告流接口读任务行上的进度，输出与以前相同的 NDJSON |
+| `sop_build` | 把一份 SOP 转成章节并生成检索向量；完成后如需摘要，再排一个 `sop_summary` |
+| `sop_summary` | 起草一份 SOP 的摘要 |
+| `sop_backfill` | 启动时为所有需要转换或摘要的文档排任务，并补齐检索向量 |
+| `citation_run` | 重新定位一个题库的引用 |
+| `persona_sync` | 把默认面试官同步到 Foundry |
+
+**跨进程靠的都是一条带条件的 UPDATE 或 INSERT，PostgreSQL 和 SQLite 行为一致：**
+- **同一目标同时只有一个活任务：** 部分唯一索引 `uq_jobs_live_target`（`kind, target_id`，状态为 queued / running）。重复提交拿到的是已有的那个任务。
+- **领取：** `UPDATE ... WHERE id = ? AND status = 'queued'`，改到行的那个进程才拥有它。
+- **租约：** 任务进程每 15 秒续一次 `lease_until`（60 秒）。进程挂掉后租约过期，任何任务进程都会把它重新排队；用完重试次数（默认 3 次）后标记失败。重启后的恢复就是靠这个，不需要启动时专门处理。
+- **取消：** 排队中的任务直接取消；运行中的任务在下一次续租时停止。
+
+**数据库锁：**
+- **判断（judge）同一时刻只有一个：** `interview_sessions.judge_lease_until`，带条件的 UPDATE 拿到才执行，否则返回 409；进程挂掉 30 秒后自动失效。
+- **启动初始化：** 每个 worker、每个实例都会跑启动初始化，在 PostgreSQL 上用会话级 advisory lock 排队执行（`app.db.boot_lock`），客户题库导入（`entrypoint.sh`）也在这把锁下执行。迁移本来就有自己的 advisory lock。
+- **配置保存：** 每个进程记住自己最后应用的主配置；语音连接建立时、每个任务开始时、以及每 30 秒检查一次，发现别的进程保存过就重新应用。
+
+**连接数：** 每个进程一个连接池（`DB_POOL_SIZE` / `DB_MAX_OVERFLOW`），任务进程也算一个。
+

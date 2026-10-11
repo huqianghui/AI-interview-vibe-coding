@@ -6,9 +6,9 @@ documents tab. Owner decision 2026-10-08: **only an approved summary is used in 
 never is (:func:`reviewed_summaries` is the one reader scoring uses). "reviewed" is written in one
 place only, :func:`save` with ``approve=True``.
 
-Drafting runs in the background, after conversion (:func:`summarize_missing`, called by
-``sop_section_service.build_missing`` once its conversions are done), never in a request, under
-its own lock: it touches only the summary columns, so it never holds up a conversion. Measured
+Drafting is a ``sop_summary`` job (app/jobs), one per document, queued after its conversion, by
+the boot backfill for every converted document without one, or by an admin's "Draft again"; never
+in a request. It touches only the summary columns, so it never holds up a conversion. Measured
 2026-10-08 with gpt-5-mini: 16-30 s per client SOP, 30 s for the largest (140k characters of
 Markdown), so one call is bounded at :data:`SUMMARY_TIMEOUT_SECONDS`. A draft is written only if
 the summary is still what it was when drafting began (:func:`_write_if_unchanged`), so an admin's
@@ -22,7 +22,6 @@ import asyncio
 import json
 import logging
 import re
-from collections import Counter
 from collections.abc import Iterable
 from datetime import UTC, datetime
 
@@ -46,11 +45,6 @@ MAX_REQUIREMENTS = 12
 MAX_HEADLINE_CHARS = 1000
 MAX_ITEM_CHARS = 400
 MAX_SUMMARY_CHARS = 20000
-
-# One drafting at a time per process; a second "Draft again" waits for the first.
-_SUMMARY_LOCK = asyncio.Lock()
-# How many pending or running drafts each document has, so the admin list can say "drafting".
-_DRAFTING: Counter[str] = Counter()
 
 PROMPT = """You summarise one Standard Operating Procedure (SOP). The summary is shown to the model
 that scores interview answers against this SOP, so it must state what the SOP requires, not
@@ -87,18 +81,11 @@ def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def drafting(document_id: str) -> bool:
-    return _DRAFTING[document_id] > 0
+async def drafting_ids(db: AsyncSession) -> set[str]:
+    """Documents with a draft queued or running, in any process."""
+    from app.jobs import queue
 
-
-def mark_drafting(document_id: str) -> None:
-    _DRAFTING[document_id] += 1
-
-
-def unmark_drafting(document_id: str) -> None:
-    _DRAFTING[document_id] -= 1
-    if _DRAFTING[document_id] <= 0:
-        del _DRAFTING[document_id]
+    return await queue.live_targets(db, "sop_summary")
 
 
 def drafting_available(llm: LLMAdapter | None = None) -> bool:
@@ -108,22 +95,6 @@ def drafting_available(llm: LLMAdapter | None = None) -> bool:
 
 def can_draft(document: SopDocument) -> bool:
     return document.markdown_source not in _NOT_CONVERTED and bool(document.markdown.strip())
-
-
-def queue_drafting(document_ids: Iterable[str]) -> list[str]:
-    """Show documents as drafting while their conversion and then their draft are pending. Returns
-    the ids marked, for :func:`unqueue_drafting`; none when no real model is configured."""
-    if not drafting_available():
-        return []
-    ids = list(document_ids)
-    for doc_id in ids:
-        mark_drafting(doc_id)
-    return ids
-
-
-def unqueue_drafting(document_ids: Iterable[str]) -> None:
-    for doc_id in document_ids:
-        unmark_drafting(doc_id)
 
 
 def _one_line(value: object, cap: int) -> str:
@@ -202,7 +173,6 @@ async def generate(db: AsyncSession, document: SopDocument, llm: LLMAdapter | No
         return False
     doc_id, name, markdown = document.id, document.name, document.markdown
     seen = (document.summary, document.summary_status)
-    mark_drafting(doc_id)
     try:
         text = await draft(name, markdown, llm)
     except asyncio.CancelledError:
@@ -218,8 +188,6 @@ async def generate(db: AsyncSession, document: SopDocument, llm: LLMAdapter | No
         await _write_if_unchanged(db, doc_id, seen, values)
         await db.refresh(document)
         return False
-    finally:
-        unmark_drafting(doc_id)
     written = await _write_if_unchanged(
         db,
         doc_id,
@@ -239,61 +207,47 @@ async def generate(db: AsyncSession, document: SopDocument, llm: LLMAdapter | No
     return written
 
 
-async def summarize_missing(session_factory, llm: LLMAdapter | None = None) -> int:  # noqa: ANN001
-    """Draft a summary for every converted document that has none (or whose draft failed). Each in
-    its own session; failures recorded and skipped; never raises (background work)."""
-    llm = llm or get_llm_adapter()
+async def ids_needing_draft(session_factory, llm: LLMAdapter | None = None) -> list[str]:  # noqa: ANN001
+    """Converted documents with no summary, or whose draft failed (retried on the next backfill).
+    None without a real model to draft with."""
     if not drafting_available(llm):
-        return 0
-    try:
-        async with _SUMMARY_LOCK:
-            async with session_factory() as db:
-                ids = (
-                    (
-                        await db.execute(
-                            select(SopDocument.id).where(
-                                SopDocument.summary_status.in_(_NEEDS_SUMMARY),
-                                SopDocument.markdown_source.not_in(_NOT_CONVERTED),
-                            )
-                        )
+        return []
+    async with session_factory() as db:
+        return list(
+            (
+                await db.execute(
+                    select(SopDocument.id).where(
+                        SopDocument.summary_status.in_(_NEEDS_SUMMARY),
+                        SopDocument.markdown_source.not_in(_NOT_CONVERTED),
                     )
-                    .scalars()
-                    .all()
                 )
-            done = 0
-            for doc_id in ids:
-                try:
-                    async with session_factory() as db:
-                        document = await db.get(SopDocument, doc_id)
-                        if document is not None and document.summary_status in _NEEDS_SUMMARY:
-                            done += await generate(db, document, llm)
-                except asyncio.CancelledError:
-                    raise
-                except Exception:  # noqa: BLE001 — background work: log, keep going
-                    logger.exception("Drafting the summary of SOP %s failed", doc_id)
-            return done
-    except asyncio.CancelledError:
-        raise
-    except Exception:  # noqa: BLE001 — e.g. the database is down; the next run retries
-        logger.exception("Drafting SOP summaries failed")
-        return 0
+            )
+            .scalars()
+            .all()
+        )
 
 
-async def redraft(session_factory, document_id: str) -> None:  # noqa: ANN001
-    """An admin's "Draft again", in the background, after any drafting already running. The caller
-    marked the document as drafting; this unmarks it. Never raises."""
-    try:
-        async with _SUMMARY_LOCK:
-            async with session_factory() as db:
-                document = await db.get(SopDocument, document_id)
-                if document is not None:
-                    await generate(db, document)
-    except asyncio.CancelledError:
-        raise
-    except Exception:  # noqa: BLE001 — background work
-        logger.exception("Drafting the summary of SOP %s failed", document_id)
-    finally:
-        unmark_drafting(document_id)
+async def needs_draft(session_factory, document_id: str) -> bool:  # noqa: ANN001
+    """Whether a document just converted should have its summary drafted now."""
+    if not drafting_available():
+        return False
+    async with session_factory() as db:
+        document = await db.get(SopDocument, document_id)
+        return (
+            document is not None
+            and can_draft(document)
+            and document.summary_status in _NEEDS_SUMMARY
+        )
+
+
+async def draft_document(session_factory, document_id: str) -> bool:  # noqa: ANN001
+    """Draft (or, asked by an admin, redraft) one document's summary: the ``sop_summary`` job.
+    One live job per document keeps two drafts of it from overlapping. Returns whether written."""
+    async with session_factory() as db:
+        document = await db.get(SopDocument, document_id)
+        if document is None:
+            return False
+        return await generate(db, document)
 
 
 async def save(db: AsyncSession, document: SopDocument, text: str, *, approve: bool) -> None:

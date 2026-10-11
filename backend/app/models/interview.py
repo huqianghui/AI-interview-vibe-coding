@@ -88,6 +88,10 @@ class InterviewSession(TimestampMixin, Base):
     # Optimistic-lock / CAS turn counter. A submit atomically reserves the turn by bumping this in a
     # single guarded UPDATE, so two distinct answers can never both drive the same turn.
     turn_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # One judge call at a time per session, across every process: a judge call takes this lease with
+    # a guarded UPDATE and clears it when done. A lease left by a crashed process just expires
+    # (app.interview.judge_flow.JUDGE_LEASE).
+    judge_lease_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # --- #187: the interviewer and question bank this interview was started with ------------
     # Pinned at start like ``brain_mode``: every later read uses these, not the current default, so

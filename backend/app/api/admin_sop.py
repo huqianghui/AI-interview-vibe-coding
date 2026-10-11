@@ -9,7 +9,6 @@ A corrupt or unsupported file is recorded as ``status="failed"`` and returned in
 never 500s the request (F1 AC #4).
 """
 
-import asyncio
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
@@ -20,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.config import get_settings
 from app.db import get_db, get_session_factory
 from app.dependencies import require_role
+from app.jobs import queue, runner
 from app.models.sop import SopDocument
 from app.services import (
     sop_document_service,
@@ -32,7 +32,6 @@ from app.sop.units import Unit, units
 
 # Background section builds started by uploads and "Convert again"; held so they are not
 # garbage-collected mid-run, and cancelled at shutdown (app.main).
-_BUILDS: set[asyncio.Task] = set()
 
 router = APIRouter(
     prefix="/admin/sop", tags=["admin-sop"], dependencies=[Depends(require_role("admin"))]
@@ -124,14 +123,20 @@ class SopSectionTextOut(BaseModel):
     full_text: str
 
 
-def _start(coro) -> None:  # noqa: ANN001 — a coroutine
-    task = asyncio.create_task(coro)
-    _BUILDS.add(task)
-    task.add_done_callback(_BUILDS.discard)
-
-
-def _start_build(session_factory: async_sessionmaker) -> None:
-    _start(sop_section_service.build_missing(session_factory))
+async def _queue(
+    db: AsyncSession,
+    session_factory: async_sessionmaker,
+    kind: str,
+    document_id: str,
+    payload: dict | None = None,
+) -> None:
+    """Queue a ``sop_build`` / ``sop_summary`` job for one document (app/jobs). An admin's
+    "Convert again" while a conversion is still queued makes that one forced, not a no-op."""
+    job, new = await queue.enqueue(db, kind, document_id, payload, created_by="admin")
+    if new:
+        await runner.kick(session_factory, job)
+    elif payload and job.status == "queued":
+        await queue.merge_payload(db, job, payload)
 
 
 class SopLibraryOut(BaseModel):
@@ -260,8 +265,8 @@ async def upload_document(
         # The library was deleted between the check above and the insert.
         await db.rollback()
         raise _library_error(sop_library_service.LibraryNotFound(library_id)) from exc
-    # Split into sections in the background (Document Intelligence takes seconds per document).
-    _start_build(session_factory)
+    # Split into sections by the job process (Document Intelligence takes seconds per document).
+    await _queue(db, session_factory, "sop_build", result.document_id)
     return SopDocumentOut(
         document_id=result.document_id,
         name=result.name,
@@ -279,6 +284,8 @@ async def list_documents(db: AsyncSession = Depends(get_db)) -> list[SopDocument
     sections = await sop_section_service.section_counts(db)
     unit_counts = await sop_section_service.unit_counts(db)
     citations = await sop_document_service.document_citations(db)
+    converting = await sop_section_service.converting_ids(db)
+    drafting = await sop_summary_service.drafting_ids(db)
     return [
         SopDocumentOut(
             document_id=d.id,
@@ -291,10 +298,10 @@ async def list_documents(db: AsyncSession = Depends(get_db)) -> list[SopDocument
             section_count=sections.get(d.id, 0),
             unit_count=unit_counts.get(d.id, 0),
             markdown_error=d.markdown_error,
-            converting=sop_section_service.converting(d.id),
+            converting=d.id in converting,
             summary_status=d.summary_status,
             summary_error=d.summary_error,
-            summarizing=sop_summary_service.drafting(d.id),
+            summarizing=d.id in drafting,
             summary=d.summary,
             cited_in=citations.get(d.id, []),
         )
@@ -439,25 +446,28 @@ async def rebuild_sections(
         markdown_error=document.markdown_error,
         converting=True,
     )
-    sop_section_service.mark_converting(document.id)
-    _start(sop_section_service.rebuild(session_factory, document.id))
+    await _queue(db, session_factory, "sop_build", document.id, {"force": True})
     return out
 
 
-def _summary_out(document: SopDocument) -> SopSummaryOut:
+async def _summary_out(db: AsyncSession, document: SopDocument) -> SopSummaryOut:
     return SopSummaryOut(
         summary=document.summary,
         status=document.summary_status,
         error=document.summary_error,
         reviewed_at=document.summary_reviewed_at,
-        summarizing=sop_summary_service.drafting(document.id),
+        summarizing=await _drafting(db, document.id),
     )
+
+
+async def _drafting(db: AsyncSession, document_id: str) -> bool:
+    return await queue.live_job(db, "sop_summary", document_id) is not None
 
 
 @router.get("/documents/{document_id}/summary", response_model=SopSummaryOut)
 async def get_summary(document_id: str, db: AsyncSession = Depends(get_db)) -> SopSummaryOut:
     """The document's key-points summary and whether it is approved (only then used in scoring)."""
-    return _summary_out(await _document(db, document_id))
+    return await _summary_out(db, await _document(db, document_id))
 
 
 @router.put("/documents/{document_id}/summary", response_model=SopSummaryOut)
@@ -466,7 +476,7 @@ async def save_summary(
 ) -> SopSummaryOut:
     """Save an admin's edit: approved (used in scoring) or a draft (not used)."""
     document = await _document(db, document_id)
-    if sop_summary_service.drafting(document.id):
+    if await _drafting(db, document.id):
         raise HTTPException(
             status_code=409, detail="The summary is being drafted; save once the draft is done"
         )
@@ -474,7 +484,7 @@ async def save_summary(
         await sop_summary_service.save(db, document, body.summary, approve=body.approve)
     except sop_summary_service.SummaryNotSaved as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return _summary_out(document)
+    return await _summary_out(db, document)
 
 
 @router.post(
@@ -494,8 +504,7 @@ async def redraft_summary(
         raise HTTPException(status_code=409, detail="The document is not converted yet")
     if not sop_summary_service.drafting_available():
         raise HTTPException(status_code=409, detail="No AI model is configured to draft with")
-    out = _summary_out(document)
+    out = await _summary_out(db, document)
     out.summarizing = True
-    sop_summary_service.mark_drafting(document.id)
-    _start(sop_summary_service.redraft(session_factory, document.id))
+    await _queue(db, session_factory, "sop_summary", document.id)
     return out

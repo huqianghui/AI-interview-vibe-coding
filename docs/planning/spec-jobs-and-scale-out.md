@@ -1,6 +1,8 @@
 # Spec: a jobs table, a separate job process, and scale-out
 
-Status: approved direction (owner, 2026-10-11), implementation in four PRs.
+Status: approved direction (owner, 2026-10-11), implementation in four PRs. PR 1 (sizing) shipped
+v0.66.1.0; PR 2 (jobs core) v0.67.0.0. "As built" notes below record where PR 2 differs from the
+first draft of this spec.
 
 ## Why
 
@@ -37,7 +39,8 @@ worker. More workers only shrink the share of interviews affected; a separate pr
 ```
 jobs
   id              uuid pk
-  kind            str    -- score_interview | sop_build | sop_summary | citation_run | persona_sync
+  kind            str    -- score_interview | sop_build | sop_summary | sop_backfill | citation_run
+                         --   | persona_sync
   target_id       str    -- interview id / document id / bank id / persona id
   payload         json   -- e.g. {"sop_coverage_check": true}, {"fresh": true}, {"force": true}
   status          str    -- queued | running | succeeded | failed | cancelled
@@ -65,6 +68,13 @@ jobs
   `running` job whose lease has expired is reclaimed by any runner: back to `queued` if
   `attempts < max_attempts`, else `failed` with `error = "lease expired after N attempts"`.
   That is the restart recovery: no boot hook needed.
+- **A handler error fails the job at once** (as built, from review): retrying would repeat a
+  deterministic failure (a bad model name) for minutes, and the work already retries what is
+  worth retrying (scoring, per question). Only a runner that DIED is retried, through its lease.
+  A heartbeat that cannot reach the database is retried while the lease still holds; after that
+  the runner stops the work, since another runner may hold it.
+- **No job process taking a scoring job** (as built): after 10 minutes queued the candidate gets a
+  503 "Scoring has not started; try again soon" instead of pings forever; the job stays queued.
 - **Cancel:** the API sets `cancel_requested`; the heartbeat sees it and cancels the asyncio task;
   status becomes `cancelled`. A queued job is cancelled directly.
 - **Idempotency is a handler requirement**: a reclaimed job runs again from the start. Scoring
@@ -76,8 +86,10 @@ jobs
 
 - `python -m app.jobs.runner`: same image, same settings, its own event loop and its own
   connection pool. Polls for work every 1 s, runs up to `JOB_RUNNER_CONCURRENCY` (default 4) jobs
-  at once; per-kind caps where the old code serialised (`sop_build`: 1, `sop_summary`: 1) are
-  enforced in the claim query (`... AND NOT EXISTS (running job of that kind)` for capped kinds).
+  at once. As built: `sop_build` and `sop_summary` run one at a time **per runner process**
+  (LibreOffice cannot run two sessions on one profile): the claim skips a serial kind while this
+  runner holds one. Two replicas may each convert one document at once; one live job per document
+  still keeps two conversions of the SAME document from racing.
 - Handlers live in `app/jobs/handlers.py`, one async function per kind, each wrapping the existing
   service function (`state_machine.score_and_finalize_events`, `sop_section_service.build`/
   `rebuild`, `sop_summary_service.redraft`/`summarize_missing`, `sop_citation_service.relocate`,
@@ -88,10 +100,14 @@ jobs
   env, identity and secrets; command overridden; no ingress). It must NOT run `entrypoint.sh`
   (migrations are the web container's job); it waits until `alembic current` equals head before
   claiming. With maxReplicas 2 there may be two runners: the CAS claim makes that safe.
-- **Local dev / tests:** `JOB_RUNNER_MODE=embedded` starts the runner inside the FastAPI lifespan
-  (one per process, still CAS-safe) so `uvicorn --reload` and the Playwright e2e keep working
-  unchanged. Production sets `JOB_RUNNER_MODE=off` on the web container. pytest gets a
-  `drain_jobs()` fixture that runs queued jobs inline.
+- **Local dev / e2e:** `JOB_RUNNER_MODE=embedded` (the default) starts the runner inside the
+  FastAPI lifespan, and a job a request queues starts at once beside it; `uvicorn --reload` and the
+  Playwright e2e work unchanged. Production sets `JOB_RUNNER_MODE=off` on the web container.
+- **pytest: `JOB_RUNNER_MODE=inline`** (as built). The request runs the job, retries included, to
+  completion before it follows it. Not a convenience: the shared test database is ONE in-memory
+  SQLite connection, on which a concurrent session's rollback undoes another's uncommitted claim
+  (found by a hanging report-stream test). `tests/test_jobs.py` covers the concurrent runner on a
+  file database with a connection per session.
 
 ### 3. What moves onto jobs
 
@@ -100,10 +116,12 @@ jobs
 | candidate `POST /interview/{id}/report/stream` scores inside the request | enqueue `score_interview` (or attach to the live one), then poll the job row every 1 s and emit the SAME NDJSON lines (`progress` from `jobs.progress`, `report` from `jobs.result`, `error` from `jobs.error`). Frontend contract unchanged. |
 | candidate `POST /interview/{id}/report` (batch) | enqueue + wait for the job (same polling), return the same `ReportOut` |
 | admin `POST /admin/interviews/{id}/report` | enqueue `score_interview`, 202; `scoring` flag = a live job exists |
-| SOP upload / "Convert again" / boot `build_missing` | enqueue `sop_build` per document; `converting` flag = a live `sop_build` job for it |
-| summary redraft / `summarize_missing` | enqueue `sop_summary` per document; `summarizing` flag = a live job |
-| `start_relocation` | still creates the `CitationRun` (the UI reads it), then enqueues `citation_run` with its id; `_LIVE` goes |
-| boot `_sync_default_persona` | enqueue `persona_sync` once (unique index dedupes across processes) |
+| SOP upload / "Convert again" | enqueue `sop_build` for that document (`{"force": true}` for "Convert again"); `converting` flag = a live `sop_build` job for it |
+| boot `build_missing` | one `sop_backfill` job: queues a `sop_build` per document that needs converting and a `sop_summary` per converted document without one, then refreshes every document's search vectors |
+| a conversion finishing | its `sop_build` job queues that document's `sop_summary` when it needs one |
+| summary redraft | enqueue `sop_summary`; `summarizing` flag = a live `sop_summary` job (as built: "drafting" shows only once the draft's own job exists, not while its conversion is still queued) |
+| `start_relocation` | still creates the `CitationRun` (the UI reads it), then enqueues `citation_run` with its id, **one attempt** (a run interrupted part-way is reported, not replayed). A `running` row with no live job behind it, older than 30 s, reads as interrupted; `_LIVE` and the 10-minute heartbeat guess are gone |
+| boot `_sync_default_persona` | enqueue `persona_sync`; boot jobs are queued under the boot lock and skipped when one was created in the last 2 minutes, so 3 workers × 2 replicas booting queue each once |
 
 **Recordings stay in the web process.** The audio is in that process's memory, so a job in another
 process cannot upload it; moving it would mean shipping the bytes through the database. The owner
@@ -121,16 +139,18 @@ cache. These are caches; duplicating them per process costs memory, not correctn
   page treats it as "wait", unchanged). Release in `finally` by setting it NULL. A crashed process's
   lease expires in 30 s instead of wedging. Not an advisory lock: those are bound to one pooled
   connection and do not exist on SQLite.
-- **Boot steps** (`main.py` lifespan seeds) and **migrations** (`alembic upgrade head` in
-  `entrypoint.sh`): on PostgreSQL, run under `pg_advisory_lock(<constant>)` on one dedicated
-  connection held for the duration, so the second replica waits and then finds everything done.
-  No-op on SQLite. (An advisory lock is right here: one connection, held start to finish, released
-  when the connection closes even if the process dies.)
+- **Boot steps** (`main.py` lifespan seeds) and **the client bank importer** (`entrypoint.sh`, via
+  `scripts/with_boot_lock.py`): on PostgreSQL, run under `pg_advisory_lock(<constant>)` on one
+  dedicated connection held for the duration, so the next process waits and then finds everything
+  done. No-op on SQLite. (An advisory lock is right here: one connection, held start to finish,
+  released when the connection closes even if the process dies.) **Migrations** already took
+  `pg_advisory_xact_lock` in `alembic/env.py` before this work.
 
 ### 5. Config reaches every process
 
-`service_configs.updated_at` already changes on every save. Each process remembers the
-`updated_at` it last applied; `config_overlay.ensure_current(db)` re-applies when the row is newer.
+Each process remembers the master row as it last applied it (as built: a fingerprint of the
+fields the overlay reads plus `updated_at`, because `updated_at` alone has one-second resolution on
+SQLite); `config_overlay.ensure_current(db)` re-applies when the row differs.
 Called at Voice Live WS connect, at the start of each job, and by a 30 s background refresh in
 each web worker. The save request itself still applies immediately in its own process.
 

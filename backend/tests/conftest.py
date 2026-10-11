@@ -30,6 +30,10 @@ os.environ.update(
         # #102: SECRET_KEY is required (no code default) — a fixed test key keeps derived
         # candidate passwords deterministic across the suite.
         "SECRET_KEY": "test-secret-key-do-not-use-in-prod",
+        # A job a request queues runs to completion inside that request (app.jobs.runner.kick):
+        # the in-memory test database is one shared connection, on which a concurrent session's
+        # rollback would undo another's claim. tests/test_jobs.py covers the concurrent runner.
+        "JOB_RUNNER_MODE": "inline",
     }
 )
 

@@ -15,18 +15,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.interview import serve_cited_document
 from app.db import get_db, get_session_factory
 from app.dependencies import require_role
-from app.interview import state_machine
 from app.interview.scoring_engine import OUTCOMES
+from app.jobs import queue, runner
 from app.models.interview import INTERVIEW_STATUSES, InterviewRecording, InterviewSession
 from app.schemas.history import InterviewDetail, InterviewResultsPage
 from app.services import interview_history_service, recording_service
 
 logger = logging.getLogger(__name__)
-
-# Interviews being scored right now by an admin request. Process-local, like the judge's in-flight
-# guard: safe because the backend runs a single replica (see judge_flow._JUDGE_IN_FLIGHT).
-_SCORING: set[str] = set()
-_TASKS: set[asyncio.Task] = set()  # references, so a running task is not garbage-collected
 
 router = APIRouter(
     prefix="/admin/interviews",
@@ -94,23 +89,8 @@ async def interview_detail(
     detail = await interview_history_service.get_detail(db, interview_id)
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Interview not found")
-    return detail.model_copy(update={"scoring": interview_id in _SCORING})
-
-
-async def _score_in_background(interview_id: str, session_factory) -> None:
-    try:
-        async with session_factory() as db:
-            session = (
-                await db.execute(
-                    select(InterviewSession).where(InterviewSession.id == interview_id)
-                )
-            ).scalar_one_or_none()
-            if session is not None:
-                await state_machine.score_and_finalize(db, session)
-    except Exception:
-        logger.exception("Admin scoring failed for interview %s", interview_id)
-    finally:
-        _SCORING.discard(interview_id)
+    scoring = await queue.live_job(db, "score_interview", interview_id) is not None
+    return detail.model_copy(update={"scoring": scoring})
 
 
 @router.post("/{interview_id}/report", status_code=status.HTTP_202_ACCEPTED)
@@ -142,14 +122,12 @@ async def generate_report(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Cannot score in status {session.status!r}",
         )
-    if interview_id in _SCORING:
+    job, new = await queue.enqueue(db, "score_interview", interview_id, created_by="admin")
+    if not new:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="This interview is already being scored"
         )
-    _SCORING.add(interview_id)
-    task = asyncio.create_task(_score_in_background(interview_id, session_factory))
-    _TASKS.add(task)
-    task.add_done_callback(_TASKS.discard)
+    await runner.kick(session_factory, job)
     return {"status": "scoring"}
 
 
