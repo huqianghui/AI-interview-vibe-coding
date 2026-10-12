@@ -49,7 +49,7 @@ def test_small_sections_merge_and_big_ones_stand_alone():
     assert all(u.length <= MAX_CHARS for u in got)
 
 
-def test_a_long_section_opens_and_only_a_part_left_too_small_crosses_into_it():
+def test_a_long_section_opens_and_a_small_section_after_it_stays_on_its_own():
     md = "\n\n".join(
         [
             f"## 1. PURPOSE\n\n{_words(150)}",
@@ -61,10 +61,16 @@ def test_a_long_section_opens_and_only_a_part_left_too_small_crosses_into_it():
     )
     got = units(_rows(md))
     groups = [[(m.number, m.own) for m in u.members] for u in got]
-    # 1 is big enough on its own; 2 opens: its intro joins 2.1; 3 is too small and both of its
-    # neighbours under the top level are too big, so it joins 2.2, its smaller neighbour.
-    assert groups == [[("1", False)], [("2", True), ("2.1", False)], [("2.2", False), ("3", False)]]
-    assert got[2].label == "2.2–3 Step two / RECORDS"
+    # 1 is big enough on its own; 2 opens: its intro joins 2.1. 3 is small, but its neighbours are
+    # too big (1) or a fragment of the opened 2 (2.2): owner, 2026-10-12, a unit crosses a section
+    # boundary only with whole sections, so 3 stays a unit of its own ("2.2–3" read as both).
+    assert groups == [
+        [("1", False)],
+        [("2", True), ("2.1", False)],
+        [("2.2", False)],
+        [("3", False)],
+    ]
+    assert got[3].label == "3 RECORDS"
     assert all(u.length <= MAX_CHARS for u in got)
 
 
@@ -191,10 +197,9 @@ def test_a_small_section_never_merges_into_an_opened_neighbours_intro():
     )
     rows = _rows(md)
     got = units(rows)
-    # 1 joins 2's intro, cited as a run ending with 2's own text: it reads 170 characters, not 8000.
-    first = got[0]
-    assert [(m.number, m.own) for m in first.members] == [("1", False), ("2", True)]
-    assert first.citation() == ("1", "2", True, 0) and first.length < 500 * 2
+    # 1 does not join 2's intro: that run would cut 2 (owner, 2026-10-12). Both stay small.
+    groups = [[(m.number, m.own) for m in u.members] for u in got]
+    assert groups[:2] == [[("1", False)], [("2", True)]]
     _round_trips(rows)
 
 
@@ -220,3 +225,41 @@ def test_every_unit_of_any_outline_is_one_citation_that_reads_it():
             )
             parts.append(f"## {n}. TOP {n}\n\n{paras}")
         _round_trips(_rows("\n\n".join(parts)))
+
+
+def test_a_fragment_of_a_chapter_never_joins_the_chapter_before_it():
+    """Owner, 2026-10-12: "6–7.2 REFERENCES / ... / Appendix 2" held all of 6 and the start of 7.
+    Here 1 plays 6 and 2 plays 7: 2's small intro and 2.1-2.2 merge among themselves (and with 2.3
+    when it fits), never with 1."""
+    md = "\n\n".join(
+        [
+            f"## 1. REFERENCES\n\n{_words(300)}",
+            "## 2. APPENDICES\n\nThe appendices.",
+            f"2.1 Appendix 1\n\n{_words(10)}",
+            f"2.2 Appendix 2\n\n{_words(10)}",
+            f"2.3 Appendix 3\n\n{_words(780)}",
+            f"## 3. HISTORY\n\n{_words(600)}",
+        ]
+    )
+    rows = _rows(md)
+    got = units(rows)
+    groups = [[(m.number, m.own) for m in u.members] for u in got]
+    assert [("1", False)] in groups
+    for g in groups:
+        tops = {n.split(".")[0] for n, _ in g}
+        assert len(tops) == 1 or all(not own for _, own in g), g
+    two = next(g for g in groups if ("2", True) in g)
+    assert ("2.1", False) in two and ("2.2", False) in two
+    _round_trips(rows)
+
+
+def test_two_whole_small_chapters_may_still_share_a_unit():
+    md = "\n\n".join(
+        [
+            f"## 1. PURPOSE\n\n{_words(20)}",
+            f"## 2. SCOPE\n\n{_words(20)}",
+            f"## 3. BODY\n\n{_words(900)}",
+        ]
+    )
+    groups = [[m.number for m in u.members] for u in units(_rows(md))]
+    assert ["1", "2"] in groups

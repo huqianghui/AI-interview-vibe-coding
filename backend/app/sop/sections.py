@@ -42,6 +42,17 @@ _NOT_A_CLAUSE = re.compile(
 # A line repeated on at least this many pages is a running header/footer, not content.
 _REPEAT_THRESHOLD = 3
 _TITLE_MAX = 160
+# A title DI wrapped onto the next line(s): "7.3 / Appendix 3 - RACI ... for Study, Country and /
+# Site Feasibility". Joined when the whole block is short and is not a sentence (a clause's text
+# ends with . : or ;). Only the line break moves: no text is added or dropped.
+_TITLE_LINES_MAX = 3
+# A wrapped line is one the page width cut: a first line shorter than this ended by itself, and a
+# short stray line after it (an OCR fragment "aEsta") is not its continuation.
+_WRAPPED_LINE_MIN = 60
+_SENTENCE_END = re.compile(r"[.:;。：；]$")
+# A heading whose number DI dropped: "##### . APPENDICES" between 6.3.3 and 7.1 (measured on a
+# client SOP, 2026-10-12). Its number is the one its first subsection implies.
+_NUMBERLESS = re.compile(r"^\.\s*(\S.*)$")
 
 
 @dataclass
@@ -125,6 +136,51 @@ def _heading_follows(prev: str, number: str) -> bool:
         if x != y:
             return 0 < y - x <= _HEADING_GAP
     return False
+
+
+def _is_plain_line(line: str, noise: set[str]) -> bool:
+    """A line that can continue a title: text, not a heading, a number, markup or noise."""
+    return bool(
+        line
+        and not _HEADING.match(line)
+        and not _NUMBER_ALONE.match(line)
+        and not _NUMBERED_INLINE.match(line)
+        and not _COMMENT.match(line)
+        and not _PAGE_BREAK.match(line)
+        and not line.startswith(("<", "|", "- ", "* ", "+ "))
+        and line not in noise
+    )
+
+
+def _wrapped_title(raw: list[str], j: int, noise: set[str]) -> tuple[str, int]:
+    """The title starting at line ``j`` and the index after it. A title DI wrapped onto the next
+    line(s) is joined, when the block is short and is not a sentence (see ``_SENTENCE_END``)."""
+    lines = [raw[j].strip()]
+    k = j + 1
+    while k < len(raw) and len(lines) < _TITLE_LINES_MAX and _is_plain_line(raw[k].strip(), noise):
+        lines.append(raw[k].strip())
+        k += 1
+    block = " ".join(lines)
+    ends_here = k >= len(raw) or not _is_plain_line(raw[k].strip(), noise)  # not a longer text
+    if (
+        len(lines) > 1
+        and ends_here
+        and len(lines[0]) >= _WRAPPED_LINE_MIN
+        and len(block) <= _TITLE_MAX
+        and not _SENTENCE_END.search(block)
+    ):
+        return block, k
+    return lines[0], j + 1
+
+
+def _next_content(raw: list[str], i: int, noise: set[str]) -> str:
+    """The next line with content from ``i`` (blank lines, comments, page breaks, noise skipped)."""
+    while i < len(raw):
+        line = raw[i].strip()
+        if line and not _COMMENT.match(line) and line not in noise:
+            return line
+        i += 1
+    return ""
 
 
 def parse_sections(markdown: str) -> list[ParsedSection]:
@@ -214,12 +270,16 @@ def parse_sections(markdown: str) -> list[ParsedSection]:
             ):
                 j += 1
             if j < len(raw) and _is_successor(last_number, alone.group(1)):
-                title = _clean_heading(_HEADING.sub(r"\2", raw[j].strip()))
+                if _HEADING.match(raw[j].strip()):
+                    title, after = _clean_heading(_HEADING.sub(r"\2", raw[j].strip())), j + 1
+                else:
+                    title, after = _wrapped_title(raw, j, noise)
+                    title = _clean_heading(title)
                 clause = alone.group(1)
                 last_number = clause
                 accepted.append(clause)
                 open_section(clause, title, len(_parts(clause)))
-                i = j + 1
+                i = after
                 continue
         if (
             numbered
@@ -241,6 +301,20 @@ def parse_sections(markdown: str) -> list[ParsedSection]:
             open_section(clause, numbered.group(2), len(_parts(clause)))
             continue
         if heading and not numbered:
+            # A heading that lost its number ("##### . APPENDICES") right before its first
+            # subsection ("7.1"): it is that subsection's parent, "7", when "7" can come next.
+            # Otherwise 7.1-7.3 nest under the clause before (6.3.3): chapter 7 disappears and
+            # its appendices become part of chapter 6.
+            lost = _NUMBERLESS.match(text)
+            following = _next_content(raw, i, noise)
+            sub = _NUMBERED_INLINE.match(following) or _NUMBER_ALONE.match(following)
+            if lost and sub and "." in sub.group(1):
+                implied = sub.group(1).rsplit(".", 1)[0]
+                if implied not in accepted and _is_successor(last_number, implied):
+                    last_number = implied
+                    accepted.append(implied)
+                    open_section(implied, lost.group(1), len(_parts(implied)))
+                    continue
             unnumbered += 1
             # An unnumbered heading inside a numbered outline nests under the open clause, so a
             # sub-heading of 5.3 stays part of 5.3's full text.
