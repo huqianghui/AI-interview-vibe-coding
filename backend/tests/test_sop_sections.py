@@ -638,7 +638,13 @@ def test_a_heading_continues_the_outline_after_a_stray_clause_and_may_skip_numbe
             "### 2.1 Parent Document",
         ]
     )
-    assert [s.number for s in parse_sections(md)] == ["1", "1.8", "3.1", "1.8.6", "1.9", "2", "2.1"]
+    sections = parse_sections(md)
+    # The outline is chosen over the whole document (2026-10-12): the sentence numbered 3.1 does
+    # not fit it, so it is a plain heading inside 1.8, not a clause; 1.8.6 is 1.8's.
+    assert [s.number for s in sections] == ["1", "1.8", "§1", "1.8.6", "1.9", "2", "2.1"]
+    by = {s.number: s for s in sections}
+    assert sections[by["1.8.6"].parent].number == "1.8"
+    assert sections[by["§1"].parent].number == "1.8"
 
 
 def test_a_body_line_number_still_needs_the_strict_order():
@@ -712,3 +718,87 @@ def test_a_title_wrapped_onto_the_next_line_is_joined_and_a_sentence_is_not():
 def test_a_numberless_heading_that_no_subsection_explains_stays_unnumbered():
     md = "## 1. PURPOSE\n\nText.\n\n##### . Notes\n\nFree text, no clause after it.\n"
     assert [s.number for s in parse_sections(md)] == ["1", "§1"]
+
+
+# --- the outline, chosen over the whole document, parents by number (2026-10-12) -----------------
+# Root cause of "6–7.2", "7–8.1" and friends: the tree was read off line order, so one missed
+# chapter heading hung its subsections under the chapter before. These pin the general rules.
+
+
+def _shape(md):
+    sections = parse_sections(md)
+    from app.sop.sections import outline_problems
+
+    assert outline_problems(sections) == []  # every clause under the section its number names
+    return {
+        s.number: (s.title, sections[s.parent].number if s.parent is not None else None)
+        for s in sections
+    }
+
+
+def test_a_chapter_heading_di_never_marked_gets_an_empty_parent_and_keeps_its_children():
+    shape = _shape("## 1. PURPOSE\n\nText.\n\n2.1\nFirst step\n\n2.2\nSecond step\n")
+    assert shape["2"] == ("", None)  # only the number: the text never named it
+    assert shape["2.1"][1] == "2" and shape["2.2"][1] == "2"
+
+
+def test_an_escaped_chapter_number_is_read_as_a_number():
+    shape = _shape("## 1. REFERENCES\n\nText.\n\n2\\. APPENDICES\n\n2.1\nAppendix 1\n")
+    assert shape["2"] == ("APPENDICES", None)
+    assert shape["2.1"][1] == "2"
+
+
+def test_a_misread_chapter_heading_before_its_subsections_becomes_their_parent():
+    """OCR read chapter 4's number as 1: "# 1. RESPONSIBILITIES" between 3 and 4.1."""
+    md = (
+        "# 1. PURPOSE\n\nP.\n\n# 2. SCOPE\n\nS.\n\n# 3. DEFINITIONS\n\nD.\n\n"
+        "# 1. RESPONSIBILITIES\n\nTasks can be delegated.\n\n## 4.1 Lead\n\nLeads.\n"
+    )
+    sections = parse_sections(md)
+    by = {s.number: s for s in sections}
+    assert by["4"].title == "RESPONSIBILITIES" and by["4"].text == "Tasks can be delegated."
+    assert sections[by["4.1"].parent].number == "4"
+    assert [s.number for s in sections] == ["1", "2", "3", "4", "4.1"]
+
+
+def test_a_stray_number_does_not_derail_the_clauses_after_it():
+    """A stray "07" once made every later clause of a 300-clause SOP text (measured)."""
+    md = "\n\n".join(
+        [
+            "## 1. PROCEDURE",
+            "1.1\nStep one",
+            "### 07",
+            "1.2\nStep two",
+            "1.2.1\nDetail",
+            "1.3\nThree",
+        ]
+    )
+    shape = _shape(md)
+    assert {"1.1", "1.2", "1.2.1", "1.3"} <= set(shape)
+    assert "07" not in shape
+
+
+def test_numbers_in_a_document_with_unnumbered_chapters_are_its_content():
+    md = "\n\n".join(
+        [
+            "## PURPOSE\n\nP.",
+            "## SCOPE\n\nS.",
+            "## APPENDICES",
+            "### Index structure",
+            "2.1\nHealth authority",
+            "3.1\nEvaluation timelines",
+            "### DOCUMENT HISTORY PAGE\n\nv1.",
+        ]
+    )
+    sections = parse_sections(md)
+    assert not any(s.number[0].isdigit() for s in sections)
+    index = next(s for s in sections if s.title == "Index structure")
+    assert "2.1" in index.text and "Evaluation timelines" in index.text
+
+
+def test_a_clause_written_on_one_long_line_keeps_all_of_it():
+    sentence = "This template should be used as a guide " * 8  # about 320 characters
+    sections = parse_sections(f"## 1. INSTRUCTIONS\n\n1.1 {sentence.strip()}\n")
+    one = next(s for s in sections if s.number == "1.1")
+    assert len(one.title) <= 160
+    assert f"{one.title} {one.text}" == sentence.strip()
