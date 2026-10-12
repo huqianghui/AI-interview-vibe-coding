@@ -50,9 +50,16 @@ _TITLE_LINES_MAX = 3
 # short stray line after it (an OCR fragment "aEsta") is not its continuation.
 _WRAPPED_LINE_MIN = 60
 _SENTENCE_END = re.compile(r"[.:;。：；]$")
-# A heading whose number DI dropped: "##### . APPENDICES" between 6.3.3 and 7.1 (measured on a
-# client SOP, 2026-10-12). Its number is the one its first subsection implies.
-_NUMBERLESS = re.compile(r"^\.\s*(\S.*)$")
+# Markdown escapes DI writes so a literal "8." at a line's start does not render as a list
+# ("8\\. APPENDICES"). Undone before a line is read for a number: a number is a number however
+# it was escaped.
+_ESCAPE = re.compile(r"\\([\\`*_{}\[\]()#+\-.!|>~])")
+# A document whose outline is unnumbered (PURPOSE, SCOPE, ... as plain headings) has at least this
+# many unnumbered headings before its first number; a numbered SOP has a title heading or two.
+_OUTLINE_MIN = 3
+# A numbered heading (DI marked it from the page layout) counts this much more than a number at
+# the start of a body line when choosing the outline.
+_HEADING_WEIGHT = 3
 
 
 @dataclass
@@ -119,9 +126,7 @@ def _is_successor(prev: str | None, number: str) -> bool:
     return False
 
 
-# How many recently accepted clauses a heading may continue from (one stray clause in between
-# must not block it), and how far its first differing part may move forward.
-_HEADING_LOOKBACK = 5
+# How far a numbered heading's first differing part may move forward from the clause before it.
 _HEADING_GAP = 9
 
 
@@ -173,50 +178,196 @@ def _wrapped_title(raw: list[str], j: int, noise: set[str]) -> tuple[str, int]:
     return lines[0], j + 1
 
 
-def _next_content(raw: list[str], i: int, noise: set[str]) -> str:
-    """The next line with content from ``i`` (blank lines, comments, page breaks, noise skipped)."""
-    while i < len(raw):
-        line = raw[i].strip()
-        if line and not _COMMENT.match(line) and line not in noise:
-            return line
-        i += 1
-    return ""
+@dataclass
+class _Candidate:
+    """A line that may open a numbered clause (one pass over the document finds them all)."""
+
+    line: int  # index into the raw lines of the line holding the number
+    number: str
+    heading: bool  # DI marked it a Markdown heading
+    parts: tuple[int, ...] = ()
+
+
+def _unescape(text: str) -> str:
+    return _ESCAPE.sub(r"\1", text)
+
+
+def _read_line(raw: list[str], i: int, noise: set[str]) -> tuple[str, re.Match | None] | None:
+    """A content line as a reader sees it: ``(text, heading match)``; None for blank lines, page
+    breaks, comments and figure tags, which carry no content."""
+    line = raw[i].strip()
+    if not line or _PAGE_BREAK.match(line) or _COMMENT.match(line):
+        return None
+    if line in ("<figure>", "</figure>"):
+        return None
+    heading = _HEADING.match(line)
+    return (_clean_heading(heading.group(2)) if heading else line), heading
+
+
+def _number_of(text: str) -> tuple[str, str | None] | None:
+    """``(number, title or None)`` when a line starts a clause: "4.2 Title", "10.REVIEW", or the
+    number alone (its title on the next line). Escapes undone first."""
+    text = _unescape(text)
+    numbered = _NUMBERED_INLINE.match(text) or _NUMBERED_TIGHT.match(text)
+    if numbered:
+        return None if _NOT_A_CLAUSE.match(text) else (numbered.group(1), numbered.group(2))
+    alone = _NUMBER_ALONE.match(text)
+    return (alone.group(1), None) if alone else None
+
+
+def _outline(candidates: list[_Candidate]) -> list[_Candidate]:
+    """The document's outline: the run of candidates that best follows the outline order, chosen
+    over the WHOLE document rather than line by line. A stray number (a list item, a table cell, a
+    decimal in prose) cannot derail the clauses after it, and a number that does not fit the
+    numbering is text. Each step must be a successor (``_is_successor``; a heading may skip
+    further, ``_heading_follows``); headings weigh more, being DI's own layout reading."""
+    n = len(candidates)
+    best = [0] * n
+    prev = [-1] * n
+    for i, c in enumerate(candidates):
+        weight = _HEADING_WEIGHT if c.heading else 1
+        if _is_successor(None, c.number):
+            best[i] = weight
+        for j in range(i):
+            if best[j] and best[j] + weight > best[i]:
+                p = candidates[j]
+                if _is_successor(p.number, c.number) or (
+                    c.heading and _heading_follows(p.number, c.number)
+                ):
+                    best[i], prev[i] = best[j] + weight, j
+    if not n or not max(best):
+        return []
+    i = max(range(n), key=lambda k: (best[k], k))
+    chain = []
+    while i >= 0:
+        chain.append(candidates[i])
+        i = prev[i]
+    return chain[::-1]
 
 
 def parse_sections(markdown: str) -> list[ParsedSection]:
-    """The document's sections in order, with parent/children links and page ranges."""
+    """The document's sections in order, with parent/children links and page ranges.
+
+    Two passes. The first finds every line that may open a numbered clause and chooses the
+    document's outline among them (:func:`_outline`). The second builds the tree, where a clause's
+    parent is decided by its NUMBER: 7.1's parent is 7, wherever 7.1 appears. Reading the tree off
+    the order of lines instead let one missed chapter heading (a dropped number ". APPENDICES", an
+    escaped one "8\\. APPENDICES", a wrong heading level) silently hang its subsections under the
+    chapter before; measured 2026-10-12, 38 sections in 7 of 26 client SOPs. A clause whose parent
+    number never appeared gets one: the unnumbered heading just before it, if there is one (it is
+    the chapter heading whose number was lost), else an empty section with only the number.
+
+    A document whose own outline is unnumbered (its chapters are plain headings) has no clauses:
+    numbers in it ("2.1 Health authority" in an appendix listing another document's structure) are
+    its content.
+    """
     raw = markdown.replace("\r\n", "\n").split("\n")
     noise = _noise_lines(raw)
+
+    # ── Pass 1: candidates, the outline among them, and the parents it lacks ──────────────────
+    candidates: list[_Candidate] = []
+    unnumbered_lines: list[int] = []  # unnumbered headings, by line
+    heading_lines: list[int] = []  # every heading, numbered or not
+    for i in range(len(raw)):
+        read = _read_line(raw, i, noise)
+        if read is None or read[0] in noise:
+            continue
+        text, heading = read
+        if heading:
+            heading_lines.append(i)
+        found = _number_of(text)
+        if found:
+            candidates.append(_Candidate(i, found[0], heading is not None, _parts(found[0])))
+        elif heading:
+            unnumbered_lines.append(i)
+    outline = _outline(candidates)
+    if outline:
+        before = sum(1 for line in unnumbered_lines if line < outline[0].line)
+        if before >= _OUTLINE_MIN:
+            outline = []  # the chapters are plain headings: numbers are content
+    clause_at = {c.line: c.number for c in outline}
+    # A missing parent: the last heading since the previous clause that is not a clause of the
+    # outline becomes it: its number was lost (". APPENDICES"), escaped beyond reading, or misread
+    # ("# 1. RESPONSIBILITIES" between 3 and 4.1). None there: an empty section with only the
+    # number opens before the child, and the text stays where it was.
+    spare = [line for line in heading_lines if line not in clause_at]
+    heading_as: dict[int, str] = {}
+    synthetic_at: dict[int, list[str]] = {}
+    present: set[str] = set()
+    previous_line = -1
+    for c in outline:
+        missing = [
+            ".".join(str(x) for x in c.parts[:k])
+            for k in range(1, len(c.parts))
+            if ".".join(str(x) for x in c.parts[:k]) not in present
+        ]
+        lost = [line for line in spare if previous_line < line < c.line and line not in heading_as]
+        for number in missing:
+            if lost and number == missing[0]:
+                heading_as[lost[-1]] = number
+            else:
+                synthetic_at.setdefault(c.line, []).append(number)
+            present.add(number)
+        present.add(c.number)
+        previous_line = c.line
+
+    # ── Pass 2: the tree ─────────────────────────────────────────────────────────────────────
     sections: list[ParsedSection] = []
     stack: list[int] = []  # indices of the open sections, outermost first
     body: list[str] = []  # text before the first section (a preamble)
     page = 1
-    last_number: str | None = None
-    # The clauses accepted so far, newest last. DI marks a heading only from the page's layout,
-    # so a numbered heading is trusted further than a number at the start of a body line: it may
-    # continue from any of the last few clauses (``_heading_follows``), so one stray clause ("8.1
-    # The SCV Lead documents ...", a sentence) cannot make every later heading look out of order.
-    accepted: list[str] = []
     unnumbered = 0
     kept_once: set[str] = set()
+    by_number: dict[str, int] = {}  # each clause number's section, the latest one
 
-    def open_section(number: str, title: str, level: int) -> None:
-        while stack and sections[stack[-1]].level >= level:
-            stack.pop()
-        parent = stack[-1] if stack else None
+    def attach(index: int, parent: int | None) -> None:
+        sections[index].parent = parent
+        if parent is not None:
+            sections[parent].children.append(index)
+
+    def open_clause(number: str, title: str) -> None:
+        """A clause under the section its number names (7.1 under 7), or at the top level."""
+        parent = by_number.get(number.rsplit(".", 1)[0]) if "." in number else None
+        # A clause written on one line with its sentence ("1. This template should be used as a
+        # guide to ..."): the title is its start, the rest its text. Nothing is cut off.
+        rest = ""
+        if len(title) > _TITLE_MAX:
+            cut = title.rfind(" ", 0, _TITLE_MAX)
+            cut = cut if cut > 0 else _TITLE_MAX
+            title, rest = title[:cut], title[cut:].strip()
         sections.append(
             ParsedSection(
                 number=number,
+                title=title,
+                level=len(_parts(number)),
+                page_start=page,
+                page_end=page,
+                text=rest,
+            )
+        )
+        index = len(sections) - 1
+        attach(index, parent)
+        by_number[number] = index
+        stack[:] = []
+        node: int | None = index
+        while node is not None:  # the open sections are the clause and its ancestors
+            stack.insert(0, node)
+            node = sections[node].parent
+
+    def open_heading(title: str, level: int) -> None:
+        while stack and sections[stack[-1]].level >= level:
+            stack.pop()
+        sections.append(
+            ParsedSection(
+                number=f"§{unnumbered}",
                 title=title[:_TITLE_MAX],
                 level=level,
                 page_start=page,
                 page_end=page,
-                parent=parent,
             )
         )
         index = len(sections) - 1
-        if parent is not None:
-            sections[parent].children.append(index)
+        attach(index, stack[-1] if stack else None)
         stack.append(index)
 
     def add_text(line: str) -> None:
@@ -240,6 +391,7 @@ def parse_sections(markdown: str) -> list[ParsedSection]:
     i = 0
     while i < len(raw):
         line = raw[i].strip()
+        at = i
         i += 1
         if not line:
             add_break()
@@ -259,69 +411,41 @@ def parse_sections(markdown: str) -> list[ParsedSection]:
                 kept_once.add(text)
                 add_text(text)
             continue
-
-        numbered = _NUMBERED_INLINE.match(text) or _NUMBERED_TIGHT.match(text)
-        alone = None if numbered else _NUMBER_ALONE.match(text)
-        if alone:
-            # "4.2" alone: the clause's text is the next non-empty, non-noise line.
-            j = i
-            while j < len(raw) and (
-                not raw[j].strip() or _COMMENT.match(raw[j].strip()) or raw[j].strip() in noise
-            ):
-                j += 1
-            if j < len(raw) and _is_successor(last_number, alone.group(1)):
-                if _HEADING.match(raw[j].strip()):
-                    title, after = _clean_heading(_HEADING.sub(r"\2", raw[j].strip())), j + 1
-                else:
-                    title, after = _wrapped_title(raw, j, noise)
-                    title = _clean_heading(title)
-                clause = alone.group(1)
-                last_number = clause
-                accepted.append(clause)
-                open_section(clause, title, len(_parts(clause)))
-                i = after
-                continue
-        if (
-            numbered
-            and not _NOT_A_CLAUSE.match(text)
-            and (
-                _is_successor(last_number, numbered.group(1))
-                or (
-                    heading is not None
-                    and any(
-                        _heading_follows(p, numbered.group(1))
-                        for p in accepted[-_HEADING_LOOKBACK:]
-                    )
-                )
-            )
-        ):
-            clause = numbered.group(1)
-            last_number = clause
-            accepted.append(clause)
-            open_section(clause, numbered.group(2), len(_parts(clause)))
+        for number in synthetic_at.get(at, []):
+            open_clause(number, "")
+        if at in heading_as:
+            # The chapter heading whose number was lost or misread: ". APPENDICES" is
+            # 7 APPENDICES, "1. RESPONSIBILITIES" after 3 is 4 RESPONSIBILITIES.
+            found = _number_of(text)
+            title = found[1] if found and found[1] else re.sub(r"^[^\w(]+", "", _unescape(text))
+            open_clause(heading_as[at], title or "")
             continue
-        if heading and not numbered:
-            # A heading that lost its number ("##### . APPENDICES") right before its first
-            # subsection ("7.1"): it is that subsection's parent, "7", when "7" can come next.
-            # Otherwise 7.1-7.3 nest under the clause before (6.3.3): chapter 7 disappears and
-            # its appendices become part of chapter 6.
-            lost = _NUMBERLESS.match(text)
-            following = _next_content(raw, i, noise)
-            sub = _NUMBERED_INLINE.match(following) or _NUMBER_ALONE.match(following)
-            if lost and sub and "." in sub.group(1):
-                implied = sub.group(1).rsplit(".", 1)[0]
-                if implied not in accepted and _is_successor(last_number, implied):
-                    last_number = implied
-                    accepted.append(implied)
-                    open_section(implied, lost.group(1), len(_parts(implied)))
-                    continue
+        if at in clause_at:
+            number, title = _number_of(text) or (clause_at[at], "")
+            if title is None:
+                # The number alone: its title is the next content line (wrapped lines joined).
+                j = i
+                while j < len(raw) and (
+                    not raw[j].strip() or _COMMENT.match(raw[j].strip()) or raw[j].strip() in noise
+                ):
+                    j += 1
+                if j < len(raw) and _HEADING.match(raw[j].strip()):
+                    title, i = _clean_heading(_HEADING.sub(r"\2", raw[j].strip())), j + 1
+                elif j < len(raw):
+                    title, i = _wrapped_title(raw, j, noise)
+                    title = _clean_heading(_unescape(title))
+                else:
+                    title = ""
+            open_clause(number, title)
+            continue
+        if heading:
             unnumbered += 1
             # An unnumbered heading inside a numbered outline nests under the open clause, so a
             # sub-heading of 5.3 stays part of 5.3's full text.
             level = min(len(heading.group(1)), 6)  # DI writes "#######" for a 7th level
             if stack and sections[stack[-1]].number[0] != "§":
                 level = max(level, sections[stack[-1]].level + 1)
-            open_section(f"§{unnumbered}", text, level)
+            open_heading(text, level)
             continue
         add_text(line)
 
@@ -346,6 +470,24 @@ def parse_sections(markdown: str) -> list[ParsedSection]:
             s.parent = s.parent + 1 if s.parent is not None else None
             s.children = [c + 1 for c in s.children]
     return sections
+
+
+def outline_problems(sections: list[ParsedSection]) -> list[str]:
+    """Clauses whose parent is not the section their number names ("7.1 under 6"): what reading
+    the tree off line order used to produce. The parser builds none; kept as the check the SOP
+    tab shows and the tests assert, so a regression is visible rather than silent."""
+    problems = []
+    for s in sections:
+        if s.number[0] == "§":
+            continue
+        want = s.number.rsplit(".", 1)[0] if "." in s.number else None
+        got = sections[s.parent].number if s.parent is not None else None
+        if want is None:
+            if got is not None and got[0] != "§":
+                problems.append(f"{s.number} under {got}")
+        elif got != want:
+            problems.append(f"{s.number} under {got or 'the top level'}")
+    return problems
 
 
 def heading_block(number: str, title: str, level: int, text: str) -> str:

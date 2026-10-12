@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.69.1.0 (2026-10-12)
+
+### Fixed
+- **SOP sections hang under the section their number names, whatever went wrong with a heading.**
+  The tree was read off line order, so one missed chapter heading hung its subsections under the
+  chapter before ("6–7.2", "7–8.1"): measured 38 sections in 7 of 26 client SOPs. The causes
+  varied (a dropped number ". APPENDICES", an escaped one "8\\. APPENDICES", an OCR misread
+  "1. RESPONSIBILITIES" for chapter 4, a wrong heading level); one rule now covers them all:
+  - the outline is chosen over the whole document (the best-following run of numbers), so a stray
+    number (a list item, a table cell, a lone "07") is text and cannot derail what follows (one
+    SOP had ~100 clauses read as text after a stray "07");
+  - a clause's parent is the section its number names (7.1 under 7);
+  - a missing parent is the heading just before its first child that is not a clause (its number
+    lost, escaped or misread), else an empty section with only the number;
+  - in a document whose chapters are unnumbered headings, numbers are content (an appendix that
+    lists another document's structure, "2.1 Health authority");
+  - a clause written on one long line keeps all of it: the title is its first 160 characters, the
+    rest its text (before, the rest was cut off).
+  Replaces the ". APPENDICES" special case of 0.68.2.0. Checked on all 26 live documents: 0
+  misplaced sections (from 38), every document's text intact word for word.
+
 ## 0.69.0.0 (2026-10-12)
 
 ### Added
