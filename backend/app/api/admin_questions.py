@@ -292,6 +292,30 @@ async def publish(
     )
 
 
+class DiscardOut(BaseModel):
+    version_no: int
+    has_unpublished_changes: bool
+
+
+@router.post("/{bank_id}/discard-draft", response_model=DiscardOut)
+async def discard_draft(bank_id: str, db: AsyncSession = Depends(get_db)) -> DiscardOut:
+    """Throw away the draft's unpublished changes: the bank's questions and rubrics go back to the
+    latest published version. 404 for an unknown bank, 409 for a bank never published (there is
+    nothing to go back to)."""
+    try:
+        await svc.get_bank(db, bank_id)
+    except QuestionBankNotFound as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bank not found") from exc
+    try:
+        version_no = await bank_version_service.discard_draft(db, bank_id)
+    except bank_version_service.NothingPublished as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="The bank has no published version"
+        ) from exc
+    _, unpublished = await bank_version_service.publish_state(db, bank_id)
+    return DiscardOut(version_no=version_no, has_unpublished_changes=unpublished)
+
+
 class CitationRunOut(BaseModel):
     """A "Relocate SOP citations" run (spec-sop-section-grounding §4): progress, then each rubric
     item's old citation beside its new one. The new citations are already in the draft."""

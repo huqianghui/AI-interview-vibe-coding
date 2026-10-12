@@ -13,10 +13,11 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -288,6 +289,87 @@ async def publish_state(db: AsyncSession, bank_id: str) -> tuple[int | None, boo
     if row is None:
         return None, True
     return row[0], row[1] != _hash(await draft_content(db, bank_id))
+
+
+class NothingPublished(LookupError):
+    """The bank has no published version to go back to."""
+
+
+async def discard_draft(db: AsyncSession, bank_id: str) -> int:
+    """Throw away the draft's unpublished changes: the questions and their rubrics become exactly
+    the latest published version again (owner, 2026-10-12: "Published v5 · Unpublished changes"
+    had no undo). Questions added since are deleted, removed ones come back with their ids (answers
+    are joined to questions by id), and each default rubric gets the version's items. One
+    transaction: a failure leaves the draft as it was. Returns the latest version's number;
+    :class:`NothingPublished` when there is none."""
+    version = await latest(db, bank_id)
+    if version is None:
+        raise NothingPublished(bank_id)
+    bank = await db.get(QuestionBank, bank_id)
+    published = questions_of(version)
+    keep = {q["id"] for q in published}
+    rows = {
+        q.id: q
+        for q in (await db.execute(select(QuestionRow).where(QuestionRow.bank_id == bank_id)))
+        .scalars()
+        .all()
+    }
+    gone = [qid for qid in rows if qid not in keep]
+    if gone:
+        checklists = select(Checklist.id).where(Checklist.question_id.in_(gone))
+        await db.execute(delete(ChecklistItem).where(ChecklistItem.checklist_id.in_(checklists)))
+        await db.execute(delete(Checklist).where(Checklist.question_id.in_(gone)))
+        await db.execute(delete(QuestionRow).where(QuestionRow.id.in_(gone)))
+    documents = set(
+        (await db.execute(select(SopDocument.id))).scalars().all()
+    )  # a cited document deleted since keeps its quote, not its link
+    for q in published:
+        row = rows.get(q["id"])
+        if row is None:
+            row = QuestionRow(id=q["id"], bank_id=bank_id)
+            db.add(row)
+        row.text = q["text"]
+        row.language = q.get("language") or (bank.language if bank else "") or "en-US"
+        row.order_index = q["order_index"]
+        row.enabled = bool(q.get("enabled", True))
+        row.weight = q.get("weight", 1)
+        row.expected_points = json.dumps(list(q.get("expected_points", [])), ensure_ascii=False)
+        row.max_follow_ups = q.get("max_follow_ups", 0)
+        row.follow_up_prompt = q.get("follow_up_prompt") or ""
+        await db.flush()
+        checklist = (
+            await db.execute(
+                select(Checklist)
+                .where(Checklist.question_id == row.id, Checklist.is_default.is_(True))
+                .order_by(Checklist.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if checklist is None:
+            checklist = Checklist(question_id=row.id, is_default=True)
+            db.add(checklist)
+            await db.flush()
+        await db.execute(delete(ChecklistItem).where(ChecklistItem.checklist_id == checklist.id))
+        await db.flush()
+        for item in q.get("rubric", []):
+            document_id = item.get("source_document_id") or None
+            db.add(
+                ChecklistItem(
+                    id=str(uuid.uuid4()),
+                    checklist_id=checklist.id,
+                    kind=item.get("kind", "required"),
+                    text=item.get("text", ""),
+                    weight=int(item.get("weight", 0)),
+                    advisory=bool(item.get("advisory", False)),
+                    source_quote=item.get("source_quote") or "",
+                    source_document_id=document_id if document_id in documents else None,
+                    source_page=item.get("source_page") or None,
+                    source_refs=json.dumps(item.get("source_refs", []), ensure_ascii=False),
+                    order_index=int(item.get("order_index", 0)),
+                )
+            )
+    await db.commit()
+    return version.version_no
 
 
 async def has_unpublished_changes(db: AsyncSession, bank_id: str) -> bool:

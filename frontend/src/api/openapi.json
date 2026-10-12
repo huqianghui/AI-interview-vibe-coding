@@ -1005,6 +1005,24 @@
         "title": "DatabaseHealth",
         "type": "object"
       },
+      "DiscardOut": {
+        "properties": {
+          "has_unpublished_changes": {
+            "title": "Has Unpublished Changes",
+            "type": "boolean"
+          },
+          "version_no": {
+            "title": "Version No",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version_no",
+          "has_unpublished_changes"
+        ],
+        "title": "DiscardOut",
+        "type": "object"
+      },
       "ExternalConfigIn": {
         "properties": {
           "api_key": {
@@ -5879,6 +5897,54 @@
           }
         ],
         "summary": "Set Default",
+        "tags": [
+          "admin-questions"
+        ]
+      }
+    },
+    "/admin/question-banks/{bank_id}/discard-draft": {
+      "post": {
+        "description": "Throw away the draft's unpublished changes: the bank's questions and rubrics go back to the\nlatest published version. 404 for an unknown bank, 409 for a bank never published (there is\nnothing to go back to).",
+        "operationId": "discard_draft_admin_question_banks__bank_id__discard_draft_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bank_id",
+            "required": true,
+            "schema": {
+              "title": "Bank Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscardOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Discard Draft",
         "tags": [
           "admin-questions"
         ]

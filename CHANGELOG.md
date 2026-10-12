@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.69.0.0 (2026-10-12)
+
+### Added
+- **"Discard changes" next to Publish.** A bank showing "Published v5 · Unpublished changes" can go
+  back to v5: its questions and rubrics become exactly the latest published version again
+  (questions added since are deleted, removed ones come back with their ids, every default rubric
+  gets the version's items, citations included). After a confirm; one transaction; no new
+  version is made. Offered only for a bank that has a published version.
+  `POST /admin/question-banks/{id}/discard-draft`.
+
 ## 0.68.2.0 (2026-10-12)
 
 ### Changed

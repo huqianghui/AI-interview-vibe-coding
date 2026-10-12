@@ -55,6 +55,15 @@ export interface PublishResult {
 export const publishBank = (bankId: string) =>
   adminRequest<PublishResult>(`/admin/question-banks/${bankId}/publish`, { method: "POST" });
 
+export interface DiscardResult {
+  version_no: number;
+  has_unpublished_changes: boolean;
+}
+
+/** Throw away the draft's unpublished changes: back to the latest published version. */
+export const discardBankDraft = (bankId: string) =>
+  adminRequest<DiscardResult>(`/admin/question-banks/${bankId}/discard-draft`, { method: "POST" });
+
 export interface AdminQuestion {
   question_id: string;
   text: string;

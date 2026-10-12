@@ -573,3 +573,68 @@ async def test_publish_is_admin_only_and_import_reports_what_it_published(
     resp = await client.post("/admin/question-banks/import", headers=admin_auth, json=bundle)
     assert resp.status_code == 201, resp.text
     assert (resp.json()["published_version_no"], resp.json()["publish_problems"]) == (1, [])
+
+
+# --- discarding the draft (owner, 2026-10-12) -------------------------------------------------
+
+
+async def test_discarding_the_draft_restores_the_latest_version_exactly(db_session):
+    bank, q, checklist, doc = await _bank(db_session)
+    bank_id, qid, doc_id = bank.id, q.id, doc.id
+    v1_id = (await bank_version_service.latest(db_session, bank.id)).id
+    # Every kind of edit: a question's text, its rubric's citations, one question added, and the
+    # original question's rubric replaced.
+    await question_service.update_question(db_session, q.id, text="Edited?")
+    await checklist_service.update_items(
+        db_session,
+        checklist.id,
+        [{"kind": "required", "text": "Something else", "weight": 100, "source_quote": "moved"}],
+    )
+    added = await question_service.add_question(
+        db_session, bank_id=bank.id, text="Added later?", order_index=1
+    )
+    await db_session.commit()
+    added_id = added.id
+    assert await bank_version_service.has_unpublished_changes(db_session, bank.id)
+
+    assert await bank_version_service.discard_draft(db_session, bank_id) == 1
+    assert not await bank_version_service.has_unpublished_changes(db_session, bank_id)
+    db_session.expire_all()
+    draft = await bank_version_service.draft_content(db_session, bank_id)
+    assert [x["id"] for x in draft["questions"]] == [qid]  # the added one is gone, the id kept
+    assert draft["questions"][0]["text"] == "How do you escalate an issue?"
+    rubric = draft["questions"][0]["rubric"]
+    assert [(i["text"], i["source_quote"], i["source_document_id"]) for i in rubric] == [
+        ("Escalates within 24 hours", "escalate within 24 hours", doc_id),
+        ("Known source conflict", "", None),
+    ]
+    assert (await bank_version_service.latest(db_session, bank_id)).id == v1_id  # no new version
+    assert await db_session.get(type(added), added_id) is None
+
+
+async def test_a_question_deleted_since_comes_back_with_its_id(db_session):
+    bank, q, _checklist, _doc = await _bank(db_session)
+    bank_id, qid = bank.id, q.id
+    await question_service.delete_question(db_session, qid)
+    assert await bank_version_service.has_unpublished_changes(db_session, bank_id)
+    await bank_version_service.discard_draft(db_session, bank_id)
+    db_session.expire_all()
+    draft = await bank_version_service.draft_content(db_session, bank_id)
+    assert [x["id"] for x in draft["questions"]] == [qid]
+    assert len(draft["questions"][0]["rubric"]) == 2
+    assert not await bank_version_service.has_unpublished_changes(db_session, bank_id)
+
+
+async def test_the_discard_api(client, db_session, admin_auth):
+    bank, q, *_ = await _bank(db_session)
+    await question_service.update_question(db_session, q.id, text="Edited?")
+    resp = await client.post(f"/admin/question-banks/{bank.id}/discard-draft", headers=admin_auth)
+    assert resp.status_code == 200
+    assert resp.json() == {"version_no": 1, "has_unpublished_changes": False}
+    never, *_ = await _bank(db_session, name="Never", is_default=False, publish=False)
+    refused = await client.post(
+        f"/admin/question-banks/{never.id}/discard-draft", headers=admin_auth
+    )
+    assert refused.status_code == 409
+    missing = await client.post("/admin/question-banks/nope/discard-draft", headers=admin_auth)
+    assert missing.status_code == 404

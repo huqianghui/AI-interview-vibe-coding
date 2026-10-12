@@ -265,6 +265,46 @@ describe("Content tab: publishing a bank version", () => {
     await openDemoBank(user);
     expect(screen.getByTestId("bank-version-status")).toHaveTextContent("Published v1");
     expect(screen.getByTestId("bank-publish")).toBeDisabled();
+    expect(screen.getByTestId("bank-discard")).toBeDisabled(); // nothing to discard either
+  });
+
+  it("discards the unpublished changes after a confirm, and not without one", async () => {
+    const user = userEvent.setup();
+    const listBanks = vi.spyOn(admin, "listBanks").mockResolvedValue([
+      { ...BANKS[0], latest_version_no: 5, has_unpublished_changes: true },
+      ...BANKS.slice(1),
+    ]);
+    const discard = vi
+      .spyOn(admin, "discardBankDraft")
+      .mockResolvedValue({ version_no: 5, has_unpublished_changes: false });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+    await openDemoBank(user);
+
+    await user.click(screen.getByTestId("bank-discard"));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("go back to v5"));
+    expect(discard).not.toHaveBeenCalled(); // the admin said no
+
+    listBanks.mockResolvedValue([
+      { ...BANKS[0], latest_version_no: 5, has_unpublished_changes: false },
+      ...BANKS.slice(1),
+    ]);
+    await user.click(screen.getByTestId("bank-discard"));
+    expect(discard).toHaveBeenCalledWith(BANKS[0].bank_id);
+    expect(await screen.findByTestId("bank-discard-result")).toHaveTextContent(
+      "Changes discarded: the draft is v5 again",
+    );
+    expect(screen.getByTestId("bank-version-status")).toHaveTextContent("Published v5");
+    expect(screen.getByTestId("bank-version-status")).not.toHaveTextContent("Unpublished");
+  });
+
+  it("offers no discard for a bank never published", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(admin, "listBanks").mockResolvedValue([
+      { ...BANKS[0], latest_version_no: null, has_unpublished_changes: true },
+      ...BANKS.slice(1),
+    ]);
+    await openDemoBank(user);
+    expect(screen.queryByTestId("bank-discard")).toBeNull();
   });
 });
 

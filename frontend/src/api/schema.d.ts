@@ -749,6 +749,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/question-banks/{bank_id}/discard-draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discard Draft
+         * @description Throw away the draft's unpublished changes: the bank's questions and rubrics go back to the
+         *     latest published version. 404 for an unknown bank, 409 for a bank never published (there is
+         *     nothing to go back to).
+         */
+        post: operations["discard_draft_admin_question_banks__bank_id__discard_draft_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/question-banks/{bank_id}/export": {
         parameters: {
             query?: never;
@@ -2090,6 +2112,13 @@ export interface components {
              * @enum {string}
              */
             status: "ok" | "unavailable";
+        };
+        /** DiscardOut */
+        DiscardOut: {
+            /** Has Unpublished Changes */
+            has_unpublished_changes: boolean;
+            /** Version No */
+            version_no: number;
         };
         /** ExternalConfigIn */
         ExternalConfigIn: {
@@ -4383,6 +4412,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BankOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    discard_draft_admin_question_banks__bank_id__discard_draft_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bank_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiscardOut"];
                 };
             };
             /** @description Validation Error */
