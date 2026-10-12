@@ -54,12 +54,15 @@ export function useContentTab(guard: Guard) {
   // The outcome of the last publish of the selected bank (version, or why it was refused).
   const [publishResult, setPublishResult] = useState<PublishResult | null>(null);
   const [publishing, setPublishing] = useState(false);
+  // The version the last "Discard changes" went back to.
+  const [discardedTo, setDiscardedTo] = useState<number | null>(null);
 
   // Every draft edit (question or rubric) can change whether the bank has unpublished changes,
   // so the banks' publish state is reloaded with it.
   const setQuestionsAndStatus = (next: AdminQuestion[]) => {
     setQuestions(next);
     setPublishResult(null);
+    setDiscardedTo(null);
     void refreshBanks();
   };
 
@@ -68,8 +71,32 @@ export function useContentTab(guard: Guard) {
       if (!selectedBank || publishing) return;
       setPublishing(true);
       try {
+        setDiscardedTo(null);
         setPublishResult(await admin.publishBank(selectedBank));
         await loadBanks();
+      } finally {
+        setPublishing(false);
+      }
+    });
+
+  /** "Discard changes": the draft goes back to the latest published version, after a confirm (it
+   * cannot be undone, and an open rubric's unsaved edits go with it). */
+  const discardDraft = (confirmText: string) =>
+    guard(async () => {
+      if (!selectedBank || publishing) return;
+      if (typeof window !== "undefined" && !window.confirm(confirmText)) return;
+      setPublishing(true);
+      try {
+        const bankId = selectedBank;
+        const result = await admin.discardBankDraft(bankId);
+        await loadBanks();
+        // The questions and every rubric changed under the editor: reload them.
+        setSelectedQuestion(null);
+        adoptChecklist(null);
+        setChecklistStatus(null);
+        setQuestions(await admin.listBankQuestions(bankId));
+        setPublishResult(null);
+        setDiscardedTo(result.version_no);
       } finally {
         setPublishing(false);
       }
@@ -85,6 +112,7 @@ export function useContentTab(guard: Guard) {
     guard(async () => {
       setSelectedBank(bankId);
       setPublishResult(null);
+      setDiscardedTo(null);
       setLibraryResult(null);
       setSelectedQuestion(null);
       adoptChecklist(null);
@@ -225,6 +253,8 @@ export function useContentTab(guard: Guard) {
     editWeightsSum,
     publishResult,
     publishBank,
+    discardDraft,
+    discardedTo,
     publishing,
     reloadAfterRelocate,
     libraries,

@@ -241,6 +241,10 @@ export const resources = {
         versionHint:
           "Edits are a draft. Interviews use the latest published version, and one that already started keeps its version.",
         publish: "Publish",
+        discard: "Discard changes",
+        discardConfirm:
+          "Discard every unpublished change to this bank (questions and rubrics) and go back to v{{no}}? This cannot be undone.",
+        discarded: "Changes discarded: the draft is v{{no}} again",
         publishedAs: "Published as v{{no}}",
         publishUnchanged: "Nothing to publish: same as v{{no}}",
         publishRefused: "Can't publish yet:",
@@ -753,6 +757,9 @@ export const resources = {
         versionUnpublished: "有未发布的修改",
         versionHint: "修改先保存为草稿。面试使用最新已发布的版本，已经开始的面试继续使用开始时的版本。",
         publish: "发布",
+        discard: "撤销修改",
+        discardConfirm: "撤销这个题库所有未发布的修改（题目和评分标准），回到 v{{no}}？此操作不能撤回。",
+        discarded: "已撤销修改：草稿已回到 v{{no}}",
         publishedAs: "已发布为 v{{no}}",
         publishUnchanged: "没有需要发布的修改：与 v{{no}} 相同",
         publishRefused: "暂时不能发布：",

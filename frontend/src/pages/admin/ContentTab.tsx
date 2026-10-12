@@ -172,18 +172,40 @@ export function ContentTab({ state, guard }: { state: ContentTabState; guard: Gu
               </Text>
             }
             action={
-              <Button
-                appearance="primary"
-                size="small"
-                data-testid="bank-publish"
-                disabled={!currentBank?.has_unpublished_changes || publishing}
-                onClick={publishBank}
-              >
-                {t("admin.publish")}
-              </Button>
+              <div style={{ display: "flex", gap: 8 }}>
+                {/* Only with something to go back to: a bank never published has no version. */}
+                {currentBank?.latest_version_no != null && (
+                  <Button
+                    size="small"
+                    data-testid="bank-discard"
+                    disabled={!currentBank.has_unpublished_changes || publishing}
+                    onClick={() =>
+                      void state.discardDraft(
+                        t("admin.discardConfirm", { no: currentBank.latest_version_no }),
+                      )
+                    }
+                  >
+                    {t("admin.discard")}
+                  </Button>
+                )}
+                <Button
+                  appearance="primary"
+                  size="small"
+                  data-testid="bank-publish"
+                  disabled={!currentBank?.has_unpublished_changes || publishing}
+                  onClick={publishBank}
+                >
+                  {t("admin.publish")}
+                </Button>
+              </div>
             }
           />
           {publishResult && <PublishOutcome result={publishResult} />}
+          {state.discardedTo != null && (
+            <Text size={200} className={styles.hintOk} data-testid="bank-discard-result">
+              {t("admin.discarded", { no: state.discardedTo })}
+            </Text>
+          )}
           {/* The SOP library the bank draws on (spec-sop-libraries): drafting, relocating and
               citing a section only ever look in it; none = general evaluation, no SOP. */}
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
