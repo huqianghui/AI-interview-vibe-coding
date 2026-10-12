@@ -8,8 +8,12 @@ at most ``MAX_CHARS`` and at least ``MIN_CHARS`` characters, counted over a unit
 2. A section too long for one unit is opened: its own text (the lines before its first
    subsection) becomes a part, and each subsection is judged the same way, down to the leaves.
 3. Parts under ``MIN_CHARS`` merge with the next (or the previous) part under the same parent,
-   while the merged unit still fits. Only a part that could not, because both its neighbours
-   there are too big, joins its smaller neighbour across a parent (a unit "4.9–5 ...").
+   while the merged unit still fits. A unit crosses a section boundary only with WHOLE sections
+   (owner, 2026-10-12: headings cut a document by meaning, at every level): reading down into a
+   section from its start is fine ("5–5.1.1 PROCEDURE / ..."), but never the tail of one section
+   joined to what follows it ("4.9–5") or a whole section joined to the start of the next ("6–7.2"
+   read as two chapters but held one and a fragment of the other). Better a unit under
+   ``MIN_CHARS``.
 4. A section still longer than ``MAX_CHARS`` with no subsection to open (or an opened section's
    own text that long) is cut at paragraph boundaries into balanced pieces (owner, 2026-10-10),
    but a table is never cut: one big table stays one piece. Pieces never merge.
@@ -106,6 +110,27 @@ class _Tree:
         kids = self.children.get(i, [])
         return self.end(kids[-1]) if kids else i
 
+    def whole_sections_only(self, members: list[Member]) -> bool:
+        """Whether a run crosses section boundaries only with whole sections (owner, 2026-10-12).
+
+        Reading DOWN into a section is fine: "5 PROCEDURE" + 5.1's intro + 5.1.1 starts chapter 5
+        at its start. Crossing OUT of one is not, unless whole: (1) a section that ends inside the
+        run must start inside it (no tail of 4 joined to 5: "4.9–5"); (2) once a section has ended
+        inside the run, every section starting after that point must end inside it too (no whole 6
+        joined to the start of 7: "6–7.2"). A run ending with a section's own text (``own``) ends
+        at that section's start, so it may only read down into it."""
+        first = members[0].order_index
+        last = members[-1].order_index if members[-1].own else self.end(members[-1].order_index)
+        touched = [(i, self.end(i)) for i in self.rows if not (self.end(i) < first or i > last)]
+        closes = [stop for start, stop in touched if stop < last]
+        if any(start < first for start, stop in touched if stop < last):
+            return False  # (1) the tail of a section that began before this run
+        if closes:
+            after = min(closes)
+            if any(start > after and stop > last for start, stop in touched):
+                return False  # (2) the start of a section that goes on past this run
+        return True
+
     def run(self, members: list[Member]) -> str:
         """What a unit's citation reads: the run in document order from its first member through
         its last (all of the last one, or only its own text)."""
@@ -152,6 +177,8 @@ def _join(tree: _Tree, first: _Part, second: _Part) -> _Part | None:
         return None  # a piece is part of one section's text: it stands alone
     joined = _Part(list(first.members), list(first.texts), first.pages)
     joined.absorb(second)
+    if not tree.whole_sections_only(joined.members):
+        return None
     text = _JOIN.join(t for t in joined.texts if t)
     return joined if tree.run(joined.members) == text else None
 
@@ -228,9 +255,9 @@ def _merged_unsealed(tree: _Tree, parts: list[_Part]) -> list[_Part]:
 
 def _absorb_small(tree: _Tree, parts: list[_Part]) -> list[_Part]:
     """Last resort for a part still under ``MIN_CHARS`` (both neighbours under its parent were too
-    big, or it sits next to an opened section): it joins its smaller neighbour, wherever that
-    comes from, if the result still fits and is still one citation. A unit then reads e.g.
-    "4.9–5 ..."."""
+    big, or it sits next to an opened section): it joins its smaller neighbour if the result still
+    fits, is still one citation, and cuts no section (:meth:`_Tree.whole_sections_only`). Two whole
+    top-level sections may still join this way; a fragment never joins outside its section."""
     out = list(parts)
     i = 0
     while i < len(out):

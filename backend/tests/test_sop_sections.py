@@ -645,3 +645,70 @@ def test_a_body_line_number_still_needs_the_strict_order():
     """Only a heading is trusted to skip: a stray "7.4" starting a sentence is not a clause."""
     md = "## 1. DOSING\n\n1.1 Weigh the dose.\n\n7.4 litres of buffer are prepared.\n"
     assert [s.number for s in parse_sections(md)] == ["1", "1.1"]
+
+
+# Measured on a client SOP, 2026-10-12: DI dropped chapter 7's number ("##### . APPENDICES") and
+# wrapped the appendix titles onto a second line. Here chapter 1 plays 6, 2 plays 7, 3 plays 8.
+_LOST_CHAPTER = """## 1. REFERENCES
+
+1.3
+Other References
+
+1.3.3
+Clinical Research Global Privacy Guidance
+
+
+##### . APPENDICES
+
+2.1
+Appendix 1 - Development Governance
+
+2.2
+Appendix 2 - Due Diligence Requirements and Collection of Documentation from PI and Site
+Staff During Feasibility and PSS
+
+2.3
+Appendix 3 - RACI (Responsible, Accountable, Consulted, Informed) for Study, Country and
+Site Feasibility
+
+The RACI table follows.
+
+## 3. DOCUMENT HISTORY PAGE
+
+Version 1.0.
+"""
+
+
+def _sections_by_number(sections):
+    return {s.number: s for s in sections}
+
+
+def test_a_chapter_heading_that_lost_its_number_takes_it_from_its_first_subsection():
+    sections = parse_sections(_LOST_CHAPTER)
+    by = _sections_by_number(sections)
+    assert by["2"].title == "APPENDICES" and by["2"].level == 1 and by["2"].parent is None
+    for sub in ("2.1", "2.2", "2.3"):
+        assert sections[by[sub].parent].number == "2"  # not chapter 1 any more
+    assert "2.1" not in full_text(sections, sections.index(by["1"]))
+    assert not any(s.number.startswith("§") for s in sections)
+
+
+def test_a_title_wrapped_onto_the_next_line_is_joined_and_a_sentence_is_not():
+    by = _sections_by_number(parse_sections(_LOST_CHAPTER))
+    assert by["2.3"].title == (
+        "Appendix 3 - RACI (Responsible, Accountable, Consulted, Informed) for Study, Country and"
+        " Site Feasibility"
+    )
+    assert by["2.3"].text == "The RACI table follows."
+    assert by["2.2"].title.endswith("from PI and Site Staff During Feasibility and PSS")
+    # A clause whose text is a sentence keeps its first line as the title, as before.
+    clause = parse_sections(
+        "## 1. PURPOSE\n\n1.1\nThe GCPL updates the request form\nwith the CDT decision.\n"
+    )
+    one = _sections_by_number(clause)["1.1"]
+    assert (one.title, one.text) == ("The GCPL updates the request form", "with the CDT decision.")
+
+
+def test_a_numberless_heading_that_no_subsection_explains_stays_unnumbered():
+    md = "## 1. PURPOSE\n\nText.\n\n##### . Notes\n\nFree text, no clause after it.\n"
+    assert [s.number for s in parse_sections(md)] == ["1", "§1"]

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.68.2.0 (2026-10-12)
+
+### Changed
+- **An SOP unit crosses a heading only with whole sections, at every level** (owner, 2026-10-12:
+  headings cut a document by meaning). Reading down into a section from its start still merges
+  ("5–5.1.8 INSTRUCTION / Preparing for a PSSV"), but the tail of one section never joins what
+  follows it ("4.9–5"), and a whole section never joins the start of the next ("6–7.2 REFERENCES /
+  ... / Appendix 2" held all of 6 and the start of 7). Better a unit under 500 characters.
+
+### Fixed
+- **A chapter heading whose number Document Intelligence dropped** ("##### . APPENDICES" between
+  6.3.3 and 7.1) takes the number its first subsection implies. Before, chapter 7 did not exist:
+  7.1–7.3 nested under 6, and every citation of 6 read the appendices too.
+- **A title wrapped onto the next line is joined** ("7.3 Appendix 3 - RACI ... for Study, Country
+  and" + "Site Feasibility"), when its first line was cut by the page width and the block ends
+  there without a full stop. Only the line break moves.
+
 ## 0.68.1.1 (2026-10-12)
 
 ### Fixed
