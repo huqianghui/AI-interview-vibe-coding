@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.68.1.1 (2026-10-12)
+
+### Fixed
+- **Status checkboxes on one line, filters aligned.** In the Jobs and Interview results filters the
+  status field spanned two grid columns, too narrow for five checkboxes, so the fifth wrapped and
+  the row's bottom alignment pushed the neighbouring select below its label line. Jobs' filters are
+  one row now (job select, statuses, Reset, wrapping only on a narrow screen); Interview results'
+  statuses take the whole row.
+
 ## 0.68.1.0 (2026-10-11)
 
 ### Changed
