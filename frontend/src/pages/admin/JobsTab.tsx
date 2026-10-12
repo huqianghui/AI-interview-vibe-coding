@@ -44,8 +44,19 @@ const STATUS_COLOR: Record<JobStatus, "informative" | "brand" | "danger" | "succ
   };
 
 const useStyles = makeStyles({
+  // One row: the job select, the status checkboxes and Reset, bottoms aligned (a select and a row
+  // of checkboxes are the same height, so the labels line up too). Wraps only on a narrow screen.
+  filterRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "flex-end",
+    columnGap: tokens.spacingHorizontalXL,
+    rowGap: tokens.spacingVerticalM,
+    marginBottom: tokens.spacingVerticalL,
+  },
+  kindField: { width: "220px", maxWidth: "100%" },
   statuses: { display: "flex", flexWrap: "wrap", columnGap: tokens.spacingHorizontalS },
-  statusField: { gridColumn: "span 2" },
+  statusField: { minWidth: 0 },
   checkboxBox: { borderRadius: "3px" },
   notice: { display: "block", marginBottom: tokens.spacingVerticalS },
 });
@@ -166,8 +177,8 @@ export function JobsTab({ state }: { state: JobsTabState }) {
     <Card className={styles.card} data-testid="jobs-tab">
       <CardHeader header={<Title3>{t("admin.jobs.tab")}</Title3>} />
       <div style={{ padding: "0 16px 16px" }}>
-        <div className={local.filters} data-testid="jobs-filters">
-          <Field label={t("admin.jobs.kind")} className={local.filter}>
+        <div className={local.filterRow} data-testid="jobs-filters">
+          <Field label={t("admin.jobs.kind")} className={local.kindField}>
             <Select
               className={local.control}
               value={state.kind}

@@ -37,7 +37,9 @@ const OUTCOMES = ["Meets Expectations", "Needs Improvement", "Does Not Meet"] as
 
 const useStyles = makeStyles({
   statuses: { display: "flex", flexWrap: "wrap", columnGap: tokens.spacingHorizontalS },
-  statusField: { gridColumn: "span 2" },
+  // The whole row: five checkboxes fit on one line at any desktop width (two grid columns did not,
+  // so the fifth wrapped); on a narrow screen they wrap inside it.
+  statusField: { gridColumn: "1 / -1" },
   scroll: { overflowX: "auto" },
   row: { cursor: "pointer" },
   // The app theme's 8px small radius turns a 16px checkbox into a circle, which reads as a radio
@@ -267,6 +269,14 @@ export function InterviewsTab({ state }: { state: InterviewsTabState }) {
             onCommit={(v) => state.setFilters({ score_max: v })}
             testId="results-filter-score-max"
           />
+          <Button
+            appearance="subtle"
+            disabled={!hasFilters}
+            onClick={state.clearFilters}
+            data-testid="results-clear"
+          >
+            {t("admin.results.clear")}
+          </Button>
           <Field label={t("history.colStatus")} className={local.statusField}>
             <div className={local.statuses}>
               {STATUSES.map((s) => (
@@ -282,14 +292,6 @@ export function InterviewsTab({ state }: { state: InterviewsTabState }) {
               ))}
             </div>
           </Field>
-          <Button
-            appearance="subtle"
-            disabled={!hasFilters}
-            onClick={state.clearFilters}
-            data-testid="results-clear"
-          >
-            {t("admin.results.clear")}
-          </Button>
         </div>
 
         {state.error && (
