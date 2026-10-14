@@ -92,6 +92,14 @@ export function avatarRateLimitRetryMs(error: Record<string, unknown> | undefine
  * candidate can turn the digital human back on later). */
 const AVATAR_RATE_LIMIT_MAX_WAIT_MS = 15_000;
 
+/** The conversation-panel id of a question's bubble: its question id plus a short hash of the text
+ * read (the external brain may read different text under one id). A key, never spoken. */
+export function questionBubbleKey(questionId: string, text: string): string {
+  let h = 5381;
+  for (let i = 0; i < text.length; i++) h = ((h << 5) + h + text.charCodeAt(i)) | 0;
+  return `question-${questionId}-${(h >>> 0).toString(36)}`;
+}
+
 export interface UseInterviewVoiceOptions {
   locale?: string;
   onTranscript?: (segment: TranscriptSegment) => void;
@@ -419,15 +427,13 @@ export function useInterviewVoice(
   /** The candidate started speaking after that question was read — VAD's `speech_started`, which comes
    * before any transcript, so a reply still in progress counts too. */
   const spokeSinceReadRef = useRef(false);
-  /** The transcript bubble that question was shown in. A re-read on the voice-only session writes
-   * into the SAME bubble: the dead session's transcript still reached the page (it rides the
-   * WebSocket), so a fresh bubble showed the question twice while it was heard once (owner, live
-   * behind a secure-access client, 2026-10-14). */
-  const lastQuestionBubbleRef = useRef<string | null>(null);
-  /** Set for the duration of such a re-read: the bubble its response must reuse, bound to the text
-   * being re-read so a LATER read (the next question, a judge nudge) can never write into it, and the
-   * response id last mapped onto it (a retry under a new id starts the bubble's text afresh). */
-  const reuseBubbleRef = useRef<{ key: string; text: string; responseId?: string } | null>(null);
+  /** The transcript bubble of the question being read: ONE per question and text, whatever Azure
+   * response carries it. The conversation panel is a log of what was said and was keyed by Azure's
+   * response id, so the same question read twice (a re-read after a voice-only fallback, a reconnect)
+   * showed twice while the question list it comes from has it once (owner, 2026-10-14). The id is only
+   * a key here; it is never part of what is spoken. Text is in the key too: the external brain can
+   * send different text under the same question id, and that is a different thing said. */
+  const questionBubbleRef = useRef<{ text: string; key: string; responseId?: string } | null>(null);
   /** Holds the FIRST question read until the digital human can actually be heard — the interviewer's
    * audio rides the avatar's WebRTC track, so reading before that track flows clipped the opening
    * words. Extracted to `useFirstReadGate`: the rule about which of its four pieces of state wins was
@@ -515,8 +521,7 @@ export function useInterviewVoice(
     // The session is over: nothing it read is a question a later session should repeat.
     lastReadTextRef.current = null;
     spokeSinceReadRef.current = false;
-    lastQuestionBubbleRef.current = null;
-    reuseBubbleRef.current = null;
+    questionBubbleRef.current = null;
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -530,31 +535,21 @@ export function useInterviewVoice(
 
   /** WS message handler — Azure Voice Live realtime events, relayed near-verbatim by the backend
    * proxy (plus its own `proxy.connected` bootstrap frame). */
-  /** The bubble an interviewer transcript belongs in: its own per-response id, except during a
-   * re-read after a voice-only fallback, which writes into the bubble the unheard read already left
-   * (see lastQuestionBubbleRef). Also remembers which bubble the current question went into. */
+  /** The bubble an interviewer transcript belongs in: the current question's own bubble when this is
+   * our read of it (see questionBubbleRef), otherwise its per-response id (a judge nudge, a model turn). */
   const assistantBubbleKey = useCallback(
     (msg: Record<string, unknown>): string => {
       const own = `assistant-${msg.response_id}-${msg.item_id}`;
       const responseId = msg.response_id as string | undefined;
-      if (!readWatch.ownsResponse(responseId)) return own;
-      const reuse = reuseBubbleRef.current;
-      if (reuse) {
-        if (speakQueue.lastEmitted() === reuse.text) {
-          if (reuse.responseId !== responseId) {
-            // A new attempt at the re-read: whatever a previous attempt streamed into the bubble is
-            // not part of this one, or a retry would show the question twice inside it.
-            assistantLiveTranscriptRef.current.delete(reuse.key);
-            reuse.responseId = responseId;
-          }
-          return reuse.key;
-        }
-        reuseBubbleRef.current = null; // the re-read is over: this is a different read
+      const bubble = questionBubbleRef.current;
+      if (!bubble || !readWatch.ownsResponse(responseId) || speakQueue.lastEmitted() !== bubble.text) return own;
+      if (bubble.responseId !== responseId) {
+        // A new read of the same question: what an earlier read streamed into the bubble is not part of
+        // this one, or the bubble would hold the question twice.
+        assistantLiveTranscriptRef.current.delete(bubble.key);
+        bubble.responseId = responseId;
       }
-      if (lastReadTextRef.current && speakQueue.lastEmitted() === lastReadTextRef.current) {
-        lastQuestionBubbleRef.current = own;
-      }
-      return own;
+      return bubble.key;
     },
     [readWatch, speakQueue],
   );
@@ -903,7 +898,6 @@ export function useInterviewVoice(
         case "response.audio_transcript.done": {
           const key = assistantBubbleKey(msg);
           assistantLiveTranscriptRef.current.delete(key);
-          if (readWatch.ownsResponse(msg.response_id as string | undefined)) reuseBubbleRef.current = null;
           if (msg.transcript) {
             emit("assistant", msg.transcript as string, true, key);
             if (readWatch.ownsResponse(msg.response_id as string | undefined)) {
@@ -1378,10 +1372,6 @@ export function useInterviewVoice(
       // wins: it is the more recent one.) A link that had flowed is not re-read: it may have been heard.
       if (info?.mediaNeverFlowed && lastReadTextRef.current && !spokeSinceReadRef.current && !draft.peek()) {
         resumeSpeakTextRef.current = lastReadTextRef.current;
-        // …into the bubble the unheard read left, not a second one.
-        reuseBubbleRef.current = lastQuestionBubbleRef.current
-          ? { key: lastQuestionBubbleRef.current, text: lastReadTextRef.current }
-          : null;
       }
       policy.markIntentionalClose(); // our own close must not trip the auto-reconnect path
       if (reconnectTimerRef.current) {
@@ -1463,8 +1453,6 @@ export function useInterviewVoice(
     // so disarm the silence timer — it must not fire a second commit for a turn already submitted.
     draft.clearSilenceAutoCommit();
     lastReadTextRef.current = null; // answered: a rebuild must not ask it again
-    lastQuestionBubbleRef.current = null;
-    reuseBubbleRef.current = null;
     draft.clearJudge(); // a submit ends the pause — no judge check may fire for the old answer
     // Defensively settle any prior armed commit (e.g. a double-click) before arming a fresh one.
     settlePendingCommit();
@@ -1610,11 +1598,20 @@ export function useInterviewVoice(
    * way — the queue guarantees it's read once the conversation frees up).
    */
   const speakQuestion = useCallback(
-    (text: string): boolean => {
+    (text: string, questionId?: string): boolean => {
       const ws = wsRef.current;
       if (!text || ws?.readyState !== WebSocket.OPEN) return false;
       lastReadTextRef.current = text;
       spokeSinceReadRef.current = false;
+      // One bubble per question and text. A re-read without an id (the hook's own resume) keeps the
+      // bubble of the same text; a read with no id and new text has none and falls back to Azure's.
+      if (questionId) {
+        if (questionBubbleRef.current?.key !== questionBubbleKey(questionId, text)) {
+          questionBubbleRef.current = { text, key: questionBubbleKey(questionId, text) };
+        }
+      } else if (questionBubbleRef.current?.text !== text) {
+        questionBubbleRef.current = null;
+      }
 
       // FIRST-READ AVATAR GATE (the "第一句话前面的词被吃掉" fix): the opening question's audio is
       // clipped when it's read before the avatar's media pipeline is up (assistant TTS rides the

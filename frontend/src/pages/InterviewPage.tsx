@@ -718,11 +718,12 @@ export function InterviewPage() {
       !suppressVerbatimRead &&
       spokenQuestionId.current !== speakText
     ) {
-      if (voice.speakQuestion(speakText)) {
+      // The question id keys the question's ONE bubble in the conversation panel; only the text is read.
+      if (voice.speakQuestion(speakText, interview?.current_question?.question_id)) {
         spokenQuestionId.current = speakText;
       }
     }
-  }, [phase, channel, voice, speakText, suppressVerbatimRead]);
+  }, [phase, channel, voice, speakText, suppressVerbatimRead, interview?.current_question?.question_id]);
 
   // Recording marker: a voice session records the candidate's microphone per question, and the
   // backend learns which question from this marker. Re-sent on every (re)connection, because a new

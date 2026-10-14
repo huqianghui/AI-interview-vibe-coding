@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.70.4.0 (2026-10-14)
+
+### Changed
+- **The conversation panel shows each question once, by construction.** The panel is a log of
+  what was said, and its interviewer bubbles were keyed by Azure's response id. So the same
+  question read under two responses (a re-read after the voice-only fallback, a reconnect) became
+  two bubbles, while the question list it comes from has it once. A question's bubble is now keyed
+  by its question id and its text, so any read of it lands in that one bubble. Different text under
+  the same id (the external brain's follow-up) stays separate, and judge nudges keep their own
+  bubbles. The id is only a key and is never read aloud. This replaces the narrower re-read-only
+  bubble reuse of 0.70.2.1, which is removed.
+
 ## 0.70.3.0 (2026-10-14)
 
 ### Changed
