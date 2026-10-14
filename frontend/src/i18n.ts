@@ -181,6 +181,7 @@ export const resources = {
         // Feature D (opt-in) advisory panel: SOP points the checklist may not cover. Reference-only.
         sopCoverage: {
           title: "SOP coverage notes",
+          titleWithCount: "SOP coverage notes ({{count}})",
           hint: "For reference only — SOP points the checklist may not fully cover. These do not affect your score.",
         },
       },
@@ -705,6 +706,7 @@ export const resources = {
         // 功能 D(可选)提示板块:评价标准可能未覆盖的 SOP 要点,仅作参考。
         sopCoverage: {
           title: "SOP 原文覆盖度提示",
+          titleWithCount: "SOP 原文覆盖度提示（{{count}}）",
           hint: "仅供参考 —— 列出评价标准可能未完全覆盖的 SOP 要点。这些内容不影响你的评分。",
         },
       },

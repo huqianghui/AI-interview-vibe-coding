@@ -11,14 +11,21 @@ import { continueByTextIfAsked } from "./helpers/micDialog";
 
 test("SOP coverage notes start closed, say they do not affect the score, and open on a click", async ({ page }) => {
   test.setTimeout(180_000);
+  let rewritten = false;
   await page.route("**/report/stream", async (route) => {
     const real = await route.fetch();
     const body = (await real.text())
       .split("\n")
       .map((line) => {
         if (!line.trim()) return line;
-        const event = JSON.parse(line) as { type?: string; report?: Record<string, unknown> };
+        let event: { type?: string; report?: Record<string, unknown> };
+        try {
+          event = JSON.parse(line);
+        } catch {
+          return line; // not an event (a heartbeat, a partial line): pass it through untouched
+        }
         if (event.type !== "report" || !event.report) return line;
+        rewritten = true;
         const first = (event.report.per_question as { question_id: string; prompt?: string }[])[0];
         event.report.sop_coverage = [
           {
@@ -72,6 +79,10 @@ test("SOP coverage notes start closed, say they do not affect the score, and ope
     await page.waitForTimeout(400);
   }
 
+  await expect(page.getByTestId("report-exec"), "the interview loop never reached the report").toBeVisible({
+    timeout: 120_000,
+  });
+  expect(rewritten, "the scoring stream carried no `report` event to add coverage findings to").toBe(true);
   const section = page.getByTestId("report-sop-coverage");
   await expect(section).toBeVisible({ timeout: 120_000 });
   const toggle = page.getByTestId("report-sop-coverage-toggle").getByRole("button");

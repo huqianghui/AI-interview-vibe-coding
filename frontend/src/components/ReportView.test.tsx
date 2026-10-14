@@ -561,6 +561,16 @@ describe("ReportView SOP coverage notes", () => {
     expect(toggle).toHaveTextContent("SOP coverage notes (2)");
     expect(screen.getByText(/do not affect your score/i)).toBeInTheDocument();
     expect(screen.queryByText("Confirm the customer's identity first")).not.toBeInTheDocument();
+    // A screen reader hears the "does not affect your score" line with the button, not only sighted users.
+    const button = screen.getByRole("button", { name: /SOP coverage notes/i });
+    expect(button).toHaveAccessibleDescription(/do not affect your score/i);
+  });
+
+  it("counts in the reader's language", async () => {
+    await i18n.changeLanguage("zh-CN");
+    renderReport(WITH_COVERAGE);
+    expect(screen.getByTestId("report-sop-coverage-toggle")).toHaveTextContent("SOP 原文覆盖度提示（2）");
+    await i18n.changeLanguage("en-US");
   });
 
   it("opens to the points, grouped by question, on one click", async () => {

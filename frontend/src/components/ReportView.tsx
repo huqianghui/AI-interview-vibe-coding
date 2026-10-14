@@ -652,13 +652,20 @@ export function ReportView({ report }: { report: Report }) {
       {report.sop_coverage && report.sop_coverage.length > 0 && (
         <Accordion collapsible className={styles.coverage} data-testid="report-sop-coverage">
           <AccordionItem value="sop-coverage">
-            <AccordionHeader as="h3" data-testid="report-sop-coverage-toggle">
+            <AccordionHeader
+              as="h3"
+              data-testid="report-sop-coverage-toggle"
+              // The "does not affect your score" line sits outside the button so it stays visible while
+              // closed; describedby makes a screen reader say it with the button too.
+              button={{ "aria-describedby": "report-sop-coverage-hint" }}
+            >
               <span className={styles.coverageTitle}>
-                {t("report.sopCoverage.title")} (
-                {report.sop_coverage.reduce((n, group) => n + group.missing.length, 0)})
+                {t("report.sopCoverage.titleWithCount", {
+                  count: report.sop_coverage.reduce((n, group) => n + group.missing.length, 0),
+                })}
               </span>
             </AccordionHeader>
-            <Text size={200} className={styles.coverageHint}>
+            <Text id="report-sop-coverage-hint" size={200} className={styles.coverageHint}>
               {t("report.sopCoverage.hint")}
             </Text>
             <AccordionPanel>
