@@ -7,7 +7,7 @@
  * component intentionally does not touch that path.
  *
  * Fallbacks: if the thumbnail fails to load → colored swatch + name initial; if the persona has no
- * character (voice mode off) → the AudioOrb, so the preview always shows a presence.
+ * character (digital-human mode off) → the AudioOrb, so the preview always shows a presence.
  */
 import { useEffect, useState } from "react";
 import { Text, makeStyles, tokens } from "@fluentui/react-components";
@@ -72,7 +72,7 @@ export function AvatarPreview({ character, style }: AvatarPreviewProps) {
     setImgError(false);
   }, [thumbnailUrl]);
 
-  // Voice mode off (no character): show the orb presence.
+  // Digital-human mode off (no character): show the orb presence.
   if (!meta) {
     return (
       <div className={styles.root} data-testid="avatar-preview" data-avatar-character="">

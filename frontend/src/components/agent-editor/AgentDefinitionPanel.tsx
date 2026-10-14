@@ -1,7 +1,7 @@
 /**
  * Left agent-definition column — the Foundry portal's left panel.
  *
- * Divider-separated sections (Identity / Model / Voice mode / Agent sync / Instructions /
+ * Divider-separated sections (Identity / Model / Digital human / Agent sync / Instructions /
  * Knowledge), not stacked Cards, matching the portal's collapsible-section look. Presentational: the
  * page owns form state and passes the editable slice + change callbacks. The digital-human preview is
  * NOT here — it lives in the center Playground column (AvatarPreview).
@@ -43,7 +43,7 @@ const useStyles = makeStyles({
 export interface AgentDefinitionPanelProps {
   form: PersonaFormState;
   onChange: (patch: Partial<PersonaFormState>) => void;
-  /** Voice mode is on when a character is set; toggling clears/sets character+style. */
+  /** Digital-human mode is on when a character is set; toggling clears/sets character+style. */
   onToggleVoiceMode: (on: boolean) => void;
   syncStatus: AgentSyncStatus;
   agentId: string | null;
@@ -125,19 +125,19 @@ export function AgentDefinitionPanel({
 
       <Divider />
 
-      {/* Voice mode */}
+      {/* Digital human — voice is always on; this only decides whether it comes with a face. */}
       <div className={styles.section}>
-        <Title3>Voice mode</Title3>
+        <Title3>Digital human</Title3>
         <Switch
-          label="Voice mode (digital-human avatar)"
+          label="Digital-human mode (avatar face)"
           checked={voiceModeOn}
           onChange={(_, d) => onToggleVoiceMode(d.checked)}
           data-testid="voice-mode"
         />
         <Text size={200} className={styles.hint}>
           {voiceModeOn
-            ? "The interviewer speaks with a digital-human avatar (pick the character under Configure)."
-            : "Voice-only presence (no avatar face)."}
+            ? "The interviewer speaks through a digital-human avatar (pick the character under Configure)."
+            : "Voice only — the interviewer still speaks and listens, without an avatar face."}
         </Text>
       </div>
 

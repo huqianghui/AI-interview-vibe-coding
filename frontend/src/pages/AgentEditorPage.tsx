@@ -187,7 +187,7 @@ export function AgentEditorPage() {
 
   const patchForm = (patch: Partial<PersonaFormState>) => setForm((f) => ({ ...f, ...patch }));
 
-  // Voice mode: on → ensure a character/style; off → clear both (voice-only orb).
+  // Digital-human mode: on → ensure a character/style; off → clear both (voice-only orb).
   const toggleVoiceMode = (on: boolean) =>
     patchForm(
       on

@@ -241,8 +241,11 @@ export function PlaygroundPanel({ personaId, character, style, locale }: Playgro
           </div>
           {/* The weak-network degrade can drop the picture here too (this panel drives the same voice
               hook), and then the picture is NOT coming back on its own — so don't cover the orb with a
-              still portrait that implies it is. AvatarView's own voice-only notice explains the state. */}
-          {!voice.isAvatarConnected && voice.mediaMode !== "audio-only" && (
+              still portrait that implies it is. AvatarView's own voice-only notice explains the state.
+              With no character (digital-human mode off) there is no portrait to hold: once voice is on,
+              AvatarView's own live orb is the presence, and the overlay's static orb would stack a second
+              orb and a second status label on top of it. */}
+          {!voice.isAvatarConnected && voice.mediaMode !== "audio-only" && (!voiceOn || !!character) && (
             <div className={styles.portraitOverlay} data-testid="playground-portrait-overlay">
               <AvatarPreview character={character} style={style} />
             </div>

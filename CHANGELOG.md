@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.69.1.2 (2026-10-14)
+
+### Fixed
+- **The agent editor names the avatar switch for what it does.** The section was called "Voice
+  mode", but voice is always on: the switch only decides whether the interviewer speaks through a
+  digital-human face or as the voice-only orb. It is now "Digital human" with the switch
+  "Digital-human mode (avatar face)", and the off hint says the interviewer still speaks and
+  listens.
+- **One orb and one "Ready" in the Playground with no avatar.** With digital-human mode off and
+  voice on, the static preview (meant to hold the character's photo until the video arrives) drew
+  its own orb and status on top of the live one, so the stage showed "Ready" twice. With no
+  character the preview now stands down once voice is on.
+
 ## 0.69.1.1 (2026-10-14)
 
 ### Fixed

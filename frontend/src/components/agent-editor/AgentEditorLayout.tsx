@@ -3,7 +3,7 @@
  *
  * Top bar (persona switcher + Save/Reset actions) over a THREE-column body, all always visible
  * (matching the Foundry portal + AI-Coach editor — no "Configure" gate):
- *   left   = agent definition (Model / Voice mode / Instructions / Tools / Knowledge)
+ *   left   = agent definition (Model / Digital human / Instructions / Tools / Knowledge)
  *   center = the Playground (digital human + inline test), given the most room
  *   right  = the configuration rail (language / voice / avatar / advanced knobs)
  * All regions are passed as props so the page owns state and this component owns only the frame.
