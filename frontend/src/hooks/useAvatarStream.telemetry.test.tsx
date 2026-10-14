@@ -174,7 +174,8 @@ const SELECTED_RELAY_PAIR = [
 
 async function connected(videoRef = makeVideoRef()) {
   const sendOffer = vi.fn();
-  const hook = renderHook(() => useAvatarStream(videoRef));
+  // A consumer that can rebuild the session, as `useInterviewVoice` is; the self-heal needs one.
+  const hook = renderHook(() => useAvatarStream(videoRef, { onModeSwitchRequest: () => undefined }));
   await act(async () => {
     void hook.result.current.connect([{ urls: "turn:relay.example.com" }], sendOffer);
   });
@@ -233,7 +234,7 @@ describe("voice.avatar wiring", () => {
     expect(avatarEvents()).toHaveLength(1);
   });
 
-  it("ends the record with ice_failed, and the recovery rebuild gets a record of its own", async () => {
+  it("ends the record with ice_failed, and the rebuilt session's handshake is labelled recovery", async () => {
     const { result, pc } = await connected();
     await completeHandshake(pc, result.current.handleServerSdp);
     await act(async () => {
@@ -241,9 +242,11 @@ describe("voice.avatar wiring", () => {
       await Promise.resolve();
     });
     expect(avatarEvents().map((e) => e.p.outcome)).toEqual(["ice_failed"]);
+    // The consumer answers the rebuild request with a new session.
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(600); // the recovery rebuild
+      void result.current.connect([{ urls: "turn:relay.example.com" }], vi.fn());
     });
+    await flush();
     expect(FakePC.instances).toHaveLength(2);
     await act(async () => {
       result.current.disconnect();
@@ -255,7 +258,7 @@ describe("voice.avatar wiring", () => {
     ]);
   });
 
-  it("ends an unfinished record with rebuilt when a recovery replaces its connection", async () => {
+  it("ends an unfinished record with rebuilt when the self-heal replaces its session", async () => {
     const { result, pc } = await connected();
     await completeHandshake(pc, result.current.handleServerSdp);
     await act(async () => {
@@ -263,7 +266,7 @@ describe("voice.avatar wiring", () => {
       pc.fireIce("disconnected"); // never comes back: the grace window expires and it rebuilds
       await vi.advanceTimersByTimeAsync(15_000);
     });
-    expect(FakePC.instances.length).toBeGreaterThan(1);
+    expect(pc.closed).toBe(true);
     expect(avatarEvents()[0].p).toMatchObject({ label: "initial", outcome: "rebuilt" });
   });
 

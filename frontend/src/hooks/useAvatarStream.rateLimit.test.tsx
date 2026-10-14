@@ -2,17 +2,17 @@
  * Regression guard for the AVATAR RATE-LIMIT allowance (TODOS.md, filed from the v0.40.0.0 review).
  *
  * Azure rate-limits avatar session creation — a third `session.avatar.connect` inside roughly 20 s was
- * refused with `"Avatar request was rate-limited. Retry after 43.0s."` (measured 2026-09-30). Two
- * consequences the self-heal path used to get wrong:
+ * refused with `"Avatar request was rate-limited. Retry after 43.0s."` (measured 2026-09-30). The
+ * self-heal used to re-offer on the live session with 500/1500/3000 ms backoffs, so its attempts landed
+ * inside ~5 s and spent the allowance on requests Azure would never honour.
  *
- *   1. Its backoffs were 500/1500/3000 ms, so all three attempts landed inside ~5 s and the third was
- *      spent on a request Azure would never honour.
- *   2. When the budget ran out it showed the orb and stopped. That STRANDED the session: the stats
- *      sampler dies with the connection, so the weak-network policy could not act either, and the
- *      candidate finished the interview picture-less with no automatic way back.
+ * The self-heal now rebuilds the whole session instead (Azure refuses a same-session re-offer outright,
+ * `webrtc_connection_invalid`), so it sends no offer of its own: every avatar request goes out from a
+ * session's connect(), through the one ledger. The exhaustion path (video → audio-only → orb) is pinned
+ * in `useAvatarStream.test.tsx`.
  *
- * These tests drive a fast-failing handshake (the WS send throws) so the attempt chain is observable in
- * virtual time without waiting out the 15 s SDP timeout per attempt.
+ * The WS send throws on every offer after the first, so a failing session is observable in virtual
+ * time without waiting out the 15 s SDP timeout.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
@@ -137,51 +137,44 @@ afterEach(() => {
 });
 
 describe("avatar rate-limit allowance", () => {
-  it("holds a self-heal attempt until Azure would accept it, instead of spending it on a refusal", async () => {
+  it("spends no allowance on the self-heal itself, and holds a rebuilt session's offer until Azure would accept it", async () => {
     const videoRef = makeVideoRef();
-    // First offer succeeds; every later one throws, so each rebuild fails immediately and the next
-    // attempt is scheduled in the same virtual instant. That isolates the BACKOFF decision, which is
-    // what this test is about, from the 15 s SDP timeout.
-    let calls = 0;
-    const sendOffer = vi.fn(() => {
-      calls += 1;
-      if (calls === 1) return Promise.resolve();
-      return Promise.reject(new Error("ws send failed"));
-    });
+    const sendOffer = vi.fn(() => Promise.resolve());
+    const requests: string[] = [];
+    const { result } = renderHook(() =>
+      useAvatarStream(videoRef, { onModeSwitchRequest: (next) => requests.push(next) }),
+    );
 
-    const { result } = renderHook(() => useAvatarStream(videoRef));
+    // Session 1 drops; the self-heal asks for a rebuild and sends nothing itself.
     await act(async () => {
       void result.current.connect(ICE_SERVERS, sendOffer);
     });
     await pushOfferOut();
     await answerHandshake(result.current.handleServerSdp);
-    expect(sendOffer).toHaveBeenCalledTimes(1); // one request on the ledger
-
-    // Drop the media. Attempt 1 is inside the allowance (1 request so far), so it runs at its table
-    // backoff of 500 ms and becomes request 2.
     await act(async () => {
       FakePC.instances[0].fireIce("failed");
+      await vi.advanceTimersByTimeAsync(0);
     });
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(600);
-    });
-    await pushOfferOut();
-    expect(sendOffer).toHaveBeenCalledTimes(2);
+    expect(requests).toEqual(["video"]);
+    expect(sendOffer, "the self-heal must not re-offer on the session it is leaving").toHaveBeenCalledTimes(1);
 
-    // Attempt 2's table backoff is 1500 ms and the allowance still has room (2 requests so far, of a
-    // measured 3), so it goes out and becomes request 3.
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2_000);
-    });
-    await pushOfferOut();
-    expect(sendOffer).toHaveBeenCalledTimes(ALLOWANCE);
+    // The consumer rebuilds; each rebuilt session's offer goes through the ledger. Sessions 2 and 3 fit
+    // the measured allowance of 3 per window.
+    for (const n of [2, 3]) {
+      await act(async () => {
+        void result.current.connect(ICE_SERVERS, sendOffer);
+      });
+      await pushOfferOut();
+      expect(sendOffer).toHaveBeenCalledTimes(n);
+      await answerHandshake(result.current.handleServerSdp);
+    }
 
-    // Attempt 3's table backoff is 3000 ms, but the allowance is now SPENT (3 requests inside the
-    // window — measured: Azure accepted three and refused the fourth with rate_limit_exceeded). So the
-    // attempt must wait for the first request to age out instead of being spent on a refusal. Before
-    // the ledger existed, this offer went out and Azure refused it, costing the attempt for nothing.
+    // A fourth inside the window would be refused, so it is held, not sent.
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(4_000);
+      void result.current.connect(ICE_SERVERS, sendOffer);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
     });
     await pushOfferOut();
     expect(
@@ -189,86 +182,11 @@ describe("avatar rate-limit allowance", () => {
       "a FOURTH avatar offer inside the window would be refused, so it must not be sent",
     ).toHaveBeenCalledTimes(ALLOWANCE);
 
-    // Once the window has passed, the attempt proceeds — a delay, not a silent drop.
+    // Once the window has passed, it proceeds — a delay, not a silent drop.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(WINDOW_MS);
     });
     await pushOfferOut();
-    expect(sendOffer.mock.calls.length).toBeGreaterThanOrEqual(ALLOWANCE + 1);
-  });
-
-  it("asks for audio-only when video self-heal is exhausted, rather than stranding the session", async () => {
-    const videoRef = makeVideoRef();
-    let calls = 0;
-    const sendOffer = vi.fn(() => {
-      calls += 1;
-      if (calls === 1) return Promise.resolve();
-      return Promise.reject(new Error("ws send failed"));
-    });
-    const modeSwitches: string[] = [];
-
-    const { result } = renderHook(() =>
-      useAvatarStream(videoRef, { onModeSwitchRequest: (next) => modeSwitches.push(next) }),
-    );
-    await act(async () => {
-      void result.current.connect(ICE_SERVERS, sendOffer);
-    });
-    await pushOfferOut();
-    await answerHandshake(result.current.handleServerSdp);
-
-    await act(async () => {
-      FakePC.instances[0].fireIce("failed");
-    });
-    // Walk far enough for all three attempts (each now spaced by the allowance) plus the downgrade.
-    for (let i = 0; i < 12; i++) {
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(WINDOW_MS);
-      });
-      await pushOfferOut();
-      if (modeSwitches.length > 0) break;
-    }
-
-    expect(modeSwitches, "an exhausted video self-heal must fall back to the mode the link can carry").toEqual([
-      "audio-only",
-    ]);
-    expect(result.current.mediaMode).toBe("audio-only");
-  });
-
-  it("does not bounce modes: an exhausted AUDIO-ONLY self-heal shows the orb and asks for nothing", async () => {
-    const videoRef = makeVideoRef();
-    let calls = 0;
-    const sendOffer = vi.fn(() => {
-      calls += 1;
-      if (calls === 1) return Promise.resolve();
-      return Promise.reject(new Error("ws send failed"));
-    });
-    const modeSwitches: string[] = [];
-
-    const { result } = renderHook(() =>
-      useAvatarStream(videoRef, { onModeSwitchRequest: (next) => modeSwitches.push(next) }),
-    );
-    // Pin audio-only BEFORE connecting, so the session comes up without a picture to lose.
-    act(() => {
-      result.current.setVideoPreference("off");
-    });
-    await act(async () => {
-      void result.current.connect(ICE_SERVERS, sendOffer);
-    });
-    await pushOfferOut();
-    await answerHandshake(result.current.handleServerSdp);
-    expect(FakePC.instances[0].transceivers.find((t) => t.kind === "video")?.direction).toBe("inactive");
-
-    await act(async () => {
-      FakePC.instances[0].fireIce("failed");
-    });
-    for (let i = 0; i < 12; i++) {
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(WINDOW_MS);
-      });
-      await pushOfferOut();
-    }
-
-    expect(modeSwitches, "there is no lighter mode to fall back to — the orb is the honest answer").toEqual([]);
-    expect(result.current.isConnected).toBe(false);
+    expect(sendOffer).toHaveBeenCalledTimes(ALLOWANCE + 1);
   });
 });

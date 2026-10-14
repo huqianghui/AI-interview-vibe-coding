@@ -126,6 +126,12 @@ describe("useAvatarStream video rate-limit cooldown", () => {
   it("flips canEnableVideo back on and clears videoEnableAtMs once the cooldown elapses", async () => {
     const { result } = startConnect();
     expect(result.current.canEnableVideo).toBe(false);
+    // Answer the offer: a session that never does is a failed handshake, which the self-heal rebuilds —
+    // and a rebuilt session restarts the cooldown this test is measuring.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8_000); // the ICE-gathering cap sends the offer
+      result.current.handleServerSdp(btoa(JSON.stringify({ type: "answer", sdp: "fake-answer-sdp" })));
+    });
 
     // The poller runs every 1s and only actually flips once VIDEO_SWITCH_MIN_INTERVAL_MS has passed.
     await act(async () => {

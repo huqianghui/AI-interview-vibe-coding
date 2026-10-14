@@ -78,8 +78,9 @@ test.describe("Voice Live agent-mode (real Azure)", () => {
     // Voice Live agent session and relays frames back.
     await enterVoiceChannel(page); // auto-voice persona: only clicks when still in text mode
 
-    // The mic-permission dialog must NOT appear (fake device grants getUserMedia).
-    await expect(page.getByText(/需要麦克风权限|microphone/i)).toHaveCount(0, { timeout: 5_000 });
+    // The mic-permission dialog must NOT appear (fake device grants getUserMedia). Its TITLE, not the
+    // bare word: the recording notice ("Your microphone is being recorded") also says microphone.
+    await expect(page.getByText(/需要麦克风权限|microphone access needed/i)).toHaveCount(0, { timeout: 5_000 });
 
     // 1) The backend proxy connected to Azure and acknowledged the initial session.update.
     await expect

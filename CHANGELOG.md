@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.69.2.0 (2026-10-14)
+
+### Fixed
+- **A digital-human media drop rebuilds the session instead of asking Azure for something it always
+  refuses.** When the avatar's connection dropped (ICE failed, or a disconnect that did not heal in
+  3 s, or the video track ended), the app sent a second `session.avatar.connect` on the same Voice
+  Live session. Azure accepts that once per session and refused every retry with
+  `webrtc_connection_invalid`: 12 of 12 in production today. Each refused retry also used up the
+  avatar rate-limit allowance, so the NEXT session's first offer was held 10–14 s, and the three
+  retries kept the candidate on the orb for up to ~50 s. A drop now rebuilds the whole session (the
+  path a picture on/off switch already used), and the in-progress answer is kept. It is bounded
+  across rebuilt sessions and WS reconnects: one more try with the picture, then audio-only (the mode a
+  link that cannot carry the picture can still carry), then the orb: three avatar sessions, which is
+  Azure's allowance per minute, because a fourth is refused at session creation and that rebuild dies
+  (measured live). A rebuild also waits for the allowance before creating the session. Media actually
+  flowing (a painted frame, or an audio-only session's ICE connecting) resets the count, so a later
+  independent drop gets a fresh budget. A rebuilt session whose handshake never completes (an offer
+  refused or lost) counts as the next failure instead of leaving the orb on a live session, and the
+  candidate switching the picture on or off starts with a clean count.
+
+### Changed
+- **New live spec `avatar-selfheal-live`** (real Azure, opt-in): A forces a drop after the picture is
+  up and expects a rebuilt session to paint again (it skips itself on a network that cannot carry the
+  avatar); B forces the production shape, ICE that never connects, and expects exactly one answered
+  offer per session through the bounded sequence (video, video, audio-only), then no fourth session.
+- `voice-live-azure` no longer mistakes the recording notice ("Your microphone is being recorded")
+  for the mic-permission dialog.
+
 ## 0.69.1.2 (2026-10-14)
 
 ### Fixed
