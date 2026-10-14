@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.70.0.0 (2026-10-14)
+
+### Added
+- **Voice-only fallback: an interview that cannot show the digital human still speaks.** The
+  avatar's picture and its voice both ride a WebRTC connection, and some networks (a corporate
+  secure-access client, measured today) never let it connect, so the interviewer was silent. When the
+  avatar's media never connects, the session now switches to voice-only: no avatar at all, the
+  interviewer's voice over the voice WebSocket those networks carry. It costs one avatar session and
+  a few seconds instead of three sessions and ~30 s of silence. The page says "The digital human
+  isn't available right now — continuing with voice only", and "Turn on video" brings it back once
+  Azure's avatar cooldown allows. A fresh connect (a new interview, Restart, the editor Playground's
+  voice button) gives the digital human another try, since the network may have changed. A handshake
+  that merely timed out gets one more try first; only an avatar whose connection never gets through
+  goes straight to voice-only. The backend opens such a session with a new `avatar=off` parameter on
+  the voice WebSocket, which can only remove the avatar.
+
+### Fixed
+- **Azure refusing an avatar session over its rate limit no longer drops the candidate to text.**
+  Azure allows 3 new avatar sessions per minute per Speech resource, counting every tab and
+  candidate, so a refusal can come from someone else's session. A refusal asking for 15 s or less is
+  waited out and retried with the digital human; a longer one, or a second refusal, opens the
+  session voice-only. Leaving during the wait ends it, and the retry no longer leaves the first
+  microphone capture running.
+- **A link that connects and dies within seconds can no longer rebuild avatar sessions forever.** A
+  drop only earns a fresh retry once media has flowed for 10 s; a quicker repeat goes voice-only.
+
+### Changed
+- "Turn off video" still means the WebRTC audio-only mode (for a weak link, where WebRTC carries
+  audio better than the WebSocket); voice-only is reached automatically.
+- Live spec `avatar-selfheal-live` B now forces an avatar that never connects and expects one avatar
+  session, then a voice-only session in which the interviewer is heard.
+
 ## 0.69.2.0 (2026-10-14)
 
 ### Fixed
