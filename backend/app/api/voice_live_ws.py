@@ -165,12 +165,16 @@ async def voice_live_websocket(ws: WebSocket) -> None:
       - ``avatar_bg`` (optional): 6-hex RGB (no ``#``) the page wants Azure to paint BEHIND the
         digital human — the photo avatar's own thumbnail backdrop from the frontend roster, so the
         live video matches the editor preview to the pixel. Anything else is ignored.
+      - ``avatar`` (optional): ``off`` opens a VOICE-ONLY session even when the persona has a
+        digital human — the page's fallback for a network that cannot carry the avatar's WebRTC
+        media (see voice_live_proxy.session_has_avatar). Anything else keeps the persona's choice.
     """
     token = ws.query_params.get("token")
     persona_id = ws.query_params.get("persona_id")
     locale = ws.query_params.get("locale") or DEFAULT_LOCALE
     _bg = (ws.query_params.get("avatar_bg") or "").strip().lstrip("#")
     avatar_background = _bg.lower() if re.fullmatch(r"[0-9a-fA-F]{6}", _bg) else None
+    avatar_off = (ws.query_params.get("avatar") or "").strip().lower() == "off"
 
     await ws.accept()
 
@@ -288,6 +292,7 @@ async def voice_live_websocket(ws: WebSocket) -> None:
                 # linear_turns_for_persona).
                 playground=bool(persona_id),
                 avatar_background=avatar_background,
+                avatar_off=avatar_off,
                 recorder=recorder_for(interview_id, persona_id),
             )
     except WebSocketDisconnect:

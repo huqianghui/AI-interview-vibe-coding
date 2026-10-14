@@ -200,6 +200,20 @@ async def test_avatar_background_accepts_only_six_hex(db_session, proxy_calls, r
     assert proxy_calls[0]["avatar_background"] == expected
 
 
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("off", True), ("OFF", True), (" off ", True), ("on", False), ("", False), (None, False)],
+)
+async def test_avatar_off_reaches_the_proxy_only_when_asked(db_session, proxy_calls, raw, expected):
+    # The page's voice-only fallback for a network that cannot carry the avatar's media.
+    await _default_persona(db_session)
+    query = {"token": await _anon_token(db_session)}
+    if raw is not None:
+        query["avatar"] = raw
+    await _run(_FakeWs(**query))
+    assert proxy_calls[0]["avatar_off"] is expected
+
+
 async def test_saved_voice_model_and_byom_profile_reach_the_proxy(db_session, proxy_calls):
     await _default_persona(db_session)
     db_session.add(

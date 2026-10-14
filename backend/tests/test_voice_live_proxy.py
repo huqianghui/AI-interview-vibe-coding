@@ -37,6 +37,7 @@ from app.services.voice_live_proxy import (  # noqa: E402
     AUDIO_APPEND_TYPE,
     build_audio_append,
     build_avatar_session,
+    session_has_avatar,
 )
 
 
@@ -63,6 +64,32 @@ class FakePersona:
 def _as_dict(obj):
     """SDK models are MutableMappings; dict() gives the wire shape."""
     return dict(obj)
+
+
+def test_avatar_off_opens_a_voice_only_session_for_a_persona_with_a_digital_human():
+    # The fallback for a network that cannot carry the avatar's WebRTC media: the page asks for
+    # avatar=off, and the session must carry neither the AVATAR modality nor an avatar block, or
+    # Azure would still route the interviewer's voice over the WebRTC track that network blocks.
+    persona = FakePersona()
+    with_avatar = _as_dict(build_avatar_session(persona, locale="zh-CN"))
+    voice_only = _as_dict(build_avatar_session(persona, locale="zh-CN", avatar_off=True))
+    assert "avatar" in [str(m) for m in with_avatar["modalities"]]
+    assert "avatar" in with_avatar
+    assert "avatar" not in [str(m) for m in voice_only["modalities"]]
+    assert "avatar" not in voice_only
+    # Everything else is the same session: the voice still speaks, VAD still listens.
+    assert voice_only["voice"] == with_avatar["voice"]
+    assert voice_only["turn_detection"] == with_avatar["turn_detection"]
+
+
+def test_session_has_avatar_follows_the_persona_unless_the_page_turns_it_off():
+    assert session_has_avatar(FakePersona()) is True
+    assert session_has_avatar(FakePersona(), avatar_off=True) is False
+    no_character = FakePersona()
+    no_character.character = "  "
+    assert session_has_avatar(no_character) is False
+    # avatar_off can only take the digital human away, never add one.
+    assert session_has_avatar(no_character, avatar_off=True) is False
 
 
 def test_avatar_session_bank_linear_turns_by_default_disables_auto_response():
