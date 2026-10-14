@@ -4,9 +4,14 @@
  * mock stack. Its default bank cites no SOP, so the coverage check has nothing to report; the REAL
  * scoring stream is fetched and only its final `report` event gets coverage findings added, so the
  * page renders them exactly as it would a real audit's.
+ *
+ * Isolated from the specs before it (they share one backend: external-interview.spec leaves an
+ * EXTERNAL default persona behind): its own one-question bank and bank interviewer, assigned to user3
+ * for the duration and unassigned after.
  */
+const CANDIDATE = "user3";
 import { test, expect } from "@playwright/test";
-import { primeCandidateLogin } from "./helpers/candidateLogin";
+import { adminApi, primeCandidateLogin } from "./helpers/candidateLogin";
 import { continueByTextIfAsked } from "./helpers/micDialog";
 
 test("SOP coverage notes start closed, say they do not affect the score, and open on a click", async ({ page }) => {
@@ -42,61 +47,64 @@ test("SOP coverage notes start closed, say they do not affect the score, and ope
       .join("\n");
     await route.fulfill({ response: real, body });
   });
-  await primeCandidateLogin(page);
-  await page.goto("/interview");
-  await page.getByRole("button", { name: /开始面试|start interview/i }).click();
-  await page.getByRole("button", { name: /我准备好了|i'm ready/i }).click();
-  await expect(page.getByTestId("question-progress")).toBeVisible();
-  await continueByTextIfAsked(page);
-
-  for (let i = 0; i < 60; i++) {
-    if (await page.getByTestId("report-exec").isVisible().catch(() => false)) break;
-    const submitEval = page.getByTestId("submit-and-evaluate");
-    if (await submitEval.isVisible().catch(() => false)) {
-      await page.getByTestId("sop-coverage-check").check();
-      await submitEval.click();
-      await page.waitForTimeout(400);
-      continue;
-    }
-    // The mic dialog can come back between questions (no device on CI): stay on text.
-    const useText = page.getByRole("button", { name: /use text instead|改用文字/i });
-    if (await useText.isVisible().catch(() => false)) {
-      // It animates in; a click on a moving target can time out, so try briefly and loop.
-      await useText.click({ timeout: 3_000 }).catch(() => undefined);
-      continue;
-    }
-    const box = page.getByRole("textbox");
-    if (!(await box.isVisible().catch(() => false))) {
-      await page.waitForTimeout(500);
-      continue;
-    }
-    await box.fill("I always double-check the runbook before every deploy.").catch(() => undefined);
-    // The mic dialog can cover the button at any moment; the next round dismisses it.
-    await page
-      .getByRole("button", { name: /提交回答|submit answer/i })
-      .click({ timeout: 3_000 })
-      .catch(() => undefined);
-    await page.waitForTimeout(400);
-  }
-
-  await expect(page.getByTestId("report-exec"), "the interview loop never reached the report").toBeVisible({
-    timeout: 120_000,
+  const stamp = Date.now();
+  const { api, headers } = await adminApi();
+  const bank = (await (
+    await api.post("/admin/question-banks", { headers, data: { name: `E2E coverage bank ${stamp}`, is_default: false } })
+  ).json()) as { bank_id: string };
+  await api.post(`/admin/question-banks/${bank.bank_id}/questions`, {
+    headers,
+    data: { text: `E2E coverage question ${stamp}?`, expected_points: ["checks the runbook"] },
   });
-  expect(rewritten, "the scoring stream carried no `report` event to add coverage findings to").toBe(true);
-  const section = page.getByTestId("report-sop-coverage");
-  await expect(section).toBeVisible({ timeout: 120_000 });
-  const toggle = page.getByTestId("report-sop-coverage-toggle").getByRole("button");
-  await expect(toggle).toHaveAttribute("aria-expanded", "false");
-  await expect(section).toContainText(/do not affect your score|不影响你的评分/i);
-  await expect(page.getByTestId("report-sop-coverage-toggle")).toContainText("(2)");
-  await expect(section).not.toContainText("Confirm the customer's identity first");
-  await section.screenshot({ path: "test-results/sop-coverage-closed.png" });
+  const users = (await (await api.get("/admin/users", { headers })).json()) as { id: string; username: string }[];
+  const userId = users.find((u) => u.username === CANDIDATE)!.id;
+  // A question-bank interviewer with no avatar character, so the candidate answers by keyboard.
+  const persona = (await (
+    await api.post("/admin/personas", {
+      headers,
+      data: { name: `E2E coverage interviewer ${stamp}`, interview_brain: "bank", enabled: true },
+    })
+  ).json()) as { id: string };
+  try {
+    const assigned = await api.patch(`/admin/users/${userId}/assignment`, {
+      headers,
+      data: { persona_id: persona.id, bank_id: bank.bank_id },
+    });
+    expect(assigned.ok()).toBe(true);
 
-  await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-expanded", "true");
-  // Open: the points are there, under their question, with the SOP sentence they come from.
-  await expect(section).toContainText("Confirm the customer's identity first");
-  await expect(section).toContainText("Log the change ticket before deploying");
-  await expect(section).toContainText('"verify ID before proceeding"');
-  await section.screenshot({ path: "test-results/sop-coverage-open.png" });
+    await primeCandidateLogin(page, CANDIDATE);
+    await page.goto("/interview");
+    await page.getByRole("button", { name: /开始面试|start interview/i }).click();
+    await page.getByRole("button", { name: /我准备好了|i'm ready/i }).click();
+    await continueByTextIfAsked(page);
+    await page.getByRole("textbox").fill("I always double-check the runbook before every deploy.");
+    await page.getByRole("button", { name: /提交回答|submit answer/i }).click();
+    await page.getByTestId("sop-coverage-check").check();
+    await page.getByTestId("submit-and-evaluate").click();
+
+    await expect(page.getByTestId("report-exec"), "the interview never reached the report").toBeVisible({
+      timeout: 120_000,
+    });
+    expect(rewritten, "the scoring stream carried no `report` event to add coverage findings to").toBe(true);
+    const section = page.getByTestId("report-sop-coverage");
+    await expect(section).toBeVisible({ timeout: 120_000 });
+    const toggle = page.getByTestId("report-sop-coverage-toggle").getByRole("button");
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(section).toContainText(/do not affect your score|不影响你的评分/i);
+    await expect(page.getByTestId("report-sop-coverage-toggle")).toContainText("(2)");
+    await expect(section).not.toContainText("Confirm the customer's identity first");
+    await section.screenshot({ path: "test-results/sop-coverage-closed.png" });
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    // Open: the points are there, under their question, with the SOP sentence they come from.
+    await expect(section).toContainText("Confirm the customer's identity first");
+    await expect(section).toContainText("Log the change ticket before deploying");
+    await expect(section).toContainText('"verify ID before proceeding"');
+    await section.screenshot({ path: "test-results/sop-coverage-open.png" });
+  } finally {
+    // Leave user3 on the default, so other specs that sign in as user3 are unaffected.
+    await api.patch(`/admin/users/${userId}/assignment`, { headers, data: { persona_id: null, bank_id: null } });
+    await api.dispose();
+  }
 });
