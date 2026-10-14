@@ -347,8 +347,10 @@ describe("InterviewPage", () => {
       ),
     );
 
-    // The advisory panel renders the uncovered point; it is reference-only, not a score change.
+    // The advisory panel renders the uncovered point; it is reference-only, not a score change, so it
+    // starts closed and opens on a click.
     const panel = await screen.findByTestId("report-sop-coverage");
+    await user.click(screen.getByRole("button", { name: /SOP coverage notes/i }));
     expect(panel).toHaveTextContent("Confirm the customer's identity first");
   });
 
