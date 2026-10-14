@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.69.1.1 (2026-10-14)
+
+### Fixed
+- **No more "Permissions policy violation: unload is not allowed" in the browser console.** The
+  App Insights SDK added an `unload` listener, which Chrome is retiring and reports as a violation
+  on every page load, a line that reads like an error and hides real ones. The SDK now skips that
+  one event; it still flushes on `beforeunload` and `pagehide`, and the interview's own last-chance
+  flush already ran on `pagehide`, so no telemetry is lost.
+
 ## 0.69.1.0 (2026-10-12)
 
 ### Fixed
