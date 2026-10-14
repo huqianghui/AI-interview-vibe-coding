@@ -290,6 +290,10 @@ async function loadSdk(connectionString: string): Promise<void> {
       // across visits.
       disableCookiesUsage: true,
       disableFlushOnBeforeUnload: false,
+      // Chrome is retiring `unload` and logs a permissions-policy violation for every listener on
+      // it, which reads like an error. The SDK still flushes on beforeunload and pagehide, and our
+      // own last-chance flush runs on pagehide (flushForUnload).
+      disablePageUnloadEvents: ["unload"],
     },
   });
   ai.loadAppInsights();

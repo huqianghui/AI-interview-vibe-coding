@@ -94,6 +94,8 @@ describe("start-up", () => {
     expect(await startTelemetry("tok")).toBe(true);
     trackEvent("late", { y: 2 });
     expect(sdk.config).toMatchObject({ connectionString: "InstrumentationKey=k", disableCookiesUsage: true });
+    // No `unload` listener: Chrome logs a violation for one, and the flush runs on pagehide.
+    expect(sdk.config).toMatchObject({ disablePageUnloadEvents: ["unload"] });
     expect(sdk.events.map((e) => e.event.name)).toEqual(["early", "late"]);
     expect(sdk.flushes).toBe(2); // each event leaves at once, not with the next 15 s batch
     expect(sdk.events[0]).toEqual({ event: { name: "early", measurements: { x: 1 } }, props: { k: "v" } });
