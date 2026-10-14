@@ -303,6 +303,26 @@ describe("useInterviewVoice re-reads the question after falling back to voice-on
     });
     const shown = [...bubbles.values()].filter((b) => b.role === "assistant" && b.content.includes("deployment safety habit"));
     expect(shown, "heard once, shown once (owner, live behind a secure-access client)").toHaveLength(1);
+
+    // The NEXT question gets a bubble of its own — the reuse ended with the re-read.
+    act(() => {
+      getHook().speakQuestion("How do you roll back a bad release?");
+    });
+    await act(async () => {
+      second.receive({ type: "response.created", response: { id: "r3" } });
+      second.receive({
+        type: "response.audio_transcript.done",
+        response_id: "r3",
+        item_id: "a3",
+        transcript: "How do you roll back a bad release?",
+      });
+      second.receive({ type: "response.done", response: { id: "r3" } });
+    });
+    const texts = [...bubbles.values()].filter((b) => b.role === "assistant").map((b) => b.content);
+    expect(texts, "question 1 is still on screen, and question 2 beside it").toEqual([
+      "Describe your deployment safety habit.",
+      "How do you roll back a bad release?",
+    ]);
     unmount();
   });
 
@@ -327,6 +347,39 @@ describe("useInterviewVoice re-reads the question after falling back to voice-on
     });
     return first;
   }
+
+  it("never lets a later read overwrite the old bubble, even when the re-read did not finish", async () => {
+    // Review P2: the reuse used to outlive a re-read that never reached transcript.done.
+    const { getHook, unmount, bubbles } = harness();
+    await readQ1(getHook);
+    act(() => {
+      avatarBridge.onModeSwitchRequest!("voice-only", { mediaNeverFlowed: true });
+    });
+    const second = await live(2);
+    await act(async () => {
+      second.receive({ type: "response.created", response: { id: "r2" } });
+      second.receive({ type: "response.audio_transcript.delta", response_id: "r2", item_id: "a2", delta: "Describe" });
+    });
+    act(() => {
+      void getHook().commitAnswer().catch(() => undefined);
+    });
+    act(() => {
+      getHook().speakQuestion("How do you roll back a bad release?");
+    });
+    await act(async () => {
+      second.receive({ type: "response.created", response: { id: "r3" } });
+      second.receive({
+        type: "response.audio_transcript.done",
+        response_id: "r3",
+        item_id: "a3",
+        transcript: "How do you roll back a bad release?",
+      });
+    });
+    const texts = [...bubbles.values()].filter((b) => b.role === "assistant").map((b) => b.content);
+    expect(texts.some((t) => t.includes("deployment safety habit") || t === "Describe"), "question 1's bubble survives").toBe(true);
+    expect(texts).toContain("How do you roll back a bad release?");
+    unmount();
+  });
 
   it("does not repeat it when the avatar's media HAD flowed — the candidate may have heard it", async () => {
     const { getHook, unmount } = harness();
