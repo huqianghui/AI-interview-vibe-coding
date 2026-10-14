@@ -402,7 +402,7 @@ export function useInterviewVoice(
   const readWatch = useQuestionReadWatch(SPEAK_CONFIRM_TIMEOUT_MS, SPEAK_MAX_ATTEMPTS);
   // Forward ref so the watchdog's retry can re-enter speakQuestion (declared below). Stays here rather
   // than in the watch module: the module decides WHEN to retry, the hook owns the read path itself.
-  const speakQuestionRef = useRef<((text: string) => boolean) | null>(null);
+  const speakQuestionRef = useRef<((text: string, questionId?: string) => boolean) | null>(null);
   // MOUTH-mode marker from `proxy.connected`: the backend sends a non-empty read-directive template
   // (the admin-configurable reader prompt + a `{text}` placeholder) for every MOUTH session
   // (external, or linear/judged bank since v0.38.3.1 — see is_mouth_persona in
@@ -542,7 +542,8 @@ export function useInterviewVoice(
       const own = `assistant-${msg.response_id}-${msg.item_id}`;
       const responseId = msg.response_id as string | undefined;
       const bubble = questionBubbleRef.current;
-      if (!bubble || !readWatch.ownsResponse(responseId) || speakQueue.lastEmitted() !== bubble.text) return own;
+      const ours = bubble && readWatch.ownsResponse(responseId) && speakQueue.lastEmitted() === bubble.text;
+      if (!ours) return own;
       if (bubble.responseId !== responseId) {
         // A new read of the same question: what an earlier read streamed into the bubble is not part of
         // this one, or the bubble would hold the question twice.
