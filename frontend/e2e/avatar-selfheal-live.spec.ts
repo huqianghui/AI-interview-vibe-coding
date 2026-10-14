@@ -17,6 +17,12 @@
  *      it runs on any network): ONE avatar session, then a voice-only session (`avatar=off`) in which
  *      the interviewer is actually heard — PCM arriving on the WebSocket.
  *
+ *   C. Nothing forced: whatever THIS network does. On a network that blocks the avatar's WebRTC (run it
+ *      with the secure-access client on), it must end voice-only with the interviewer heard and a
+ *      `voice.fallback` saying why; on one that carries it, the picture paints and nothing falls back.
+ *      Telemetry is read without reaching Azure: start the backend with a connection string whose
+ *      IngestionEndpoint is https://fake-ingest.invalid/ and the page's batches are intercepted here.
+ *
  * Run: E2E_API=http://127.0.0.1:8000 BASE=http://localhost:5173 E2E_ADMIN_USERNAME=… E2E_ADMIN_PASSWORD=…
  *      LIVE_VOICE=1 npx playwright test avatar-selfheal-live --config=e2e/live.config.ts
  */
@@ -207,6 +213,76 @@ test.describe("avatar self-heal (real Azure)", () => {
       // It stays put: no further session.
       await page.waitForTimeout(10_000);
       expect(urls).toHaveLength(2);
+    } catch (err) {
+      console.log(dump());
+      throw err;
+    }
+  });
+
+  test("C: on the real network, the interviewer is heard — with the picture, or voice-only and saying why", async ({ page }) => {
+    test.setTimeout(150_000);
+    // Capture the page's App Insights batches without sending them anywhere.
+    const fallbacks: Record<string, unknown>[] = [];
+    let ingestRequests = 0;
+    type Envelope = { data?: { baseData?: { name?: string; properties?: Record<string, unknown> } } };
+    const take = (item: Envelope) => {
+      const base = item.data?.baseData;
+      if (base?.name === "voice.fallback") fallbacks.push(base.properties ?? {});
+    };
+    await page.route("https://fake-ingest.invalid/**", async (route) => {
+      ingestRequests += 1;
+      const body = route.request().postData() ?? "";
+      // The SDK posts a JSON array of envelopes; the beacon path may send one envelope per line.
+      try {
+        const parsed = JSON.parse(body) as Envelope | Envelope[];
+        (Array.isArray(parsed) ? parsed : [parsed]).forEach(take);
+      } catch {
+        for (const line of body.split("\n")) {
+          try {
+            take(JSON.parse(line) as Envelope);
+          } catch {
+            /* not JSON */
+          }
+        }
+      }
+      await route.fulfill({ status: 200, contentType: "application/json", body: '{"itemsReceived":1,"itemsAccepted":1,"errors":[]}' });
+    });
+    const { sessions, logs, dump } = watch(page);
+    const urls: string[] = [];
+    let voiceOnlyAudio = 0;
+    page.on("websocket", (ws) => {
+      if (!/voice-live\/ws/.test(ws.url())) return;
+      urls.push(ws.url());
+      const voiceOnly = new URL(ws.url()).searchParams.get("avatar") === "off";
+      ws.on("framereceived", (f) => {
+        if (voiceOnly && typeof f.payload === "string" && f.payload.includes('"response.audio.delta"')) voiceOnlyAudio += 1;
+      });
+    });
+    await startVoiceInterview(page);
+
+    try {
+      await expect
+        .poll(async () => (await painting(page)) || voiceOnlyAudio > 0, {
+          timeout: 90_000,
+          message: "neither a painted digital human nor a voice-only session that speaks",
+        })
+        .toBe(true);
+      const picture = await painting(page);
+      console.log(`[C] outcome: ${picture ? "PICTURE (this network carries the avatar)" : "VOICE-ONLY"}; sessions=${JSON.stringify(sessions)}; urls=${urls.length}`);
+      expectNoReoffer(sessions);
+      await expect(page.getByText(/语音不可用|voice unavailable/i)).toHaveCount(0);
+      if (picture) return;
+
+      await expect(page.locator('[data-testid="avatar-view"]')).toHaveAttribute("data-media-mode", "voice-only");
+      await expect(page.getByTestId("avatar-voice-only-hint")).toBeVisible();
+      expect(urls.at(-1) && new URL(urls.at(-1)!).searchParams.get("avatar")).toBe("off");
+      // The SDK batches; flush it by leaving the page, then read what it sent.
+      await page.goto("about:blank");
+      await expect
+        .poll(() => fallbacks.length, { timeout: 30_000, message: `no voice.fallback among ${ingestRequests} telemetry requests` })
+        .toBeGreaterThan(0);
+      console.log(`[C] voice.fallback: ${JSON.stringify(fallbacks)}`);
+      console.log(`[C] decisions: ${logs.filter((l) => /media dropped|rate-limited|voice-only/.test(l)).join(" | ")}`);
     } catch (err) {
       console.log(dump());
       throw err;

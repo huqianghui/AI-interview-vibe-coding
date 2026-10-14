@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.70.2.0 (2026-10-14)
+
+### Fixed
+- **Behind a secure-access client the interviewer now actually asks the first question.** Found by
+  the first real test with the client on: the fallback to voice-only worked, but the candidate saw
+  the question card and heard nothing. The avatar's read gate gives up after 6 s and reads the
+  question anyway, while ICE behind the client takes about 8 s to fail. So the question was read
+  into the avatar session whose audio could never arrive, and Azure still reported it delivered
+  (the transcript comes over the WebSocket). A rebuild into voice-only now reads the last question
+  again, unless the candidate has already started answering it.
+
+### Changed
+- New live spec `avatar-selfheal-live` C runs on the real network with nothing forced: it expects
+  the digital human, or voice-only with the interviewer heard and a `voice.fallback` saying why. The
+  page's telemetry is intercepted and never reaches Azure. Measured with the client on: one avatar
+  session, then voice-only, and `voice.fallback` = `ice_never_connected`, `had_srflx: true`,
+  `had_relay: false`, `ice_errors: 701`, `ice_failure_kind: no_relay`. STUN works, no TURN relay is
+  ever allocated, so the client blocks the avatar's TURN servers.
+
 ## 0.70.1.0 (2026-10-14)
 
 ### Added
