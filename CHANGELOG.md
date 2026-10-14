@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.70.2.1 (2026-10-14)
+
+### Fixed
+- **The re-read question shows once.** Behind a secure-access client the first question was heard
+  once but appeared twice in the conversation panel (owner, live). The unheard read in the dead
+  avatar session still sent its transcript over the WebSocket, and the re-read on the voice-only
+  session added a second bubble. The re-read now writes into that same bubble. Live spec C checks
+  the panel.
+
 ## 0.70.2.0 (2026-10-14)
 
 ### Fixed

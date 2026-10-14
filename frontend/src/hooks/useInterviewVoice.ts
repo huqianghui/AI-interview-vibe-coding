@@ -419,6 +419,13 @@ export function useInterviewVoice(
   /** The candidate started speaking after that question was read — VAD's `speech_started`, which comes
    * before any transcript, so a reply still in progress counts too. */
   const spokeSinceReadRef = useRef(false);
+  /** The transcript bubble that question was shown in. A re-read on the voice-only session writes
+   * into the SAME bubble: the dead session's transcript still reached the page (it rides the
+   * WebSocket), so a fresh bubble showed the question twice while it was heard once (owner, live
+   * behind a secure-access client, 2026-10-14). */
+  const lastQuestionBubbleRef = useRef<string | null>(null);
+  /** Set for the duration of such a re-read: the bubble its response must reuse. */
+  const reuseBubbleRef = useRef<string | null>(null);
   /** Holds the FIRST question read until the digital human can actually be heard — the interviewer's
    * audio rides the avatar's WebRTC track, so reading before that track flows clipped the opening
    * words. Extracted to `useFirstReadGate`: the rule about which of its four pieces of state wins was
@@ -506,6 +513,8 @@ export function useInterviewVoice(
     // The session is over: nothing it read is a question a later session should repeat.
     lastReadTextRef.current = null;
     spokeSinceReadRef.current = false;
+    lastQuestionBubbleRef.current = null;
+    reuseBubbleRef.current = null;
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -519,6 +528,22 @@ export function useInterviewVoice(
 
   /** WS message handler — Azure Voice Live realtime events, relayed near-verbatim by the backend
    * proxy (plus its own `proxy.connected` bootstrap frame). */
+  /** The bubble an interviewer transcript belongs in: its own per-response id, except during a
+   * re-read after a voice-only fallback, which writes into the bubble the unheard read already left
+   * (see lastQuestionBubbleRef). Also remembers which bubble the current question went into. */
+  const assistantBubbleKey = useCallback(
+    (msg: Record<string, unknown>): string => {
+      const own = `assistant-${msg.response_id}-${msg.item_id}`;
+      if (!readWatch.ownsResponse(msg.response_id as string | undefined)) return own;
+      if (reuseBubbleRef.current) return reuseBubbleRef.current;
+      if (lastReadTextRef.current && speakQueue.lastEmitted() === lastReadTextRef.current) {
+        lastQuestionBubbleRef.current = own;
+      }
+      return own;
+    },
+    [readWatch, speakQueue],
+  );
+
   const handleMessage = useCallback(
     (
       event: MessageEvent,
@@ -842,7 +867,7 @@ export function useInterviewVoice(
           // Accumulate — consumers replace same-id segments, so a bare fragment would leave only
           // the newest word on screen. Emit the RUNNING text so the bubble grows as the
           // interviewer speaks.
-          const key = `assistant-${msg.response_id}-${msg.item_id}`;
+          const key = assistantBubbleKey(msg);
           const delta = (msg.delta as string | undefined) ?? "";
           if (delta) {
             voiceMetrics.turn("first_text");
@@ -861,8 +886,9 @@ export function useInterviewVoice(
           break;
         }
         case "response.audio_transcript.done": {
-          const key = `assistant-${msg.response_id}-${msg.item_id}`;
+          const key = assistantBubbleKey(msg);
           assistantLiveTranscriptRef.current.delete(key);
+          if (readWatch.ownsResponse(msg.response_id as string | undefined)) reuseBubbleRef.current = null;
           if (msg.transcript) {
             emit("assistant", msg.transcript as string, true, key);
             if (readWatch.ownsResponse(msg.response_id as string | undefined)) {
@@ -988,6 +1014,7 @@ export function useInterviewVoice(
       }
     },
     [
+      assistantBubbleKey,
       audio,
       avatarStream,
       send,
@@ -1336,6 +1363,8 @@ export function useInterviewVoice(
       // wins: it is the more recent one.) A link that had flowed is not re-read: it may have been heard.
       if (info?.mediaNeverFlowed && lastReadTextRef.current && !spokeSinceReadRef.current && !draft.peek()) {
         resumeSpeakTextRef.current = lastReadTextRef.current;
+        // …into the bubble the unheard read left, not a second one.
+        reuseBubbleRef.current = lastQuestionBubbleRef.current;
       }
       policy.markIntentionalClose(); // our own close must not trip the auto-reconnect path
       if (reconnectTimerRef.current) {
@@ -1417,6 +1446,7 @@ export function useInterviewVoice(
     // so disarm the silence timer — it must not fire a second commit for a turn already submitted.
     draft.clearSilenceAutoCommit();
     lastReadTextRef.current = null; // answered: a rebuild must not ask it again
+    lastQuestionBubbleRef.current = null;
     draft.clearJudge(); // a submit ends the pause — no judge check may fire for the old answer
     // Defensively settle any prior armed commit (e.g. a double-click) before arming a fresh one.
     settlePendingCommit();
