@@ -276,6 +276,13 @@ test.describe("avatar self-heal (real Azure)", () => {
       await expect(page.locator('[data-testid="avatar-view"]')).toHaveAttribute("data-media-mode", "voice-only");
       await expect(page.getByTestId("avatar-voice-only-hint")).toBeVisible();
       expect(urls.at(-1) && new URL(urls.at(-1)!).searchParams.get("avatar")).toBe("off");
+      // Heard once, so shown once: the dead avatar session's transcript still reached the page, and the
+      // re-read must replace that bubble rather than add a second one (owner, live, 2026-10-14).
+      await page.waitForTimeout(8_000); // let the re-read's transcript finish
+      const transcript = (await page.getByTestId("transcript").innerText()).replace(/\s+/g, " ");
+      const question = transcript.match(/Interviewer\s*(.{20,}?[.?!])/)?.[1] ?? "";
+      expect(question, `no interviewer question in the transcript: ${transcript.slice(0, 200)}`).not.toBe("");
+      expect(transcript.split(question).length - 1, `shown more than once: ${transcript.slice(0, 400)}`).toBe(1);
       // The SDK batches; flush it by leaving the page, then read what it sent.
       await page.goto("about:blank");
       await expect
