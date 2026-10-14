@@ -295,6 +295,9 @@ export function useAvatarStream(
   /** The current mode lives in four places that must never disagree: the policy state, the flag
    * `runHandshake` reads, the applied mode, and the React state the UI renders. Write them together. */
   const applyMode = useCallback((next: MediaMode) => {
+    // Leaving voice-only by ANY path (a fresh connect, the candidate's "Turn on video") ends the
+    // fallback: the next session's events must not carry its reason.
+    if (appliedModeRef.current === "voice-only" && next !== "voice-only") voiceMetrics.clearFallback();
     decisionRef.current = { ...decisionRef.current, mode: next };
     wantVideoRef.current = next === "video";
     appliedModeRef.current = next;
@@ -859,7 +862,9 @@ export function useAvatarStream(
           had_srflx: gathered.srflx,
           had_relay: gathered.relay,
           ice_errors: [...iceErrorCodesRef.current].sort().join(","),
-          ice_failure_kind: iceFailureKind(gathered, reason.startsWith("ice-")),
+          // Only a connection whose media never flowed failed AT ICE; one that connected and then
+          // dropped is a flapping link, not a network that blocks the avatar.
+          ice_failure_kind: iceFailureKind(gathered, !mediaFlowedRef.current && reason.startsWith("ice-")),
         });
       }
       if (pcRef.current) void handshakesRef.current.get(pcRef.current)?.finish("rebuilt");
@@ -1122,7 +1127,6 @@ export function useAvatarStream(
    * mode the candidate's pin asks for. No-op in any other mode. */
   const retryAvatarAfterFallback = useCallback(() => {
     if (appliedModeRef.current !== "voice-only") return;
-    voiceMetrics.clearFallback();
     applyMode(decisionRef.current.preference === "off" ? "audio-only" : "video");
     mediaFailuresRef.current = 0;
   }, [applyMode]);

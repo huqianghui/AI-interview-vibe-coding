@@ -217,12 +217,12 @@ No measurements; properties are the event context plus:
 
 | Property | What |
 |---|---|
-| `reason` | `ice_never_connected` (Azure answered the avatar's offer, ICE never connected — a network that blocks its WebRTC), `repeated_drop` (the media flowed, dropped, and dropped again within 10 s), `handshake_failed` (the offer was never answered, twice), `rate_limited` (Azure refused to create the avatar session over its allowance) |
+| `reason` | `ice_never_connected` (Azure answered the avatar's offer, ICE never connected — a network that blocks its WebRTC), `repeated_drop` (the media flowed, dropped, and dropped again within 10 s), `handshake_failed` (a drop of an offer never answered was the one that ended it), `rate_limited` (Azure refused to create the avatar session over its allowance) |
 | `from_mode` | the mode it left: `video` or `audio-only` |
 | `trigger` | the drop signal: `ice-failed`, `ice-disconnected-grace-expired`, `track-ended`, `handshake-failed` (not on `rate_limited`) |
 | `had_srflx` / `had_relay` | whether ICE gathered a server-reflexive (STUN answered) / relay (TURN allocated) candidate |
-| `ice_errors` | `icecandidateerror` codes seen on that connection, e.g. `701` (an ICE server could not be reached) |
-| `ice_failure_kind` | derived: `stun_unreachable` (no srflx, no relay), `no_relay` (STUN answered, no TURN relay, checks failed — the secure-access shape measured 2026-10-14), `relay_failed` (a relay, and the checks over it still failed), `unknown` (not an ICE failure) |
+| `ice_errors` | `icecandidateerror` codes seen on that connection, e.g. `701` (an ICE server could not be reached). One unreachable server among several also raises it on a healthy connection, so read it next to `ice_failure_kind`, not as the cause |
+| `ice_failure_kind` | derived: `stun_unreachable` (no srflx, no relay), `no_relay` (STUN answered, no TURN relay, checks failed — the secure-access shape measured 2026-10-14), `relay_failed` (a relay, and the checks over it still failed), `unknown` (not an ICE failure, including a connection that had flowed and then dropped) |
 | `retry_after_ms` | on `rate_limited`: how long Azure asked us to wait |
 
 WebRTC never names the reason a network blocked it; these are the nearest thing to an error code a

@@ -303,16 +303,31 @@ describe("useAvatarStream self-heal", () => {
     await drop(await newSession(result, sendOffer), 1_000);
     expect(fallback, "a first drop rebuilds; it is not a fallback").not.toHaveBeenCalled();
     await drop(await newSession(result, sendOffer), 2_000);
-    expect(fallback).toHaveBeenLastCalledWith("repeated_drop", expect.objectContaining({ from_mode: "video" }));
+    expect(fallback).toHaveBeenLastCalledWith(
+      "repeated_drop",
+      // A link that connected and then dropped is not a network blocking ICE.
+      expect.objectContaining({ from_mode: "video", ice_failure_kind: "unknown" }),
+    );
 
     act(() => {
       result.current.retryAvatarAfterFallback();
     });
-    expect(clear).toHaveBeenCalled();
+    expect(clear).toHaveBeenCalledTimes(1);
+    clear.mockClear();
+    // The candidate's "Turn on video" out of voice-only ends the fallback too.
+    act(() => {
+      result.current.fallBackToVoiceOnly(32_000);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(61_000); // past the cooldown the refusal started
+      result.current.setVideoPreference("on");
+    });
+    expect(clear).toHaveBeenCalledTimes(1);
     act(() => {
       result.current.fallBackToVoiceOnly(32_000);
     });
     expect(fallback).toHaveBeenLastCalledWith("rate_limited", { from_mode: "video", retry_after_ms: 32_000 });
+    expect(fallback, "one repeated_drop, two rate_limited").toHaveBeenCalledTimes(3);
   });
 
   it("rebuilds once in the same mode after a drop of media that had flowed", async () => {

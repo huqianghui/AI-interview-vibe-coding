@@ -553,6 +553,9 @@ export function useInterviewVoice(
       switch (msg.type as string | undefined) {
         case "proxy.connected":
           avatarEnabledRef.current = Boolean(msg.avatar_enabled);
+          // A session that has the digital human is no fallback's, whatever an earlier session on this
+          // page (another interview, the Playground) went through: voiceMetrics outlives this hook.
+          if (msg.avatar_enabled) voiceMetrics.clearFallback();
           voiceMetrics.setContext({
             avatar: Boolean(msg.avatar_enabled),
             linear_turns: Boolean(msg.linear_turns),
@@ -1647,6 +1650,8 @@ export function useInterviewVoice(
   // Every voice timing event carries the interview it belongs to ("playground" for the editor).
   useEffect(() => {
     voiceMetrics.setContext({ interview_id: interviewId || "playground" });
+    // A new interview starts with no fallback behind it (see the proxy.connected clear).
+    voiceMetrics.clearFallback();
   }, [interviewId]);
 
   useEffect(() => {
