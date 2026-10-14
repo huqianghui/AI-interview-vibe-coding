@@ -166,12 +166,19 @@ const MEDIA_STABLE_MS = 10_000;
 const AVATAR_REQUEST_WINDOW_MS = 60_000;
 const AVATAR_REQUESTS_PER_WINDOW = 3;
 
+/** What the consumer needs to know about WHY a rebuild is asked for. */
+export interface ModeSwitchInfo {
+  /** The connection being left never carried media (ICE never connected, or the handshake never
+   * completed): anything read into that session was never heard, so the consumer says it again. */
+  mediaNeverFlowed: boolean;
+}
+
 export interface AvatarStreamOptions {
   /** Called when the Voice Live session must be rebuilt in mode `next`: the media policy (or the
    * candidate) turned the picture on/off, or the self-heal is recovering a media drop (`next` may then
    * equal the current mode). See HOW the picture is switched in the module header. The hook has already
    * torn its media down by the time this fires, and remembers the mode it wants. */
-  onModeSwitchRequest?: (next: MediaMode) => void;
+  onModeSwitchRequest?: (next: MediaMode, info?: ModeSwitchInfo) => void;
 }
 
 export function useAvatarStream(
@@ -868,11 +875,13 @@ export function useAvatarStream(
         });
       }
       if (pcRef.current) void handshakesRef.current.get(pcRef.current)?.finish("rebuilt");
+      // Read before teardown, which starts the next connection's bookkeeping.
+      const flowed = mediaFlowedRef.current;
       teardownMedia();
       if (next === "voice-only") {
         // No avatar session, so nothing to wait for: Azure's avatar allowance is not touched.
         mediaFailuresRef.current = 0;
-        onModeSwitchRequestRef.current(next);
+        onModeSwitchRequestRef.current(next, { mediaNeverFlowed: !flowed });
         return;
       }
       nextConnectLabelRef.current = "recovery";

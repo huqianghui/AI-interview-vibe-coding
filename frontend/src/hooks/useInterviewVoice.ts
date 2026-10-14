@@ -45,6 +45,7 @@ import {
 } from "./useVoiceAudio";
 import { useAvatarStream } from "./useAvatarStream";
 import type { MediaMode } from "./avatarHealth";
+import type { ModeSwitchInfo } from "./useAvatarStream";
 import { voiceMetrics } from "../telemetry/voiceTimeline";
 import { beginWebSocketTrace, flushForUnload, type WebSocketTrace } from "../telemetry/appInsights";
 import type {
@@ -300,9 +301,9 @@ export function useInterviewVoice(
   // `session.avatar.connect` once per session and has no renegotiate/disconnect event (it answers a
   // second offer with "WebRTC connection is in connected state" — measured 2026-09-30). The media hook
   // decides WHEN, this hook owns HOW, via a ref because `restartForMediaMode` is defined below `connect`.
-  const restartForMediaModeRef = useRef<((next: MediaMode) => void) | null>(null);
+  const restartForMediaModeRef = useRef<((next: MediaMode, info?: ModeSwitchInfo) => void) | null>(null);
   const avatarStream = useAvatarStream(options.videoRef ?? fallbackVideoRef, {
-    onModeSwitchRequest: (next) => restartForMediaModeRef.current?.(next),
+    onModeSwitchRequest: (next, info) => restartForMediaModeRef.current?.(next, info),
   });
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -410,10 +411,14 @@ export function useInterviewVoice(
   // once the next session reaches `session.updated`. Without this, a drop-during-reconnect is
   // unrecoverable — the page latched "spoken" and never asks again.
   const resumeSpeakTextRef = useRef<string | null>(null);
-  /** The last question text handed to a read, so a rebuild into voice-only can say it again: the
-   * dead avatar session "delivered" it (Azure answered the response) while its audio went down a
-   * WebRTC connection that never carried anything. */
+  /** The current QUESTION (not a judge nudge), so a rebuild into voice-only can say it again: the dead
+   * avatar session "delivered" it (Azure answered the response, its transcript rides the WebSocket)
+   * while its audio went down a WebRTC connection that never carried anything. Cleared once the
+   * candidate submits an answer to it, and on teardown. */
   const lastReadTextRef = useRef<string | null>(null);
+  /** The candidate started speaking after that question was read — VAD's `speech_started`, which comes
+   * before any transcript, so a reply still in progress counts too. */
+  const spokeSinceReadRef = useRef(false);
   /** Holds the FIRST question read until the digital human can actually be heard — the interviewer's
    * audio rides the avatar's WebRTC track, so reading before that track flows clipped the opening
    * words. Extracted to `useFirstReadGate`: the rule about which of its four pieces of state wins was
@@ -498,6 +503,9 @@ export function useInterviewVoice(
 
   const cleanup = useCallback(() => {
     voiceMetrics.flush();
+    // The session is over: nothing it read is a question a later session should repeat.
+    lastReadTextRef.current = null;
+    spokeSinceReadRef.current = false;
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -727,6 +735,7 @@ export function useInterviewVoice(
 
         case "input_audio_buffer.speech_started":
           voiceMetrics.turn("speech_started");
+          spokeSinceReadRef.current = true;
           setAudio("listening");
           // The candidate resumed speaking — they haven't finished the answer yet, so cancel any
           // pending silence-auto-commit (and the judge window). Both re-arm when the next
@@ -1311,7 +1320,7 @@ export function useInterviewVoice(
    *     current question so the new session re-reads it instead of losing it.
    */
   const restartForMediaMode = useCallback(
-    (next: MediaMode) => {
+    (next: MediaMode, info?: ModeSwitchInfo) => {
       // No session to rebuild (pre-flight, or after a disconnect): the media hook already remembered
       // the mode, and the next connect() opens the session in it. Rebuilding here would open a session
       // nobody asked for.
@@ -1320,12 +1329,12 @@ export function useInterviewVoice(
         return;
       }
       console.info(`[voice] rebuilding the session for media mode ${next}`);
-      // Into voice-only, the avatar session is being left because its media did not carry: the last
-      // question was read into it and, measured live behind a secure-access client (2026-10-14), never
-      // heard — its read gate elapsed and the read went out ~2 s before ICE gave up. Read it again on
-      // the new session unless the candidate has already started answering it. (A read still
-      // unconfirmed is stashed by resetTurnState anyway, and wins: it is the more recent one.)
-      if (next === "voice-only" && lastReadTextRef.current && !draft.peek()) {
+      // The avatar session being left never carried media, so the question read into it was never
+      // heard — measured live behind a secure-access client (2026-10-14): the read gate elapsed and the
+      // read went out ~2 s before ICE gave up. Say it again on the new session, unless the candidate
+      // has started answering it. (A read still unconfirmed is stashed by resetTurnState anyway, and
+      // wins: it is the more recent one.) A link that had flowed is not re-read: it may have been heard.
+      if (info?.mediaNeverFlowed && lastReadTextRef.current && !spokeSinceReadRef.current && !draft.peek()) {
         resumeSpeakTextRef.current = lastReadTextRef.current;
       }
       policy.markIntentionalClose(); // our own close must not trip the auto-reconnect path
@@ -1407,6 +1416,7 @@ export function useInterviewVoice(
     // This turn is being committed (via the "I'm done" button OR the silence auto-commit),
     // so disarm the silence timer — it must not fire a second commit for a turn already submitted.
     draft.clearSilenceAutoCommit();
+    lastReadTextRef.current = null; // answered: a rebuild must not ask it again
     draft.clearJudge(); // a submit ends the pause — no judge check may fire for the old answer
     // Defensively settle any prior armed commit (e.g. a double-click) before arming a fresh one.
     settlePendingCommit();
@@ -1464,7 +1474,6 @@ export function useInterviewVoice(
       // Refuses a text already handed to a live response — several routes reach here and every
       // `response.done` fires the flush, so without this the same question was read two or three times.
       if (!speakQueue.claimEmit(text)) return;
-      lastReadTextRef.current = text;
       voiceMetrics.turn("read_request");
       // The next `response.created` belongs to THIS attempt — its id becomes the delivery proof.
       readWatch.expectResponse();
@@ -1556,6 +1565,8 @@ export function useInterviewVoice(
     (text: string): boolean => {
       const ws = wsRef.current;
       if (!text || ws?.readyState !== WebSocket.OPEN) return false;
+      lastReadTextRef.current = text;
+      spokeSinceReadRef.current = false;
 
       // FIRST-READ AVATAR GATE (the "第一句话前面的词被吃掉" fix): the opening question's audio is
       // clipped when it's read before the avatar's media pipeline is up (assistant TTS rides the

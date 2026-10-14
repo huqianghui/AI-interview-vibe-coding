@@ -215,10 +215,16 @@ describe("useAvatarStream self-heal", () => {
    * the whole Voice Live session (here: the test calls connect() again). */
   function renderWithConsumer(videoRef: ReturnType<typeof makeVideoRef>) {
     const requests: string[] = [];
+    const infos: ({ mediaNeverFlowed: boolean } | undefined)[] = [];
     const { result } = renderHook(() =>
-      useAvatarStream(videoRef, { onModeSwitchRequest: (next) => requests.push(next) }),
+      useAvatarStream(videoRef, {
+        onModeSwitchRequest: (next, info) => {
+          requests.push(next);
+          infos.push(info);
+        },
+      }),
     );
-    return { result, requests };
+    return { result, requests, infos };
   }
 
   /** Connect a new session on a new PC and complete its handshake; returns that PC. */
@@ -249,7 +255,7 @@ describe("useAvatarStream self-heal", () => {
     // audio track still arrives with the answer, which must not count as media flowing.
     const videoRef = makeVideoRef();
     const sendOffer = vi.fn();
-    const { result, requests } = renderWithConsumer(videoRef);
+    const { result, requests, infos } = renderWithConsumer(videoRef);
     const pc = await newSession(result, sendOffer);
     await act(async () => {
       pc.emitTrack("audio");
@@ -257,6 +263,7 @@ describe("useAvatarStream self-heal", () => {
     await drop(pc, null);
 
     expect(requests).toEqual(["voice-only"]);
+    expect(infos, "the consumer re-reads what this session swallowed").toEqual([{ mediaNeverFlowed: true }]);
     expect(result.current.mediaMode).toBe("voice-only");
     expect(result.current.wantsAvatar(), "the next session opens with avatar=off").toBe(false);
     expect(pc.closed).toBe(true);
@@ -347,7 +354,7 @@ describe("useAvatarStream self-heal", () => {
   it("goes voice-only when a drop repeats before media was stable, so a flapping link cannot loop", async () => {
     const videoRef = makeVideoRef();
     const sendOffer = vi.fn();
-    const { result, requests } = renderWithConsumer(videoRef);
+    const { result, requests, infos } = renderWithConsumer(videoRef);
     await drop(await newSession(result, sendOffer), 1_000);
     expect(requests).toEqual(["video"]);
 
@@ -358,6 +365,7 @@ describe("useAvatarStream self-heal", () => {
     });
     await drop(await newSession(result, sendOffer), 5_000); // flowed, but not for MEDIA_STABLE_MS
     expect(requests).toEqual(["video", "voice-only"]);
+    expect(infos.at(-1), "its media had flowed: maybe heard, not re-read").toEqual({ mediaNeverFlowed: false });
     expect(sendOffer).toHaveBeenCalledTimes(2);
   });
 
