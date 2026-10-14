@@ -22,6 +22,7 @@ import { act, renderHook } from "@testing-library/react";
 
 import { HEALTH_THRESHOLDS as T } from "./avatarHealth";
 import { useAvatarStream } from "./useAvatarStream";
+import { voiceMetrics } from "../telemetry/voiceTimeline";
 
 /** Minimal controllable RTCPeerConnection stand-in. Captures the hook's event handlers so the test
  * can fire ICE state changes / gathering completion / track events on demand. */
@@ -262,6 +263,71 @@ describe("useAvatarStream self-heal", () => {
     // The bug this replaced: a second `session.avatar.connect` on the same session, which Azure refuses.
     expect(FakePC.instances, "no new PeerConnection on the old session").toHaveLength(1);
     expect(sendOffer, "one avatar session spent, not three").toHaveBeenCalledTimes(1);
+  });
+
+  it("reports why it went voice-only, with what the ICE got as far as (voice.fallback)", async () => {
+    const fallback = vi.spyOn(voiceMetrics, "fallback");
+    const videoRef = makeVideoRef();
+    const sendOffer = vi.fn();
+    const { result } = renderWithConsumer(videoRef);
+    await act(async () => {
+      void result.current.connect([{ urls: "stun:stun.example.com" }], sendOffer);
+    });
+    const pc = FakePC.instances[0];
+    await act(async () => {
+      // STUN answers, no TURN relay is ever allocated, and the TURN server reports 701.
+      pc.emitCandidate("candidate:2 1 udp 1686052607 20.1.1.1 50001 typ srflx raddr 0.0.0.0 rport 0");
+      (pc as unknown as { onicecandidateerror: ((e: unknown) => void) | null }).onicecandidateerror?.({
+        errorCode: 701,
+      });
+    });
+    await completeHandshake(pc, result.current.handleServerSdp);
+    await drop(pc, null);
+
+    expect(fallback).toHaveBeenCalledWith("ice_never_connected", {
+      from_mode: "video",
+      trigger: "ice-failed",
+      had_srflx: true,
+      had_relay: false,
+      ice_errors: "701",
+      ice_failure_kind: "no_relay",
+    });
+  });
+
+  it("reports a flapping link as repeated_drop, and a rate-limit fallback as rate_limited", async () => {
+    const fallback = vi.spyOn(voiceMetrics, "fallback");
+    const clear = vi.spyOn(voiceMetrics, "clearFallback");
+    const videoRef = makeVideoRef();
+    const sendOffer = vi.fn();
+    const { result } = renderWithConsumer(videoRef);
+    await drop(await newSession(result, sendOffer), 1_000);
+    expect(fallback, "a first drop rebuilds; it is not a fallback").not.toHaveBeenCalled();
+    await drop(await newSession(result, sendOffer), 2_000);
+    expect(fallback).toHaveBeenLastCalledWith(
+      "repeated_drop",
+      // A link that connected and then dropped is not a network blocking ICE.
+      expect.objectContaining({ from_mode: "video", ice_failure_kind: "unknown" }),
+    );
+
+    act(() => {
+      result.current.retryAvatarAfterFallback();
+    });
+    expect(clear).toHaveBeenCalledTimes(1);
+    clear.mockClear();
+    // The candidate's "Turn on video" out of voice-only ends the fallback too.
+    act(() => {
+      result.current.fallBackToVoiceOnly(32_000);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(61_000); // past the cooldown the refusal started
+      result.current.setVideoPreference("on");
+    });
+    expect(clear).toHaveBeenCalledTimes(1);
+    act(() => {
+      result.current.fallBackToVoiceOnly(32_000);
+    });
+    expect(fallback).toHaveBeenLastCalledWith("rate_limited", { from_mode: "video", retry_after_ms: 32_000 });
+    expect(fallback, "one repeated_drop, two rate_limited").toHaveBeenCalledTimes(3);
   });
 
   it("rebuilds once in the same mode after a drop of media that had flowed", async () => {

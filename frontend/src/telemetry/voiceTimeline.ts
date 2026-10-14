@@ -8,6 +8,10 @@
  *   media-mode switch). ICE gathering (first host / srflx (= the STUN answer) / relay (= the TURN
  *   allocation) candidate), our offer gate, Azure's SDP answer, ICE connected, first track, first
  *   painted frame, plus the selected candidate pair and its RTT.
+ * - `voice.fallback`: once each time a session goes VOICE-ONLY (no digital human, the voice over the
+ *   WebSocket): why (`reason`), from which mode, and — for a network failure — what ICE got as far as
+ *   (`ice_failure_kind`). Every later event of the page then carries `fallback_reason` too, so the
+ *   voice-only sessions can be grouped by cause without reconstructing their ICE timelines.
  * - `voice.turn`: once per interviewer response. Everything from the end of the previous response:
  *   the candidate speaking (VAD), speech-to-text, "I'm done" waiting for the transcript, the
  *   `/answer` round trip (the brain or judge), the read request, `response.created`, the first text
@@ -137,6 +141,30 @@ function guarded(what: string, fn: () => void): void {
  * Turn and setup bookkeeping for one voice hook. The hooks call `turn(...)` / `setup(...)` with mark
  * names; this decides when an event is complete and sends it.
  */
+/** Why a session went voice-only (`voice.fallback`'s `reason`, and `fallback_reason` after it).
+ * - `ice_never_connected`: Azure answered the avatar's offer but ICE never connected — a network
+ *   that blocks the avatar's WebRTC (a corporate secure-access client, 2026-10-14).
+ * - `repeated_drop`: the media flowed, dropped, and dropped again before it was stable.
+ * - `handshake_failed`: the offer was never answered, twice.
+ * - `rate_limited`: Azure refused to create the avatar session (its allowance per Speech resource). */
+export type FallbackReason = "ice_never_connected" | "repeated_drop" | "handshake_failed" | "rate_limited";
+
+/** What a failed avatar connection's ICE got as far as — the closest a browser gets to an error code
+ * for "the network blocked it", which WebRTC itself never names.
+ * - `stun_unreachable`: no server-reflexive or relay candidate at all (UDP to the ICE servers blocked).
+ * - `no_relay`: STUN answered but no TURN relay was allocated, and the direct checks failed (the
+ *   2026-10-14 production shape: srflx in ~540 ms, no relay, ICE failed).
+ * - `relay_failed`: a TURN relay was allocated and the checks over it still failed.
+ * - `unknown`: none of the above can be told (e.g. the connection never got that far). */
+export type IceFailureKind = "stun_unreachable" | "no_relay" | "relay_failed" | "unknown";
+
+export function iceFailureKind(gathered: { srflx: boolean; relay: boolean }, iceFailed: boolean): IceFailureKind {
+  if (!iceFailed) return "unknown";
+  if (gathered.relay) return "relay_failed";
+  if (gathered.srflx) return "no_relay";
+  return "stun_unreachable";
+}
+
 export class VoiceMetrics {
   private turnLine: Timeline;
   /** Per-turn counts sent with the turn (e.g. playback gaps); reset with it. */
@@ -250,6 +278,25 @@ export class VoiceMetrics {
       heard: line.has("first_audible"),
     });
     this.turnIndex += 1;
+  }
+
+  // --- voice-only fallback -----------------------------------------------------------------------
+
+  /** A session is going voice-only: say why, and tag everything after it with the reason. */
+  fallback(reason: FallbackReason, props: Properties = {}): void {
+    guarded("fallback", () => {
+      this.context = { ...this.context, fallback_reason: reason };
+      this.emit("voice.fallback", {}, { ...this.context, reason, ...props });
+    });
+  }
+
+  /** The digital human is being tried again: later events are no longer a fallback's. */
+  clearFallback(): void {
+    guarded("clearFallback", () => {
+      const { fallback_reason: _dropped, ...rest } = this.context;
+      void _dropped;
+      this.context = rest;
+    });
   }
 
   /** The connection is going away: send whatever is open. */

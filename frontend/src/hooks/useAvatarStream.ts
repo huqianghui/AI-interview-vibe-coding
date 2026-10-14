@@ -88,7 +88,9 @@ import {
 } from "./avatarHealth";
 import {
   AvatarHandshakeMetrics,
+  type FallbackReason,
   candidateType,
+  iceFailureKind,
   selectedPair,
   voiceMetrics,
   watchAudibleOnsets,
@@ -215,6 +217,8 @@ export function useAvatarStream(
   /** This connection's media has flowed (ICE reached connected). A drop of one that never did goes
    * straight to voice-only: the link has not carried the avatar once, and a retry will not change it. */
   const mediaFlowedRef = useRef(false);
+  /** `icecandidateerror` codes seen on the current connection (see wirePc). */
+  const iceErrorCodesRef = useRef<Set<number>>(new Set());
   /** Clears the failure count once media has flowed for MEDIA_STABLE_MS. */
   const stableTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** A "turn the digital human on" from voice-only that the cooldown refused, retried when it lifts. */
@@ -291,6 +295,9 @@ export function useAvatarStream(
   /** The current mode lives in four places that must never disagree: the policy state, the flag
    * `runHandshake` reads, the applied mode, and the React state the UI renders. Write them together. */
   const applyMode = useCallback((next: MediaMode) => {
+    // Leaving voice-only by ANY path (a fresh connect, the candidate's "Turn on video") ends the
+    // fallback: the next session's events must not carry its reason.
+    if (appliedModeRef.current === "voice-only" && next !== "voice-only") voiceMetrics.clearFallback();
     decisionRef.current = { ...decisionRef.current, mode: next };
     wantVideoRef.current = next === "video";
     appliedModeRef.current = next;
@@ -528,6 +535,12 @@ export function useAvatarStream(
    * (closed) PC's late-firing event can't touch the live connection. */
   const wirePc = useCallback(
     (pc: RTCPeerConnection) => {
+      // The ICE servers' own error codes (701 = the STUN/TURN server could not be reached), kept for
+      // `voice.fallback`: the nearest thing a browser has to an error code for a blocked network.
+      pc.onicecandidateerror = (event: Event) => {
+        const code = (event as RTCPeerConnectionIceErrorEvent).errorCode;
+        if (pc === pcRef.current && typeof code === "number") iceErrorCodesRef.current.add(code);
+      };
       pc.onconnectionstatechange = () => {
         console.info("[avatar-stream] connectionState:", pc.connectionState);
         if (pc.connectionState !== "connected") return;
@@ -820,22 +833,40 @@ export function useAvatarStream(
       }
       let next: MediaMode;
       let why: string;
+      let fallbackReason: FallbackReason;
       // A handshake that never completed (an SDP timeout, a lost or refused offer) can be a passing
       // fault, so it is counted like any drop — one more try. Only ICE that never connected on an
       // answered offer is the signature of a network that blocks the avatar outright.
       if (!mediaFlowedRef.current && reason !== "handshake-failed") {
         next = "voice-only";
         why = "its media never flowed";
+        fallbackReason = "ice_never_connected";
       } else {
         const failures = ++mediaFailuresRef.current;
         next = failures >= MAX_MEDIA_FAILURES ? "voice-only" : current;
         why = `drop ${failures}/${MAX_MEDIA_FAILURES} without a stable stretch`;
+        fallbackReason = reason === "handshake-failed" ? "handshake_failed" : "repeated_drop";
       }
       console.warn(`[avatar-stream] media dropped (${reason}; ${why}); rebuilding the Voice Live session in ${next}`);
       // The mode is written BEFORE teardown, which is what connect() and the consumer read.
       applyMode(next);
       // The dropped connection's record ends as `rebuilt` (a no-op if `ice_failed` already ended it);
       // teardown would otherwise file it as an ordinary `closed`.
+      if (next === "voice-only") {
+        // Read off the dropped connection BEFORE teardown closes it.
+        const handshake = pcRef.current ? handshakesRef.current.get(pcRef.current) : undefined;
+        const gathered = { srflx: Boolean(handshake?.has("first_srflx")), relay: Boolean(handshake?.has("first_relay")) };
+        voiceMetrics.fallback(fallbackReason, {
+          from_mode: current,
+          trigger: reason,
+          had_srflx: gathered.srflx,
+          had_relay: gathered.relay,
+          ice_errors: [...iceErrorCodesRef.current].sort().join(","),
+          // Only a connection whose media never flowed failed AT ICE; one that connected and then
+          // dropped is a flapping link, not a network that blocks the avatar.
+          ice_failure_kind: iceFailureKind(gathered, !mediaFlowedRef.current && reason.startsWith("ice-")),
+        });
+      }
       if (pcRef.current) void handshakesRef.current.get(pcRef.current)?.finish("rebuilt");
       teardownMedia();
       if (next === "voice-only") {
@@ -975,6 +1006,7 @@ export function useAvatarStream(
       clearTimers();
       sendOfferRef.current = sendSdpOffer;
       mediaFlowedRef.current = false;
+      iceErrorCodesRef.current = new Set();
       const label = nextConnectLabelRef.current;
       nextConnectLabelRef.current = "initial";
 
@@ -1076,7 +1108,11 @@ export function useAvatarStream(
   const wantsAvatar = useCallback(() => decisionRef.current.mode !== "voice-only", []);
   /** Open the next session voice-only — the consumer's answer to Azure refusing to create an avatar
    * session at all (its allowance is spent), where there is no avatar connection here to fail. */
-  const fallBackToVoiceOnly = useCallback(() => {
+  const fallBackToVoiceOnly = useCallback((retryAfterMs?: number) => {
+    voiceMetrics.fallback("rate_limited", {
+      from_mode: appliedModeRef.current,
+      ...(retryAfterMs !== undefined ? { retry_after_ms: retryAfterMs } : {}),
+    });
     applyMode("voice-only");
     mediaFailuresRef.current = 0;
     // Azure just said the allowance is spent, so "Turn on video" waits out the cooldown like it does

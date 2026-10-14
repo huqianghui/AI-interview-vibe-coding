@@ -597,7 +597,7 @@
     {
       "type": 1,
       "content": {
-        "json": "## Voice-only sessions (audio over the WebSocket)\n\nWithout an avatar the interviewer's audio arrives as PCM on the WebSocket and plays through the page's jitter buffer: a gap is the buffer running dry mid-speech."
+        "json": "## Voice-only sessions (audio over the WebSocket)\n\nWithout an avatar the interviewer's audio arrives as PCM on the WebSocket and plays through the page's jitter buffer: a gap is the buffer running dry mid-speech.\n\nA session with a digital human that went voice-only anyway sends `voice.fallback` saying why. `ice_never_connected` + `no_relay` is a network that blocks the avatar's WebRTC (a corporate secure-access client: STUN answers, no TURN relay, ICE fails); `rate_limited` is Azure's avatar allowance (3 new sessions per minute per Speech resource)."
       }
     },
     {
@@ -607,6 +607,32 @@
         "query": "customEvents\n| where name == \"voice.turn\" and tostring(customDimensions.audio_path) == \"ws\"\n| extend gaps = todouble(customMeasurements.playback_gaps), gap_ms = todouble(customMeasurements.playback_gap_ms_total)\n| summarize turns = count(), turns_with_gaps = countif(gaps > 0), gaps = sum(gaps), avg_gap_ms = round(sum(gap_ms) / iff(sum(gaps) > 0, sum(gaps), 1.0))",
         "size": 0,
         "title": "Playback gaps per turn",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customEvents\n| where name == \"voice.fallback\"\n| extend reason = tostring(customDimensions.reason), ice_failure_kind = tostring(customDimensions.ice_failure_kind), from_mode = tostring(customDimensions.from_mode)\n| summarize fallbacks = count(), interviews = dcount(tostring(customDimensions.interview_id)), last_seen = max(timestamp) by reason, ice_failure_kind, from_mode\n| order by fallbacks desc",
+        "size": 0,
+        "title": "Why sessions went voice-only (`voice.fallback`)",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customEvents\n| where name == \"voice.fallback\"\n| project timestamp, interview_id = tostring(customDimensions.interview_id), reason = tostring(customDimensions.reason), from_mode = tostring(customDimensions.from_mode), trigger = tostring(customDimensions.trigger), ice_failure_kind = tostring(customDimensions.ice_failure_kind), had_srflx = tostring(customDimensions.had_srflx), had_relay = tostring(customDimensions.had_relay), ice_errors = tostring(customDimensions.ice_errors), retry_after_ms = tostring(customDimensions.retry_after_ms)\n| order by timestamp desc\n| take 50",
+        "size": 0,
+        "title": "Recent voice-only fallbacks",
         "timeContextFromParameter": "TimeRange",
         "queryType": 0,
         "resourceType": "microsoft.insights/components",

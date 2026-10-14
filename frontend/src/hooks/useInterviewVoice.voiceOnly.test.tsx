@@ -57,6 +57,7 @@ vi.mock("./useAvatarStream", () => ({
 
 vi.mock("./useVoiceAudio", () => ({
   MIC_SAMPLE_RATE: 16_000,
+  AZURE_DEFAULT_INPUT_SAMPLE_RATE: 24_000,
   useVoiceAudio: () => ({
     initMic: vi.fn(),
     startRecording: vi.fn(),
@@ -210,6 +211,25 @@ describe("useInterviewVoice voice-only", () => {
       await Promise.resolve();
     });
     expect(FakeWebSocket.instances).toHaveLength(0);
+    unmount();
+  });
+});
+
+describe("useInterviewVoice fallback_reason context", () => {
+  it("clears a previous fallback when a session with the digital human comes up", async () => {
+    const { voiceMetrics } = await import("../telemetry/voiceTimeline");
+    const clear = vi.spyOn(voiceMetrics, "clearFallback");
+    const { getHook, unmount } = harness();
+    clear.mockClear(); // the mount clears once for the new interview
+    act(() => {
+      void getHook().connect("en-US").catch(() => undefined);
+    });
+    const ws = await socket(1);
+    await act(async () => {
+      ws.receive({ type: "proxy.connected", avatar_enabled: true, mode: "model" });
+    });
+    expect(clear).toHaveBeenCalledTimes(1);
+    clear.mockRestore();
     unmount();
   });
 });
