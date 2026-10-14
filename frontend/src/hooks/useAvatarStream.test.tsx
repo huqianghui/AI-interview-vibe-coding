@@ -7,11 +7,14 @@
  * path back — one media blip meant orb for the rest of the session.
  *
  * These tests drive a controllable fake RTCPeerConnection through the drop signals and assert:
- *   1. ICE `failed` → the hook rebuilds the PC and re-runs the handshake (a 2nd offer is sent).
+ *   1. ICE `failed` → the hook asks its consumer to rebuild the Voice Live SESSION in the same mode,
+ *      and never re-offers on the live one (Azure refuses that: `webrtc_connection_invalid`).
  *   2. A transient ICE `disconnected` that returns to `connected` within the grace window does NOT
  *      rebuild (no reconnect storm, no orb flash).
- *   3. `disconnect()` cancels a pending rebuild (no zombie handshake after teardown).
- *   4. The recovery budget is bounded: repeated failed rebuilds stop after MAX_RECOVERY_ATTEMPTS.
+ *   3. `disconnect()` cancels a pending rebuild (no zombie rebuild after teardown).
+ *   4. The budget is bounded across rebuilt sessions: video → video → audio-only → orb, three avatar
+ *      sessions in all (Azure's allowance), and a rebuild waits out the allowance before it asks.
+ *   5. Media actually flowing hands the next drop a fresh budget.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
@@ -206,73 +209,81 @@ describe("useAvatarStream ICE gathering gate", () => {
 });
 
 describe("useAvatarStream self-heal", () => {
-  it("rebuilds the avatar connection and re-handshakes on ICE failed", async () => {
-    const videoRef = makeVideoRef();
-    const sendOffer = vi.fn();
-    const { result } = renderHook(() => useAvatarStream(videoRef));
+  /** Render with a recorder standing in for `useInterviewVoice`, which answers a request by rebuilding
+   * the whole Voice Live session (here: the test calls connect() again). */
+  function renderWithConsumer(videoRef: ReturnType<typeof makeVideoRef>) {
+    const requests: string[] = [];
+    const { result } = renderHook(() =>
+      useAvatarStream(videoRef, { onModeSwitchRequest: (next) => requests.push(next) }),
+    );
+    return { result, requests };
+  }
 
+  /** Connect a new session on a new PC and complete its handshake; returns that PC. */
+  async function newSession(result: { current: ReturnType<typeof useAvatarStream> }, sendOffer: ReturnType<typeof vi.fn>) {
+    const before = FakePC.instances.length;
     await act(async () => {
       void result.current.connect([{ urls: "stun:stun.example.com" }], sendOffer);
     });
-    await completeHandshake(FakePC.instances[0], result.current.handleServerSdp);
-    expect(FakePC.instances).toHaveLength(1);
+    const pc = FakePC.instances[before];
+    await completeHandshake(pc, result.current.handleServerSdp);
+    return pc;
+  }
+
+  it("asks for a session rebuild in the same mode on ICE failed, never re-offering on the live session", async () => {
+    const videoRef = makeVideoRef();
+    const sendOffer = vi.fn();
+    const { result, requests } = renderWithConsumer(videoRef);
+    const pc = await newSession(result, sendOffer);
     expect(sendOffer).toHaveBeenCalledTimes(1);
 
-    // ICE fails → immediate recovery scheduled (500ms backoff for attempt #1).
     await act(async () => {
-      FakePC.instances[0].fireIce("failed");
+      pc.fireIce("failed");
     });
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(600); // fire the recovery timer → rebuild
+      await vi.advanceTimersByTimeAsync(20_000);
     });
-    expect(FakePC.instances).toHaveLength(2);
-    expect(FakePC.instances[0].closed).toBe(true); // old PC torn down
 
-    // The rebuilt PC re-runs the full handshake → a 2nd offer goes out.
-    await completeHandshake(FakePC.instances[1], result.current.handleServerSdp);
-    expect(sendOffer).toHaveBeenCalledTimes(2);
+    expect(requests).toEqual(["video"]);
+    expect(pc.closed).toBe(true); // the dead media is torn down
+    // The bug: a second `session.avatar.connect` on the same session, which Azure refuses.
+    expect(FakePC.instances, "no new PeerConnection on the old session").toHaveLength(1);
+    expect(sendOffer, "no re-offer on the old session").toHaveBeenCalledTimes(1);
+    expect(result.current.isConnected).toBe(false);
   });
 
   it("does NOT rebuild on a transient disconnected that self-heals within the grace window", async () => {
     const videoRef = makeVideoRef();
     const sendOffer = vi.fn();
-    const { result } = renderHook(() => useAvatarStream(videoRef));
-
-    await act(async () => {
-      void result.current.connect([{ urls: "stun:stun.example.com" }], sendOffer);
-    });
-    await completeHandshake(FakePC.instances[0], result.current.handleServerSdp);
+    const { result, requests } = renderWithConsumer(videoRef);
+    const pc = await newSession(result, sendOffer);
 
     // Transient blip: disconnected then back to connected before the 3s grace expires.
     await act(async () => {
-      FakePC.instances[0].fireIce("disconnected");
+      pc.fireIce("disconnected");
     });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1000);
-      FakePC.instances[0].fireIce("connected"); // recovered on its own
+      pc.fireIce("connected"); // recovered on its own
     });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000); // well past the grace window
     });
 
-    // No rebuild, no extra offer — the orb never flashed.
-    expect(FakePC.instances).toHaveLength(1);
-    expect(sendOffer).toHaveBeenCalledTimes(1);
+    // No rebuild — the orb never flashed.
+    expect(requests).toEqual([]);
+    expect(pc.closed).toBe(false);
   });
 
   it("cancels a pending rebuild when disconnect() is called", async () => {
     const videoRef = makeVideoRef();
     const sendOffer = vi.fn();
-    const { result } = renderHook(() => useAvatarStream(videoRef));
+    const { result, requests } = renderWithConsumer(videoRef);
+    const pc = await newSession(result, sendOffer);
 
+    // A drop inside its grace window; disconnect() before it expires must abort the rebuild.
     await act(async () => {
-      void result.current.connect([{ urls: "stun:stun.example.com" }], sendOffer);
-    });
-    await completeHandshake(FakePC.instances[0], result.current.handleServerSdp);
-
-    // Failure schedules a rebuild; disconnect() before the backoff fires must abort it.
-    await act(async () => {
-      FakePC.instances[0].fireIce("failed");
+      pc.fireIce("disconnected");
     });
     await act(async () => {
       result.current.disconnect();
@@ -281,41 +292,145 @@ describe("useAvatarStream self-heal", () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
 
-    expect(FakePC.instances).toHaveLength(1); // no zombie rebuild
-    expect(sendOffer).toHaveBeenCalledTimes(1);
+    expect(requests).toEqual([]); // no zombie rebuild
   });
 
-  it("bounds recovery: stops rebuilding after MAX_RECOVERY_ATTEMPTS failed handshakes", async () => {
+  it("bounds the self-heal across rebuilt sessions: video once more, then audio-only, then the orb", async () => {
     const videoRef = makeVideoRef();
     const sendOffer = vi.fn();
-    const { result } = renderHook(() => useAvatarStream(videoRef));
+    const { result, requests } = renderWithConsumer(videoRef);
 
-    await act(async () => {
-      void result.current.connect([{ urls: "stun:stun.example.com" }], sendOffer);
-    });
-    await completeHandshake(FakePC.instances[0], result.current.handleServerSdp);
-    expect(FakePC.instances).toHaveLength(1);
+    // The 2026-10-14 production shape: ICE never connects on any session (the audio track still
+    // arrives with the answer, which must not count as media flowing).
+    const failNext = async () => {
+      const pc = await newSession(result, sendOffer);
+      await act(async () => {
+        pc.emitTrack("audio");
+        pc.fireIce("failed");
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      return pc;
+    };
 
-    // Kick off recovery; let each rebuilt handshake FAIL by never sending a server SDP (the 15s SDP
-    // timeout rejects), which chains into the next bounded attempt. Advance generously to let all
-    // backoffs (500/1500/3000ms) + gathering(8s) + SDP(15s) timeouts elapse for every attempt.
-    await act(async () => {
-      FakePC.instances[0].fireIce("failed");
-    });
-    await act(async () => {
-      // Complete ICE gathering on each rebuilt PC as it appears so the handshake advances to the
-      // SDP wait, then let the SDP timeout reject it. Loop over a long virtual window.
-      for (let i = 0; i < 40; i++) {
-        FakePC.instances.forEach((pc) => {
-          if (!pc.closed && pc.localDescription) pc.completeGathering();
-        });
-        await vi.advanceTimersByTimeAsync(3000);
-      }
-    });
+    await failNext();
+    expect(requests).toEqual(["video"]);
 
-    // MAX_RECOVERY_ATTEMPTS = 3 → at most the original + 3 rebuilds, then it gives up (orb).
-    expect(FakePC.instances.length).toBeLessThanOrEqual(4);
+    // A WS reconnect tears the media down between sessions; the count must survive it, or Azure ending
+    // the stream would hand every session a fresh budget and never stop.
+    act(() => {
+      result.current.disconnect();
+    });
+    await failNext();
+    expect(requests).toEqual(["video", "audio-only"]);
+    expect(result.current.mediaMode).toBe("audio-only");
+
+    const audioPc = await failNext();
+    expect(audioPc.transceivers.find((t) => t.kind === "video")?.direction).toBe("inactive");
+    expect(requests, "the fallback session was audio-only's one retry: the orb, no fourth session").toEqual([
+      "video",
+      "audio-only",
+    ]);
+    expect(sendOffer, "three avatar sessions — Azure's whole allowance").toHaveBeenCalledTimes(3);
     expect(result.current.isConnected).toBe(false);
+  });
+
+  it("holds a rebuild until Azure's avatar allowance has room, instead of creating a session it refuses", async () => {
+    const videoRef = makeVideoRef();
+    const sendOffer = vi.fn();
+    const { result, requests } = renderWithConsumer(videoRef);
+    // Spend the allowance (3 sessions inside the window), with the last one dropping.
+    await newSession(result, sendOffer);
+    await newSession(result, sendOffer);
+    const third = await newSession(result, sendOffer);
+    await act(async () => {
+      third.fireIce("failed");
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(requests, "a fourth session now would be refused at creation").toEqual([]);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(requests, "a delay, not a silent drop").toEqual(["video"]);
+  });
+
+  it("treats a rebuilt session whose handshake never completes as the next failure, not the end", async () => {
+    const videoRef = makeVideoRef();
+    const sendOffer = vi.fn();
+    const { result, requests } = renderWithConsumer(videoRef);
+    const first = await newSession(result, sendOffer);
+    await act(async () => {
+      first.fireIce("failed");
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(requests).toEqual(["video"]);
+
+    // The rebuilt session's offer is never answered (refused, or lost): the 15 s SDP timeout rejects it.
+    await act(async () => {
+      void result.current.connect([{ urls: "stun:stun.example.com" }], sendOffer).catch(() => undefined);
+    });
+    await flush();
+    await act(async () => {
+      FakePC.instances[1].completeGathering();
+      await vi.advanceTimersByTimeAsync(16_000);
+    });
+    expect(requests, "stranding the orb on a live session was the old failure").toEqual(["video", "audio-only"]);
+  });
+
+  it("recovers a later drop on a connection it had given up on, once that connection came back", async () => {
+    const videoRef = makeVideoRef();
+    const sendOffer = vi.fn();
+    const { result, requests } = renderWithConsumer(videoRef);
+    act(() => {
+      result.current.setVideoPreference("off"); // audio-only from the start
+    });
+    const audio1 = await newSession(result, sendOffer);
+    await act(async () => {
+      audio1.fireIce("failed");
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const audio2 = await newSession(result, sendOffer);
+    await act(async () => {
+      audio2.fireIce("failed"); // second audio-only failure: the orb
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(requests).toEqual(["audio-only"]);
+
+    // The connection it gave up on comes back on its own, then genuinely drops later.
+    await act(async () => {
+      audio2.fireIce("connected");
+      audio2.fireIce("failed");
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(requests, "a stuck recovering flag used to swallow this drop").toEqual(["audio-only", "audio-only"]);
+  });
+
+  it("gives a later independent drop a fresh budget once frames have painted", async () => {
+    const videoRef = makeVideoRef();
+    const sendOffer = vi.fn();
+    const { result, requests } = renderWithConsumer(videoRef);
+
+    const first = await newSession(result, sendOffer);
+    await act(async () => {
+      first.fireIce("failed");
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(requests).toEqual(["video"]);
+
+    // The rebuilt session paints real frames: that drop is over.
+    const second = await newSession(result, sendOffer);
+    Object.assign(videoRef.current!, { videoWidth: 640, videoHeight: 360 });
+    await act(async () => {
+      second.fireIce("connected");
+      second.emitTrack("video");
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    expect(result.current.isConnected).toBe(true);
+
+    await act(async () => {
+      second.fireIce("failed");
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(requests, "a fresh drop retries in video, not straight to audio-only").toEqual(["video", "video"]);
   });
 });
 
@@ -622,8 +737,8 @@ describe("useAvatarStream weak-network adaptation", () => {
   });
 
   it("keeps the audio-only mode through a media drop, and does not spend the self-heal budget on the switch", async () => {
-    // A policy switch is not a failure: the rebuilt session must still get all three self-heal attempts.
-    // And a link that just proved it can't carry video must not get the picture back via recovery.
+    // A policy switch is not a failure: the rebuilt session must still get its self-heal rebuild. And a
+    // link that just proved it can't carry video must not get the picture back via recovery.
     const videoRef = makeVideoRef();
     const sendOffer = vi.fn();
     const { result, requests } = renderStream(videoRef);
@@ -636,21 +751,16 @@ describe("useAvatarStream weak-network adaptation", () => {
     const audioPc = await bringUp(result, sendOffer, 1);
     expect(FakePC.instances).toHaveLength(2);
 
-    // Now break the media for real and let every rebuilt handshake fail (no server SDP answer).
+    // Now break the media for real.
     await act(async () => {
       audioPc.fireIce("failed");
-    });
-    await act(async () => {
-      for (let i = 0; i < 40; i++) {
-        FakePC.instances.forEach((p) => {
-          if (!p.closed && p.localDescription) p.completeGathering();
-        });
-        await vi.advanceTimersByTimeAsync(3000);
-      }
+      await vi.advanceTimersByTimeAsync(0);
     });
 
-    // 2 (connect + rebuilt) + MAX_RECOVERY_ATTEMPTS(3) = 5. A consumed budget would stop at 4.
-    expect(FakePC.instances).toHaveLength(5);
-    expect(FakePC.instances[4].transceivers[0]).toEqual({ kind: "video", direction: "inactive" });
+    // A consumed budget would show the orb here and ask for nothing.
+    expect(requests).toEqual(["audio-only", "audio-only"]);
+    const rebuilt = await bringUp(result, sendOffer, 2);
+    expect(rebuilt.transceivers[0]).toEqual({ kind: "video", direction: "inactive" });
   });
+
 });

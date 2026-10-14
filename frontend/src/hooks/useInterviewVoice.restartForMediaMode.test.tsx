@@ -129,6 +129,30 @@ describe("useInterviewVoice restartForMediaMode", () => {
     unmount();
   });
 
+  it("rebuilds the session for a same-mode request — the avatar self-heal recovering a media drop", async () => {
+    // Azure refuses a second `session.avatar.connect` on a live session (webrtc_connection_invalid), so
+    // the self-heal asks for the mode it is ALREADY in. That must still open a new session, not be
+    // mistaken for a no-op mode switch.
+    vi.useFakeTimers();
+    const { getHook, unmount } = await connectFor();
+    const oldWs = FakeWebSocket.last!;
+
+    act(() => {
+      avatarBridge.onModeSwitchRequest!("video");
+    });
+    await act(async () => {
+      for (let i = 0; i < 20 && FakeWebSocket.last === oldWs; i++) await Promise.resolve();
+    });
+    const freshWs = FakeWebSocket.last!;
+    expect(freshWs).not.toBe(oldWs);
+    expect(oldWs.readyState).toBe(3); // the old session is closed, not re-offered on
+    await act(async () => {
+      freshWs.receive({ type: "session.updated", session: {} });
+    });
+    expect(getHook().connectionState).toBe("connected");
+    unmount();
+  });
+
   it("detaches the old socket's handlers before closing it, and rebuilds exactly once", async () => {
     vi.useFakeTimers();
     const { getHook, unmount } = await connectFor();

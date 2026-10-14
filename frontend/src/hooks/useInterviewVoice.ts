@@ -1184,8 +1184,10 @@ export function useInterviewVoice(
   }, [audio, cleanup, policy, setConn]);
 
   /**
-   * Rebuild the Voice Live session because the avatar media mode changed (weak-network degrade, or the
-   * candidate's manual toggle). Deliberately NOT the failure path:
+   * Rebuild the Voice Live session for the avatar media hook: the media mode changed (weak-network
+   * degrade, or the candidate's manual toggle), or its self-heal is recovering a media drop, which Azure
+   * will not renegotiate on the live session. Deliberately NOT the WS failure path (the media hook bounds
+   * its own rebuilds):
    *   - it resets the WS reconnect budget (`connect(..., false)`), so two mode switches can't use up the
    *     three retries a real drop will need;
    *   - `keepDraft` preserves whatever the candidate has already said, and `resetTurnState` stashes the
