@@ -74,7 +74,7 @@ vi.mock("./useVoiceAudio", () => ({
   }),
 }));
 
-import { avatarRateLimitRetryMs, useInterviewVoice } from "./useInterviewVoice";
+import { avatarRateLimitRetryMs, questionBubbleKey, useInterviewVoice } from "./useInterviewVoice";
 
 afterEach(() => {
   avatarBridge.onModeSwitchRequest = null;
@@ -267,7 +267,7 @@ describe("useInterviewVoice re-reads the question after falling back to voice-on
     });
     const first = await live(1);
     act(() => {
-      getHook().speakQuestion("Describe your deployment safety habit.");
+      getHook().speakQuestion("Describe your deployment safety habit.", "q1");
     });
     expect(first.reads.some((r) => r.includes("deployment safety habit"))).toBe(true);
     await act(async () => {
@@ -306,7 +306,7 @@ describe("useInterviewVoice re-reads the question after falling back to voice-on
 
     // The NEXT question gets a bubble of its own — the reuse ended with the re-read.
     act(() => {
-      getHook().speakQuestion("How do you roll back a bad release?");
+      getHook().speakQuestion("How do you roll back a bad release?", "q2");
     });
     await act(async () => {
       second.receive({ type: "response.created", response: { id: "r3" } });
@@ -333,7 +333,7 @@ describe("useInterviewVoice re-reads the question after falling back to voice-on
     });
     const first = await live(1);
     act(() => {
-      getHook().speakQuestion("Describe your deployment safety habit.");
+      getHook().speakQuestion("Describe your deployment safety habit.", "q1");
     });
     await act(async () => {
       first.receive({ type: "response.created", response: { id: "r1" } });
@@ -364,7 +364,7 @@ describe("useInterviewVoice re-reads the question after falling back to voice-on
       void getHook().commitAnswer().catch(() => undefined);
     });
     act(() => {
-      getHook().speakQuestion("How do you roll back a bad release?");
+      getHook().speakQuestion("How do you roll back a bad release?", "q2");
     });
     await act(async () => {
       second.receive({ type: "response.created", response: { id: "r3" } });
@@ -427,7 +427,7 @@ describe("useInterviewVoice re-reads the question after falling back to voice-on
     });
     const first = await live(1);
     act(() => {
-      getHook().speakQuestion("Describe your deployment safety habit.");
+      getHook().speakQuestion("Describe your deployment safety habit.", "q1");
     });
     await act(async () => {
       // Confirmed the way the real dead session confirmed it: the transcript still arrives on the
@@ -453,6 +453,115 @@ describe("useInterviewVoice re-reads the question after falling back to voice-on
     const second = await live(2);
     expect(second.reads.some((r) => r.includes("deployment safety habit"))).toBe(false);
     unmount();
+  });
+});
+
+describe("useInterviewVoice: one conversation bubble per question", () => {
+  async function liveSession() {
+    const ws = await socket(1);
+    await act(async () => {
+      ws.receive({
+        type: "proxy.connected",
+        avatar_enabled: false,
+        mode: "model",
+        read_directive: "Read verbatim.",
+        input_audio_sampling_rate: 16_000,
+      });
+      ws.receive({ type: "session.updated", session: {} });
+    });
+    return ws;
+  }
+  /** Azure answers our read with response `id`, its transcript being `text`. */
+  async function answered(ws: FakeWebSocket, id: string, text: string) {
+    await act(async () => {
+      ws.receive({ type: "response.created", response: { id } });
+      ws.receive({ type: "response.audio_transcript.delta", response_id: id, item_id: `i-${id}`, delta: text.slice(0, 8) });
+      ws.receive({ type: "response.audio_transcript.done", response_id: id, item_id: `i-${id}`, transcript: text });
+      ws.receive({ type: "response.done", response: { id } });
+    });
+  }
+  const interviewer = (bubbles: Map<string, { role: string; content: string }>) =>
+    [...bubbles.values()].filter((b) => b.role === "assistant").map((b) => b.content);
+
+  it("shows a question read twice under two Azure responses once, and the next question beside it", async () => {
+    const { getHook, unmount, bubbles } = harness();
+    act(() => {
+      void getHook().connect("en-US").catch(() => undefined);
+    });
+    const first = await liveSession();
+    act(() => {
+      getHook().speakQuestion("Describe your deployment safety habit.", "q1");
+    });
+    await answered(first, "r1", "Describe your deployment safety habit.");
+    // Read again on a NEW session (within one session the speak queue refuses a repeat): here the
+    // re-read after a voice-only fallback, which the hook issues itself, without the id.
+    act(() => {
+      avatarBridge.onModeSwitchRequest!("voice-only", { mediaNeverFlowed: true });
+    });
+    const second = await (async () => {
+      const ws = await socket(2);
+      await act(async () => {
+        ws.receive({
+          type: "proxy.connected",
+          avatar_enabled: false,
+          mode: "model",
+          read_directive: "Read verbatim.",
+          input_audio_sampling_rate: 16_000,
+        });
+        ws.receive({ type: "session.updated", session: {} });
+      });
+      return ws;
+    })();
+    await answered(second, "r2", "Describe your deployment safety habit.");
+    act(() => {
+      getHook().speakQuestion("How do you roll back a bad release?", "q2");
+    });
+    await answered(second, "r3", "How do you roll back a bad release?");
+    expect(interviewer(bubbles)).toEqual([
+      "Describe your deployment safety habit.",
+      "How do you roll back a bad release?",
+    ]);
+    unmount();
+  });
+
+  it("keeps different text under the same question id apart — the external brain's follow-up", async () => {
+    const { getHook, unmount, bubbles } = harness();
+    act(() => {
+      void getHook().connect("en-US").catch(() => undefined);
+    });
+    const ws = await liveSession();
+    act(() => {
+      getHook().speakQuestion("Tell me about your last study.", "q1");
+    });
+    await answered(ws, "r1", "Tell me about your last study.");
+    act(() => {
+      getHook().speakQuestion("And how did you handle the deviations?", "q1");
+    });
+    await answered(ws, "r2", "And how did you handle the deviations?");
+    expect(interviewer(bubbles)).toHaveLength(2);
+    unmount();
+  });
+
+  it("never reads the question id: it is only the bubble's key", async () => {
+    const { getHook, unmount } = harness();
+    act(() => {
+      void getHook().connect("en-US").catch(() => undefined);
+    });
+    const ws = await liveSession();
+    act(() => {
+      getHook().speakQuestion("Describe your deployment safety habit.", "q-7f3a");
+    });
+    const reads = ws.reads.join("\n");
+    expect(reads).toContain("Describe your deployment safety habit.");
+    expect(reads).not.toContain("q-7f3a");
+    unmount();
+  });
+
+  it("keys a question by its id and text", () => {
+    expect(questionBubbleKey("q1", "A?")).toBe(questionBubbleKey("q1", "A?"));
+    expect(questionBubbleKey("q1", "A?")).not.toBe(questionBubbleKey("q1", "B?"));
+    expect(questionBubbleKey("q1", "A?")).not.toBe(questionBubbleKey("q2", "A?"));
+    expect(questionBubbleKey("q1", "A?")).toMatch(/^question-q1-[0-9a-z]+$/);
   });
 });
 
