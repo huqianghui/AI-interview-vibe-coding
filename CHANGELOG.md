@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.70.3.0 (2026-10-14)
+
+### Changed
+- **SOP coverage notes are one collapsible section, closed by default.** They are for reference
+  only and never affect the score, so a long list no longer pushes the end of the report down. The
+  header counts the points ("SOP coverage notes (2)"), and the "These do not affect your score"
+  line stays visible while it is closed. One click opens the points, grouped by question with their
+  SOP sentence, as before. New e2e `report-sop-coverage` (mock stack) checks closed-then-open.
+
 ## 0.70.2.1 (2026-10-14)
 
 ### Fixed

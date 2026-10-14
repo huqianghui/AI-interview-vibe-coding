@@ -537,3 +537,55 @@ describe("ReportView PDF download", () => {
     expect(screen.getByTestId("report-download-pdf")).toBeInTheDocument();
   });
 });
+
+describe("ReportView SOP coverage notes", () => {
+  const WITH_COVERAGE: Report = {
+    ...SCORED,
+    sop_coverage: [
+      {
+        question_id: "q1",
+        question_text: "Describe your deployment safety habit.",
+        missing: [
+          { point: "Confirm the customer's identity first", sop_evidence: "verify ID before proceeding" },
+          { point: "Log the change ticket", sop_evidence: "" },
+        ],
+      },
+    ],
+  };
+
+  it("is one section, closed by default, that still says it does not affect the score", async () => {
+    await i18n.changeLanguage("en-US");
+    renderReport(WITH_COVERAGE);
+    const toggle = screen.getByTestId("report-sop-coverage-toggle");
+    // The header counts the points, so a closed section still says how much is inside.
+    expect(toggle).toHaveTextContent("SOP coverage notes (2)");
+    expect(screen.getByText(/do not affect your score/i)).toBeInTheDocument();
+    expect(screen.queryByText("Confirm the customer's identity first")).not.toBeInTheDocument();
+    // A screen reader hears the "does not affect your score" line with the button, not only sighted users.
+    const button = screen.getByRole("button", { name: /SOP coverage notes/i });
+    expect(button).toHaveAccessibleDescription(/do not affect your score/i);
+  });
+
+  it("counts in the reader's language", async () => {
+    await i18n.changeLanguage("zh-CN");
+    renderReport(WITH_COVERAGE);
+    expect(screen.getByTestId("report-sop-coverage-toggle")).toHaveTextContent("SOP 原文覆盖度提示（2）");
+    await i18n.changeLanguage("en-US");
+  });
+
+  it("opens to the points, grouped by question, on one click", async () => {
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    renderReport(WITH_COVERAGE);
+    await user.click(screen.getByRole("button", { name: /SOP coverage notes/i }));
+    const panel = screen.getByTestId("report-sop-coverage");
+    expect(panel).toHaveTextContent("Confirm the customer's identity first");
+    expect(panel).toHaveTextContent("Log the change ticket");
+    expect(panel).toHaveTextContent('"verify ID before proceeding"');
+  });
+
+  it("is absent when the check found nothing", async () => {
+    renderReport({ ...SCORED, sop_coverage: [] });
+    expect(screen.queryByTestId("report-sop-coverage")).not.toBeInTheDocument();
+  });
+});

@@ -246,7 +246,20 @@ const useStyles = makeStyles({
     background: tokens.colorNeutralBackground2,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
   },
-  coverageHint: { color: tokens.colorNeutralForeground3, display: "block", marginBottom: "8px" },
+  coverageTitle: {
+    fontFamily: fonts.display,
+    fontWeight: 700,
+    fontSize: tokens.fontSizeBase400,
+    lineHeight: tokens.lineHeightBase400,
+    color: palette.ink,
+  },
+  coverageHint: {
+    color: tokens.colorNeutralForeground3,
+    display: "block",
+    // Aligned with the header text (past the chevron), so the line reads as the header's subtitle.
+    paddingInlineStart: tokens.spacingHorizontalM,
+    marginBottom: "8px",
+  },
   coverageGroup: { marginTop: "12px" },
   coverageQuestion: { display: "block", marginBottom: "4px" },
   coveragePoint: {
@@ -633,37 +646,55 @@ export function ReportView({ report }: { report: Report }) {
       </Accordion>
 
       {/* Feature D (opt-in): advisory SOP-coverage findings. Rendered only when the candidate ran
-          the check AND it surfaced something. Reference-only — it never affected the score above. */}
+          the check AND it surfaced something. Reference-only — it never affected the score above —
+          so it is ONE collapsible section, closed by default (owner, 2026-10-14): it must not push
+          the report down, but the "does not affect your score" line stays visible while closed. */}
       {report.sop_coverage && report.sop_coverage.length > 0 && (
-        <div className={styles.coverage} data-testid="report-sop-coverage">
-          <Title3 as="h3">{t("report.sopCoverage.title")}</Title3>
-          <Text size={200} className={styles.coverageHint}>
-            {t("report.sopCoverage.hint")}
-          </Text>
-          {report.sop_coverage.map((group, gi) => (
-            <div key={group.question_id ?? gi} className={styles.coverageGroup}>
-              <Text weight="semibold" className={styles.coverageQuestion}>
-                {group.question_text ||
-                  t("report.questionN", {
-                    n:
-                      report.per_question.findIndex(
-                        (q) => q.question_id === group.question_id,
-                      ) + 1,
-                  })}
-              </Text>
-              {group.missing.map((m, mi) => (
-                <div key={mi} className={styles.coveragePoint}>
-                  <Text>{m.point}</Text>
-                  {m.sop_evidence && (
-                    <Text size={200} className={styles.coverageEvidence}>
-                      {t("report.sopSource")}: "{m.sop_evidence}"
-                    </Text>
-                  )}
+        <Accordion collapsible className={styles.coverage} data-testid="report-sop-coverage">
+          <AccordionItem value="sop-coverage">
+            <AccordionHeader
+              as="h3"
+              data-testid="report-sop-coverage-toggle"
+              // The "does not affect your score" line sits outside the button so it stays visible while
+              // closed; describedby makes a screen reader say it with the button too.
+              button={{ "aria-describedby": "report-sop-coverage-hint" }}
+            >
+              <span className={styles.coverageTitle}>
+                {t("report.sopCoverage.titleWithCount", {
+                  count: report.sop_coverage.reduce((n, group) => n + group.missing.length, 0),
+                })}
+              </span>
+            </AccordionHeader>
+            <Text id="report-sop-coverage-hint" size={200} className={styles.coverageHint}>
+              {t("report.sopCoverage.hint")}
+            </Text>
+            <AccordionPanel>
+              {report.sop_coverage.map((group, gi) => (
+                <div key={group.question_id ?? gi} className={styles.coverageGroup}>
+                  <Text weight="semibold" className={styles.coverageQuestion}>
+                    {group.question_text ||
+                      t("report.questionN", {
+                        n:
+                          report.per_question.findIndex(
+                            (q) => q.question_id === group.question_id,
+                          ) + 1,
+                      })}
+                  </Text>
+                  {group.missing.map((m, mi) => (
+                    <div key={mi} className={styles.coveragePoint}>
+                      <Text>{m.point}</Text>
+                      {m.sop_evidence && (
+                        <Text size={200} className={styles.coverageEvidence}>
+                          {t("report.sopSource")}: "{m.sop_evidence}"
+                        </Text>
+                      )}
+                    </div>
+                  ))}
                 </div>
               ))}
-            </div>
-          ))}
-        </div>
+            </AccordionPanel>
+          </AccordionItem>
+        </Accordion>
       )}
     </div>
   );
