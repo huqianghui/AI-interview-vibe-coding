@@ -92,7 +92,23 @@ class FakeWebSocket {
   constructor(public url: string) {
     FakeWebSocket.instances.push(this);
   }
-  send() {}
+  sent: string[] = [];
+  send(data: string) {
+    if (typeof data === "string") this.sent.push(data);
+  }
+  /** The texts of the question reads sent on this socket. */
+  get reads() {
+    return this.sent
+      .map((raw) => {
+        try {
+          return JSON.parse(raw) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })
+      .filter((m) => m?.type === "response.create")
+      .map((m) => JSON.stringify(m));
+  }
   close() {
     this.readyState = 3;
     setTimeout(() => this.onclose?.(), 0);
@@ -211,6 +227,92 @@ describe("useInterviewVoice voice-only", () => {
       await Promise.resolve();
     });
     expect(FakeWebSocket.instances).toHaveLength(0);
+    unmount();
+  });
+});
+
+describe("useInterviewVoice re-reads the question after falling back to voice-only", () => {
+  /** A live session with the read directive (mouth mode), the way a real interview runs. */
+  async function live(n: number) {
+    const ws = await socket(n);
+    await act(async () => {
+      ws.receive({
+        type: "proxy.connected",
+        avatar_enabled: false,
+        mode: "model",
+        read_directive: "Read verbatim.",
+        input_audio_sampling_rate: 16_000,
+      });
+      ws.receive({ type: "session.updated", session: {} });
+    });
+    return ws;
+  }
+
+  it("says the last question again on the voice-only session — the dead avatar session never played it", async () => {
+    // Measured behind a secure-access client: the read gate elapsed and the question went into the
+    // avatar session ~2 s before its ICE gave up, so the candidate saw the card and heard nothing.
+    const { getHook, unmount } = harness();
+    act(() => {
+      void getHook().connect("en-US").catch(() => undefined);
+    });
+    const first = await live(1);
+    act(() => {
+      getHook().speakQuestion("Describe your deployment safety habit.");
+    });
+    expect(first.reads.some((r) => r.includes("deployment safety habit"))).toBe(true);
+    await act(async () => {
+      // Confirmed the way the real dead session confirmed it: the transcript still arrives on the
+      // WebSocket while the audio goes down the WebRTC connection that never carried anything.
+      first.receive({ type: "response.created", response: { id: "r1" } });
+      first.receive({
+        type: "response.audio_transcript.done",
+        response_id: "r1",
+        item_id: "a1",
+        transcript: "Describe your deployment safety habit.",
+      });
+      first.receive({ type: "response.done", response: { id: "r1" } });
+    });
+
+    act(() => {
+      avatarBridge.onModeSwitchRequest!("voice-only");
+    });
+    const second = await live(2);
+    expect(second.reads.some((r) => r.includes("deployment safety habit")), "re-read on the new session").toBe(true);
+    unmount();
+  });
+
+  it("does not repeat the question once the candidate has started answering it", async () => {
+    const { getHook, unmount } = harness();
+    act(() => {
+      void getHook().connect("en-US").catch(() => undefined);
+    });
+    const first = await live(1);
+    act(() => {
+      getHook().speakQuestion("Describe your deployment safety habit.");
+    });
+    await act(async () => {
+      // Confirmed the way the real dead session confirmed it: the transcript still arrives on the
+      // WebSocket while the audio goes down the WebRTC connection that never carried anything.
+      first.receive({ type: "response.created", response: { id: "r1" } });
+      first.receive({
+        type: "response.audio_transcript.done",
+        response_id: "r1",
+        item_id: "a1",
+        transcript: "Describe your deployment safety habit.",
+      });
+      first.receive({ type: "response.done", response: { id: "r1" } });
+      first.receive({
+        type: "conversation.item.input_audio_transcription.completed",
+        item_id: "u1",
+        transcript: "I always run a canary first.",
+      });
+    });
+
+    act(() => {
+      avatarBridge.onModeSwitchRequest!("voice-only");
+    });
+    const second = await live(2);
+    expect(second.reads.some((r) => r.includes("deployment safety habit"))).toBe(false);
     unmount();
   });
 });

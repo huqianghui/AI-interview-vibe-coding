@@ -410,6 +410,10 @@ export function useInterviewVoice(
   // once the next session reaches `session.updated`. Without this, a drop-during-reconnect is
   // unrecoverable — the page latched "spoken" and never asks again.
   const resumeSpeakTextRef = useRef<string | null>(null);
+  /** The last question text handed to a read, so a rebuild into voice-only can say it again: the
+   * dead avatar session "delivered" it (Azure answered the response) while its audio went down a
+   * WebRTC connection that never carried anything. */
+  const lastReadTextRef = useRef<string | null>(null);
   /** Holds the FIRST question read until the digital human can actually be heard — the interviewer's
    * audio rides the avatar's WebRTC track, so reading before that track flows clipped the opening
    * words. Extracted to `useFirstReadGate`: the rule about which of its four pieces of state wins was
@@ -1316,6 +1320,14 @@ export function useInterviewVoice(
         return;
       }
       console.info(`[voice] rebuilding the session for media mode ${next}`);
+      // Into voice-only, the avatar session is being left because its media did not carry: the last
+      // question was read into it and, measured live behind a secure-access client (2026-10-14), never
+      // heard — its read gate elapsed and the read went out ~2 s before ICE gave up. Read it again on
+      // the new session unless the candidate has already started answering it. (A read still
+      // unconfirmed is stashed by resetTurnState anyway, and wins: it is the more recent one.)
+      if (next === "voice-only" && lastReadTextRef.current && !draft.peek()) {
+        resumeSpeakTextRef.current = lastReadTextRef.current;
+      }
       policy.markIntentionalClose(); // our own close must not trip the auto-reconnect path
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
@@ -1352,7 +1364,7 @@ export function useInterviewVoice(
     // No resetTurnState here on purpose: connect() runs the keepDraft-preserving reset itself, so
     // listing it would claim a dependency this callback does not have. `connect` is reached through
     // `connectRef` rather than captured, which is what keeps this out of a dependency cycle with it.
-    [audio, policy, setConn],
+    [audio, draft, policy, setConn],
   );
   restartForMediaModeRef.current = restartForMediaMode;
 
@@ -1452,6 +1464,7 @@ export function useInterviewVoice(
       // Refuses a text already handed to a live response — several routes reach here and every
       // `response.done` fires the flush, so without this the same question was read two or three times.
       if (!speakQueue.claimEmit(text)) return;
+      lastReadTextRef.current = text;
       voiceMetrics.turn("read_request");
       // The next `response.created` belongs to THIS attempt — its id becomes the delivery proof.
       readWatch.expectResponse();
