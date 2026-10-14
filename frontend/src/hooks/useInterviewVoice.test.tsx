@@ -37,6 +37,9 @@ vi.mock("./useAvatarStream", () => ({
     avatarOptions.onModeSwitchRequest = options?.onModeSwitchRequest;
     return {
       connect: vi.fn(),
+      wantsAvatar: () => true,
+      fallBackToVoiceOnly: vi.fn(),
+      retryAvatarAfterFallback: vi.fn(),
       disconnect: disconnectSpy,
       handleServerSdp: vi.fn(),
       get isConnected() {

@@ -116,6 +116,14 @@ export function useVoiceAudio() {
   /** Request mic access and load the recorder worklet. Throws on getUserMedia denial (the caller
    * distinguishes that as MicAccessError) or on worklet-module load failure. */
   const initMic = useCallback(async (): Promise<void> => {
+    // Release a previous capture first. A second init (a connect retried after Azure refused the
+    // session over the avatar rate limit) otherwise overwrote these refs and orphaned the first stream
+    // and context — the hardware stayed captured, mic indicator on, until the tab closed.
+    micStreamRef.current?.getTracks().forEach((t) => t.stop());
+    micStreamRef.current = null;
+    void micContextRef.current?.close().catch(() => undefined);
+    micContextRef.current = null;
+    workletNodeRef.current = null;
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         sampleRate: MIC_SAMPLE_RATE,

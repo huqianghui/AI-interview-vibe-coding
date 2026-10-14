@@ -238,6 +238,7 @@ describe("voice.avatar wiring", () => {
     const { result, pc } = await connected();
     await completeHandshake(pc, result.current.handleServerSdp);
     await act(async () => {
+      pc.fireIce("connected"); // a drop of media that flowed: rebuilt with the avatar
       pc.fireIce("failed");
       await Promise.resolve();
     });

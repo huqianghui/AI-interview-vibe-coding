@@ -24,7 +24,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 
-import { HEALTH_THRESHOLDS as T } from "./avatarHealth";
+import { HEALTH_THRESHOLDS as T, type MediaMode } from "./avatarHealth";
 import { useAvatarStream } from "./useAvatarStream";
 
 class FakePC {
@@ -97,14 +97,15 @@ afterEach(() => {
 function startConnect() {
   const videoRef = makeVideoRef();
   const sendOffer = vi.fn();
-  const modeSwitches: ("video" | "audio-only")[] = [];
+  const modeSwitches: MediaMode[] = [];
   // The callback has to reach the hook that has not been rendered yet, so it reads through a holder
   // instead of a forward-declared binding. Same indirection a ref gives, without a `let` that is
   // assigned exactly once.
   const hook: { result?: ReturnType<typeof renderHook<ReturnType<typeof useAvatarStream>, unknown>>["result"] } = {};
-  const onModeSwitchRequest = (next: "video" | "audio-only") => {
+  const onModeSwitchRequest = (next: MediaMode) => {
     modeSwitches.push(next);
-    void hook.result?.current.connect(ICE_SERVERS, sendOffer).catch(() => undefined);
+    // Like useInterviewVoice: a voice-only session has no avatar block, so it never reaches connect().
+    if (next !== "voice-only") void hook.result?.current.connect(ICE_SERVERS, sendOffer).catch(() => undefined);
   };
   const { result } = renderHook(() => useAvatarStream(videoRef, { onModeSwitchRequest }));
   hook.result = result;

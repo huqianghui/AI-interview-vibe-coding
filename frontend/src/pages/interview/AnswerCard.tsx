@@ -48,7 +48,9 @@ export function AnswerCard({
   const { t } = useTranslation();
   // Turning the picture back on waits out an Azure rate-limit cooldown. Compute the copy at render
   // time from a fixed deadline — no ticking timer, so this costs nothing when nothing else changes.
-  const videoToggleBlocked = voice.mediaMode === "audio-only" && !voice.canEnableVideo;
+  // Any picture-less mode offers "turn on": audio-only (the weak-network downgrade) and voice-only.
+  const pictureOff = voice.mediaMode !== "video";
+  const videoToggleBlocked = pictureOff && !voice.canEnableVideo;
   const videoCooldownSeconds = voice.videoEnableAtMs
     ? Math.max(1, Math.ceil((voice.videoEnableAtMs - Date.now()) / 1000))
     : null;
@@ -140,8 +142,9 @@ export function AnswerCard({
             </Button>
             {/* Manual override of the automatic weak-network degrade. Our thresholds cannot be right
                 for every network, so the candidate can force the picture off (saves ~1 Mbps and, more
-                importantly, stops the video starving the interviewer's voice) or force it back on.
-                Pinning also stops the automation from moving the mode on its own. */}
+                importantly, stops the video starving the interviewer's voice) or force it back on —
+                also from voice-only, where the self-heal put a network that could not carry the
+                avatar at all. Pinning also stops the automation from moving the mode on its own. */}
             {/* Azure rate-limits avatar session creation and every switch makes a new one, so turning
                 the picture back ON has a cooldown. Disable the control instead of letting the click do
                 nothing — but SAY WHY: a dimmed button with no reason is indistinguishable from a bug,
@@ -149,7 +152,7 @@ export function AnswerCard({
                 that is the move that rescues the audio. */}
             <Button
               onClick={() =>
-                voice.setVideoPreference(voice.mediaMode === "audio-only" ? "on" : "off")
+                voice.setVideoPreference(pictureOff ? "on" : "off")
               }
               className={styles.voiceButton}
               disabled={videoToggleBlocked}
@@ -157,7 +160,7 @@ export function AnswerCard({
               aria-describedby={videoToggleBlocked ? "voice-video-cooldown" : undefined}
               data-testid="voice-video-toggle"
             >
-              {voice.mediaMode === "audio-only" ? t("voice.showAvatar") : t("voice.hideAvatar")}
+              {pictureOff ? t("voice.showAvatar") : t("voice.hideAvatar")}
             </Button>
             {/* Manual end-of-answer control (P13) */}
             <Button

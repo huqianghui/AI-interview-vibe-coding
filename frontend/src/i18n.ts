@@ -94,6 +94,7 @@ export const resources = {
         emptyAnswer:
           'We didn\'t catch an answer — please speak, then tap "I\'m done answering" again.',
         voiceOnlyNotice: "Weak network — voice only",
+        voiceOnlyNetworkNotice: "The digital human isn't available right now — continuing with voice only",
         hideAvatar: "Turn off video",
         showAvatar: "Turn on video",
         showAvatarCooldown: "Video can be turned back on again shortly.",
@@ -630,6 +631,7 @@ export const resources = {
         imDone: "我答完了",
         emptyAnswer: "我们没有听到你的回答 —— 请说话后再次点击「我答完了」。",
         voiceOnlyNotice: "网络较弱 —— 已切换为语音模式",
+        voiceOnlyNetworkNotice: "数字人暂时无法显示 —— 已切换为纯语音",
         hideAvatar: "关闭画面",
         showAvatar: "开启画面",
         showAvatarCooldown: "稍后即可重新开启画面。",

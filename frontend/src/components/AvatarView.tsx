@@ -159,9 +159,10 @@ interface AvatarViewProps {
   /** True once a real avatar video track is playing → show video, hide the orb. */
   isAvatarConnected: boolean;
   /** `"audio-only"` once the media layer gave up the picture to protect the interviewer's voice on a
-   * weak link (`docs/avatar-weaknet-probe.md` §3.9). Without this the orb is ambiguous — it looks
-   * identical to "still connecting", so the candidate can't tell a deliberate degrade from a hang.
-   * Defaults to `"video"` so callers that don't care (the editor Playground) need no change. */
+   * weak link (`docs/avatar-weaknet-probe.md` §3.9); `"voice-only"` when there is no avatar session at
+   * all (the self-heal's answer to a network that cannot carry it). Without this the
+   * orb is ambiguous — it looks identical to "still connecting", so the candidate can't tell a
+   * deliberate degrade from a hang. Defaults to `"video"` so callers that don't care need no change. */
   mediaMode?: MediaMode;
   /** Which avatar is configured, so the cached still belongs to the right face. Omit it and the slot
    * stays un-keyed — the pre-2026-10-03 behaviour, which is correct for a persona with no character. */
@@ -330,7 +331,8 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
   }, [isAvatarConnected, sampleLuma, character]);
 
   // Deliberately picture-less: say so, and don't also claim to be "connecting".
-  const audioOnly = mediaMode === "audio-only";
+  const audioOnly = mediaMode !== "video";
+  const noticeKey = mediaMode === "audio-only" ? "voice.voiceOnlyNotice" : "voice.voiceOnlyNetworkNotice";
   // An empty picture counts as NO picture everywhere below, so the stage can only ever be showing the
   // live figure, the cached still, or the orb.
   // PROOF, not mere arrival: frames existing is not evidence that they contain anything.
@@ -407,7 +409,7 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
           data-testid="avatar-voice-only-hint"
         >
           <span className={styles.voiceOnlyDot} aria-hidden />
-          <Text size={200}>{t("voice.voiceOnlyNotice")}</Text>
+          <Text size={200}>{t(noticeKey)}</Text>
         </div>
       )}
     </div>

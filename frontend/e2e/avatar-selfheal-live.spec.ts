@@ -4,18 +4,18 @@
  * Azure honours `session.avatar.connect` once per Voice Live session. The self-heal used to answer an
  * avatar media drop by re-offering on the SAME session, and Azure refused every one of those with
  * `webrtc_connection_invalid` ("WebRTC connection is in connected state") — 12 of 12 in production on
- * 2026-10-14, each spending the avatar rate-limit allowance. It now rebuilds the whole session, bounded:
- * video → video → audio-only → orb, three avatar sessions, Azure's allowance per 60 s.
+ * 2026-10-14, each spending the avatar rate-limit allowance. It now rebuilds the whole session: once
+ * more with the avatar after a drop of media that had flowed, and VOICE-ONLY (no avatar session, the
+ * interviewer's voice over the WebSocket) when the avatar's media never flowed at all.
  *
  * Both tests assert against Azure's own frames: every session sends exactly ONE avatar offer, Azure
  * answers it, and nothing is refused.
  *   A. The picture is up, then the avatar's ICE "fails" (the getter is shadowed and the handler fired —
  *      the signal a dead TURN path produces): a rebuilt session paints again. Needs a network that can
  *      carry the avatar; it skips itself, saying so, on one that cannot.
- *   B. ICE never connects on any session (the production shape, forced so it runs on any network): the
- *      self-heal walks the bounded sequence and stops. Start it with no avatar session in the last
- *      60 s on this Speech resource: Azure counts them all, and a fourth is refused. A spends one or
- *      two, so run B on its own (`-g "B:"`) a minute after anything else.
+ *   B. The avatar's ICE never connects (the production shape behind a secure-access client, forced so
+ *      it runs on any network): ONE avatar session, then a voice-only session (`avatar=off`) in which
+ *      the interviewer is actually heard — PCM arriving on the WebSocket.
  *
  * Run: E2E_API=http://127.0.0.1:8000 BASE=http://localhost:5173 E2E_ADMIN_USERNAME=… E2E_ADMIN_PASSWORD=…
  *      LIVE_VOICE=1 npx playwright test avatar-selfheal-live --config=e2e/live.config.ts
@@ -148,10 +148,9 @@ test.describe("avatar self-heal (real Azure)", () => {
     }
   });
 
-  test("B: ICE that never connects walks video → video → audio-only, then stops", async ({ page }) => {
-    test.setTimeout(180_000);
-    // Every avatar connection "fails" the moment Azure's answer is applied, before a frame can paint:
-    // the production shape (ICE checking → failed), on any network.
+  test("B: an avatar whose media never connects falls back to a voice-only session that speaks", async ({ page }) => {
+    test.setTimeout(150_000);
+    // Every avatar connection "fails" the moment Azure's answer is applied, before a frame can paint.
     await page.addInitScript(() => {
       const Native = window.RTCPeerConnection;
       window.RTCPeerConnection = function (config?: RTCConfiguration) {
@@ -168,23 +167,46 @@ test.describe("avatar self-heal (real Azure)", () => {
       } as unknown as typeof RTCPeerConnection;
       window.RTCPeerConnection.prototype = Native.prototype;
     });
-    const { sessions, logs, dump } = watch(page);
+    const { sessions, dump } = watch(page);
+    const urls: string[] = [];
+    const voiceOnlyFrames = { avatarEnabled: null as boolean | null, audioDeltas: 0 };
+    page.on("websocket", (ws) => {
+      if (!/voice-live\/ws/.test(ws.url())) return;
+      urls.push(ws.url());
+      const voiceOnly = new URL(ws.url()).searchParams.get("avatar") === "off";
+      ws.on("framereceived", (f) => {
+        if (!voiceOnly || typeof f.payload !== "string") return;
+        try {
+          const msg = JSON.parse(f.payload) as Record<string, unknown>;
+          if (msg.type === "proxy.connected") voiceOnlyFrames.avatarEnabled = Boolean(msg.avatar_enabled);
+          if (msg.type === "response.audio.delta") voiceOnlyFrames.audioDeltas += 1;
+        } catch {
+          /* not JSON */
+        }
+      });
+    });
     await startVoiceInterview(page);
 
     try {
-      const rebuilds = () => logs.filter((l) => /rebuilding the Voice Live session in/.test(l));
       await expect
-        .poll(() => logs.some((l) => /media failed in audio-only .*showing orb/.test(l)), {
-          timeout: 120_000,
-          message: "the self-heal never reached its end (the orb after the audio-only fallback fails)",
+        .poll(() => voiceOnlyFrames.audioDeltas, {
+          timeout: 90_000,
+          message: "no voice-only session, or the interviewer was never heard in it",
         })
-        .toBe(true);
-      expect(rebuilds().map((l) => /in (video|audio-only)$/.exec(l)?.[1])).toEqual(["video", "audio-only"]);
-      // It stops: no fourth session.
-      await page.waitForTimeout(15_000);
-      expect(sessions).toHaveLength(3);
-      expect(sessions.map((s) => s.answers), "Azure answered every session's single offer").toEqual([1, 1, 1]);
+        .toBeGreaterThan(0);
+      expect(urls, "one avatar session, then one voice-only session").toHaveLength(2);
+      expect(new URL(urls[0]).searchParams.get("avatar")).toBeNull();
+      expect(new URL(urls[1]).searchParams.get("avatar")).toBe("off");
+      expect(voiceOnlyFrames.avatarEnabled, "the backend built it without the avatar").toBe(false);
+      expect(sessions.map((s) => s.offersSent), "no avatar offer in the voice-only session").toEqual([1, 0]);
+      expect(sessions[0].answers).toBe(1);
       expectNoReoffer(sessions);
+      await expect(page.locator('[data-testid="avatar-view"]')).toHaveAttribute("data-media-mode", "voice-only");
+      await expect(page.getByTestId("avatar-voice-only-hint")).toBeVisible();
+      await expect(page.getByText(/语音不可用|voice unavailable/i)).toHaveCount(0);
+      // It stays put: no further session.
+      await page.waitForTimeout(10_000);
+      expect(urls).toHaveLength(2);
     } catch (err) {
       console.log(dump());
       throw err;

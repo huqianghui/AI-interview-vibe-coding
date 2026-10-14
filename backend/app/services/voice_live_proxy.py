@@ -282,6 +282,19 @@ def build_turn_detection(
     )
 
 
+def session_has_avatar(persona: InterviewerPersona, *, avatar_off: bool = False) -> bool:
+    """Does this session carry the digital human? The persona's ``character`` decides, unless the
+    page asked for a voice-only session (``avatar_off``).
+
+    Why a page asks: the avatar's picture AND voice ride a WebRTC connection, and some networks
+    never let it connect (a corporate secure-access client, measured 2026-10-14: ICE checking →
+    failed on every session), so an avatar session there is silent. A voice-only session sends the
+    interviewer's audio over this proxy's WebSocket instead, which those networks carry. One
+    function, so the session and ``proxy.connected``'s ``avatar_enabled`` can never disagree.
+    """
+    return not avatar_off and bool((persona.character or "").strip())
+
+
 def build_avatar_session(
     persona: InterviewerPersona,
     *,
@@ -289,6 +302,7 @@ def build_avatar_session(
     playground: bool = False,
     background: str | None = None,
     realtime_pipeline: bool = False,
+    avatar_off: bool = False,
 ) -> Any:
     """Build the Azure SDK ``RequestSession`` for a persona's avatar/voice Voice Live session.
 
@@ -300,7 +314,9 @@ def build_avatar_session(
     a lint-only venv) — mirrors the reference's import-inside-try pattern.
 
     Modalities include AVATAR only when the persona has a ``character`` configured (an avatar-less
-    persona is TEXT+AUDIO only).
+    persona is TEXT+AUDIO only) and the page did not ask for ``avatar_off`` — a voice-only session
+    for a candidate whose network cannot carry the avatar's WebRTC media (see
+    :func:`session_has_avatar`).
     """
     from azure.ai.voicelive.models import (
         AudioEchoCancellation,
@@ -317,7 +333,7 @@ def build_avatar_session(
 
     resolved_locale, voice_name = resolve_voice(persona.voice_map, locale)
 
-    has_avatar = bool((persona.character or "").strip())
+    has_avatar = session_has_avatar(persona, avatar_off=avatar_off)
     modalities = [Modality.TEXT, Modality.AUDIO]
     if has_avatar:
         modalities.append(Modality.AVATAR)
@@ -569,6 +585,7 @@ async def run_proxy(
     realtime_pipeline: bool = False,
     playground: bool = False,
     avatar_background: str | None = None,
+    avatar_off: bool = False,
     recorder: Any = None,
 ) -> None:  # pragma: no cover — live Azure connect + relay, no Azure in CI
     """Hold the Azure Voice Live SDK connection and relay browser <-> Azure.
@@ -624,6 +641,7 @@ async def run_proxy(
                 playground=playground,
                 background=avatar_background,
                 realtime_pipeline=realtime_pipeline,
+                avatar_off=avatar_off,
             )
             await conn.session.update(session=session)
 
@@ -667,7 +685,7 @@ async def run_proxy(
                         # Which pipeline the session was built for — the thing that decides which
                         # end-of-utterance detector went on the wire.
                         "realtime_pipeline": realtime_pipeline,
-                        "avatar_enabled": bool((persona.character or "").strip()),
+                        "avatar_enabled": session_has_avatar(persona, avatar_off=avatar_off),
                         "persona_id": persona.id,
                         "read_directive": read_directive,
                         # Observability for the live E2E spec / console: the turn contract this
