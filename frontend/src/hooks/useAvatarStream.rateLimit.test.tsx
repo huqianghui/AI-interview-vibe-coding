@@ -152,6 +152,7 @@ describe("avatar rate-limit allowance", () => {
     await pushOfferOut();
     await answerHandshake(result.current.handleServerSdp);
     await act(async () => {
+      FakePC.instances[0].fireIce("connected"); // media flowed, then dropped: one rebuild in video
       FakePC.instances[0].fireIce("failed");
       await vi.advanceTimersByTimeAsync(0);
     });

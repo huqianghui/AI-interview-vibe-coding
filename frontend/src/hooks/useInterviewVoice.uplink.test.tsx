@@ -17,6 +17,9 @@ import { act, render } from "@testing-library/react";
 vi.mock("./useAvatarStream", () => ({
   useAvatarStream: () => ({
     connect: vi.fn(),
+    wantsAvatar: () => true,
+    fallBackToVoiceOnly: vi.fn(),
+    retryAvatarAfterFallback: vi.fn(),
     disconnect: vi.fn(),
     handleServerSdp: vi.fn(),
     isConnected: false,

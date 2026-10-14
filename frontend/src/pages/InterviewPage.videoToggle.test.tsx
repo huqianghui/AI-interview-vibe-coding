@@ -108,6 +108,23 @@ describe("InterviewPage manual video/audio-only toggle", () => {
     expect(calls).toEqual(["on"]);
   });
 
+  it('offers "Turn on video" in voice-only too, and requests "on" on click', async () => {
+    // Voice-only (no avatar session — the self-heal's fallback) is picture-less like audio-only: the
+    // same way back.
+    const calls: string[] = [];
+    const { user } = await startOnVoiceQuestion(
+      baseVoiceMock({
+        mediaMode: "voice-only",
+        canEnableVideo: true,
+        setVideoPreference: (v: string) => calls.push(v),
+      }),
+    );
+    const toggle = screen.getByTestId("voice-video-toggle");
+    expect(toggle).toHaveTextContent("Turn on video");
+    await user.click(toggle);
+    expect(calls).toEqual(["on"]);
+  });
+
   it("disables the toggle during the Azure rate-limit cooldown and states why (no generic seconds)", async () => {
     const calls: string[] = [];
     await startOnVoiceQuestion(

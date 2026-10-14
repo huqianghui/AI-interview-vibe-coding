@@ -44,6 +44,7 @@ import {
   useVoiceAudio,
 } from "./useVoiceAudio";
 import { useAvatarStream } from "./useAvatarStream";
+import type { MediaMode } from "./avatarHealth";
 import { voiceMetrics } from "../telemetry/voiceTimeline";
 import { beginWebSocketTrace, flushForUnload, type WebSocketTrace } from "../telemetry/appInsights";
 import type {
@@ -59,6 +60,36 @@ export class MicAccessError extends Error {
     this.name = "MicAccessError";
   }
 }
+
+/** Azure refused to CREATE this session because the avatar allowance is spent (3 new avatar sessions
+ * per 60 s per Speech resource — every tab and every candidate on it counts). Not fatal: Azure says
+ * when to come back, and a voice-only session spends none of the allowance (see `connect`). */
+export class AvatarRateLimitedError extends Error {
+  constructor(
+    message: string,
+    readonly retryAfterMs: number,
+  ) {
+    super(message);
+    this.name = "AvatarRateLimitedError";
+  }
+}
+
+/** Azure's avatar rate-limit refusal → how long it asks us to wait, or null for any other error.
+ * The shape, measured live 2026-10-14: `{code: "rate_limit_exceeded", message: "Avatar request was
+ * rate-limited. Retry after 32.0s."}`, arriving before `session.updated`. */
+export function avatarRateLimitRetryMs(error: Record<string, unknown> | undefined): number | null {
+  if (!error || error.code !== "rate_limit_exceeded") return null;
+  const message = String(error.message ?? "");
+  if (!/avatar/i.test(message)) return null;
+  const seconds = /retry after\s+([\d.]+)\s*s/i.exec(message)?.[1];
+  // No figure: assume the worst case, a whole window.
+  return seconds ? Math.ceil(Number(seconds) * 1000) : 60_000;
+}
+
+/** Wait out a rate-limit refusal and retry WITH the digital human only when Azure asks for this little;
+ * a longer wait is silence at the start of an interview, so the session goes voice-only instead (the
+ * candidate can turn the digital human back on later). */
+const AVATAR_RATE_LIMIT_MAX_WAIT_MS = 15_000;
 
 export interface UseInterviewVoiceOptions {
   locale?: string;
@@ -238,6 +269,7 @@ function buildWsUrl(
   locale: string,
   avatarBackground?: string,
   traceparent?: string | null,
+  avatarOff = false,
 ): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const params = new URLSearchParams({ token, locale });
@@ -246,6 +278,9 @@ function buildWsUrl(
   if (personaId) params.set("persona_id", personaId);
   const bg = avatarBackground?.replace(/^#/, "");
   if (bg && /^[0-9a-fA-F]{6}$/.test(bg)) params.set("avatar_bg", bg.toLowerCase());
+  // Voice-only: a session with no digital human, the interviewer's voice over this WebSocket (see
+  // MediaMode). The backend then reports avatar_enabled=false, and this hook plays the WS audio.
+  if (avatarOff) params.set("avatar", "off");
   return `${protocol}//${window.location.host}/api/voice-live/ws?${params.toString()}`;
 }
 
@@ -265,7 +300,7 @@ export function useInterviewVoice(
   // `session.avatar.connect` once per session and has no renegotiate/disconnect event (it answers a
   // second offer with "WebRTC connection is in connected state" — measured 2026-09-30). The media hook
   // decides WHEN, this hook owns HOW, via a ref because `restartForMediaMode` is defined below `connect`.
-  const restartForMediaModeRef = useRef<((next: "video" | "audio-only") => void) | null>(null);
+  const restartForMediaModeRef = useRef<((next: MediaMode) => void) | null>(null);
   const avatarStream = useAvatarStream(options.videoRef ?? fallbackVideoRef, {
     onModeSwitchRequest: (next) => restartForMediaModeRef.current?.(next),
   });
@@ -633,7 +668,10 @@ export function useInterviewVoice(
           if (
             avatarConf &&
             iceServers.length > 0 &&
-            !avatarStartedRef.current
+            !avatarStartedRef.current &&
+            // A voice-only session has no avatar to connect; a backend that ignored avatar=off would
+            // otherwise start a handshake whose failure the self-heal cannot get out of.
+            avatarStream.wantsAvatar()
           ) {
             avatarStartedRef.current = true;
             console.info(
@@ -890,6 +928,25 @@ export function useInterviewVoice(
             }
             break;
           }
+          // Azure refused to create the session over the avatar allowance. Not fatal and not the page's
+          // business: `connect` decides between waiting it out and going voice-only. Detach the socket
+          // first, so its close does not start the reconnect loop on top of that decision.
+          const retryAfterMs = avatarRateLimitRetryMs(errInfo);
+          if (retryAfterMs !== null) {
+            const dead = wsRef.current;
+            if (dead) {
+              dead.onclose = null;
+              dead.onmessage = null;
+              dead.onerror = null;
+              dead.close();
+              wsRef.current = null;
+              wsTraceRef.current?.end(1000, false, "avatar_rate_limited");
+            }
+            // The mic this attempt started is released here; the retry acquires its own.
+            audio.cleanupMic();
+            onFatalError(new AvatarRateLimitedError(error.message, retryAfterMs));
+            break;
+          }
           // During a BACKGROUND reconnect attempt, a pre-connect error is transient: the reconnect
           // loop will retry (and only reports to the page after all attempts fail). Surfacing it
           // here flipped the page to "语音不可用" even when the very next retry succeeded — the
@@ -1004,6 +1061,7 @@ export function useInterviewVoice(
         effectiveLocale,
         optionsRef.current.avatarBackground,
         wsTrace.traceparent,
+        !avatarStream.wantsAvatar(),
       );
       console.info(
         "[voice] opening WS proxy; persona:",
@@ -1132,6 +1190,51 @@ export function useInterviewVoice(
     [audio, avatarStream, cleanup, handleMessage, policy, resetTurnState, setConn],
   );
 
+  /** Ends a pending rate-limit wait (see openWithAvatarAllowance). */
+  const rateLimitWaitRef = useRef<(() => void) | null>(null);
+  /** `openSession`, plus the answer to Azure refusing the session over the avatar allowance — which no
+   * ledger of ours can prevent, since Azure counts every tab and candidate on the Speech resource. A
+   * short `Retry after` is waited out and the session retried with the digital human; a long one, or a
+   * second refusal, opens it voice-only now. Either way the candidate gets an interview instead of the
+   * "voice unavailable" fallback the refusal used to cause. */
+  const openWithAvatarAllowance = useCallback(
+    async (locale: string | undefined, opts: ConnectOptions): Promise<void> => {
+      try {
+        await openSession(locale, opts);
+        return;
+      } catch (err) {
+        if (!(err instanceof AvatarRateLimitedError)) throw err;
+        if (err.retryAfterMs > AVATAR_RATE_LIMIT_MAX_WAIT_MS) {
+          console.warn(`[voice] ${err.message} — opening the session voice-only instead of waiting`);
+          avatarStream.fallBackToVoiceOnly();
+          return openSession(locale, opts);
+        }
+        console.warn(`[voice] ${err.message} — waiting it out, then retrying with the digital human`);
+        // Abortable: disconnect() ends the wait at once. Otherwise this attempt kept holding the
+        // in-flight slot, so a candidate who left and came back inside the wait JOINED it — and it then
+        // saw "left" and opened nothing, stranding them with no session.
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, err.retryAfterMs + 500);
+          rateLimitWaitRef.current = () => {
+            clearTimeout(timer);
+            resolve();
+          };
+        });
+        rateLimitWaitRef.current = null;
+        if (policy.wasIntentionalClose()) return; // the candidate left during the wait.
+      }
+      try {
+        await openSession(locale, opts);
+      } catch (err) {
+        if (!(err instanceof AvatarRateLimitedError)) throw err;
+        console.warn(`[voice] ${err.message} again — opening the session voice-only`);
+        avatarStream.fallBackToVoiceOnly();
+        await openSession(locale, opts);
+      }
+    },
+    [avatarStream, openSession, policy],
+  );
+
   /**
    * Open a voice session, or join the attempt already running.
    *
@@ -1155,6 +1258,12 @@ export function useInterviewVoice(
    */
   const connect = useCallback(
     async (locale?: string, opts: ConnectOptions = {}): Promise<void> => {
+      // A connect the PAGE asked for (no options — every internal rebuild/reconnect passes some) gives
+      // the digital human another chance after an AUTOMATIC voice-only fallback: the network may have
+      // changed, and the editor Playground has no "Turn on video" to leave voice-only by hand. Costs one
+      // avatar session if it still cannot connect.
+      const pageInitiated = !opts.isReconnect && !opts.replaceInFlight && !opts.keepDraft;
+      if (pageInitiated && !policy.inFlight(false)) avatarStream.retryAvatarAfterFallback();
       const joined = policy.inFlight(Boolean(opts.replaceInFlight));
       if (joined) {
         console.info("[voice] connect already in flight — joining it instead of opening a second session");
@@ -1163,14 +1272,15 @@ export function useInterviewVoice(
       // `track` both records this attempt and frees the slot when it settles, so the two cannot drift
       // apart — and it frees the slot only if this attempt still owns it, since a replaceInFlight caller
       // may have started a newer one meanwhile.
-      await policy.track(openSession(locale, opts));
+      await policy.track(openWithAvatarAllowance(locale, opts));
     },
-    [openSession, policy],
+    [avatarStream, openWithAvatarAllowance, policy],
   );
   connectRef.current = connect;
 
   const disconnect = useCallback(async () => {
     policy.markIntentionalClose();
+    rateLimitWaitRef.current?.();
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
@@ -1194,7 +1304,14 @@ export function useInterviewVoice(
    *     current question so the new session re-reads it instead of losing it.
    */
   const restartForMediaMode = useCallback(
-    (next: "video" | "audio-only") => {
+    (next: MediaMode) => {
+      // No session to rebuild (pre-flight, or after a disconnect): the media hook already remembered
+      // the mode, and the next connect() opens the session in it. Rebuilding here would open a session
+      // nobody asked for.
+      if (!wsRef.current && !sessionLiveRef.current) {
+        console.info(`[voice] media mode ${next} noted for the next session (none is open)`);
+        return;
+      }
       console.info(`[voice] rebuilding the session for media mode ${next}`);
       policy.markIntentionalClose(); // our own close must not trip the auto-reconnect path
       if (reconnectTimerRef.current) {

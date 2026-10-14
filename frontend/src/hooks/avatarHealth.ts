@@ -24,7 +24,17 @@
  * Kept free of React so the whole policy is unit-testable without a browser or a PeerConnection.
  */
 
-export type MediaMode = "video" | "audio-only";
+/** How the interviewer is presented.
+ * - `video`: the digital human, picture and voice over its WebRTC connection.
+ * - `audio-only`: the same avatar connection with the picture turned off (`a=inactive`) — the
+ *   weak-network downgrade, for a link that works but cannot afford the video.
+ * - `voice-only`: NO avatar session at all; the interviewer's voice comes over the voice WebSocket.
+ *   For a network that cannot carry the avatar's WebRTC media at all (a corporate secure-access
+ *   client, measured 2026-10-14), where both modes above are silent. Reached automatically by the
+ *   self-heal, never by the "Turn off video" pin: that one is for a weak link, where WebRTC (UDP)
+ *   carries audio better than the WebSocket (TCP). Nothing is sampled here, so the health policy
+ *   never acts on it. */
+export type MediaMode = "video" | "audio-only" | "voice-only";
 
 /** `auto` = follow the health signal (default). `on`/`off` = the candidate pinned it by hand; the
  * automation stops touching the mode, but the UI keeps telling the truth about the link. */
@@ -271,6 +281,8 @@ export function reduceHealth(
   if (state.preference !== "auto") {
     return { state: { ...state, badWindows: 0, stalledWindows: 0, healthySince: null }, action: null };
   }
+  // No avatar connection to judge, and nothing to move between: voice-only is left only by hand.
+  if (state.mode === "voice-only") return { state, action: null };
 
   if (state.mode === "video") {
     // Primary trigger, threshold-free: bytes are arriving and nothing decodes. Secondary: the

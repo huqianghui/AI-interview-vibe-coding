@@ -245,7 +245,7 @@ export function PlaygroundPanel({ personaId, character, style, locale }: Playgro
               With no character (digital-human mode off) there is no portrait to hold: once voice is on,
               AvatarView's own live orb is the presence, and the overlay's static orb would stack a second
               orb and a second status label on top of it. */}
-          {!voice.isAvatarConnected && voice.mediaMode !== "audio-only" && (!voiceOn || !!character) && (
+          {!voice.isAvatarConnected && voice.mediaMode === "video" && (!voiceOn || !!character) && (
             <div className={styles.portraitOverlay} data-testid="playground-portrait-overlay">
               <AvatarPreview character={character} style={style} />
             </div>

@@ -29,13 +29,24 @@
  * connection is in connected state") even when our side of the connection is dead. Measured in
  * production 2026-10-14: 12 of 12 same-session re-offers refused, each one spent from the avatar
  * rate-limit allowance (holding the NEXT session's first offer 10–14 s), and Azure ended the stream
- * ~3 s later anyway. Bounded by MAX_MEDIA_FAILURES_PER_MODE consecutive failures without media flowing:
- * a video session gets one rebuild in video, then audio-only (the mode a link that cannot carry the
- * picture can still carry), then the orb; an audio-only session whose media had flowed gets one
- * rebuild, then the orb. A rebuild waits out Azure's avatar allowance first. The count survives
- * session rebuilds and WS reconnects (Azure ending the stream rebuilds a session too) and resets once
- * media flows (frames paint, or an audio-only session's ICE connects), so a later independent drop
- * gets a fresh budget.
+ * ~3 s later anyway.
+ *
+ * Where it rebuilds TO is the part that decides whether the candidate hears anything. The avatar's
+ * picture AND its voice ride the WebRTC connection, so on a network that never lets it connect (a
+ * corporate secure-access client, 2026-10-14: ICE checking → failed on every session) every avatar
+ * mode is silent, the audio-only one included. The way out is `voice-only`: a session with NO avatar,
+ * whose voice comes over the voice WebSocket those networks do carry (only the self-heal goes there;
+ * the candidate's "Turn off video" is audio-only, for a weak link — see setVideoPreference). So:
+ *   - a connection whose media NEVER flowed (ICE never connected, or the handshake never completed)
+ *     goes straight to voice-only: one avatar session spent, not three, and seconds instead of ~30 s
+ *     of silence. Retrying a link that has not connected once does not make it connect;
+ *   - a connection whose media had flowed and then dropped gets one rebuild in the same mode; a second
+ *     such drop within MEDIA_STABLE_MS of media flowing again goes to voice-only (a flapping link).
+ * The count survives session rebuilds and WS reconnects (Azure ending the stream rebuilds a session
+ * too) and resets once media has flowed for MEDIA_STABLE_MS — not on first flow, or a link that
+ * connects for a second and dies would rebuild forever. A rebuild into an avatar mode waits out
+ * Azure's avatar allowance first; voice-only spends none of it. Voice-only is left only by hand
+ * (the candidate's "show the digital human"), never automatically.
  *
  * WEAK-NETWORK ADAPTATION (`docs/avatar-weaknet-probe.md` §3.8/§3.9, measured on real Azure): the
  * avatar's video and the interviewer's VOICE ride the SAME RTP transport, so on a lossy link the video
@@ -100,14 +111,15 @@ const SERVER_SDP_TIMEOUT_MS = 15000;
  * as a real drop and rebuilding — so a momentary blip never flashes the fallback orb. `failed` is
  * terminal and skips this grace (it won't recover without a full renegotiation). */
 const DISCONNECTED_GRACE_MS = 3000;
-/** Consecutive media failures (no media actually flowing in between) a mode is allowed before the
- * self-heal gives it up: 2 = one session rebuild in the same mode, then audio-only (from video) or the
- * orb (from audio-only). The audio-only session a video failure falls back to IS that mode's one retry,
- * so a link whose ICE never connects (the 2026-10-14 production shape) costs three avatar sessions —
- * first connect, one video rebuild, audio-only — which is Azure's whole measured allowance of 3 per
- * 60 s (below). A fourth inside the window is refused at session creation, before any offer, and the
- * rebuild dies with it (measured live 2026-10-14). */
-const MAX_MEDIA_FAILURES_PER_MODE = 2;
+/** Drops of a connection whose media HAD flowed, with no stable stretch in between, before the
+ * self-heal stops rebuilding avatar sessions and goes voice-only: 2 = one rebuild in the same mode.
+ * Every avatar rebuild spends from Azure's allowance of 3 per 60 s (below), and a fourth inside the
+ * window is refused at session creation, before any offer — the rebuild dies with it (measured live
+ * 2026-10-14). */
+const MAX_MEDIA_FAILURES = 2;
+/** Media must flow this long before a later drop counts as independent (a fresh budget). Resetting on
+ * first flow let a link that connects and dies within seconds rebuild forever. */
+const MEDIA_STABLE_MS = 10_000;
 /** Azure rate-limits avatar SESSION CREATION, and every path that offers `session.avatar.connect`
  * spends from the same allowance: a self-heal re-handshake, a deliberate media-mode switch, and a
  * brand-new session all look identical to Azure. One shared ledger, consulted by every path, is the
@@ -200,6 +212,14 @@ export function useAvatarStream(
    * not in a session, so it survives the full session rebuild a mode switch performs — which is the
    * whole point: Azure counts those requests across our session boundaries. */
   const avatarRequestsRef = useRef<number[]>([]);
+  /** This connection's media has flowed (ICE reached connected). A drop of one that never did goes
+   * straight to voice-only: the link has not carried the avatar once, and a retry will not change it. */
+  const mediaFlowedRef = useRef(false);
+  /** Clears the failure count once media has flowed for MEDIA_STABLE_MS. */
+  const stableTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** A "turn the digital human on" from voice-only that the cooldown refused, retried when it lifts. */
+  const pinRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setVideoPreferenceRef = useRef<((preference: VideoPreference) => void) | null>(null);
   /** The self-heal's pending session-rebuild request, held while the avatar allowance is spent. */
   const rebuildTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const graceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -211,6 +231,10 @@ export function useAvatarStream(
   // What the NEXT handshake should offer for the video m-line: recvonly (want the face) vs inactive
   // (audio-only). Read by runHandshake, flipped by switchMediaMode / setVideoPreference.
   const wantVideoRef = useRef(true);
+  /** The mode the media is actually in. NOT `decisionRef.current.mode`: `reduceHealth` commits its
+   * decision there BEFORE the actuator runs, so "already in that mode?" asked of the policy state
+   * would veto every downgrade it decides. */
+  const appliedModeRef = useRef<MediaMode>("video");
   const statsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   /** The 250 ms frame poller started inside `attachStream`. Before mode switching existed this only
    * had to survive until the final disconnect, so it was left to stop itself (its own `settled` flag
@@ -264,11 +288,12 @@ export function useAvatarStream(
     snapshotRef.current = null;
   }, []);
 
-  /** The current mode lives in three places that must never disagree: the policy state, the flag
-   * `runHandshake` reads, and the React state the UI renders. Write them together, once. */
+  /** The current mode lives in four places that must never disagree: the policy state, the flag
+   * `runHandshake` reads, the applied mode, and the React state the UI renders. Write them together. */
   const applyMode = useCallback((next: MediaMode) => {
     decisionRef.current = { ...decisionRef.current, mode: next };
     wantVideoRef.current = next === "video";
+    appliedModeRef.current = next;
     setMediaMode(next);
   }, []);
 
@@ -287,6 +312,10 @@ export function useAvatarStream(
     if (rebuildTimerRef.current) {
       clearTimeout(rebuildTimerRef.current);
       rebuildTimerRef.current = null;
+    }
+    if (stableTimerRef.current) {
+      clearTimeout(stableTimerRef.current);
+      stableTimerRef.current = null;
     }
     stopSampling();
     stopFramePolling();
@@ -360,9 +389,6 @@ export function useAvatarStream(
           voiceMetrics.setup("first_video_frame");
           voiceMetrics.setup("media_ready");
           console.info(`[avatar-stream] video HAS frames: ${videoEl.videoWidth}x${videoEl.videoHeight}`);
-          // Real frames are painting again → this drop (if any) is fully recovered; hand the next
-          // independent drop a fresh recovery budget.
-          mediaFailuresRef.current = 0;
           setIsConnected(true);
         }
       };
@@ -543,13 +569,25 @@ export function useAvatarStream(
             clearTimeout(graceTimerRef.current);
             graceTimerRef.current = null;
           }
-          // An audio-only session's equivalent of a painted frame: its media is actually flowing, so this
-          // drop (if any) is over. The track's arrival is NOT that signal — Azure delivers it with the SDP
-          // answer even when ICE never connects, so resetting there would hand a dead link endless retries.
-          if (!wantVideoRef.current) mediaFailuresRef.current = 0;
+          // Media is flowing — the signal the self-heal's choices rest on. NOT the track's arrival: Azure
+          // delivers that with the SDP answer even when ICE never connects. A drop is over (a fresh
+          // budget) only once this has held for MEDIA_STABLE_MS, so a link that connects and dies within
+          // seconds cannot rebuild forever.
+          mediaFlowedRef.current = true;
+          if (!stableTimerRef.current) {
+            stableTimerRef.current = setTimeout(() => {
+              stableTimerRef.current = null;
+              if (pc === pcRef.current) mediaFailuresRef.current = 0;
+            }, MEDIA_STABLE_MS);
+          }
           // Media is flowing: start watching whether it's actually doing us any good.
           startSampling(pc);
           return;
+        }
+        if ((state === "failed" || state === "disconnected") && stableTimerRef.current) {
+          // Not stable after all: this stretch does not earn a fresh budget.
+          clearTimeout(stableTimerRef.current);
+          stableTimerRef.current = null;
         }
         if (state === "failed") {
           stopSampling();
@@ -761,49 +799,51 @@ export function useAvatarStream(
     [avatarRequestWaitMs, noteAvatarRequest],
   );
 
-  /** Recover from an avatar media drop by rebuilding the whole Voice Live session in the mode the link
-   * can carry (see MEDIA-LAYER SELF-HEAL in the header): the same mode on a first failure, audio-only
-   * after MAX_MEDIA_FAILURES_PER_MODE failures in video, the orb after that many in audio-only. */
+  /** Recover from an avatar media drop by rebuilding the whole Voice Live session (see MEDIA-LAYER
+   * SELF-HEAL in the header): voice-only when this connection's media never flowed, or when a drop
+   * repeats within MEDIA_STABLE_MS; otherwise once more in the same mode. */
   const attemptRecovery = useCallback(
     (reason: string) => {
       // Never connected, already disconnected, or a rebuild is already on its way (teardown nulls it):
-      // nothing to rebuild. No separate "recovering" flag: on the give-up paths below one would stay set
-      // with the connection still open, and silently swallow a later genuine drop on it.
+      // nothing to rebuild. No separate "recovering" flag: on a give-up path one would stay set with the
+      // connection still open, and silently swallow a later genuine drop on it.
       if (!sendOfferRef.current) return;
       // Show the orb meanwhile — the frozen last frame would otherwise masquerade as live.
       setIsConnected(false);
       clearTimers();
 
-      const failures = ++mediaFailuresRef.current;
-      const current: MediaMode = wantVideoRef.current ? "video" : "audio-only";
+      const current = appliedModeRef.current;
       if (!onModeSwitchRequestRef.current) {
         // Nobody can rebuild the session, and a re-offer on this one would be refused.
         console.warn(`[avatar-stream] media dropped (${reason}) and no onModeSwitchRequest is wired; showing orb`);
         return;
       }
-      let next: MediaMode = current;
-      if (failures >= MAX_MEDIA_FAILURES_PER_MODE) {
-        if (current === "audio-only") {
-          // No lighter mode to fall back to, and bouncing back to video would loop: the orb is the
-          // honest answer. If this connection comes back on its own, ICE connected resets the count.
-          console.warn(`[avatar-stream] media failed in audio-only (${reason}), no lighter mode left; showing orb`);
-          return;
-        }
-        // A link that just failed the picture twice is the link audio-only exists for. That session is
-        // also audio-only's one retry (MAX_MEDIA_FAILURES_PER_MODE); media actually flowing resets it.
-        next = "audio-only";
-        mediaFailuresRef.current = MAX_MEDIA_FAILURES_PER_MODE - 1;
+      let next: MediaMode;
+      let why: string;
+      // A handshake that never completed (an SDP timeout, a lost or refused offer) can be a passing
+      // fault, so it is counted like any drop — one more try. Only ICE that never connected on an
+      // answered offer is the signature of a network that blocks the avatar outright.
+      if (!mediaFlowedRef.current && reason !== "handshake-failed") {
+        next = "voice-only";
+        why = "its media never flowed";
+      } else {
+        const failures = ++mediaFailuresRef.current;
+        next = failures >= MAX_MEDIA_FAILURES ? "voice-only" : current;
+        why = `drop ${failures}/${MAX_MEDIA_FAILURES} without a stable stretch`;
       }
-      console.warn(
-        `[avatar-stream] media dropped (${reason}, failure ${failures}/${MAX_MEDIA_FAILURES_PER_MODE} in ${current}); ` +
-          `rebuilding the Voice Live session in ${next}`,
-      );
-      // The mode is written BEFORE teardown, which is what connect() reads.
+      console.warn(`[avatar-stream] media dropped (${reason}; ${why}); rebuilding the Voice Live session in ${next}`);
+      // The mode is written BEFORE teardown, which is what connect() and the consumer read.
       applyMode(next);
       // The dropped connection's record ends as `rebuilt` (a no-op if `ice_failed` already ended it);
       // teardown would otherwise file it as an ordinary `closed`.
       if (pcRef.current) void handshakesRef.current.get(pcRef.current)?.finish("rebuilt");
       teardownMedia();
+      if (next === "voice-only") {
+        // No avatar session, so nothing to wait for: Azure's avatar allowance is not touched.
+        mediaFailuresRef.current = 0;
+        onModeSwitchRequestRef.current(next);
+        return;
+      }
       nextConnectLabelRef.current = "recovery";
       // Wait out the allowance BEFORE asking for the session, not at its offer: Azure refuses a session
       // created over the allowance outright (before any offer), and that rebuild dies with it.
@@ -822,13 +862,30 @@ export function useAvatarStream(
   );
   attemptRecoveryRef.current = attemptRecovery;
 
+  /** How long (ms, 0 = now) until bringing the picture back would be neither refused nor premature, and
+   * says why when it is not 0. Both bounds, not just the cooldown: the 60 s cooldown does cover Azure's
+   * window today, but only by arithmetic coincidence — consulting the ledger as well makes the
+   * guarantee explicit, so lowering the cooldown later cannot quietly reintroduce a refused request. */
+  const videoRestoreWaitMs = useCallback((): number => {
+    const since = avatarConnectedAtRef.current;
+    const cooldown = since === null ? 0 : HEALTH_THRESHOLDS.VIDEO_SWITCH_MIN_INTERVAL_MS - (Date.now() - since);
+    const wait = Math.max(0, cooldown, avatarRequestWaitMs());
+    if (wait > 0) {
+      console.info(
+        `[avatar-stream] not restoring the picture yet (${Math.ceil(wait / 1000)}s left on the Azure avatar ` +
+          `rate-limit ${cooldown >= wait ? "cooldown" : "allowance"})`,
+      );
+    }
+    return wait;
+  }, [avatarRequestWaitMs]);
+
   /** Ask for the picture to be turned on/off. Tears the media down immediately (which is the point when
    * the video is the thing starving the voice) and delegates the rebuild to the consumer, because Azure
    * will not renegotiate an avatar connection on a live session — see the module header. */
   const switchMediaMode = useCallback(
     (next: MediaMode, reason: string): boolean => {
       if (!sendOfferRef.current) return false; // no live avatar session to switch.
-      if (wantVideoRef.current === (next === "video")) return false; // already in that mode.
+      if (appliedModeRef.current === next) return false; // already in that mode.
       if (!onModeSwitchRequestRef.current) {
         // Nobody can rebuild the session, so tearing the media down here would kill the avatar for
         // good. Refuse instead — a consumer that wants adaptation must wire the callback.
@@ -840,19 +897,7 @@ export function useAvatarStream(
         // cascades into a dead voice session. Dropping the picture is never delayed; bringing it back
         // waits. The hysteresis in avatarHealth already spaces AUTOMATIC restores past this, so in
         // practice this only catches an impatient human on the manual toggle.
-        const since = avatarConnectedAtRef.current;
-        const cooldown = since === null ? 0 : HEALTH_THRESHOLDS.VIDEO_SWITCH_MIN_INTERVAL_MS - (Date.now() - since);
-        // Both bounds, not just the cooldown. The 60 s cooldown does cover Azure's ~20 s window today,
-        // but only by arithmetic coincidence — consulting the ledger as well makes the guarantee
-        // explicit, so lowering the cooldown later cannot quietly reintroduce a refused request.
-        const wait = Math.max(cooldown, avatarRequestWaitMs());
-        if (wait > 0) {
-          console.info(
-            `[avatar-stream] not restoring the picture yet (${Math.ceil(wait / 1000)}s left on the Azure avatar ` +
-              `rate-limit ${cooldown >= wait ? "cooldown" : "allowance"})`,
-          );
-          return false;
-        }
+        if (videoRestoreWaitMs() > 0) return false;
       }
 
       console.info(`[avatar-stream] media mode → ${next} (${reason}); rebuilding the Voice Live session`);
@@ -863,13 +908,16 @@ export function useAvatarStream(
       onModeSwitchRequestRef.current?.(next);
       return true;
     },
-    [applyMode, avatarRequestWaitMs, teardownMedia],
+    [applyMode, teardownMedia, videoRestoreWaitMs],
   );
   switchMediaModeRef.current = switchMediaMode;
 
-  /** Pin the picture on/off by hand, or hand control back to the health signal (`auto`). A pinned
-   * preference stops the automation from moving the mode, but sampling continues so the UI can keep
-   * telling the truth about the link. */
+  /** Pin the picture on/off by hand, or hand control back to the health signal (`auto`). `off` is
+   * audio-only, NOT voice-only: the pin exists for a weak link, where WebRTC (UDP) carries the voice
+   * better than the WebSocket (TCP) would — Microsoft's own guidance. A network that cannot carry the
+   * avatar's WebRTC at all reaches voice-only on its own: that audio-only session never connects, and
+   * the self-heal moves it on within seconds. A pinned preference stops the automation from moving the
+   * mode, but sampling continues so the UI can keep telling the truth about the link. */
   const setVideoPreference = useCallback((preference: VideoPreference) => {
     const target: MediaMode | null =
       preference === "off" ? "audio-only" : preference === "on" ? "video" : null;
@@ -879,6 +927,29 @@ export function useAvatarStream(
     // to failures the candidate has just overruled.
     if (target) mediaFailuresRef.current = 0;
     if (!target) return; // back to "auto": leave the current mode, let the health signal take over.
+    if (appliedModeRef.current === target) return;
+    if (appliedModeRef.current === "voice-only") {
+      if (pinRetryTimerRef.current) {
+        clearTimeout(pinRetryTimerRef.current);
+        pinRetryTimerRef.current = null;
+      }
+      // There is no avatar session to tear down; the consumer opens one with the next session (it
+      // ignores the request when no voice session is live, and the mode is remembered for connect()).
+      // Either target creates an avatar session, so either waits out the allowance.
+      const wait = videoRestoreWaitMs();
+      if (wait > 0) {
+        // Voice-only has no stats sampler to retry a refused pin later (that is what retries it in the
+        // avatar modes), so retry it here — or "turn the digital human on" would be silently dropped.
+        pinRetryTimerRef.current = setTimeout(() => {
+          pinRetryTimerRef.current = null;
+          if (decisionRef.current.preference === "on") setVideoPreferenceRef.current?.("on");
+        }, wait);
+        return;
+      }
+      applyMode(target);
+      onModeSwitchRequestRef.current?.(target);
+      return;
+    }
     if (!sendOfferRef.current) {
       // No live session yet (e.g. pinned on the pre-flight screen): just decide what the next
       // connect() will offer. Going through switchMediaMode here would bail and silently drop the pin.
@@ -886,7 +957,8 @@ export function useAvatarStream(
       return;
     }
     switchMediaModeRef.current?.(target, `user-pinned-${preference}`);
-  }, [applyMode]);
+  }, [applyMode, videoRestoreWaitMs]);
+  setVideoPreferenceRef.current = setVideoPreference;
 
   /**
    * Start the avatar WebRTC handshake.
@@ -902,6 +974,7 @@ export function useAvatarStream(
       const gen = ++genRef.current;
       clearTimers();
       sendOfferRef.current = sendSdpOffer;
+      mediaFlowedRef.current = false;
       const label = nextConnectLabelRef.current;
       nextConnectLabelRef.current = "initial";
 
@@ -982,15 +1055,52 @@ export function useAvatarStream(
     sdpResolverRef.current?.(sdp);
   }, []);
 
+  // The voice-only pin retry outlives teardown on purpose (a WS reconnect must not drop the candidate's
+  // "turn it on"), so it needs its own end.
+  useEffect(
+    () => () => {
+      if (pinRetryTimerRef.current) clearTimeout(pinRetryTimerRef.current);
+    },
+    [],
+  );
+
   const disconnect = useCallback(() => {
     teardownMedia();
     // A rebuild this teardown cancelled never happened, so the next connect is not its recovery.
     nextConnectLabelRef.current = "initial";
   }, [teardownMedia]);
 
+  /** Should the next Voice Live session carry the digital human? False in voice-only, where the
+   * consumer opens the session with `avatar=off` (no avatar block, voice over the WebSocket). Read at
+   * connect time, not from render state, because a rebuild reconnects in the same tick it is asked for. */
+  const wantsAvatar = useCallback(() => decisionRef.current.mode !== "voice-only", []);
+  /** Open the next session voice-only — the consumer's answer to Azure refusing to create an avatar
+   * session at all (its allowance is spent), where there is no avatar connection here to fail. */
+  const fallBackToVoiceOnly = useCallback(() => {
+    applyMode("voice-only");
+    mediaFailuresRef.current = 0;
+    // Azure just said the allowance is spent, so "Turn on video" waits out the cooldown like it does
+    // after any avatar session — a click right now would only be refused again.
+    avatarConnectedAtRef.current = Date.now();
+    setCanEnableVideo(false);
+  }, [applyMode]);
+
+  /** A fresh, page-initiated connect after an AUTOMATIC voice-only fallback gives the digital human
+   * one more chance (the network may have changed — the candidate turned a secure-access client off,
+   * or moved). Voice-only is only ever automatic, so this is always the right undo; it returns to the
+   * mode the candidate's pin asks for. No-op in any other mode. */
+  const retryAvatarAfterFallback = useCallback(() => {
+    if (appliedModeRef.current !== "voice-only") return;
+    applyMode(decisionRef.current.preference === "off" ? "audio-only" : "video");
+    mediaFailuresRef.current = 0;
+  }, [applyMode]);
+
   return {
     connect,
     disconnect,
+    wantsAvatar,
+    fallBackToVoiceOnly,
+    retryAvatarAfterFallback,
     handleServerSdp,
     /** Video frames are painting. Drives AvatarView's video-vs-orb choice. */
     isConnected,

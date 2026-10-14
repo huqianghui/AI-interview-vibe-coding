@@ -359,6 +359,17 @@ describe("reduceHealth with a pinned preference", () => {
   });
 });
 
+describe("reduceHealth in voice-only", () => {
+  it("never acts: there is no avatar connection to judge, and voice-only is left only by hand", () => {
+    const voiceOnly: DecisionState = { ...initialDecisionState(), mode: "voice-only" };
+    for (const health of [HEALTHY, WASTING]) {
+      const { state, actions } = feed(voiceOnly, health, 60, 0);
+      expect(actions).toEqual([]);
+      expect(state.mode).toBe("voice-only");
+    }
+  });
+});
+
 describe("isVideoStalled", () => {
   it("reports a stall only after STALL_WINDOWS of silence, and only in video mode", () => {
     const stalled: MediaHealth = { ...HEALTHY, videoBytesFlowing: false, videoDecoding: false };
