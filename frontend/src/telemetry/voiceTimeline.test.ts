@@ -3,6 +3,7 @@ import {
   AUDIBLE_POLL_MS,
   AvatarHandshakeMetrics,
   candidateType,
+  iceFailureKind,
   selectedPair,
   SETUP_TIMEOUT_MS,
   SILENCE_BEFORE_ONSET_MS,
@@ -51,6 +52,53 @@ describe("Timeline", () => {
     const line = new Timeline(h.clock);
     line.mark("a");
     expect(line.measurements([["x", "a", "missing"]])).toEqual({ t_a: 0 });
+  });
+});
+
+describe("VoiceMetrics voice-only fallback", () => {
+  it("sends voice.fallback with the reason, and tags every later event with it", () => {
+    const h = harness();
+    const vm = new VoiceMetrics(h.emit, h.clock);
+    vm.setContext({ interview_id: "iv-1" });
+    vm.fallback("ice_never_connected", { from_mode: "video", ice_failure_kind: "no_relay" });
+    expect(h.sent[0]).toEqual({
+      name: "voice.fallback",
+      m: {},
+      p: {
+        interview_id: "iv-1",
+        fallback_reason: "ice_never_connected",
+        reason: "ice_never_connected",
+        from_mode: "video",
+        ice_failure_kind: "no_relay",
+      },
+    });
+
+    vm.startSetup();
+    vm.flush();
+    expect(h.sent[1].name).toBe("voice.setup");
+    expect(h.sent[1].p.fallback_reason, "the voice-only session's own events say why").toBe(
+      "ice_never_connected",
+    );
+  });
+
+  it("stops tagging once the digital human is tried again", () => {
+    const h = harness();
+    const vm = new VoiceMetrics(h.emit, h.clock);
+    vm.fallback("rate_limited");
+    vm.clearFallback();
+    vm.startSetup();
+    vm.flush();
+    expect(h.sent.at(-1)!.p).not.toHaveProperty("fallback_reason");
+  });
+});
+
+describe("iceFailureKind", () => {
+  it("names what a failed ICE got as far as", () => {
+    expect(iceFailureKind({ srflx: false, relay: false }, true)).toBe("stun_unreachable");
+    // The 2026-10-14 production shape: STUN answered in ~540 ms, no relay, ICE failed.
+    expect(iceFailureKind({ srflx: true, relay: false }, true)).toBe("no_relay");
+    expect(iceFailureKind({ srflx: true, relay: true }, true)).toBe("relay_failed");
+    expect(iceFailureKind({ srflx: true, relay: true }, false), "not an ICE failure").toBe("unknown");
   });
 });
 

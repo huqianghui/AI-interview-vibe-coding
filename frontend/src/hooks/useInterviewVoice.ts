@@ -1206,7 +1206,7 @@ export function useInterviewVoice(
         if (!(err instanceof AvatarRateLimitedError)) throw err;
         if (err.retryAfterMs > AVATAR_RATE_LIMIT_MAX_WAIT_MS) {
           console.warn(`[voice] ${err.message} — opening the session voice-only instead of waiting`);
-          avatarStream.fallBackToVoiceOnly();
+          avatarStream.fallBackToVoiceOnly(err.retryAfterMs);
           return openSession(locale, opts);
         }
         console.warn(`[voice] ${err.message} — waiting it out, then retrying with the digital human`);
@@ -1228,7 +1228,7 @@ export function useInterviewVoice(
       } catch (err) {
         if (!(err instanceof AvatarRateLimitedError)) throw err;
         console.warn(`[voice] ${err.message} again — opening the session voice-only`);
-        avatarStream.fallBackToVoiceOnly();
+        avatarStream.fallBackToVoiceOnly(err.retryAfterMs);
         await openSession(locale, opts);
       }
     },

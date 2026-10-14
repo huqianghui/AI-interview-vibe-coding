@@ -208,6 +208,26 @@ restarted) starts a fresh window instead of producing an invented rate. When the
 (teardown, recovery rebuild, media-mode switch, or the tab closing) the partial window is sent if it is at least 5 s
 long, marked `partial = true`: it is often the degraded stretch that made the connection end.
 
+### `voice.fallback`: why a session went voice-only
+
+Sent each time a session that had a digital human goes **voice-only** (no avatar session, the
+interviewer's voice as PCM over the WebSocket), at the moment the page decides it. From then on every
+event of the page also carries `fallback_reason`, until a fresh connect tries the digital human again.
+No measurements; properties are the event context plus:
+
+| Property | What |
+|---|---|
+| `reason` | `ice_never_connected` (Azure answered the avatar's offer, ICE never connected — a network that blocks its WebRTC), `repeated_drop` (the media flowed, dropped, and dropped again within 10 s), `handshake_failed` (the offer was never answered, twice), `rate_limited` (Azure refused to create the avatar session over its allowance) |
+| `from_mode` | the mode it left: `video` or `audio-only` |
+| `trigger` | the drop signal: `ice-failed`, `ice-disconnected-grace-expired`, `track-ended`, `handshake-failed` (not on `rate_limited`) |
+| `had_srflx` / `had_relay` | whether ICE gathered a server-reflexive (STUN answered) / relay (TURN allocated) candidate |
+| `ice_errors` | `icecandidateerror` codes seen on that connection, e.g. `701` (an ICE server could not be reached) |
+| `ice_failure_kind` | derived: `stun_unreachable` (no srflx, no relay), `no_relay` (STUN answered, no TURN relay, checks failed — the secure-access shape measured 2026-10-14), `relay_failed` (a relay, and the checks over it still failed), `unknown` (not an ICE failure) |
+| `retry_after_ms` | on `rate_limited`: how long Azure asked us to wait |
+
+WebRTC never names the reason a network blocked it; these are the nearest thing to an error code a
+browser has, and they are for diagnosis — the page's decision does not depend on them.
+
 ### Voice-only playback gaps (on `voice.turn`)
 
 Without an avatar, the interviewer's audio is PCM on the WebSocket and plays through the page's

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.70.1.0 (2026-10-14)
+
+### Added
+- **Telemetry says why a session went voice-only.** A new `voice.fallback` event is sent the moment
+  a session that had a digital human goes voice-only, with the `reason` (`ice_never_connected`,
+  `repeated_drop`, `handshake_failed`, `rate_limited`), the mode it left, and for a network failure
+  what ICE got as far as: whether STUN answered and a TURN relay was allocated, the ICE servers'
+  error codes, and a derived `ice_failure_kind` (`no_relay` is the secure-access-client shape). Every
+  later event of the page carries `fallback_reason`, so voice-only sessions group by cause in App
+  Insights without reconstructing their ICE timelines. The Voice performance workbook gets two
+  tables: fallbacks by reason, and the most recent fallbacks. Diagnosis only; the switching rules
+  are unchanged.
+
 ## 0.70.0.0 (2026-10-14)
 
 ### Added
