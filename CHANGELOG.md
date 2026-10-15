@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.76.0.0 (2026-10-15)
+
+### Changed
+- **A photo avatar's video bitrate is now picked for each session from the candidate's network.**
+  When the voice session opens, the page sends what this browser knows about its network: its last
+  in-session media RTT and audio loss (kept for a day) or, on a browser's first session, a few round
+  trips to the backend. A photo avatar on a weaker network (RTT over 300 ms or loss over 0.5%) asks
+  Azure for 300 kbit/s; everything else keeps Azure's default. Azure only takes the bitrate when a
+  session is created, so the choice is made before connecting. `VOICE_LIVE_AVATAR_VIDEO_BITRATE`,
+  when set, still overrides it. Each session records the bitrate it chose, so whether 300 kbit/s
+  reduces freezes can now be measured. Verified on real Azure: the session asked for 300 kbit/s,
+  Azure's own session echo confirmed it, and the interviewer spoke.
+- **Network grades are now A to D.** The study's B and C (both "photo avatar", differing only in the
+  bitrate, which the backend now picks) are one grade, B; its D and E become C and D.
+  `docs/network-grades.md` keeps the original A-to-E table and states the mapping. In B's weaker
+  half the Performance tab says the bitrate is lowered automatically; a set override says it
+  switches that off.
+
 ## 0.75.0.0 (2026-10-15)
 
 ### Added

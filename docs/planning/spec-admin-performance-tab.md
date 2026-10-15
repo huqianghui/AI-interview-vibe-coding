@@ -154,3 +154,16 @@ One feature PR (new admin route + tab + infra role), full `/ship` flow.
   and gives the grade the other numbers make.
 - The standalone workbook card is gone: the workbook link is in the lookup ("paste this Operation
   id") and one line at the top for the cross-interview sections.
+
+## Revision 4 (owner decision, 2026-10-15)
+
+- Grades A to D: the study's B and C merged into one grade, "photo avatar" (RTT ≤ 500 ms, loss ≤ 1%,
+  ≥ 1.5 Mbit/s); the study's D and E become C and D. docs/network-grades.md keeps the original A-to-E
+  table and states the mapping.
+- What told B and C apart, the video bitrate, the backend picks per session: the page sends a
+  network hint with the voice WebSocket (`net_rtt`, `net_loss`: the worse of this browser's last
+  in-session media RTT p95 / loss, kept a day, and a few pre-connect round trips); a photo avatar
+  with RTT > 300 ms or loss > 0.5% gets 300 kbit/s, else Azure's default.
+  `VOICE_LIVE_AVATAR_VIDEO_BITRATE`, when set, overrides it. Each session reports the bitrate it chose
+  and why (`proxy.connected`, `voice.*` telemetry), to measure whether 300 kbit/s reduces freezes.
+- No page setting for the bitrate (owner: not now).

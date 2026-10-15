@@ -1,15 +1,19 @@
 /**
- * The A-to-E network grade of docs/network-grades.md (from the Voice Live weak-network study,
- * §7.6.2): three numbers (RTT, UDP loss, downlink) plus a UDP gate pick the starting form of the
- * interview. Used twice: on an interview's own WebRTC telemetry (authoritative) and on this
- * browser's quick check (an estimate: no UDP loss, TCP RTT to the region instead of the media
- * path).
+ * The A-to-D network grade of docs/network-grades.md: three numbers (RTT, UDP loss, downlink) plus
+ * a UDP gate pick the starting form of the interview. From the Voice Live weak-network study's
+ * A-to-E table (§7.6.2) with its B and C merged into one grade, "photo avatar" (owner, 2026-10-15):
+ * both start with a photo avatar, and what told them apart, the video bitrate, the backend now picks
+ * per session by itself (voice_live_proxy.choose_avatar_bitrate). So: A = the study's A, B = its B
+ * and C, C = its D, D = its E.
+ *
+ * Used twice: on an interview's own WebRTC telemetry (authoritative) and on this browser's quick
+ * check (an estimate: no UDP loss, TCP RTT to the region instead of the media path).
  */
 
-export type Grade = "A" | "B" | "C" | "D" | "E";
+export type Grade = "A" | "B" | "C" | "D";
 
 export interface GradeInput {
-  /** UDP 3478 reachable (false = E); null = not known. */
+  /** UDP 3478 reachable (false = D); null = not known. */
   udpOk: boolean | null;
   rttMs: number | null;
   /** Audio packet loss in percent; null = not measured (the browser check). */
@@ -37,13 +41,18 @@ export interface GradeResult {
   boundary: boolean;
   /** Something the grade needed was not measured, so it may be better or worse than shown. */
   estimated: boolean;
-  /** Why it is not one grade better (for D: what triggered it; empty for A). */
+  /** Why it is not one grade better (for C: what triggered it; empty for A). */
   reasons: GradeReason[];
-  /** D only because of the downlink: on the browser check, a measurement that underestimates a
+  /** C only because of the downlink: on the browser check, a measurement that underestimates a
    * distant link. */
   downlinkOnly: boolean;
-  /** With `downlinkOnly`: the grade the other numbers alone give. */
+  /** With `downlinkOnly`: the grade the other numbers alone give, and whether that grade is in
+   * B's upper half (the advice follows that grade). */
   withoutDownlink?: Grade;
+  withoutDownlinkAutoBitrate?: boolean;
+  /** B in its upper half (RTT > 300 ms or loss > 0.5%): there the backend lowers a photo
+   * avatar's video bitrate for each new session by itself. */
+  autoBitrate: boolean;
 }
 
 interface Row {
@@ -56,13 +65,16 @@ interface Row {
 // docs/network-grades.md, verbatim: the best row whose every limit holds.
 const ROWS: Row[] = [
   { grade: "A", rtt: 150, loss: 0.5, down: 4000 },
-  { grade: "B", rtt: 300, loss: 0.5, down: 2000 },
-  { grade: "C", rtt: 500, loss: 1, down: 1500 },
+  { grade: "B", rtt: 500, loss: 1, down: 1500 },
 ];
-// D: any one of these.
-const D_LOSS = 3;
-const D_RTT = 600;
-const D_DOWN = 1000;
+// C: any one of these.
+const C_LOSS = 3;
+const C_RTT = 600;
+const C_DOWN = 1000;
+/** Where B's upper half begins (the study's C): there the backend lowers a photo avatar's
+ * bitrate by itself. Mirrors voice_live_proxy.AUTO_BITRATE_RTT_MS / _LOSS_PCT. */
+export const AUTO_BITRATE_RTT_MS = 300;
+export const AUTO_BITRATE_LOSS_PCT = 0.5;
 
 /** The limits of `row` that the numbers break. */
 function broken(row: Row, rtt: number, loss: number, down: number | null): GradeReason[] {
@@ -81,30 +93,34 @@ export function gradeNetwork(input: GradeInput): GradeResult | null {
   const result = (grade: Grade, reasons: GradeReason[], boundary = false): GradeResult => ({
     grade,
     boundary,
-    estimated: grade === "E" ? false : estimated,
+    estimated: grade === "D" ? false : estimated,
     reasons,
     downlinkOnly: false,
+    autoBitrate:
+      grade === "B" &&
+      ((rttMs ?? 0) > AUTO_BITRATE_RTT_MS || (lossPct ?? 0) > AUTO_BITRATE_LOSS_PCT),
   });
   if (udpOk === false) {
-    return result("E", [{ metric: "udp", value: null, limit: 3478, row: "E" }]);
+    return result("D", [{ metric: "udp", value: null, limit: 3478, row: "D" }]);
   }
   if (rttMs === null || !Number.isFinite(rttMs)) return null;
   const down = downCounts ? downKbps : null;
   const loss = lossPct ?? 0;
   const triggers: GradeReason[] = [];
-  if (loss >= D_LOSS) triggers.push({ metric: "loss", value: loss, limit: D_LOSS, row: "D" });
-  if (rttMs >= D_RTT) triggers.push({ metric: "rtt", value: rttMs, limit: D_RTT, row: "D" });
-  if (down !== null && down < D_DOWN) {
-    triggers.push({ metric: "down", value: down, limit: D_DOWN, row: "D" });
+  if (loss >= C_LOSS) triggers.push({ metric: "loss", value: loss, limit: C_LOSS, row: "C" });
+  if (rttMs >= C_RTT) triggers.push({ metric: "rtt", value: rttMs, limit: C_RTT, row: "C" });
+  if (down !== null && down < C_DOWN) {
+    triggers.push({ metric: "down", value: down, limit: C_DOWN, row: "C" });
   }
   if (triggers.length) {
-    const graded = result("D", triggers);
+    const graded = result("C", triggers);
     if (triggers.every((r) => r.metric === "down")) {
-      const rest = gradeNetwork({ ...input, downCounts: false })?.grade;
+      const rest = gradeNetwork({ ...input, downCounts: false });
       // Only worth saying when the other numbers alone give a better start.
-      if (rest && rest !== "D") {
+      if (rest && rest.grade !== "C") {
         graded.downlinkOnly = true;
-        graded.withoutDownlink = rest;
+        graded.withoutDownlink = rest.grade;
+        graded.withoutDownlinkAutoBitrate = rest.autoBitrate;
       }
     }
     return graded;
@@ -114,5 +130,5 @@ export function gradeNetwork(input: GradeInput): GradeResult | null {
       return result(row.grade, i === 0 ? [] : broken(ROWS[i - 1], rttMs, loss, down));
     }
   }
-  return result("D", broken(ROWS[ROWS.length - 1], rttMs, loss, down), true);
+  return result("C", broken(ROWS[ROWS.length - 1], rttMs, loss, down), true);
 }

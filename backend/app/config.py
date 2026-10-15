@@ -161,10 +161,12 @@ class Settings(BaseSettings):
     # MUST match the frontend's MIC_SAMPLE_RATE (frontend/src/hooks/useVoiceAudio.ts); the value is
     # echoed in ``proxy.connected`` so the page can detect drift. Cannot be changed mid-session.
     voice_live_input_sampling_rate: int = 16000
-    # Optional cap on the avatar VIDEO bitrate (bits/s) sent in session.avatar.video.bitrate.
-    # Azure's default is 2 Mbps for 1080p video avatars; the weak-network probe (2026-09-30) showed
-    # the sender does NOT honour a receiver-side SDP b=AS cap, so this server-side knob is the only
-    # bandwidth lever. None ⇒ omit the field (Azure default). Unset until the probe settles a value.
+    # Optional fixed avatar VIDEO bitrate (bits/s) for session.avatar.video.bitrate. Unset, the
+    # backend picks it per session: a photo avatar on a weaker network (the page's hint: RTT over
+    # 300 ms or loss over 0.5%) gets 300 kbit/s, everything else Azure's default (2 Mbps at 1080p):
+    # voice_live_proxy.choose_avatar_bitrate, docs/network-grades.md. Set, it overrides that choice
+    # for every session. The weak-network probe (2026-09-30) showed the sender ignores a
+    # receiver-side SDP b=AS cap, so this is the only bandwidth lever, honoured at session creation.
     voice_live_avatar_video_bitrate: int | None = None
 
     # Application Insights in the Azure portal, for the admin Performance tab's links

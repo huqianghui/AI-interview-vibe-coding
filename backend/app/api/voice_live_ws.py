@@ -31,7 +31,7 @@ from app.services.agents.voice_live_metadata import FALLBACK_LOCALE
 from app.services.anonymous_session_service import AnonymousSessionError, verify_anonymous_token
 from app.services.recording_service import QuestionRecorder, recording_enabled
 from app.services.voice_live_probe import uses_realtime_pipeline
-from app.services.voice_live_proxy import is_mouth_persona, run_proxy
+from app.services.voice_live_proxy import NetworkHint, is_mouth_persona, run_proxy
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +156,20 @@ async def _interview_persona(db, token: str, caller: str):
     return await persona_service.get_default_persona(db), None
 
 
+def _network_hint(rtt: str | None, loss: str | None) -> NetworkHint | None:
+    """The page's network numbers, each kept only when it is a plausible value."""
+
+    def bounded(raw: str | None, top: float) -> float | None:
+        try:
+            value = float(raw) if raw not in (None, "") else None
+        except ValueError:
+            return None
+        return value if value is not None and 0 <= value <= top else None
+
+    hint = NetworkHint(rtt_ms=bounded(rtt, 10_000), loss_pct=bounded(loss, 100))
+    return hint if hint.rtt_ms is not None or hint.loss_pct is not None else None
+
+
 @router.websocket("/voice-live/ws")
 async def voice_live_websocket(ws: WebSocket) -> None:
     """Proxy WebSocket: browser <-> backend <-> Azure Voice Live (avatar video path).
@@ -171,6 +185,9 @@ async def voice_live_websocket(ws: WebSocket) -> None:
       - ``avatar`` (optional): ``off`` opens a VOICE-ONLY session even when the persona has a
         digital human — the page's fallback for a network that cannot carry the avatar's WebRTC
         media (see voice_live_proxy.session_has_avatar). Anything else keeps the persona's choice.
+      - ``net_rtt`` / ``net_loss`` (optional): what the page knows about its network (round trip in
+        ms, audio loss in percent); they pick a photo avatar's bitrate for this session
+        (voice_live_proxy.choose_avatar_bitrate). Anything out of range is ignored.
       - ``probe`` (optional): ``1`` = the admin Performance tab's reachability check. Once an
         admin is authenticated the socket answers ``{"type": "probe.ok"}`` and closes normally:
         no persona, no Voice Live session, no Azure call (and so no avatar rate limit). Anyone
@@ -182,6 +199,7 @@ async def voice_live_websocket(ws: WebSocket) -> None:
     _bg = (ws.query_params.get("avatar_bg") or "").strip().lstrip("#")
     avatar_background = _bg.lower() if re.fullmatch(r"[0-9a-fA-F]{6}", _bg) else None
     avatar_off = (ws.query_params.get("avatar") or "").strip().lower() == "off"
+    network_hint = _network_hint(ws.query_params.get("net_rtt"), ws.query_params.get("net_loss"))
 
     await ws.accept()
 
@@ -291,6 +309,8 @@ async def voice_live_websocket(ws: WebSocket) -> None:
                 "voice.playground": bool(persona_id),
                 "voice.mode": _voice_mode or "native",
                 "voice.persona_id": getattr(persona, "id", None),
+                "voice.net_rtt_ms": network_hint.rtt_ms if network_hint else None,
+                "voice.net_loss_pct": network_hint.loss_pct if network_hint else None,
             },
         ):
             await run_proxy(
@@ -309,6 +329,7 @@ async def voice_live_websocket(ws: WebSocket) -> None:
                 # linear_turns_for_persona).
                 playground=bool(persona_id),
                 avatar_background=avatar_background,
+                network_hint=network_hint,
                 avatar_off=avatar_off,
                 recorder=recorder_for(interview_id, persona_id),
             )

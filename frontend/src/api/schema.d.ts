@@ -2342,7 +2342,7 @@ export interface components {
         };
         /**
          * InterviewNetworkOut
-         * @description The network one interview ran on, from its own telemetry; the page grades it (A to E).
+         * @description The network one interview ran on, from its own telemetry; the page grades it (A to D).
          */
         InterviewNetworkOut: {
             avatar?: components["schemas"]["AvatarOutcomesOut"] | null;

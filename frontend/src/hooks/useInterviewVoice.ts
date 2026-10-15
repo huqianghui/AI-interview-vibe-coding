@@ -48,6 +48,7 @@ import type { MediaMode } from "./avatarHealth";
 import type { ModeSwitchInfo } from "./useAvatarStream";
 import { voiceMetrics } from "../telemetry/voiceTimeline";
 import { beginWebSocketTrace, flushForUnload, type WebSocketTrace } from "../telemetry/appInsights";
+import { networkHint } from "../telemetry/networkHint";
 import type {
   AudioState,
   TranscriptSegment,
@@ -272,7 +273,7 @@ function toRtcIceServers(raw: unknown): RTCIceServer[] {
     }));
 }
 
-function buildWsUrl(
+export function buildWsUrl(
   token: string,
   personaId: string | undefined,
   locale: string,
@@ -290,6 +291,15 @@ function buildWsUrl(
   // Voice-only: a session with no digital human, the interviewer's voice over this WebSocket (see
   // MediaMode). The backend then reports avatar_enabled=false, and this hook plays the WS audio.
   if (avatarOff) params.set("avatar", "off");
+  // What this browser knows about its network: the backend picks a photo avatar's bitrate from it
+  // (Azure takes the bitrate only when the session is created; docs/network-grades.md).
+  try {
+    const hint = networkHint();
+    if (hint.rttMs !== null) params.set("net_rtt", String(hint.rttMs));
+    if (hint.lossPct !== null) params.set("net_loss", hint.lossPct.toFixed(2));
+  } catch (err) {
+    console.debug("[voice] no network hint", err); // never a reason not to connect
+  }
   return `${protocol}//${window.location.host}/api/voice-live/ws?${params.toString()}`;
 }
 
@@ -608,6 +618,12 @@ export function useInterviewVoice(
             avatar: Boolean(msg.avatar_enabled),
             linear_turns: Boolean(msg.linear_turns),
             audio_path: msg.avatar_enabled ? "webrtc" : "ws",
+            // The bitrate this session asked Azure for (0 = Azure's default) and why, so the
+            // automatic choice can be measured against freezes in the workbook.
+            avatar_bitrate:
+              typeof msg.avatar_video_bitrate === "number" ? msg.avatar_video_bitrate : 0,
+            avatar_bitrate_reason:
+              typeof msg.avatar_bitrate_reason === "string" ? msg.avatar_bitrate_reason : "",
           });
           voiceMetrics.setup("proxy_connected");
           // Uplink framing (perf review P0-1): with this flag the mic goes up as raw binary PCM

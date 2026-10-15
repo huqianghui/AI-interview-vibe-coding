@@ -2,27 +2,27 @@
   "00-signin.png": {
     "sha256": "30c24cbb329d11b588dbb720d35c57ad22fdfdfa803bb86b21a641254179f7ce",
     "sources": "40e3cb0c07be7d0c1bbb281440988fdb62c0c1895d734c2606315ebc384af1b8",
-    "capturedAt": "2026-10-15T07:11:43.417Z"
+    "capturedAt": "2026-10-15T11:57:33.952Z"
   },
   "01-landing.png": {
     "sha256": "3e3e84e1d53a1ea9d2defb926beb0dd7bd9668a74468dce29ba84ce8216f7563",
     "sources": "da2ee040dd1d88efebaf39b6960a3a3c9d1df054a9d4313935c94f37d621f19d",
-    "capturedAt": "2026-10-15T07:11:46.493Z"
+    "capturedAt": "2026-10-15T11:57:36.321Z"
   },
   "01b-orientation.png": {
     "sha256": "937bbd71340179536c2ea2d8c8ae1516bfb771c431d1ac002fd3046b0f82d5d4",
     "sources": "ab810ec322f19a9b2f4fa3df2237e3d1a993183e4ecf6f128ad958db8af66d76",
-    "capturedAt": "2026-10-15T07:11:46.838Z"
+    "capturedAt": "2026-10-15T11:57:36.672Z"
   },
   "02-interview-question.png": {
-    "sha256": "e1044e40944efffaff47820ac8b03d688a0f8006d31942fb0a6730921375e934",
-    "sources": "6caae6a658ef5385326c5c299d2e9a229144991d86eb8a0720586b3ac36e92c9",
-    "capturedAt": "2026-10-15T07:11:50.702Z"
+    "sha256": "2ad952c075821df4d118c8526521e35ddf56fa6083575b316a93c1c97863048e",
+    "sources": "7be3b7461c3646b3444e0c8b94d824abe4a5b10f90b2365477058331c07b0d2b",
+    "capturedAt": "2026-10-15T11:57:41.001Z"
   },
   "04-review-before-scoring.png": {
     "sha256": "ca7864a27abdbb41795c5e7914e3f2e32789cfc363df47e9265ebd7650c2717d",
     "sources": "3a56f7438d5d97e92c529b9da2ab1f00d97e48f45f93448e0937ce4e389f9ca5",
-    "capturedAt": "2026-10-15T07:11:51.696Z"
+    "capturedAt": "2026-10-15T11:57:41.987Z"
   },
   "05-report-executive.png": {
     "sha256": "e5dca533c968383f39cd45fcf3a2dc6ae47dd1298888deb881c338e71f7fd610",

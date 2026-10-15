@@ -77,7 +77,7 @@ class AvatarOutcomesOut(BaseModel):
 
 
 class InterviewNetworkOut(BaseModel):
-    """The network one interview ran on, from its own telemetry; the page grades it (A to E)."""
+    """The network one interview ran on, from its own telemetry; the page grades it (A to D)."""
 
     # found: the fields below are set; not_found: App Insights has nothing for it (yet);
     # unavailable: the Logs query API cannot be asked, ``reason`` says why.

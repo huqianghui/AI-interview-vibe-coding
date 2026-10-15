@@ -553,16 +553,12 @@ export const resources = {
           rec: {
             A: "Video avatar at the default bitrate; start with video.",
             B:
-              "Photo avatar at the default bitrate (or VOICE_LIVE_AVATAR_VIDEO_BITRATE=500000); " +
-              "start with video. A video avatar already freezes at this RTT.",
+              "Photo avatar; start with video. The backend picks its bitrate for each session. " +
+              "A video avatar freezes at this RTT.",
             C:
-              "Photo avatar with VOICE_LIVE_AVATAR_VIDEO_BITRATE=300000; expect stop-and-go video. " +
-              "Do not start with a video avatar: the automatic switch turns its picture off within " +
-              "seconds.",
-            D:
               "Start voice-only (the candidate turns video off, or an interviewer without a " +
               "digital human). At this loss or RTT even a photo avatar's media dies.",
-            E:
+            D:
               "UDP 3478 is blocked: no digital human of any kind, only voice over the WebSocket " +
               "(the app falls back to it by itself). Ask the network team to allow outbound UDP 3478.",
           },
@@ -586,13 +582,13 @@ export const resources = {
             rtt: "RTT {{value}} ms > {{limit}} ms ({{row}}'s limit)",
             loss: "loss {{value}}% > {{limit}}% ({{row}}'s limit)",
             down: "downlink {{value}} < {{limit}} ({{row}}'s limit)",
-            rttD: "RTT {{value}} ms ≥ {{limit}} ms",
-            lossD: "loss {{value}}% ≥ {{limit}}%",
-            downD: "downlink {{value}} < {{limit}}",
+            rttC: "RTT {{value}} ms ≥ {{limit}} ms",
+            lossC: "loss {{value}}% ≥ {{limit}}%",
+            downC: "downlink {{value}} < {{limit}}",
             udp: "UDP 3478 not reachable",
           },
           noteDownlinkOnly:
-            "D only because of the downlink, which this check underestimates on a distant link: " +
+            "C only because of the downlink, which this check underestimates on a distant link: " +
             "the other numbers alone give {{grade}}.",
           compare: {
             default: "Compared with the default interviewer, {{name}} (no interview chosen):",
@@ -617,14 +613,12 @@ export const resources = {
             avatarCannotConnect:
               "{{name}}'s digital human cannot connect without UDP 3478: assign a voice-only " +
               "interviewer, or have UDP 3478 allowed.",
-            setBitrate:
-              "Set VOICE_LIVE_AVATAR_VIDEO_BITRATE={{value}} (now {{current}}).",
-            setBitrateUnset:
-              "Set VOICE_LIVE_AVATAR_VIDEO_BITRATE={{value}} (now not set: Azure's 2 Mbit/s).",
-            bitrateOptional:
-              "Optional: VOICE_LIVE_AVATAR_VIDEO_BITRATE={{value}} (now {{current}}).",
-            bitrateOptionalUnset:
-              "Optional: VOICE_LIVE_AVATAR_VIDEO_BITRATE={{value}} (now not set: Azure's 2 Mbit/s).",
+            autoBitrate:
+              "This network is in the photo avatar's weaker half: {{name}}'s new sessions start " +
+              "at 300 kbit/s automatically (still stop-and-go at times).",
+            overrideBitrate:
+              "VOICE_LIVE_AVATAR_VIDEO_BITRATE={{current}} is set: it overrides the backend's " +
+              "per-session choice. Unset it to let the backend pick.",
             bitrateTooLow:
               "VOICE_LIVE_AVATAR_VIDEO_BITRATE={{current}} lowers picture quality, and this " +
               "network does not need it.",
@@ -635,10 +629,9 @@ export const resources = {
           legendTitle: "Grades",
           legend: {
             A: "RTT ≤ 150 ms, loss ≤ 0.5%, ≥ 4 Mbit/s: video avatar",
-            B: "RTT ≤ 300 ms, loss ≤ 0.5%, ≥ 2 Mbit/s: photo avatar",
-            C: "RTT ≤ 500 ms, loss ≤ 1%, ≥ 1.5 Mbit/s: photo avatar at 300 kbit/s",
-            D: "loss ≥ 3%, RTT ≥ 600 ms or < 1 Mbit/s: voice-only",
-            E: "UDP 3478 blocked: voice over the WebSocket only",
+            B: "RTT ≤ 500 ms, loss ≤ 1%, ≥ 1.5 Mbit/s: photo avatar (bitrate picked per session)",
+            C: "loss ≥ 3%, RTT ≥ 600 ms or < 1 Mbit/s: voice-only",
+            D: "UDP 3478 blocked: voice over the WebSocket only",
           },
           workbookTop: "Across all interviews: the Voice performance workbook (its lower sections)",
           workbookRow: "Workbook",
@@ -1227,16 +1220,11 @@ export const resources = {
             "这场面试早于固定 Operation id：它跑在 {{count}} 个 operation 下，每个都有自己的 Logs 链接。",
           rec: {
             A: "视频数字人，默认码率，以视频起步。",
-            B:
-              "照片数字人，默认码率（或 VOICE_LIVE_AVATAR_VIDEO_BITRATE=500000），以视频起步。" +
-              "这个 RTT 下视频数字人已经会卡。",
+            B: "照片数字人，以视频起步；码率由后端为每个会话自动选择。这个 RTT 下视频数字人会卡。",
             C:
-              "照片数字人，VOICE_LIVE_AVATAR_VIDEO_BITRATE=300000；画面会“动一下停一下”。" +
-              "不要以视频数字人起步：自动降级会在十几秒内把画面关掉。",
-            D:
               "以纯音频起步（候选人关闭视频，或使用不带数字人的面试官）。这种丢包或 RTT 下，" +
               "照片数字人的媒体也会断。",
-            E:
+            D:
               "UDP 3478 不通：任何数字人都不可用，只能走 WebSocket 纯语音（应用会自动降级）。" +
               "请网络团队放行出向 UDP 3478。",
           },
@@ -1255,12 +1243,12 @@ export const resources = {
             rtt: "RTT {{value}} ms > {{limit}} ms（{{row}} 级上限）",
             loss: "丢包 {{value}}% > {{limit}}%（{{row}} 级上限）",
             down: "下行 {{value}} < {{limit}}（{{row}} 级下限）",
-            rttD: "RTT {{value}} ms ≥ {{limit}} ms",
-            lossD: "丢包 {{value}}% ≥ {{limit}}%",
-            downD: "下行 {{value}} < {{limit}}",
+            rttC: "RTT {{value}} ms ≥ {{limit}} ms",
+            lossC: "丢包 {{value}}% ≥ {{limit}}%",
+            downC: "下行 {{value}} < {{limit}}",
             udp: "UDP 3478 不通",
           },
-          noteDownlinkOnly: "只因下行被判为 D，而这项检测在远距离链路上会偏低：仅看其他指标是 {{grade}} 级。",
+          noteDownlinkOnly: "只因下行被判为 C，而这项检测在远距离链路上会偏低：仅看其他指标是 {{grade}} 级。",
           compare: {
             default: "与默认面试官 {{name}} 比较（未选择面试）：",
             interview: "与这场面试的面试官 {{name}} 比较：",
@@ -1278,12 +1266,10 @@ export const resources = {
               "{{name}} 带数字人：这里应以纯音频起步（候选人关闭视频，或分配不带数字人的面试官）。",
             avatarCannotConnect:
               "UDP 3478 不通时 {{name}} 的数字人无法连接：请分配纯语音面试官，或让网络放行 UDP 3478。",
-            setBitrate: "设置 VOICE_LIVE_AVATAR_VIDEO_BITRATE={{value}}（当前 {{current}}）。",
-            setBitrateUnset:
-              "设置 VOICE_LIVE_AVATAR_VIDEO_BITRATE={{value}}（当前未设置：Azure 默认 2 Mbit/s）。",
-            bitrateOptional: "可选：VOICE_LIVE_AVATAR_VIDEO_BITRATE={{value}}（当前 {{current}}）。",
-            bitrateOptionalUnset:
-              "可选：VOICE_LIVE_AVATAR_VIDEO_BITRATE={{value}}（当前未设置：Azure 默认 2 Mbit/s）。",
+            autoBitrate: "这个网络处于照片数字人的较弱区间：{{name}} 的新会话会自动以 300 kbit/s 起步（画面仍会偶尔停顿）。",
+            overrideBitrate:
+              "已设置 VOICE_LIVE_AVATAR_VIDEO_BITRATE={{current}}：它会覆盖后端按会话的自动选择。" +
+              "去掉这个设置即可交给后端选择。",
             bitrateTooLow: "VOICE_LIVE_AVATAR_VIDEO_BITRATE={{current}} 会降低画质，这个网络不需要。",
             sampleRate:
               "上行采样率为 {{current}} Hz：请设置 VOICE_LIVE_INPUT_SAMPLING_RATE={{value}}" +
@@ -1292,10 +1278,9 @@ export const resources = {
           legendTitle: "分级",
           legend: {
             A: "RTT ≤ 150 ms，丢包 ≤ 0.5%，≥ 4 Mbit/s：视频数字人",
-            B: "RTT ≤ 300 ms，丢包 ≤ 0.5%，≥ 2 Mbit/s：照片数字人",
-            C: "RTT ≤ 500 ms，丢包 ≤ 1%，≥ 1.5 Mbit/s：照片数字人，码率 300 kbit/s",
-            D: "丢包 ≥ 3%、RTT ≥ 600 ms 或 < 1 Mbit/s：纯音频",
-            E: "UDP 3478 不通：只能走 WebSocket 纯语音",
+            B: "RTT ≤ 500 ms，丢包 ≤ 1%，≥ 1.5 Mbit/s：照片数字人（码率按会话自动选择）",
+            C: "丢包 ≥ 3%、RTT ≥ 600 ms 或 < 1 Mbit/s：纯音频",
+            D: "UDP 3478 不通：只能走 WebSocket 纯语音",
           },
           workbookTop: "跨面试统计：语音性能 workbook（下方各节）",
           workbookRow: "Workbook",
