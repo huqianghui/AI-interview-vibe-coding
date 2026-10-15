@@ -74,14 +74,16 @@ def _register_foundry_llm() -> None:
     settings = get_settings()
     if not settings.foundry_project_endpoint:
         return
+    from app.config import JUDGE_MODEL_DEFAULT
     from app.services.agents.adapters.foundry_llm import FoundryLLMAdapter
 
     _LLM_ADAPTERS["azure"] = FoundryLLMAdapter(
         endpoint=settings.foundry_project_endpoint,
         project=settings.azure_foundry_default_project,
         api_key=settings.foundry_api_key,
-        # Judgments run on their own model (JUDGE_MODEL); empty falls back to the agent's model.
-        model=settings.judge_model or settings.foundry_agent_model,
+        # The inference model (judge + scoring): Connection tab → JUDGE_MODEL → code default. It is
+        # independent of the agent's model.
+        model=settings.judge_model or JUDGE_MODEL_DEFAULT,
     )
 
 

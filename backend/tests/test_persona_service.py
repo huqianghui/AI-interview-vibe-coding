@@ -280,20 +280,19 @@ async def test_reconcile_keeps_matching_instructions_untouched(db_session, monke
     assert out.agent_version == "10"
 
 
-async def test_reconcile_default_persona_propagates_model_to_master(db_session, monkeypatch):
+async def test_reconcile_default_persona_never_touches_the_master_config(db_session, monkeypatch):
     from app.services import config_service
 
-    # A saved master row exists (endpoint/key/model). Reconciling the DEFAULT persona to a new model
-    # must update the master row's model_or_deployment (runtime-override path).
+    # The master row's model is the judge/scoring (inference) model, independent of any agent's
+    # model (owner, 2026-10-15). Reconciling the DEFAULT persona to a new model updates the
+    # persona only — the master row, inference and voice alike, stays exactly as the admin saved it.
     await config_service.upsert_master_config(
         db_session,
         endpoint="https://demo.services.ai.azure.com",
         api_key="k",
         default_project="demo-prj",
-        model_or_deployment="gpt-5.4-mini",
+        model_or_deployment="gpt-6-sol",
         updated_by="admin",
-        # The operator also configured the VOICE leg, which is a separate setting. Reconcile
-        # propagates the per-persona model to the INFERENCE model only and must leave these alone.
         voice_model="gpt-5-mini",
         voice_model_mode="byom",
         voice_byom_profile="byom-azure-openai-chat-completion",
@@ -305,20 +304,13 @@ async def test_reconcile_default_persona_propagates_model_to_master(db_session, 
     p.model = "gpt-5.4-mini"
     await db_session.commit()
 
-    # Overlay is a no-op-safe call in tests; stub it so we don't mutate the settings singleton.
-    async def _noop_overlay(db):
-        return True
-
-    monkeypatch.setattr(
-        "app.services.config_overlay.apply_master_config_to_settings", _noop_overlay
-    )
     _stub_adapter(monkeypatch, {"agent_version": "11", "model": "gpt-5"})
     await svc.reconcile_persona(db_session, p)
 
+    assert p.model == "gpt-5"
     master = await config_service.get_master_config(db_session)
-    assert master.model_or_deployment == "gpt-5"
-    # upsert_master_config rewrites every field, so _propagate_default_model has to echo the voice
-    # settings back; otherwise every reconcile would reset the operator's Voice Live config.
+    assert master.model_or_deployment == "gpt-6-sol"
+    assert master.updated_by == "admin"
     assert master.voice_model == "gpt-5-mini"
     assert master.voice_model_mode == "byom"
     assert master.voice_byom_profile == "byom-azure-openai-chat-completion"

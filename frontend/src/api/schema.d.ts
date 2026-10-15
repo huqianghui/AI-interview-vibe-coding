@@ -1803,11 +1803,6 @@ export interface components {
             endpoint: string;
             /** Is Active */
             is_active: boolean;
-            /**
-             * Judge Model
-             * @default
-             */
-            judge_model: string;
             /** Knowledge Base */
             knowledge_base: string;
             /** Knowledge Source */
@@ -2636,6 +2631,11 @@ export interface components {
             turn_detection: string;
             /** Voice Map */
             voice_map: string;
+            /**
+             * Voice Model Check
+             * @default
+             */
+            voice_model_check: string;
             /** Voice Temperature */
             voice_temperature: number;
         };

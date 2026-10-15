@@ -368,10 +368,13 @@ chat-completion 调用（`POST /{id}/judge` → `app.interview.judge.run_judge`�
 
 | 用到模型的地方 | 解析链（左优先）| 何时生效 | 代码 |
 | --- | --- | --- | --- |
-| **judge**（judged 模式的 wait/nudge）| master `model_or_deployment` → env `FOUNDRY_AGENT_MODEL` → `gpt-5-mini` | adapter **注册时**钉死；admin 保存后 `refresh_azure_adapters()` 重建，**不用重启** | `judge.py:376` → `registry.py:103/83` → `config_overlay.py:49` |
-| **评估 / 打分**（含 checklist 起草、SOP 覆盖）| **同上，同一条链、同一个 adapter 实例** | 同上 | `scoring_service.py:299`、`checklist_service.py:123`、`sop_coverage.py:111` |
-| **Foundry agent 的底层模型** | `persona.model` → 上面那条链 | **"同步到 Foundry"时**写进 agent，**不在连接时传** | `azure_agent_sync.py:127` |
-| **Voice Live `model=`**（路径①）| `persona.model` → master `model_or_deployment` → env `VOICE_LIVE_DEFAULT_MODEL` | **每次建连**时读 DB，改了下一场面试即生效 | `voice_live_ws.py:41-52`、`:158-166` |
+| **judge**（judged 模式的 wait/nudge）| Connection 页 Inference model（master `model_or_deployment`）→ env `JUDGE_MODEL` → `gpt-6-sol` | adapter **注册时**钉死；admin 保存后 `refresh_azure_adapters()` 重建，**不用重启** | `judge.py` → `registry.py` → `config_overlay.py` |
+| **评估 / 打分**（含 checklist 起草、SOP 覆盖）| **同上，同一条链、同一个 adapter 实例** | 同上 | `scoring_service.py`、`checklist_service.py`、`sop_coverage.py` |
+| **Foundry agent 的底层模型** | agent 编辑页 `persona.model` → env `FOUNDRY_AGENT_MODEL` → `gpt-6-luna`（与上面的 Inference model **无关**）| **"同步到 Foundry"时**写进 agent，**不在连接时传** | `azure_agent_sync.py` |
+| **Voice Live `model=`**（路径①）| Connection 页 Voice session model（master `voice_model`，**覆盖**）→ `persona.model`（**默认**）→ env `VOICE_LIVE_DEFAULT_MODEL` | **每次建连**时读 DB，改了下一场面试即生效 | `voice_live_ws.py` `resolve_voice_model` |
+
+> v0.72.0.0（owner 2026-10-15）：三者各自独立。上表是当前解析链；下面三点里关于"一个字段喂三处"
+> 的描述是 v0.43 之前的历史，留作根因说明。
 
 三个最容易误会的点：
 
@@ -380,8 +383,9 @@ chat-completion 调用（`POST /{id}/judge` → `app.interview.judge.run_judge`�
    都只是**配置缺失时的兜底**，admin 或 `.env` 一填就被盖掉。
 2. **`get_llm_adapter(name)` 的 `name` 是 provider（`azure` / `mock`），不是模型名。** 模型在注册时就
    固定在 adapter 实例上，调用方选不了。推论：**judge 和打分必然是同一个模型**——
-   v0.71.0.0 起由 `JUDGE_MODEL` 决定（空则沿用 agent 的模型），与 agent 模型分开。另外 judge / 打分**都不读 `persona.model`**——per-persona model 只影响
-   agent 同步和 Voice Live 连接。
+   即 Connection 页的 Inference model（env 兜底 `JUDGE_MODEL`），与 agent 模型分开。judge / 打分
+   **都不读 `persona.model`**——per-persona model 只影响 agent 同步，以及（没有 Connection 覆盖时）
+   Voice Live 连接；agent 编辑页保存时会对改过的模型做一次 Voice Live 实测，不支持就当场提示。
 3. **admin 那一个 model 字段，一条链喂三处用途。** 它同时是 ① judge/打分的 chat 模型、② agent 同步时的
    底层模型、③ Voice Live 的 `model=`。前两个接受**你自己的 deployment 名**，第三个只认**本 region 的
    原生预部署清单**（§2 / §3.1）——所以把一个自有 deployment 名填进这个字段，chat 侧正常、语音侧立刻

@@ -41,31 +41,34 @@ router = APIRouter(tags=["voice-live-ws"])
 DEFAULT_LOCALE = FALLBACK_LOCALE
 
 
-def resolve_voice_model(master_voice_model: str | None, env_model: str) -> str:
+def resolve_voice_model(
+    master_voice_model: str | None, persona_model: str | None, env_model: str
+) -> str:
     """Pick the Voice Live SESSION model from USER CONFIG, not a hardcoded env value.
 
-    Priority: the admin-saved ``service_config.voice_model`` → the ``.env``
-    ``VOICE_LIVE_DEFAULT_MODEL`` as a last-resort fallback. The first is read from the DB
-    per-connection, so a change in the admin UI takes effect on the NEXT interview with no backend
-    restart — the env value alone is frozen at process start because ``get_settings()`` is
-    ``lru_cache``d. Blank/whitespace-only is skipped (an empty row must not shadow the env default).
+    Priority (owner decision 2026-10-15):
 
-    **Two tiers deliberately removed** when the voice model was split out of the inference model:
+    1. the admin Connection tab's ``service_config.voice_model`` — an OVERRIDE for every session;
+    2. the persona's own ``model`` (the agent editor's "Model deployment") — the default;
+    3. the ``.env`` ``VOICE_LIVE_DEFAULT_MODEL`` as a last resort.
 
-    * ``service_config.model_or_deployment`` — that is the INFERENCE model (judge / scoring / the
-      Foundry agent) and is a deployment name in the resource. Voice Live MODEL mode accepts only
-      models it hosts natively in the region, so feeding the inference model in here is exactly what
-      produced "Model X is not supported in this region" (measured: gpt-5.4-mini is a real
-      deployment and native Voice Live rejects it).
-    * ``persona.model`` — same values, same problem, and a per-persona tier would let an illegal
-      model reach a session through the agent editor even when the global voice model is valid. The
-      voice model is global; ``persona.model`` now only drives the agent / inference side. If a
-      per-persona voice model is ever wanted, give it its OWN column and its own legal dropdown.
+    The first two are read from the DB per connection, so an admin change takes effect on the NEXT
+    interview with no restart (``get_settings()`` is ``lru_cache``d, so env alone is frozen at
+    process start). Blank/whitespace-only values are skipped so an empty field never shadows the
+    next tier.
 
-    The intent of #99 (v0.37.4.6) is preserved in full: the model still comes from user config, is
-    still read from the DB per connection, and is still never frozen by the env cache.
+    The risk that removed the persona tier in v0.43 still exists: the agent editor lists ANY
+    deployment in the resource, and native Voice Live accepts only the models it hosts in the
+    region ("Model X is not supported in this region"). It is now caught at save time instead — the
+    agent editor runs the same live check the Connection tab does (``voice_model_check`` on the
+    persona response) — and the Connection override exists for exactly that case.
+
+    ``service_config.model_or_deployment`` is NOT a tier: it is the judge/scoring model.
     """
-    return (master_voice_model or "").strip() or env_model
+    for candidate in (master_voice_model, persona_model):
+        if candidate and candidate.strip():
+            return candidate.strip()
+    return env_model
 
 
 def resolve_byom_profile(voice_model_mode: str | None, voice_byom_profile: str | None) -> str:
@@ -232,25 +235,28 @@ async def voice_live_websocket(ws: WebSocket) -> None:
             )
             return
 
-        # Read the two user-config sources per-connection (see resolve_voice_model for the why).
+        # Read the user-config sources per-connection (see resolve_voice_model for the why).
         _master = await config_service.get_master_config(db)
-        # The VOICE leg only — persona.model and model_or_deployment are the inference model now
-        # (see resolve_voice_model).
         _master_voice_model = _master.voice_model if _master else None
+        _persona_model = getattr(persona, "model", None)
         _voice_mode = _master.voice_model_mode if _master else None
         _voice_profile = _master.voice_byom_profile if _master else None
 
     settings = get_settings()
-    resolved_model = resolve_voice_model(_master_voice_model, settings.voice_live_default_model)
+    resolved_model = resolve_voice_model(
+        _master_voice_model, _persona_model, settings.voice_live_default_model
+    )
     resolved_profile = resolve_byom_profile(_voice_mode, _voice_profile)
     # Cascaded (a chat model) keeps the detector it always had; speech-to-speech MUST switch,
     # because the text-based one is refused there. Membership is measured, not guessed — see
     # voice_live_probe.uses_realtime_pipeline (phi4-mm-realtime is cascaded despite its name).
     realtime_pipeline = uses_realtime_pipeline(resolved_model, resolved_profile)
     logger.info(
-        "Voice Live model resolved to %r (master.voice_model=%r → env=%r); mode=%r profile=%r",
+        "Voice Live model resolved to %r (master.voice_model=%r → persona.model=%r → env=%r); "
+        "mode=%r profile=%r",
         resolved_model,
         _master_voice_model or None,
+        _persona_model or None,
         settings.voice_live_default_model,
         _voice_mode or "native",
         resolved_profile or None,

@@ -234,10 +234,15 @@ class PersonaOut(BaseModel):
     # NULL/blank — surfaced as the editor placeholder so the operator sees the effective reader
     # prompt (parallel to default_instructions, but for the external "mouth" path).
     default_external_reader_prompt: str
+    # Save-time live check of ``model`` against Voice Live, set only when this save changed the
+    # model AND it is what voice sessions will run (no Connection-tab voice override). A warning,
+    # never a block: the agent itself works on any deployment. Empty otherwise.
+    voice_model_check: str = ""
 
     @classmethod
-    def of(cls, p: InterviewerPersona) -> "PersonaOut":
-        return cls(**{f: getattr(p, f) for f in cls.model_fields})
+    def of(cls, p: InterviewerPersona, voice_model_check: str = "") -> "PersonaOut":
+        fields = {f: getattr(p, f) for f in cls.model_fields if f != "voice_model_check"}
+        return cls(**fields, voice_model_check=voice_model_check)
 
 
 class PersonaKnowledgeOut(BaseModel):
@@ -324,6 +329,41 @@ async def list_all(db: AsyncSession = Depends(get_db)) -> list[PersonaOut]:
     return [PersonaOut.of(p) for p in await svc.list_personas(db)]
 
 
+async def _voice_check_for_persona(db: AsyncSession, persona: InterviewerPersona) -> str:
+    """Live-check the persona's model against Voice Live when voice sessions will run on it.
+
+    Voice resolves Connection-tab override → persona.model → env (see voice_live_ws),
+    and the agent editor lists ANY deployment while native Voice Live accepts only the models it
+    hosts in the region. So a model picked here can break voice without breaking the agent — this
+    says so at save time instead of in the interview. Skipped when the override is set (the persona
+    model then never reaches Voice Live) or when there is no saved connection to check against.
+    """
+    from app.api.admin_config import _check_voice_model, _production_voice_session
+    from app.services import voice_live_probe as probe
+
+    model = (persona.model or "").strip()
+    master = await config_service.get_master_config(db)
+    if not model or master is None or not master.endpoint or (master.voice_model or "").strip():
+        return ""
+    try:
+        return await _check_voice_model(
+            endpoint=master.endpoint,
+            api_key=await config_service.get_decrypted_key(db) or "",
+            voice_model=model,
+            mode="native",
+            profile="",
+            session=await _production_voice_session(
+                db, realtime_pipeline=probe.uses_realtime_pipeline(model, "")
+            ),
+        )
+    except HTTPException as exc:
+        return (
+            f"Voice Live does not accept {model} in this region ({exc.detail}). The agent works, "
+            "but voice sessions on this model will fail: pick a supported model, or set the "
+            "voice model override in the Connection tab."
+        )
+
+
 @router.post("", response_model=PersonaOut, status_code=status.HTTP_201_CREATED)
 async def create(body: PersonaCreate, db: AsyncSession = Depends(get_db)) -> PersonaOut:
     try:
@@ -331,7 +371,7 @@ async def create(body: PersonaCreate, db: AsyncSession = Depends(get_db)) -> Per
     except svc.PersonaConflict as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await _sync(db, persona)
-    return PersonaOut.of(persona)
+    return PersonaOut.of(persona, await _voice_check_for_persona(db, persona))
 
 
 # --- Foundry IQ knowledge (per-persona) ------------------------------------
@@ -462,6 +502,8 @@ async def update(
 ) -> PersonaOut:
     changes = body.model_dump(exclude_unset=True)
     try:
+        # The editor sends the whole form, so "model" is in every save: compare, don't key on it.
+        prior_model = (await svc.get_persona(db, persona_id)).model
         persona = await svc.update_persona(db, persona_id, **changes)
     except svc.PersonaNotFound as exc:
         raise HTTPException(
@@ -471,7 +513,9 @@ async def update(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     # Config that affects the agent changed → re-sync.
     await _sync(db, persona)
-    return PersonaOut.of(persona)
+    model_changed = (persona.model or "") != (prior_model or "")
+    check = await _voice_check_for_persona(db, persona) if model_changed else ""
+    return PersonaOut.of(persona, check)
 
 
 @router.post("/{persona_id}/set-default", response_model=PersonaOut)

@@ -142,23 +142,12 @@ export function ConnectionTab({ state, guard }: { state: ConnectionTabState; gua
             {probing && <Spinner size="tiny" label="Probing the region…" />}
           </div>
 
-          <Text weight="semibold">
-            Inference model — the agent's fallback, and judge and scoring when no judge model is set
-          </Text>
+          <Text weight="semibold">Inference model — judge and scoring</Text>
           <Body1>
-            A <strong>deployment</strong> in this resource — judge, scoring and the Foundry agent
-            all address models by deployment name, so your own deployments are exactly right here.
-            The digital-human agent uses it only when its persona has no model of its own: a model
-            picked in the agent editor overrides it, and a synced persona usually has one, because
-            reconcile pulls the live agent's model onto the persona. Changing this does not rewrite
-            those — that would erase a deliberate choice. Judge and scoring use the deployment's
-            <strong> JUDGE_MODEL</strong> setting when it is set, and this value otherwise.
+            A <strong>deployment</strong> in this resource that the in-interview judge and report
+            scoring run on. It is independent of the digital-human agent: each agent&apos;s model is
+            set per persona in the agent editor (Model deployment), and this does not change it.
           </Body1>
-          {cfg?.judge_model && (
-            <Caption1 data-testid="cfg-judge-model">
-              Judge and scoring currently run on: <strong>{cfg.judge_model}</strong>
-            </Caption1>
-          )}
 
           {/* Model: dropdown once options are loaded, else a text input fallback. */}
           {modelOptions.length > 0 ? (
@@ -184,23 +173,41 @@ export function ConnectionTab({ state, guard }: { state: ConnectionTabState; gua
             />
           )}
 
-          {modelOverrides.length > 0 ? (
-            <Caption1 data-testid="cfg-model-overrides">
-              {modelOverrides.length} persona(s) carry their own model and are NOT affected by this
-              setting:{" "}
-              {modelOverrides.map((o) => `${o.name} (${o.model})`).join(", ")}. Change those in the
-              agent editor.
-            </Caption1>
-          ) : (
-            <Caption1 data-testid="cfg-model-overrides-none">
-              No persona overrides this — every persona's agent follows the model above.
-            </Caption1>
-          )}
-
           {/* The Voice Live SESSION model — a separate setting, because its legal values are a
               different set. Keeping it in one field with the inference model is what produced
               "Model X is not supported in this region" on every voice session. */}
           <Text weight="semibold">Voice session model — Voice Live</Text>
+          <Body1 data-testid="cfg-voice-override-hint">
+            By default each voice session runs on its persona&apos;s own model (the agent
+            editor&apos;s Model deployment). Choose a model here to <strong>override</strong> that
+            for every persona; leave it empty to follow each persona.
+          </Body1>
+          {cfgVoiceModel ? (
+            <div className={styles.row}>
+              <Caption1 data-testid="cfg-voice-overrides">
+                Overriding: every voice session runs on <strong>{cfgVoiceModel}</strong>
+                {modelOverrides.length > 0 &&
+                  `, instead of ${modelOverrides.map((o) => `${o.name} (${o.model})`).join(", ")}`}
+                . Saved with the rest of this card.
+              </Caption1>
+              {!cfgVoiceByom && (
+                <Button
+                  size="small"
+                  data-testid="cfg-voice-clear-override"
+                  onClick={() => setCfgVoiceModel("")}
+                >
+                  Follow each persona
+                </Button>
+              )}
+            </div>
+          ) : (
+            <Caption1 data-testid="cfg-voice-follows-persona">
+              Not overriding: voice follows each persona
+              {modelOverrides.length > 0 &&
+                ` — ${modelOverrides.map((o) => `${o.name} (${o.model})`).join(", ")}`}
+              .
+            </Caption1>
+          )}
           <Switch
             label="Use my own model (bring your own model)"
             checked={cfgVoiceByom}
@@ -265,9 +272,9 @@ export function ConnectionTab({ state, guard }: { state: ConnectionTabState; gua
             </>
           ) : (
             <Body1 data-testid="cfg-voice-native-hint">
-              The voice session runs on a model <strong>Azure hosts for Voice Live</strong> in this
-              region. Those are not deployments in your resource, so judge / scoring / the agent
-              cannot use them — <strong>these are two separate settings and both need a value</strong>.
+              The override must be a model <strong>Azure hosts for Voice Live</strong> in this
+              region. Those are not deployments in your resource, so the list below differs from
+              the inference list above.
             </Body1>
           )}
           {/* Native mode lists only models a real connection ACCEPTED here; BYOM mode lists your

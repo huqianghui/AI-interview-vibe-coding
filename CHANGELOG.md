@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.72.0.0 (2026-10-15)
+
+### Changed
+- **Inference, agent and voice models are three independent settings** (owner decision).
+  - The Connection tab's **Inference model** is the judge + report scoring model only (env
+    fallback `JUDGE_MODEL`, default `gpt-6-sol`). It is no longer the agent's fallback, and the
+    `JUDGE_MODEL`-overrides-the-page behaviour of 0.71.0.0 is gone: the page value wins.
+  - The **agent's model** is set per persona in the agent editor (Model deployment); a persona with
+    none falls back to `FOUNDRY_AGENT_MODEL`. Reconciling the default persona no longer writes its
+    model into the Connection tab's Inference model.
+  - The **Voice Live session model** follows the persona's model by default. The Connection tab's
+    Voice session model is now an **override** for every persona; "Follow each persona" clears it.
+- **The agent editor checks a changed model against Voice Live on save.** Voice can now run on the
+  persona's model, and the editor lists any deployment while native Voice Live accepts only the
+  models it hosts in the region. A rejected model still saves (the agent works) and the status line
+  says voice sessions on it will fail. No check runs while the Connection override is set.
+
 ## 0.71.0.0 (2026-10-15)
 
 ### Changed

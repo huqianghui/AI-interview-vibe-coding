@@ -96,7 +96,9 @@ async def apply_master_config_to_settings(db: AsyncSession) -> bool:
     # project-scoped URL from endpoint + project.
     settings.foundry_project_endpoint = master.endpoint
     settings.foundry_api_key = api_key
-    settings.foundry_agent_model = master.model_or_deployment or settings.foundry_agent_model
+    # The saved "Inference model" is the judge + scoring model only. It does NOT touch the agent's
+    # fallback model (foundry_agent_model): the agent's model is set per persona in the editor.
+    settings.judge_model = master.model_or_deployment or settings.judge_model
 
     # Voice Live path (the WS proxy reads these at connect time). NOTE: deliberately does NOT
     # overlay voice_live_default_model — ``model_or_deployment`` is the agent's CHAT deployment

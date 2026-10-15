@@ -138,7 +138,9 @@ Flip the providers to real (`DEFAULT_LLM_PROVIDER=azure_openai`, `DEFAULT_RETRIE
 `DEFAULT_AGENT_SYNC_PROVIDER=azure`) and boot as in Layer 2.
 
 **Critical deploy knob — model deployments.** Project default is `gpt-6-luna` for both the agent
-chat model and the Voice Live model, and `gpt-6-sol` for judge + scoring (`JUDGE_MODEL`).
+chat model and the Voice Live model, and `gpt-6-sol` for judge + scoring (`JUDGE_MODEL`). These are
+env fallbacks: the Connection tab's Inference model (judge + scoring), the agent editor's per-persona
+model, and the Connection tab's voice override win over them.
 `FOUNDRY_AGENT_MODEL` and `JUDGE_MODEL` must be deployments on your Foundry resource;
 `VOICE_LIVE_DEFAULT_MODEL` must be a model Voice Live hosts natively in your region (your own
 deployments do not count — `gpt-6-luna`, `gpt-6-sol` and `gpt-5-mini` are accepted on swedencentral,

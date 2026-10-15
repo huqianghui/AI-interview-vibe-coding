@@ -581,3 +581,83 @@ async def test_a_concurrent_duplicate_create_is_a_409_not_a_500(client, monkeypa
     again = await client.post("/admin/personas", headers=AUTH, json={"name": "ava"})
     assert again.status_code == 409
     assert "already exists" in again.json()["detail"]
+
+
+# --- save-time Voice Live check of the persona's model (owner, 2026-10-15) ------------------------
+# Voice resolves Connection override → persona.model → env, and the agent editor lists any
+# deployment, so a changed model is live-checked and a rejection comes back as a warning.
+
+
+async def _master(db_session, voice_model: str = "") -> None:
+    await config_service.upsert_master_config(
+        db_session,
+        endpoint="https://demo.services.ai.azure.com",
+        api_key="k",
+        default_project="demo-prj",
+        model_or_deployment="gpt-6-sol",
+        voice_model=voice_model,
+        updated_by="admin",
+    )
+    await db_session.commit()
+
+
+def _stub_check(monkeypatch, *, reject: bool = False) -> list[str]:
+    from fastapi import HTTPException
+
+    calls: list[str] = []
+
+    async def fake_check(*, voice_model, **_kw):
+        calls.append(voice_model)
+        if reject:
+            raise HTTPException(status_code=422, detail="not supported in this region")
+        return f"Voice model {voice_model} verified against the live service."
+
+    async def no_session(*_a, **_kw):
+        return None
+
+    monkeypatch.setattr("app.api.admin_config._check_voice_model", fake_check)
+    monkeypatch.setattr("app.api.admin_config._production_voice_session", no_session)
+    return calls
+
+
+async def test_changed_model_is_voice_checked_when_voice_follows_the_persona(
+    client, db_session, monkeypatch
+):
+    await _master(db_session)
+    calls = _stub_check(monkeypatch)
+    p = (await client.post("/admin/personas", headers=AUTH, json={"name": "V1"})).json()
+    resp = await client.put(
+        f"/admin/personas/{p['id']}", headers=AUTH, json={"model": "gpt-6-luna"}
+    )
+    assert resp.status_code == 200
+    assert calls == ["gpt-6-luna"]
+    assert "verified" in resp.json()["voice_model_check"]
+    # Re-saving the whole form with the SAME model does not probe again (the editor sends it all).
+    again = await client.put(
+        f"/admin/personas/{p['id']}", headers=AUTH, json={"name": "V1b", "model": "gpt-6-luna"}
+    )
+    assert calls == ["gpt-6-luna"]
+    assert again.json()["voice_model_check"] == ""
+
+
+async def test_rejected_model_saves_with_a_warning(client, db_session, monkeypatch):
+    await _master(db_session)
+    _stub_check(monkeypatch, reject=True)
+    p = (await client.post("/admin/personas", headers=AUTH, json={"name": "V2"})).json()
+    resp = await client.put(
+        f"/admin/personas/{p['id']}", headers=AUTH, json={"model": "gpt-5.4-mini"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["model"] == "gpt-5.4-mini"
+    assert "does not accept gpt-5.4-mini" in resp.json()["voice_model_check"]
+
+
+async def test_no_voice_check_while_the_connection_override_is_set(client, db_session, monkeypatch):
+    await _master(db_session, voice_model="gpt-5-mini")
+    calls = _stub_check(monkeypatch)
+    p = (await client.post("/admin/personas", headers=AUTH, json={"name": "V3"})).json()
+    resp = await client.put(
+        f"/admin/personas/{p['id']}", headers=AUTH, json={"model": "gpt-6-luna"}
+    )
+    assert calls == []
+    assert resp.json()["voice_model_check"] == ""
