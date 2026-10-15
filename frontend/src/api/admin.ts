@@ -194,6 +194,7 @@ export interface AiFoundryConfig {
   knowledge_source: string;
   is_active: boolean;
   voice_model_check?: string; // what the save-time live check concluded
+  judge_model?: string; // what judge + scoring run on: JUDGE_MODEL, else model_or_deployment
 }
 
 export interface AiFoundryConfigInput {

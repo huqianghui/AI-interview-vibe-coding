@@ -72,9 +72,20 @@ FAST_MAX_OUTPUT_TOKENS = 320
 
 
 def _is_reasoning_model(model: str) -> bool:
-    """gpt-5 family / o-series expose ``reasoning.effort`` (and ``text.verbosity`` on gpt-5)."""
+    """gpt-5/gpt-6 families and o-series expose ``reasoning.effort``."""
     m = (model or "").lower()
-    return m.startswith("gpt-5") or m.startswith("o1") or m.startswith("o3") or m.startswith("o4")
+    return m.startswith(("gpt-5", "gpt-6", "o1", "o3", "o4"))
+
+
+def _lowest_reasoning_effort(model: str) -> str:
+    """The "reasoning off" effort value, which differs by family. Measured 2026-10-15: gpt-6-luna
+    and gpt-6-sol reject ``minimal`` with a 400 and accept ``none``; gpt-5-mini is the reverse."""
+    return "none" if (model or "").lower().startswith("gpt-6") else "minimal"
+
+
+def _supports_verbosity(model: str) -> bool:
+    """``text.verbosity`` is accepted on gpt-5 and gpt-6 (gpt-6 measured 2026-10-15)."""
+    return (model or "").lower().startswith(("gpt-5", "gpt-6"))
 
 
 def _build_completion_kwargs(
@@ -87,9 +98,10 @@ def _build_completion_kwargs(
     not accept). No ``agent_reference`` — scoring is a plain-model judgment, not an agent turn.
 
     ``fast`` (issue #114 judge): latency-sensitive callers on a reasoning model turn reasoning
-    OFF (``minimal`` effort — owner decision 2026-09-24: speed and brevity over the last bit of
-    verdict precision), ask for low verbosity, and cap the output tokens (the judge returns a tiny
-    JSON object; ``max_output_tokens`` stops a rambling completion from eating the pause budget).
+    OFF (the lowest effort the family accepts — owner decision 2026-09-24: speed and brevity over
+    the last bit of verdict precision), ask for low verbosity, and cap the output tokens (the judge
+    returns a tiny JSON object; ``max_output_tokens`` stops a rambling completion from eating the
+    pause budget).
     Live-measured on gpt-5-mini: default effort 7–10 s per call; ``low`` 2–5 s (median ≈3.5 s);
     ``minimal`` 2–3 s warm. Non-reasoning models ignore the reasoning knob.
     """
@@ -100,8 +112,8 @@ def _build_completion_kwargs(
     if fast:
         kwargs["max_output_tokens"] = FAST_MAX_OUTPUT_TOKENS
         if _is_reasoning_model(model):
-            kwargs["reasoning"] = {"effort": "minimal"}
-            if model.lower().startswith("gpt-5"):
+            kwargs["reasoning"] = {"effort": _lowest_reasoning_effort(model)}
+            if _supports_verbosity(model):
                 text["verbosity"] = "low"
     if text:
         kwargs["text"] = text
@@ -114,7 +126,7 @@ class FoundryLLMAdapter(LLMAdapter):
     name = "azure"
 
     def __init__(
-        self, *, endpoint: str, project: str = "", api_key: str = "", model: str = "gpt-5-mini"
+        self, *, endpoint: str, project: str = "", api_key: str = "", model: str = "gpt-6-sol"
     ) -> None:
         # Project-scoped endpoint the SDK requires (bare account endpoint 404s), same as agent-sync.
         self._endpoint = project_endpoint(endpoint, project)

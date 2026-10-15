@@ -114,9 +114,13 @@ class Settings(BaseSettings):
     default_agent_sync_provider: str = "mock"
     foundry_project_endpoint: str = ""
     # Model the interviewer Foundry agent runs on. MUST name a deployment that exists on the target
-    # Azure resource. Project default is gpt-5-mini (second choice: gpt-4.1-mini); the real value
-    # comes from the DB master config (admin page) in prod, or FOUNDRY_AGENT_MODEL in .env for dev.
-    foundry_agent_model: str = "gpt-5-mini"
+    # Azure resource. Project default is gpt-6-luna; the real value comes from the DB master config
+    # (admin page) in prod, or FOUNDRY_AGENT_MODEL in .env for dev.
+    foundry_agent_model: str = "gpt-6-luna"
+    # Model the plain-model judgments run on: the in-interview judge and report scoring (and the
+    # SOP coverage audit / document summaries, which share the same adapter). A deployment on the
+    # same resource. Empty = use foundry_agent_model. Project default gpt-6-sol.
+    judge_model: str = "gpt-6-sol"
     foundry_api_key: str = ""
 
     # Azure Foundry / Voice Live resource. The browser never talks to it directly: the backend's
@@ -131,10 +135,11 @@ class Settings(BaseSettings):
     sop_embedding_api_version: str = "2024-10-21"
     # Model Voice Live runs the session on (MODEL mode). Voice Live only accepts models it hosts
     # natively in the resource's region (Learn: Speech regions → Voice Live tab) — NOT arbitrary
-    # deployments. Project default gpt-5-mini (second choice gpt-4.1-mini); both live-verified on
-    # Sweden Central 2026-09-23. gpt-5.6-luna/sol, gpt-5.4-mini and gpt-6-* are rejected there
-    # ("Model X is not supported in this region"). Real value: persona.model → DB master → .env.
-    voice_live_default_model: str = "gpt-5-mini"
+    # deployments. Project default gpt-6-luna; gpt-6-luna, gpt-6-sol and gpt-5-mini are all accepted
+    # on Sweden Central (probed 2026-10-15, scripts/voice_live_model_probe.py — the list drifts, so
+    # re-probe a new region). A rejected model fails with "Model X is not supported in this region".
+    # Real value: persona.model → DB master → .env.
+    voice_live_default_model: str = "gpt-6-luna"
     # Voice Live realtime api-version. Classic Foundry agents (what agent-sync currently creates)
     # require 2026-01-01-preview or 2025-10-01 — api-version 2026-04-10 and above reject them with
     # "Classic foundry agent is not supported" (live-verified 2026-08-11, swedencentral). The GA

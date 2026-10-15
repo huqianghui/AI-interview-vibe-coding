@@ -143,16 +143,22 @@ export function ConnectionTab({ state, guard }: { state: ConnectionTabState; gua
           </div>
 
           <Text weight="semibold">
-            Inference model — judge and scoring always; the agent only as a fallback
+            Inference model — the agent's fallback, and judge and scoring when no judge model is set
           </Text>
           <Body1>
             A <strong>deployment</strong> in this resource — judge, scoring and the Foundry agent
             all address models by deployment name, so your own deployments are exactly right here.
-            Judge and scoring always use this value. The digital-human agent uses it only when its
-            persona has no model of its own: a model picked in the agent editor overrides it, and a
-            synced persona usually has one, because reconcile pulls the live agent's model onto the
-            persona. Changing this does not rewrite those — that would erase a deliberate choice.
+            The digital-human agent uses it only when its persona has no model of its own: a model
+            picked in the agent editor overrides it, and a synced persona usually has one, because
+            reconcile pulls the live agent's model onto the persona. Changing this does not rewrite
+            those — that would erase a deliberate choice. Judge and scoring use the deployment's
+            <strong> JUDGE_MODEL</strong> setting when it is set, and this value otherwise.
           </Body1>
+          {cfg?.judge_model && (
+            <Caption1 data-testid="cfg-judge-model">
+              Judge and scoring currently run on: <strong>{cfg.judge_model}</strong>
+            </Caption1>
+          )}
 
           {/* Model: dropdown once options are loaded, else a text input fallback. */}
           {modelOptions.length > 0 ? (
@@ -172,7 +178,7 @@ export function ConnectionTab({ state, guard }: { state: ConnectionTabState; gua
           ) : (
             <Input
               value={cfgModel}
-              placeholder="Model / deployment (e.g. gpt-5-mini) — or Load options above"
+              placeholder="Model / deployment (e.g. gpt-6-luna) — or Load options above"
               onChange={(_, d) => setCfgModel(d.value)}
               data-testid="cfg-model"
             />

@@ -239,6 +239,11 @@
             "title": "Is Active",
             "type": "boolean"
           },
+          "judge_model": {
+            "default": "",
+            "title": "Judge Model",
+            "type": "string"
+          },
           "knowledge_base": {
             "title": "Knowledge Base",
             "type": "string"
