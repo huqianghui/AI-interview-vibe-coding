@@ -4,7 +4,9 @@ Status: APPROVED (2026-10-15). Owner answers so far: the backend managed identit
 Log Analytics read role; the tab's "network info" is a probe from the admin's own browser (option a);
 cross-session aggregates stay in a workbook, not in the app; the Operation id is recorded on the
 interview and shown in the admin Results (with Open in Performance), instead of the candidate having
-to report it; the candidate's interview page shows NO Operation id.
+to report it; the candidate's interview page shows NO Operation id. Revised the same day: ONE fixed
+Operation id per interview, derived from the interview id (no table, no backfill: no interview
+predates it that matters).
 
 ## Context
 
@@ -26,37 +28,34 @@ and to one example operation.
 | Portal links | static README links, our tenant/subscription | `README.md:42-44` |
 | Backend MI roles | AcrPull, Storage Blob Data Reader (+ storage writers) | `infra/azure/modules/role-assignments.bicep`, `storage.bicep` |
 
-One interview spans SEVERAL operations: a reload, a reconnect after a network drop, or a Restart each
-open a new page view / WS with a new trace id. Those are exactly the interviews with performance
-problems, so one id per interview is not enough.
+Left alone, one interview spans SEVERAL operations: a reload or a route change starts a new trace id.
+Those are exactly the interviews with performance problems, so the page pins one id per interview.
 
 ## Proposed Change
 
 ```
-#1 Record operation ids on the session ─> #2 Results column + per-interview links ─> #3 Performance tab
-                                          (#4 MI role + link config, needed by #3's lookup links)
+#1 Fixed operation id per interview ─> #2 Results column + Open in Performance ─> #3 Performance tab
+                                       (#4 MI role + link config, needed by #3's lookup links)
 ```
 
-### 1. Record operation ids (backend)
+### 1. One fixed Operation id per interview (frontend)
 
-- New table `interview_operations`: `interview_id` FK (cascade delete), `operation_id CHAR(32)`,
-  `first_seen_at`, `last_seen_at`, `source` (`voice_ws` | `api`); unique `(interview_id, operation_id)`.
-- Written when the voice WS opens (trace id parsed from its `traceparent`, same validation as
-  `parent_context`) and on interview `/start`, `/answer`, `/complete` (from the request's
-  `traceparent` header). Upsert = insert or bump `last_seen_at`. Best effort: a missing or malformed
-  `traceparent` (telemetry off, SDK not loaded yet) writes nothing and never fails the request.
-- A table, not a JSON column: a reconnect storm must not rewrite one growing row, and the Results query
-  can count ids without parsing.
-- Ids only. No text, same rule as the rest of the telemetry.
+- Operation id = the interview id (a UUID4) without its dashes: 32 hex, a valid W3C trace id.
+- The interview page pins it as soon as it knows the interview id (`getTraceCtx().setTraceId`), and
+  again after every page view the route tracker records (it resets the trace id). From then on every
+  `/api` call, every voice WS (its `traceparent`) and the backend spans parented on them carry it,
+  through reloads, reconnects and WS rebuilds.
+- Not covered, by design: telemetry before the interview exists (sign-in, the `/start` call that
+  creates it) stays on the page's own id. A Restart is a NEW interview, so a new id.
+- No table, no backfill (owner, 2026-10-15). The backend computes the id where it shows it.
 
 ### 2. Results: Operation id column
 
-- Results table gains an **Operation id** column: the most recent id (short form, 8 chars), "+N" when
-  the interview had more, a copy button, and an **Open in Performance** action. The row carries no
-  portal links itself (table design rule: rows stay clean); the lookup lives in one place, #3.
+- Results table gains an **Operation id** column: the id (short form, 8 chars), a copy button (full
+  id) and an **Open in Performance** action. The row carries no portal links itself (table design
+  rule: rows stay clean); the lookup lives in one place, #3.
 - Open in Performance switches to the Performance tab with the id filled into its lookup and run
-  (`/admin?tab=performance&op=<id>`, so the URL is shareable between admins). For an interview with
-  several ids, the lookup shows all of them (see #3).
+  (`/admin?tab=performance&op=<id>`, so the URL is shareable between admins).
 - Admin only. The candidate history view does not show it.
 
 ### 3. Performance tab (admin)
@@ -73,8 +72,7 @@ Three cards:
     opening a real avatar session (rate-limited to ~3 per minute, measured). The workbook already
     reports ICE/STUN/TURN for real interviews.
 - **Look up an Operation id**: paste an id, or arrive from Results (#2). Shows which interview it
-  belongs to (from #1, link back to its result), that interview's other ids with times, and for the
-  chosen id three links, built by the backend from config (#4), never hardcoded:
+  belongs to (the id with its dashes put back, when that interview exists) and three links, built by the backend from config (#4), never hardcoded:
   1. **Logs**: the raw-trace query of README line 43 with this id. The `q/` segment is the query
      gzipped + base64; built in the backend with `gzip` + `base64`.
   2. **End-to-end transaction**: needs `eventId` + `timestamp`, not the operation id. The backend
@@ -84,7 +82,7 @@ Three cards:
   3. **Workbook**: UNVERIFIED whether a portal URL can pre-fill a workbook parameter (Microsoft
      documents parameter passing only between workbooks). Verify live during implementation; if it
      cannot, the link opens the workbook and the copy button supplies the id to paste.
-  An id not recorded on any interview (e.g. an admin page view) still gets the three links.
+  An id that is no interview's (e.g. an admin page view) still gets the three links.
 - **Workbooks**: links to the Voice performance workbook and to a cross-session aggregates view (the
   existing workbook's cross-session sections, or a new workbook if those are not enough; the workbook is
   not part of this PR).
@@ -105,13 +103,14 @@ Three cards:
 
 ## Testing
 
-- Backend: traceparent parse/upsert (valid, malformed, absent, repeat bumps `last_seen_at`), link
-  building (Logs `q/` round-trips through gunzip), query client mocked in CI, REAL Logs query locally
+- Backend: id ↔ interview mapping (valid, malformed, unknown), link building (Logs `q/` round-trips through gunzip), query client mocked in CI, REAL Logs query locally
   (owner rule: real provider locally).
-- Frontend: Results column (one id, many ids, none) + Open in Performance (tab + `op` param), lookup
+- Frontend: pinning (set after the interview id is known, re-set after a route change, unchanged
+  without the SDK), Results column + Open in Performance (tab + `op` param), lookup
   card (recorded id, unrecorded id, link missing for absent config), network check with a mocked fetch.
-- Live: run one interview with a reconnect on Azure, confirm two ids recorded and all three links open
-  the right operation.
+- Live: run one interview with a reload and a reconnect on Azure; confirm everything after `/start`
+  is under the one id and all three links open it (incl. that the end-to-end view copes with a whole
+  interview in one operation).
 
 ## Decided
 
@@ -120,4 +119,4 @@ Three cards:
 
 ## Ship
 
-One feature PR (new table + migration + route + tab), full `/ship` flow.
+One feature PR (new admin route + tab + infra role), full `/ship` flow.

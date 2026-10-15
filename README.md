@@ -44,7 +44,11 @@ The HTML report is public and does not require Azure access.
 | **End-to-end transaction details** of the same example interview: App Insights' own Gantt view, every step from the page view through each browser call, backend request and Azure call, with its duration | [Open the end-to-end view](https://ms.portal.azure.com/#view/AppInsightsExtension/DetailsV2Blade/DataModel~/%7B%22eventId%22%3A%223df89da7-c482-11f1-a04b-7ced8d3e83c6%22%2C%22timestamp%22%3A%222026-10-10T08%3A11%3A51.052Z%22%7D/ComponentId~/%7B%22Name%22%3A%22appi-aiinterview-public%22%2C%22ResourceGroup%22%3A%22rg-aiinterview-public-swedencentral%22%2C%22SubscriptionId%22%3A%227a03e9b8-18d6-48e7-b186-0ec68da9e86f%22%7D) |
 | **Interactive performance report**: Application Insights and workbook analysis with playable interview timelines | [Open the report](https://huqianghui.github.io/AI-interview-vibe-coding/) |
 
-In the workbook, pick an interview (the newest is selected by default) or paste an **Operation id**.
+Every interview is one operation, and its **Operation id** is the interview id without the dashes.
+In the app, the admin **Performance** tab looks an Operation id up and links to all three views
+above for it (Interview results shows the id on every row, one click away), and runs a network check
+from the admin's browser. In the workbook, pick an interview (the newest is selected by default) or
+paste an **Operation id**.
 What each metric means: [`docs/voice-performance-telemetry.md`](docs/voice-performance-telemetry.md).
 
 ## Key scenarios

@@ -280,16 +280,22 @@ Azure OpenAI / blob / SQL; the voice socket → its backend `voice.session`); it
 links open App Insights' own end-to-end transaction view (a Gantt chart). **Full trace of this
 interview** is the same items as a flat list. In App Insights itself:
 
-1. Find the interview's operation id: **Logs**, then
-   `customEvents | where tostring(customDimensions.interview_id) == "<interview id>" | distinct operation_Id`
-   (or copy `operation_Id` from any workbook row).
+1. Find the interview's operation id: it is the interview id without the dashes (see below). The
+   admin **Performance** tab shows it, links straight to the views below, and **Interview results**
+   has it on every row.
 2. **Investigate → Transaction search**, paste the operation id in the search box, open any result:
    the **End-to-end transaction details** view shows the whole tree (browser call → backend request
    → its dependencies) with a timeline. Or in **Logs**:
    `union * | where operation_Id == "<operation id>" | order by timestamp asc`.
 
-One interview is normally one operation: the browser's trace id lasts for the page view, and the
-backend joins it through `traceparent` (REST headers, the WebSocket query string).
+One interview is one operation, with one fixed id. A fresh interview adopts the page's trace id as
+its own id (the backend reads it from the `/start` call's `traceparent`), so the sign-in page,
+`/start` and the interview share it; the interview page then pins it as the SDK's trace id for the
+rest of the interview, putting it back after every route change, so a reload, a reconnect or a
+WebSocket rebuild stays in the same operation. A Restart starts a new operation first and the new
+interview adopts that. The backend joins through `traceparent` (REST headers, the WebSocket query
+string). With no usable trace id (telemetry off) the interview gets a random UUID and the page pins
+that instead.
 
 ## Querying directly
 
