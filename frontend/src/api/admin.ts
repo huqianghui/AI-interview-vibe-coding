@@ -795,16 +795,28 @@ export async function fetchDownloadProbe(kb: number): Promise<{ bytes: number; m
     const bytes = (await resp.arrayBuffer()).byteLength;
     return { bytes, ms: performance.now() - started };
   }
+  const headers = performance.now();
   let started: number | null = null;
-  let bytes = 0;
+  let total = 0;
+  let tail = 0;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
+    total += value.byteLength;
     if (started === null) started = performance.now();
-    else bytes += value.byteLength;
+    else tail += value.byteLength;
   }
-  return { bytes, ms: started === null ? 0 : performance.now() - started };
+  const end = performance.now();
+  // A body that came in one or two big chunks (a buffering proxy) leaves too little after the
+  // first to time: then the whole body from the headers is the better reading.
+  if (started === null || tail < TAIL_MIN_BYTES || end - started < TAIL_MIN_MS) {
+    return { bytes: total, ms: end - headers };
+  }
+  return { bytes: tail, ms: end - started };
 }
+
+const TAIL_MIN_BYTES = 256 * 1024;
+const TAIL_MIN_MS = 20;
 
 /** The interviewer and settings a grade is compared with. Mirrors `CurrentConfig`. */
 export interface CurrentConfig {

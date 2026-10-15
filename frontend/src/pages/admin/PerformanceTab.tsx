@@ -151,12 +151,12 @@ type T = (key: string, o?: Record<string, unknown>) => string;
 
 function reasonText(t: T, r: GradeReason): string {
   if (r.metric === "udp") return t("admin.performance.reason.udp");
-  const value =
-    r.metric === "down"
-      ? formatRate(r.value ?? 0)
-      : r.metric === "loss"
-        ? (r.value ?? 0).toFixed(1)
-        : Math.round(r.value ?? 0);
+  const raw = r.value ?? 0;
+  // One more decimal where rounding would print the limit itself ("RTT 150 ms > 150 ms").
+  const digits = r.metric === "loss" ? 1 : 0;
+  const atLimit = raw.toFixed(digits) === (r.limit ?? 0).toFixed(digits);
+  const shown = raw.toFixed(atLimit ? digits + 1 : digits);
+  const value = r.metric === "down" ? formatRate(raw) : shown;
   const limit = r.metric === "down" ? formatRate(r.limit ?? 0) : r.limit;
   const key = r.row === "D" ? `${r.metric}D` : r.metric;
   return t(`admin.performance.reason.${key}`, { value, limit, row: r.row });
@@ -199,7 +199,11 @@ function GradeView({
     ...(result.boundary ? [t("admin.performance.noteBoundary")] : []),
     ...notes,
   ];
-  const advice = config ? adviseConfig(result.grade, config) : [];
+  // A D from the browser's downlink alone (a reading that underestimates distant links) advises
+  // from what the other numbers give, so a slow probe never demands voice-only.
+  const adviceGrade =
+    result.downlinkOnly && result.withoutDownlink ? result.withoutDownlink : result.grade;
+  const advice = config ? adviseConfig(adviceGrade, config) : [];
   return (
     <span className={local.gradeLayout}>
       <span className={`${local.grade} ${local.gradeMain}`} data-testid={testId}>

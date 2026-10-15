@@ -83,6 +83,20 @@ describe("gradeNetwork", () => {
     expect(notOnly?.withoutDownlink).toBeUndefined();
   });
 
+  it("not 'downlink only' in the downlink gap, nor when the rest is D anyway", () => {
+    // 1000 to 1500 kbit/s is the C/D gap, not D's downlink trigger.
+    expect(gradeNetwork(net({ rttMs: 250, downKbps: 1200 }))).toMatchObject({
+      grade: "D",
+      boundary: true,
+      downlinkOnly: false,
+    });
+    // RTT in the 500 to 600 gap makes the rest D too: nothing better to point at.
+    expect(gradeNetwork(net({ rttMs: 550, downKbps: 800 }))).toMatchObject({
+      grade: "D",
+      downlinkOnly: false,
+    });
+  });
+
   it("no RTT (or not a number), no grade", () => {
     expect(gradeNetwork(net({ rttMs: null }))).toBeNull();
     expect(gradeNetwork(net({ rttMs: Number.NaN }))).toBeNull();

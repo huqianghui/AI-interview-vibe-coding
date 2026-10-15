@@ -154,7 +154,7 @@ export function measureStun(timeoutMs = 5000): Promise<StunReach> {
 export async function measureDownlink(kb = 2048): Promise<number | null> {
   try {
     const { bytes, ms } = await fetchDownloadProbe(kb);
-    return ms > 0 ? Math.round((bytes * 8) / ms) : null;
+    return ms > 0 && bytes > 0 ? Math.round((bytes * 8) / ms) : null;
   } catch {
     return null;
   }

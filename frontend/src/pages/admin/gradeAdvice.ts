@@ -1,6 +1,6 @@
 /**
  * What to change, comparing a grade's recommended starting form and settings
- * (docs/network-grades.md §2) with the current ones: the interviewer's digital human (video,
+ * (docs/network-grades.md §2, verbatim: change one, change the other) with the current ones: the interviewer's digital human (video,
  * photo, none) and the deployment's avatar bitrate and uplink sample rate. Each line is a change
  * the grade calls for, or a note that something already matches or could be better.
  */
@@ -47,7 +47,9 @@ export function adviseConfig(grade: Grade, config: CurrentConfig): Advice[] {
   const usesAvatar = who !== null && who.avatar !== "none" && grade !== "D" && grade !== "E";
   const cap = MAX_BITRATE[grade];
   const bitrate = config.avatar_video_bitrate;
-  if (usesAvatar && cap !== null && (bitrate === null || bitrate > cap)) {
+  // C needs the cap; B is fine at Azure's default and only flags a cap set above 500 k.
+  const overCap = cap !== null && (bitrate === null ? grade === "C" : bitrate > cap);
+  if (usesAvatar && overCap && cap !== null) {
     // A separate key when unset: the text says "not set (Azure's 2 Mbit/s)" in each language.
     const key = grade === "C" ? "setBitrate" : "bitrateOptional";
     out.push({

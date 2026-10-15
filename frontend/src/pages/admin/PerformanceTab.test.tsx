@@ -446,6 +446,33 @@ describe("the network an interview ran on", () => {
     );
   });
 
+  it("an id with no recorded interviewer says it falls back to the default", async () => {
+    vi.mocked(admin.getCurrentConfig).mockResolvedValue({
+      source: "default_fallback",
+      interviewer: { id: "p1", name: "Sakura", avatar: "photo", character: "sakura" },
+      avatar_video_bitrate: null,
+      input_sampling_rate: 16000,
+    });
+    renderAt(`/admin?tab=performance&op=${OP}`);
+    const advice = await screen.findByTestId("performance-interview-grade-advice");
+    expect(advice).toHaveTextContent(
+      "No interviewer is recorded for this interview; compared with the default " +
+        "interviewer, Sakura:",
+    );
+    expect(advice).toHaveTextContent("Matches the recommendation: nothing to change.");
+  });
+
+  it("a value that rounds to the limit gets a decimal (never '150 > 150')", async () => {
+    vi.mocked(admin.getInterviewNetwork).mockResolvedValue({
+      ...NETWORK,
+      media: { ...NETWORK.media!, rtt_p95_ms: 150.4 },
+    });
+    renderAt(`/admin?tab=performance&op=${OP}`);
+    expect(await screen.findByTestId("performance-interview-grade-why")).toHaveTextContent(
+      "RTT 150.4 ms > 150 ms",
+    );
+  });
+
   it("shows the five grades beside it, the current one marked", async () => {
     renderAt(`/admin?tab=performance&op=${OP}`);
     await screen.findByTestId("performance-interview-grade");
@@ -516,6 +543,32 @@ describe("probe helpers", () => {
     made[1].onicecandidate?.({ candidate: host });
     made[1].onicecandidate?.({ candidate: null });
     expect(await blocked).toEqual({ ok: false, reason: expect.stringMatching(/3478/) });
+    vi.unstubAllGlobals();
+  });
+
+  it("fetchDownloadProbe times after the first chunk, or the whole body in one", async () => {
+    const stream = (chunks: number[]) =>
+      new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          const next = chunks.shift();
+          if (next === undefined) controller.close();
+          else {
+            await new Promise((r) => setTimeout(r, 15));
+            controller.enqueue(new Uint8Array(next));
+          }
+        },
+      });
+    const serve = (chunks: number[]) =>
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(stream(chunks))));
+    // Many chunks: the first is left out of both the bytes and the time.
+    serve([64 * 1024, 300 * 1024, 300 * 1024]);
+    const tail = await admin.fetchDownloadProbe(2048);
+    expect(tail.bytes).toBe(600 * 1024);
+    // One big chunk: the whole body, timed from the headers, never "0 kbit/s".
+    serve([2048 * 1024]);
+    const whole = await admin.fetchDownloadProbe(2048);
+    expect(whole.bytes).toBe(2048 * 1024);
+    expect(whole.ms).toBeGreaterThan(0);
     vi.unstubAllGlobals();
   });
 

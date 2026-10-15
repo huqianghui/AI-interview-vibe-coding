@@ -130,7 +130,7 @@ One feature PR (new admin route + tab + infra role), full `/ship` flow.
 
 1. **Live network check.** Starts when the tab opens and keeps sampling while it is open and the
    page visible: API round trip every 2 s (a one-minute line chart with median and p95), voice WS
-   probe every 15 s, a 512 KiB download every 30 s, a STUN Binding to Azure's relay every 60 s.
+   probe every 15 s, a download (2 MiB every 2 min since revision 3), a STUN Binding to Azure's relay every 60 s.
 2. **The workbook once.** The per-interview workbook row is gone (the portal cannot pre-fill it, so
    it was the same generic link twice); one Workbook card says how to use it for one interview and
    across interviews.

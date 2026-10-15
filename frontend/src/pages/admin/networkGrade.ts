@@ -83,7 +83,7 @@ export function gradeNetwork(input: GradeInput): GradeResult | null {
     boundary,
     estimated: grade === "E" ? false : estimated,
     reasons,
-    downlinkOnly: grade === "D" && reasons.length > 0 && reasons.every((r) => r.metric === "down"),
+    downlinkOnly: false,
   });
   if (udpOk === false) {
     return result("E", [{ metric: "udp", value: null, limit: 3478, row: "E" }]);
@@ -99,8 +99,13 @@ export function gradeNetwork(input: GradeInput): GradeResult | null {
   }
   if (triggers.length) {
     const graded = result("D", triggers);
-    if (graded.downlinkOnly) {
-      graded.withoutDownlink = gradeNetwork({ ...input, downCounts: false })?.grade;
+    if (triggers.every((r) => r.metric === "down")) {
+      const rest = gradeNetwork({ ...input, downCounts: false })?.grade;
+      // Only worth saying when the other numbers alone give a better start.
+      if (rest && rest !== "D") {
+        graded.downlinkOnly = true;
+        graded.withoutDownlink = rest;
+      }
     }
     return graded;
   }

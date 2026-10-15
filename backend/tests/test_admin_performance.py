@@ -734,3 +734,33 @@ async def test_config_of_an_unknown_id_falls_back_to_the_default_and_a_bad_id_is
 async def test_config_with_no_interviewer_at_all(client, admin_auth):
     body = (await client.get("/admin/performance/config", headers=admin_auth)).json()
     assert body["interviewer"] is None
+
+
+async def test_config_when_the_pinned_interviewer_cannot_be_read(
+    client, admin_auth, db_session, monkeypatch
+):
+    """The foreign key sets a deleted persona's pins to NULL, so this is the guard for a pin that
+    still cannot be read (a race with the delete): the default stands in, said so."""
+    from app.services import persona_service as psvc
+
+    await psvc.create_persona(db_session, name="Pinned", character="lisa", is_default=True)
+    headers = await mint_candidate_headers(client)
+    await client.post("/candidate/interview/start", headers={**headers, "traceparent": TRACEPARENT})
+    await psvc.create_persona(db_session, name="Now", character="amara", is_default=True)
+
+    async def _gone(db, persona_id):
+        raise psvc.PersonaNotFound(persona_id)
+
+    monkeypatch.setattr(psvc, "get_persona", _gone)
+    body = (
+        await client.get(f"/admin/performance/config?operation_id={TRACE}", headers=admin_auth)
+    ).json()
+    assert body["source"] == "default_fallback"
+    assert body["interviewer"]["name"] == "Now"
+
+
+async def test_config_bitrate_zero_reads_as_unset(client, admin_auth, monkeypatch):
+    settings = _settings(voice_live_avatar_video_bitrate=0)
+    monkeypatch.setattr("app.api.admin_performance.get_settings", lambda: settings)
+    body = (await client.get("/admin/performance/config", headers=admin_auth)).json()
+    assert body["avatar_video_bitrate"] is None

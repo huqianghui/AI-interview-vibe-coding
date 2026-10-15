@@ -21,8 +21,9 @@ describe("adviseConfig", () => {
   it.each([
     ["A", "video", []],
     ["A", "photo", ["videoPossible"]],
-    ["B", "photo", ["bitrateOptionalUnset"]],
-    ["B", "video", ["switchToPhoto!", "bitrateOptionalUnset"]],
+    // B is fine at Azure's default bitrate: no line for it unset.
+    ["B", "photo", []],
+    ["B", "video", ["switchToPhoto!"]],
     ["B", "none", ["photoPossible"]],
     ["C", "photo", ["setBitrateUnset!"]],
     ["C", "video", ["switchToPhoto!", "setBitrateUnset!"]],
@@ -39,6 +40,13 @@ describe("adviseConfig", () => {
     expect(adviseConfig("C", config("photo", { avatar_video_bitrate: 500000 }))).toEqual([
       { key: "setBitrate", params: { value: 300000, current: 500000 }, change: true },
     ]);
+  });
+
+  it("B flags only a cap set above 500 kbit/s", () => {
+    expect(keys("B", config("photo", { avatar_video_bitrate: 800000 }))).toEqual([
+      "bitrateOptional",
+    ]);
+    expect(keys("B", config("photo", { avatar_video_bitrate: 400000 }))).toEqual([]);
   });
 
   it("A notes a bitrate cap it does not need", () => {

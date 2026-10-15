@@ -18,6 +18,7 @@ from app.config import get_settings
 from app.db import get_db
 from app.dependencies import require_role
 from app.models.interview import InterviewSession
+from app.models.persona import InterviewerPersona
 from app.schemas.history import InterviewResultItem
 from app.services import interview_history_service, performance_service, persona_service
 from app.services.agents.voice_live_metadata import is_photo_avatar
@@ -112,7 +113,7 @@ class CurrentConfig(BaseModel):
     input_sampling_rate: int
 
 
-# The download check: enough to time over a slow link, small enough to repeat every half minute.
+# The download check: enough to time over a slow link, small enough to repeat every two minutes.
 MAX_DOWNLOAD_KB = 2048
 
 
@@ -213,7 +214,7 @@ async def download(kb: Annotated[int, Query(ge=1, le=MAX_DOWNLOAD_KB)] = 256) ->
     )
 
 
-def _interviewer(persona) -> InterviewerOut | None:  # noqa: ANN001
+def _interviewer(persona: InterviewerPersona | None) -> InterviewerOut | None:
     if persona is None:
         return None
     character = (persona.character or "").strip()
@@ -253,6 +254,7 @@ async def current_config(
     return CurrentConfig(
         source=source,
         interviewer=_interviewer(persona),
-        avatar_video_bitrate=settings.voice_live_avatar_video_bitrate,
+        # 0 means unset, as in the proxy (``if settings.voice_live_avatar_video_bitrate``).
+        avatar_video_bitrate=settings.voice_live_avatar_video_bitrate or None,
         input_sampling_rate=settings.voice_live_input_sampling_rate,
     )
