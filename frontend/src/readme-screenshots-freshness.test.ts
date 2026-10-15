@@ -51,7 +51,9 @@ function recapturedFromCurrentSources(image: string): boolean {
   const entry = readLedger()[image];
   const imagePath = resolve(REPO, `docs/images/${image}`);
   if (!entry || !existsSync(imagePath)) return false;
-  return entry.sha256 === sha256(readFileSync(imagePath)) && entry.sources === sourcesFingerprint(REPO, image);
+  const current = sourcesFingerprint(REPO, image);
+  const sourcesMatch = entry.sources === current || entry.kept?.sources === current;
+  return entry.sha256 === sha256(readFileSync(imagePath)) && sourcesMatch;
 }
 
 describe("README screenshot freshness", () => {
@@ -66,7 +68,8 @@ describe("README screenshot freshness", () => {
         true,
       );
 
-      // An identical recapture from the current sources is current, whatever the commit times say.
+      // An identical recapture from the current sources is current, whatever the commit times say;
+      // so is an image the ledger records as deliberately kept against the current sources.
       if (recapturedFromCurrentSources(image)) return;
       const shotAt = lastCommit(imagePath);
       expect(shotAt, `${imagePath} has no commit history`).toBeGreaterThan(0);

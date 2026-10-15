@@ -60,4 +60,8 @@ export interface CaptureEntry {
   sha256: string;
   sources: string;
   capturedAt: string;
+  /** Set by hand when the owner keeps an image on purpose after its sources changed: why, and
+   *  the fingerprint of the sources it was kept against. Any later source change fails again. A
+   *  recapture rewrites the entry and drops this. */
+  kept?: { reason: string; sources: string };
 }

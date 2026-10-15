@@ -2,12 +2,20 @@
   "00-signin.png": {
     "sha256": "a81d038445967aa8aa76cd54d9c90cdd939bed934972577788e68a65ed60c138",
     "sources": "899955330fbd4fa19a0d5b419bb28d5ea24a45ff254505a568dff9c28bca109a",
-    "capturedAt": "2026-10-14T13:17:19.743Z"
+    "capturedAt": "2026-10-14T13:17:19.743Z",
+    "kept": {
+      "reason": "Owner 2026-10-15: the README keeps the Lisa capture on purpose (Lisa is the most widely used avatar and still right for documentation). Only the default interviewer moved to Sakura; the screen's layout did not change.",
+      "sources": "40e3cb0c07be7d0c1bbb281440988fdb62c0c1895d734c2606315ebc384af1b8"
+    }
   },
   "01-landing.png": {
     "sha256": "3385340d976877aa73d1d5b8d7a156c7b77d38a508c9658f164d8a0e8efe0298",
     "sources": "f22d3ddbaa86ec6dc89acbb410d5c31df475718319eebd626f7728919af91fba",
-    "capturedAt": "2026-10-14T13:17:21.618Z"
+    "capturedAt": "2026-10-14T13:17:21.618Z",
+    "kept": {
+      "reason": "Owner 2026-10-15: the README keeps the Lisa capture on purpose (Lisa is the most widely used avatar and still right for documentation). Only the default interviewer moved to Sakura; the screen's layout did not change.",
+      "sources": "da2ee040dd1d88efebaf39b6960a3a3c9d1df054a9d4313935c94f37d621f19d"
+    }
   },
   "01b-orientation.png": {
     "sha256": "7253bd1f2044884c909695b1f4ebe43802893363064e5d3fce6e6700f17eb23f",
