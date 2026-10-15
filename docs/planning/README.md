@@ -282,3 +282,6 @@ and `CHANGELOG.md`.
   saves reach every process; an admin Jobs tab; then scale-out to 3 uvicorn workers × max 2
   replicas with larger containers and PostgreSQL B2s (owner, 2026-10-11). Closes
   architecture-review deferred item 3. Recordings deliberately stay in the web process.
+- [`spec-admin-performance-tab.md`](spec-admin-performance-tab.md) — 后台 Performance 页：后端从
+  traceparent 记录每场面试的全部 Operation id，Results 里一键跳到 Performance 页查询（Logs / 端到端事务 /
+  workbook 链接）；管理员浏览器侧网络检测；候选人页面不显示 Operation id。
