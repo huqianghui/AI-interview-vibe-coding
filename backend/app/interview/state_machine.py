@@ -198,6 +198,7 @@ async def start_interview(
     persona_id: str | None = None,
     bank_id: str | None = None,
     bank_version_id: str | None = None,
+    session_id: str | None = None,
 ) -> InterviewSession:
     """Start a new interview — or resume the candidate's existing in-progress one.
 
@@ -220,6 +221,8 @@ async def start_interview(
         persona_id=persona_id,
         bank_id=bank_id,
         bank_version_id=bank_version_id,
+        # The page's operation id when the route chose one (performance_service.adoptable_id).
+        **({"id": session_id} if session_id else {}),
     )
     session.started_at = _now()
     db.add(session)

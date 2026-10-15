@@ -470,6 +470,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/performance/links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Links */
+        get: operations["links_admin_performance_links_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/performance/operations/{operation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lookup
+         * @description The interview an operation id belongs to, and its Logs and workbook links. 422 when the id
+         *     is not 32 hex (an interview id with its dashes is accepted too).
+         */
+        get: operations["lookup_admin_performance_operations__operation_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/performance/operations/{operation_id}/transaction": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Transaction
+         * @description The end-to-end transaction link, found through the Logs query API (a few seconds).
+         */
+        get: operations["transaction_admin_performance_operations__operation_id__transaction_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/personas": {
         parameters: {
             query?: never;
@@ -2244,6 +2302,11 @@ export interface components {
             has_report: boolean;
             /** Id */
             id: string;
+            /**
+             * Operation Id
+             * @default
+             */
+            operation_id: string;
             /** Outcome */
             outcome: string | null;
             /** Persona Id */
@@ -2386,12 +2449,34 @@ export interface components {
             /** Username */
             username: string;
         };
+        /** OperationLookup */
+        OperationLookup: {
+            interview: components["schemas"]["InterviewResultItem"] | null;
+            /** Logs Url */
+            logs_url: string | null;
+            /** Operation Id */
+            operation_id: string;
+            /** Workbook Url */
+            workbook_url: string | null;
+        };
         /** Option */
         Option: {
             /** Label */
             label: string;
             /** Value */
             value: string;
+        };
+        /**
+         * PerformanceLinks
+         * @description What this deployment can link to (an empty setting hides the link that needs it).
+         */
+        PerformanceLinks: {
+            /** Logs */
+            logs: boolean;
+            /** Transaction */
+            transaction: boolean;
+            /** Workbook Url */
+            workbook_url: string | null;
         };
         /** PersonaCreate */
         PersonaCreate: {
@@ -3149,6 +3234,18 @@ export interface components {
              */
             token_type: string;
         };
+        /** TransactionLink */
+        TransactionLink: {
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "found" | "not_found" | "unavailable";
+            /** Url */
+            url?: string | null;
+        };
         /** TranscriptTurn */
         TranscriptTurn: {
             /** Content */
@@ -3839,6 +3936,88 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JobOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    links_admin_performance_links_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PerformanceLinks"];
+                };
+            };
+        };
+    };
+    lookup_admin_performance_operations__operation_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationLookup"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    transaction_admin_performance_operations__operation_id__transaction_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TransactionLink"];
                 };
             };
             /** @description Validation Error */
@@ -5332,6 +5511,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
+                traceparent?: string | null;
                 "X-Anon-Session"?: string | null;
             };
             path?: never;
@@ -5647,6 +5827,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
+                traceparent?: string | null;
                 "X-Anon-Session"?: string | null;
             };
             path: {

@@ -118,15 +118,26 @@ class _NoSpan:
 _TRACEPARENT = re.compile(r"00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}")
 
 
+def _well_formed(traceparent: str | None) -> bool:
+    """The right shape, and neither id all zeros (invalid by the spec)."""
+    if not traceparent or not _TRACEPARENT.fullmatch(traceparent):
+        return False
+    return traceparent[3:35] != "0" * 32 and traceparent[36:52] != "0" * 16
+
+
+def trace_id(traceparent: str | None) -> str | None:
+    """The trace id (App Insights' operation id) a well-formed ``traceparent`` carries, or None.
+    Independent of whether this process has telemetry on: the browser's trace exists either way."""
+    return traceparent[3:35] if _well_formed(traceparent) else None
+
+
 def parent_context(traceparent: str | None) -> Any:
     """The OpenTelemetry context a well-formed W3C ``traceparent`` names, or None.
 
     For a caller that cannot send it as a header: the browser's voice WebSocket passes it in the
     query string, so the session's span joins the page's trace. Anything malformed is ignored rather
-    than trusted, and so is an all-zero id (invalid by the spec)."""
-    if _tracer is None or not traceparent or not _TRACEPARENT.fullmatch(traceparent):
-        return None
-    if traceparent[3:35] == "0" * 32 or traceparent[36:52] == "0" * 16:
+    than trusted."""
+    if _tracer is None or not _well_formed(traceparent):
         return None
     from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 

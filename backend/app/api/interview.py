@@ -13,7 +13,7 @@ import json
 import logging
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +30,7 @@ from app.models.job import Job
 from app.models.judge_event import JUDGE_TRIGGERS
 from app.services import (
     assignment_service,
+    performance_service,
     persona_service,
     recording_service,
     sop_document_service,
@@ -328,29 +329,38 @@ async def _owned_interview(
 async def start(
     candidate: AnonymousCandidateSession = Depends(get_anonymous_session),
     db: AsyncSession = Depends(get_db),
+    traceparent: str | None = Header(default=None),
 ) -> InterviewOut:
     # Resume takes precedence and PRESERVES the session's original engine: a persona flipped to a
     # different brain after an interview started must not re-interpret that live session (that's why
     # brain_mode is a per-session snapshot). Only a fresh start reads the default persona's engine.
     existing = await state_machine.find_resumable_interview(db, candidate.id)
-    session = existing if existing is not None else await _start_fresh(db, candidate)
+    session = existing if existing is not None else await _start_fresh(db, candidate, traceparent)
     question = await _current_question(db, session)
     return _to_interview_out(session, question, **(await _persona_voice_flags(db, session)))
 
 
-async def _start_fresh(db: AsyncSession, candidate: AnonymousCandidateSession) -> InterviewSession:
+async def _start_fresh(
+    db: AsyncSession, candidate: AnonymousCandidateSession, traceparent: str | None
+) -> InterviewSession:
     """Create a brand-new interview (never resumes) on the candidate's interviewer and bank.
 
     #187: the user's assignment, else the default, resolved once and pinned onto the session with
     the persona's CURRENT engine and turn contract (review D6): a later edit of the persona, the
     default, or the assignment never re-interprets this interview.
+
+    Its id is the page's operation id when that is usable (performance_service.adoptable_id), so
+    the interview and its App Insights trace share one id from sign-in on.
     """
+    session_id = await performance_service.adoptable_id(db, traceparent)
     assigned = await assignment_service.resolve_for_candidate(db, candidate)
     persona = assigned.persona
     persona_id = persona.id if persona else None
     brain = persona.interview_brain if persona else "bank"
     if brain == "external":
-        return await external_runner.start_interview(db, candidate.id, persona_id=persona_id)
+        return await external_runner.start_interview(
+            db, candidate.id, persona_id=persona_id, session_id=session_id
+        )
     turn_mode = persona.bank_turn_mode if persona else "linear"
     return await state_machine.start_interview(
         db,
@@ -359,6 +369,7 @@ async def _start_fresh(db: AsyncSession, candidate: AnonymousCandidateSession) -
         persona_id=persona_id,
         bank_id=assigned.bank_id,
         bank_version_id=assigned.bank_version_id,
+        session_id=session_id,
     )
 
 
@@ -367,6 +378,7 @@ async def restart(
     interview_id: str,
     candidate: AnonymousCandidateSession = Depends(get_anonymous_session),
     db: AsyncSession = Depends(get_db),
+    traceparent: str | None = Header(default=None),
 ) -> InterviewOut:
     """Abandon the candidate's LIVE interview and start a fresh one — the "重新开始" button.
 
@@ -397,7 +409,7 @@ async def restart(
         await state_machine.abandon_interview(db, session)
     except state_machine.InterviewStateError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    fresh = await _start_fresh(db, candidate)
+    fresh = await _start_fresh(db, candidate, traceparent)
     question = await _current_question(db, fresh)
     return _to_interview_out(fresh, question, **(await _persona_voice_flags(db, fresh)))
 

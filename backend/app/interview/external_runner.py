@@ -284,7 +284,11 @@ async def _mark_recovery_required(db: AsyncSession, session: InterviewSession) -
 
 
 async def start_interview(
-    db: AsyncSession, candidate_session_id: str, *, persona_id: str | None = None
+    db: AsyncSession,
+    candidate_session_id: str,
+    *,
+    persona_id: str | None = None,
+    session_id: str | None = None,
 ) -> InterviewSession:
     """Start (or resume) an external-brain interview for a candidate.
 
@@ -314,6 +318,8 @@ async def start_interview(
         external_phase="awaiting",
         turn_version=0,
         persona_id=persona_id,
+        # The page's operation id when the route chose one (performance_service.adoptable_id).
+        **({"id": session_id} if session_id else {}),
     )
     session.started_at = _now()
     db.add(session)
