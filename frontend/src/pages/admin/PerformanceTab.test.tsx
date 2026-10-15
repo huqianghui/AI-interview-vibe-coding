@@ -110,6 +110,21 @@ beforeEach(() => {
   });
   vi.spyOn(admin, "lookupOperation").mockResolvedValue(LOOKUP);
   vi.spyOn(admin, "getInterviewNetwork").mockResolvedValue(NETWORK);
+  vi.spyOn(admin, "getCurrentConfig").mockImplementation(async (operationId?: string) =>
+    operationId
+      ? {
+          source: "interview",
+          interviewer: { id: "p2", name: "Lisa", avatar: "video", character: "lisa" },
+          avatar_video_bitrate: null,
+          input_sampling_rate: 16000,
+        }
+      : {
+          source: "default",
+          interviewer: { id: "p1", name: "Sakura", avatar: "photo", character: "sakura" },
+          avatar_video_bitrate: null,
+          input_sampling_rate: 16000,
+        },
+  );
   // The live check: deterministic stand-ins for the network.
   vi.spyOn(probe, "apiRttOnce").mockResolvedValue(42);
   vi.spyOn(probe, "measureWs").mockResolvedValue({ ok: true, ms: 120 });
@@ -303,6 +318,25 @@ describe("live network check", () => {
     expect(screen.getByTestId("performance-browser")).toHaveTextContent("Not available");
   });
 
+  it("compares this browser's grade with the default interviewer", async () => {
+    const { LIVE_CHECK } = await import("./usePerformanceTab");
+    const saved = LIVE_CHECK.rttMs;
+    LIVE_CHECK.rttMs = 20;
+    try {
+      renderAt("/admin?tab=performance");
+      const advice = await screen.findByTestId("performance-live-grade-advice");
+      expect(advice).toHaveTextContent(
+        "Compared with the default interviewer, Sakura (no interview chosen):",
+      );
+      // Grade A suits a video avatar; Sakura is a photo avatar: a note, not a must.
+      expect(advice).toHaveTextContent(/Sakura has no video avatar/);
+      const live = screen.getByTestId("performance-live-grade");
+      expect(live).toHaveTextContent(/Recomputed every 2 s/);
+    } finally {
+      LIVE_CHECK.rttMs = saved;
+    }
+  });
+
   it("keeps sampling, so the chart moves and the grade appears", async () => {
     const { LIVE_CHECK } = await import("./usePerformanceTab");
     const saved = LIVE_CHECK.rttMs;
@@ -393,10 +427,32 @@ describe("the network an interview ran on", () => {
     expect(await screen.findByText(text)).toBeInTheDocument();
   });
 
-  it("the workbook is linked once, in its own card", async () => {
+  it("the workbook: in the lookup (paste this id), and at the top for all interviews", async () => {
     renderAt(`/admin?tab=performance&op=${OP}`);
     await screen.findByTestId("performance-result");
     expect(screen.getAllByTestId("performance-workbook")).toHaveLength(1);
+    expect(screen.getByTestId("performance-workbook-across")).toHaveTextContent(/Across all/);
+  });
+
+  it("is compared with that interview's own interviewer, and says so", async () => {
+    renderAt(`/admin?tab=performance&op=${OP}`);
+    const advice = await screen.findByTestId("performance-interview-grade-advice");
+    expect(admin.getCurrentConfig).toHaveBeenCalledWith(OP);
+    expect(advice).toHaveTextContent("Compared with this interview's interviewer, Lisa:");
+    // Grade B calls for a photo avatar; Lisa is a video avatar.
+    expect(advice).toHaveTextContent(/Lisa uses a video avatar: switch it to a photo avatar/);
+    expect(screen.getByTestId("performance-interview-grade-why")).toHaveTextContent(
+      "Why B: RTT 294 ms > 150 ms (A's limit)",
+    );
+  });
+
+  it("shows the five grades beside it, the current one marked", async () => {
+    renderAt(`/admin?tab=performance&op=${OP}`);
+    await screen.findByTestId("performance-interview-grade");
+    const marked = screen.getAllByTestId("performance-legend-current");
+    expect(marked.map((m) => m.textContent)).toContain("B");
+    const legend = screen.getAllByTestId("performance-grade-legend")[0];
+    expect(legend).toHaveTextContent(/UDP 3478 blocked/);
   });
 });
 

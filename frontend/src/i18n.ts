@@ -521,11 +521,6 @@ export const resources = {
           copy: "Copy",
           copied: "Copied",
           notConfigured: "Application Insights links are not configured for this deployment.",
-          workbookTitle: "Voice performance workbook",
-          workbookCardHint:
-            "One interview: paste its Operation id into the workbook's Operation id box (or pick " +
-            "it in Interview). Across interviews: connection setup, avatar handshake, turn latency, " +
-            "page load and API latency, further down the same workbook.",
           live: "Live · updates every 2 s",
           paused: "Paused while this tab is hidden",
           rttChart: "API round trip, last minute (ms)",
@@ -580,6 +575,74 @@ export const resources = {
             "show the link's capacity.",
           noteRelay: "Ran through the TURN relay: the RTT includes the relay hop.",
           gradesDoc: "Grades and settings: docs/network-grades.md",
+          liveCadence:
+            "Recomputed every 2 s from the last minute (RTT p95 of 30 samples); STUN every 60 s, " +
+            "downlink every 2 min.",
+          interviewCadence:
+            "From the whole interview's telemetry, read when you look it up (it arrives a few " +
+            "minutes late: look it up again right after an interview).",
+          why: "Why {{grade}}: {{reasons}}",
+          reason: {
+            rtt: "RTT {{value}} ms > {{limit}} ms ({{row}}'s limit)",
+            loss: "loss {{value}}% > {{limit}}% ({{row}}'s limit)",
+            down: "downlink {{value}} < {{limit}} ({{row}}'s limit)",
+            rttD: "RTT {{value}} ms ≥ {{limit}} ms",
+            lossD: "loss {{value}}% ≥ {{limit}}%",
+            downD: "downlink {{value}} < {{limit}}",
+            udp: "UDP 3478 not reachable",
+          },
+          noteDownlinkOnly:
+            "D only because of the downlink, which this check underestimates on a distant link: " +
+            "the other numbers alone give {{grade}}.",
+          compare: {
+            default: "Compared with the default interviewer, {{name}} (no interview chosen):",
+            interview: "Compared with this interview's interviewer, {{name}}:",
+            default_fallback:
+              "No interviewer is recorded for this interview; compared with the default " +
+              "interviewer, {{name}}:",
+          },
+          compareSettings: "Deployment settings: avatar bitrate {{bitrate}} · uplink {{rate}} Hz.",
+          bitrateUnset: "not set (Azure's 2 Mbit/s)",
+          advice: {
+            matches: "Matches the recommendation: nothing to change.",
+            noInterviewer: "No interviewer is configured.",
+            videoPossible:
+              "{{name}} has no video avatar: a video avatar would work on this network.",
+            switchToPhoto:
+              "{{name}} uses a video avatar: switch it to a photo avatar (agent editor).",
+            photoPossible: "{{name}} is voice-only: a photo avatar would work on this network.",
+            startVoiceOnly:
+              "{{name}} has a digital human: start voice-only here (the candidate turns video " +
+              "off, or assign an interviewer without one).",
+            avatarCannotConnect:
+              "{{name}}'s digital human cannot connect without UDP 3478: assign a voice-only " +
+              "interviewer, or have UDP 3478 allowed.",
+            setBitrate:
+              "Set VOICE_LIVE_AVATAR_VIDEO_BITRATE={{value}} (now {{current}}).",
+            setBitrateUnset:
+              "Set VOICE_LIVE_AVATAR_VIDEO_BITRATE={{value}} (now not set: Azure's 2 Mbit/s).",
+            bitrateOptional:
+              "Optional: VOICE_LIVE_AVATAR_VIDEO_BITRATE={{value}} (now {{current}}).",
+            bitrateOptionalUnset:
+              "Optional: VOICE_LIVE_AVATAR_VIDEO_BITRATE={{value}} (now not set: Azure's 2 Mbit/s).",
+            bitrateTooLow:
+              "VOICE_LIVE_AVATAR_VIDEO_BITRATE={{current}} lowers picture quality, and this " +
+              "network does not need it.",
+            sampleRate:
+              "Uplink sample rate is {{current}} Hz: set VOICE_LIVE_INPUT_SAMPLING_RATE={{value}} " +
+              "(with the frontend's MIC_SAMPLE_RATE).",
+          },
+          legendTitle: "Grades",
+          legend: {
+            A: "RTT ≤ 150 ms, loss ≤ 0.5%, ≥ 4 Mbit/s: video avatar",
+            B: "RTT ≤ 300 ms, loss ≤ 0.5%, ≥ 2 Mbit/s: photo avatar",
+            C: "RTT ≤ 500 ms, loss ≤ 1%, ≥ 1.5 Mbit/s: photo avatar at 300 kbit/s",
+            D: "loss ≥ 3%, RTT ≥ 600 ms or < 1 Mbit/s: voice-only",
+            E: "UDP 3478 blocked: voice over the WebSocket only",
+          },
+          workbookTop: "Across all interviews: the Voice performance workbook (its lower sections)",
+          workbookRow: "Workbook",
+          workbookRowHint: "paste this Operation id into its Operation id box",
         },
       },
       // Candidate sign-in gate (#102) — shown on the interview page whenever no candidate JWT is
@@ -1134,11 +1197,6 @@ export const resources = {
           copy: "复制",
           copied: "已复制",
           notConfigured: "这个部署没有配置 Application Insights 链接。",
-          workbookTitle: "语音性能 workbook",
-          workbookCardHint:
-            "看单场面试：把 Operation id 粘贴到 workbook 的 Operation id 输入框（或在 Interview " +
-            "下拉里选）。跨面试：连接建立、数字人握手、每轮延迟、页面加载和 API 延迟，在同一个 " +
-            "workbook 的下方。",
           live: "实时 · 每 2 秒更新",
           paused: "此页签隐藏时暂停",
           rttChart: "API 往返时间，最近一分钟（ms）",
@@ -1189,6 +1247,59 @@ export const resources = {
           noteDownNotGraded: "下行未参与分级：照片数字人只发约 0.8 Mbit/s，这个估计反映不了链路容量。",
           noteRelay: "经过 TURN 中继：RTT 包含中继这一跳。",
           gradesDoc: "分级与配置：docs/network-grades.md",
+          liveCadence: "每 2 秒按最近一分钟重新计算（RTT 取 30 个采样的 p95）；STUN 每 60 秒，下行每 2 分钟。",
+          interviewCadence:
+            "取自整场面试的遥测，在查询时读取（数据会晚几分钟到达：面试刚结束时请稍后再查一次）。",
+          why: "{{grade}} 级的原因：{{reasons}}",
+          reason: {
+            rtt: "RTT {{value}} ms > {{limit}} ms（{{row}} 级上限）",
+            loss: "丢包 {{value}}% > {{limit}}%（{{row}} 级上限）",
+            down: "下行 {{value}} < {{limit}}（{{row}} 级下限）",
+            rttD: "RTT {{value}} ms ≥ {{limit}} ms",
+            lossD: "丢包 {{value}}% ≥ {{limit}}%",
+            downD: "下行 {{value}} < {{limit}}",
+            udp: "UDP 3478 不通",
+          },
+          noteDownlinkOnly: "只因下行被判为 D，而这项检测在远距离链路上会偏低：仅看其他指标是 {{grade}} 级。",
+          compare: {
+            default: "与默认面试官 {{name}} 比较（未选择面试）：",
+            interview: "与这场面试的面试官 {{name}} 比较：",
+            default_fallback: "这场面试没有记录面试官，改为与默认面试官 {{name}} 比较：",
+          },
+          compareSettings: "部署设置：数字人码率 {{bitrate}} · 上行 {{rate}} Hz。",
+          bitrateUnset: "未设置（Azure 默认 2 Mbit/s）",
+          advice: {
+            matches: "与推荐一致，无需修改。",
+            noInterviewer: "没有配置面试官。",
+            videoPossible: "{{name}} 没有用视频数字人：这个网络可以用视频数字人。",
+            switchToPhoto: "{{name}} 用的是视频数字人：请在面试官编辑器里改为照片数字人。",
+            photoPossible: "{{name}} 是纯语音：这个网络可以用照片数字人。",
+            startVoiceOnly:
+              "{{name}} 带数字人：这里应以纯音频起步（候选人关闭视频，或分配不带数字人的面试官）。",
+            avatarCannotConnect:
+              "UDP 3478 不通时 {{name}} 的数字人无法连接：请分配纯语音面试官，或让网络放行 UDP 3478。",
+            setBitrate: "设置 VOICE_LIVE_AVATAR_VIDEO_BITRATE={{value}}（当前 {{current}}）。",
+            setBitrateUnset:
+              "设置 VOICE_LIVE_AVATAR_VIDEO_BITRATE={{value}}（当前未设置：Azure 默认 2 Mbit/s）。",
+            bitrateOptional: "可选：VOICE_LIVE_AVATAR_VIDEO_BITRATE={{value}}（当前 {{current}}）。",
+            bitrateOptionalUnset:
+              "可选：VOICE_LIVE_AVATAR_VIDEO_BITRATE={{value}}（当前未设置：Azure 默认 2 Mbit/s）。",
+            bitrateTooLow: "VOICE_LIVE_AVATAR_VIDEO_BITRATE={{current}} 会降低画质，这个网络不需要。",
+            sampleRate:
+              "上行采样率为 {{current}} Hz：请设置 VOICE_LIVE_INPUT_SAMPLING_RATE={{value}}" +
+              "（同时修改前端的 MIC_SAMPLE_RATE）。",
+          },
+          legendTitle: "分级",
+          legend: {
+            A: "RTT ≤ 150 ms，丢包 ≤ 0.5%，≥ 4 Mbit/s：视频数字人",
+            B: "RTT ≤ 300 ms，丢包 ≤ 0.5%，≥ 2 Mbit/s：照片数字人",
+            C: "RTT ≤ 500 ms，丢包 ≤ 1%，≥ 1.5 Mbit/s：照片数字人，码率 300 kbit/s",
+            D: "丢包 ≥ 3%、RTT ≥ 600 ms 或 < 1 Mbit/s：纯音频",
+            E: "UDP 3478 不通：只能走 WebSocket 纯语音",
+          },
+          workbookTop: "跨面试统计：语音性能 workbook（下方各节）",
+          workbookRow: "Workbook",
+          workbookRowHint: "把这个 Operation id 粘贴到它的 Operation id 输入框",
         },
       },
       // 候选人登录门(#102)——面试页在没有候选人 JWT 时展示。候选人使用与管理员相同的
