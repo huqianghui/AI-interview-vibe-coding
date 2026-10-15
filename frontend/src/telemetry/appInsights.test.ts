@@ -7,7 +7,9 @@ const sdk = vi.hoisted(() => ({
   flushes: 0,
   dependencies: [] as Record<string, unknown>[],
   unloadFlushes: 0,
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
 }));
+const PAGE_TRACE = "4bf92f3577b34da6a3ce929d0e0e4736";
 vi.mock("@microsoft/applicationinsights-web", () => ({
   DistributedTracingModes: { W3C: 2 },
   ApplicationInsights: class {
@@ -26,7 +28,12 @@ vi.mock("@microsoft/applicationinsights-web", () => ({
       sdk.dependencies.push(dependency);
     }
     getTraceCtx() {
-      return { getTraceId: () => "4bf92f3577b34da6a3ce929d0e0e4736" };
+      return {
+        getTraceId: () => sdk.traceId,
+        setTraceId: (id: string) => {
+          sdk.traceId = id;
+        },
+      };
     }
     onunloadFlush() {
       sdk.unloadFlushes += 1;
@@ -40,8 +47,12 @@ vi.mock("@microsoft/applicationinsights-web", () => ({
 import {
   beginWebSocketTrace,
   flushForUnload,
+  operationIdFor,
+  pinnedOperationId,
   pinOperation,
+  renewOperation,
   resetTelemetryForTests,
+  setInterviewOperation,
   scrubItem,
   startTelemetry,
   stripQuery,
@@ -51,6 +62,7 @@ import {
 afterEach(() => {
   vi.unstubAllGlobals();
   resetTelemetryForTests();
+  sdk.traceId = PAGE_TRACE;
 });
 
 describe("URL scrubbing", () => {
@@ -329,6 +341,81 @@ describe("WebSocket trace", () => {
     expect(() => trace.end(1006, false)).not.toThrow();
     resetTelemetryForTests({ trackEvent: () => undefined, traceId: () => "not-a-trace-id" });
     expect(beginWebSocketTrace("x", "y").traceparent).toBeNull();
+  });
+});
+
+describe("one operation per interview", () => {
+  const INTERVIEW = "0af7651916cd43dd8448eb211c80319c";
+  const INTERVIEW_ID = "0af76519-16cd-43dd-8448-eb211c80319c";
+
+  async function started() {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ app_insights_connection_string: "InstrumentationKey=k" }))),
+    );
+    expect(await startTelemetry("tok")).toBe(true);
+  }
+
+  it("an interview's operation id is its id without the dashes", () => {
+    expect(operationIdFor(INTERVIEW_ID)).toBe(INTERVIEW);
+    expect(operationIdFor(INTERVIEW_ID.toUpperCase())).toBe(INTERVIEW);
+    expect(operationIdFor("not-an-id")).toBeNull();
+    expect(operationIdFor("0".repeat(32))).toBeNull();
+  });
+
+  it("pins the interview's id as the page's trace id, and the voice socket carries it", async () => {
+    await started();
+    setInterviewOperation(INTERVIEW_ID);
+    expect(sdk.traceId).toBe(INTERVIEW);
+    expect(beginWebSocketTrace("WS", "h").traceparent).toMatch(new RegExp(`^00-${INTERVIEW}-`));
+  });
+
+  it("a pin set before the SDK loads is applied when it does", async () => {
+    setInterviewOperation(INTERVIEW_ID);
+    expect(sdk.traceId).toBe(PAGE_TRACE);
+    await started();
+    expect(sdk.traceId).toBe(INTERVIEW);
+  });
+
+  it("puts the pin back after a route change gives the page a new trace id", async () => {
+    await started();
+    setInterviewOperation(INTERVIEW_ID);
+    sdk.traceId = "1".repeat(32); // what the SDK's route tracker does on pushState
+    history.pushState({}, "", "/interview?x=1");
+    expect(sdk.traceId).toBe(INTERVIEW);
+    sdk.traceId = "2".repeat(32);
+    history.replaceState({}, "", "/interview");
+    expect(sdk.traceId).toBe(INTERVIEW);
+  });
+
+  it("unpinned, a route change keeps whatever the SDK chose", async () => {
+    await started();
+    setInterviewOperation(INTERVIEW_ID);
+    setInterviewOperation(null);
+    sdk.traceId = "3".repeat(32);
+    history.pushState({}, "", "/admin");
+    expect(sdk.traceId).toBe("3".repeat(32));
+  });
+
+  it("renewing (Restart) starts a new operation the next interview will adopt", async () => {
+    await started();
+    setInterviewOperation(INTERVIEW_ID);
+    renewOperation();
+    const renewed = pinnedOperationId();
+    expect(renewed).toMatch(/^[0-9a-f]{32}$/);
+    expect(renewed).not.toBe(INTERVIEW);
+    expect(sdk.traceId).toBe(renewed);
+  });
+
+  it("a socket opened before the SDK loads still carries the pinned operation", () => {
+    setInterviewOperation(INTERVIEW_ID);
+    expect(beginWebSocketTrace("WS", "h").traceparent).toMatch(new RegExp(`^00-${INTERVIEW}-`));
+  });
+
+  it("without the SDK, pinning does nothing and never throws", () => {
+    expect(() => setInterviewOperation(INTERVIEW_ID)).not.toThrow();
+    expect(() => renewOperation()).not.toThrow();
+    expect(sdk.traceId).toBe(PAGE_TRACE);
   });
 });
 

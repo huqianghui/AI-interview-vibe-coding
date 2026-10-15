@@ -42,6 +42,8 @@ interface Sink {
   unloadFlush?(): void;
   /** The page's current trace id (32 hex), or null. */
   traceId?(): string | null;
+  /** Make `id` the page's trace id: every request and item from now on is filed under it. */
+  setTraceId?(id: string): void;
 }
 
 // Events recorded before the SDK is ready (the voice session prewarms on page load, in parallel with
@@ -118,6 +120,49 @@ const randomHex = (bytes: number): string =>
     "",
   );
 
+/**
+ * One interview = one App Insights operation (spec-admin-performance-tab). A fresh interview takes
+ * the page's operation id as its own id (the backend adopts the `/start` call's trace id), and the
+ * page pins that id for the rest of the interview, so a reload, a reconnect or a WebSocket rebuild
+ * stays in the same operation. The SDK starts a new trace id on every route change; the pin is put
+ * back right after (see {@link loadSdk}).
+ */
+let pinnedOperation: string | null = null;
+
+/** The operation id an interview's telemetry is filed under: its id without the dashes. */
+export function operationIdFor(interviewId: string): string | null {
+  const id = interviewId.replace(/-/g, "").toLowerCase();
+  return /^[0-9a-f]{32}$/.test(id) && !/^0+$/.test(id) ? id : null;
+}
+
+function applyPin(): void {
+  if (!pinnedOperation) return;
+  try {
+    if (sink?.traceId?.() !== pinnedOperation) sink?.setTraceId?.(pinnedOperation);
+  } catch (err) {
+    console.debug("[telemetry] could not pin the operation", err);
+  }
+}
+
+/** Pin the interview's operation id (null: unpin, e.g. leaving the interview page). Applied now if
+ * the SDK is up, else as soon as it loads. Idempotent. */
+export function setInterviewOperation(interviewId: string | null): void {
+  pinnedOperation = interviewId ? operationIdFor(interviewId) : null;
+  applyPin();
+}
+
+/** Start a new operation for the interview about to be created (Restart): the restart call itself
+ * is filed under it, and the backend adopts it as the new interview's id. */
+export function renewOperation(): void {
+  pinnedOperation = randomHex(16);
+  applyPin();
+}
+
+/** The pinned operation id, or null (exported for tests). */
+export function pinnedOperationId(): string | null {
+  return pinnedOperation;
+}
+
 export interface WebSocketTrace {
   /** W3C `traceparent` for the backend to parent its session span on, or null before the SDK is up. */
   traceparent: string | null;
@@ -136,14 +181,17 @@ export interface WebSocketTrace {
  * Insights the browser's socket and the backend's session become one parent/child pair in the page's
  * trace. The dependency is pinned to the trace it OPENED in (`trace_id`, applied by the telemetry
  * initializer), even if the page has moved to another route by the time it closes. Opened before the
- * SDK has loaded, the socket is still recorded at `end()`, just unlinked.
+ * SDK has loaded, the socket carries the interview's pinned operation if there is one (and is still
+ * recorded at `end()`), else it is just unlinked.
  */
 export function beginWebSocketTrace(name: string, target: string): WebSocketTrace {
   let id = "";
   let traceId: string | null = null;
   try {
     id = randomHex(8);
-    const current = sink?.traceId?.() ?? null;
+    // Before the SDK has loaded (a reload: the voice prewarm races it), the interview's pinned
+    // operation still names the trace, so the socket and its backend session are not orphaned.
+    const current = sink?.traceId?.() ?? pinnedOperation;
     if (current && /^[0-9a-f]{32}$/.test(current)) traceId = current;
   } catch (err) {
     console.debug("[telemetry] no trace context", err);
@@ -316,7 +364,20 @@ async function loadSdk(connectionString: string): Promise<void> {
     },
     unloadFlush: () => ai.onunloadFlush(),
     traceId: () => ai.getTraceCtx()?.getTraceId() ?? null,
+    setTraceId: (id) => ai.getTraceCtx()?.setTraceId(id),
   };
+  // The SDK gives every route change a new trace id, synchronously inside pushState/replaceState
+  // (and on popstate): put the interview's pin back right after. Wrapped AFTER loadAppInsights, so
+  // ours runs once the SDK's own hook has.
+  for (const method of ["pushState", "replaceState"] as const) {
+    const original = history[method].bind(history);
+    history[method] = (...args: Parameters<History["pushState"]>) => {
+      original(...args);
+      applyPin();
+    };
+  }
+  window.addEventListener("popstate", applyPin);
+  applyPin();
   for (const event of buffered) {
     sink.trackEvent(event.name, event.measurements, event.properties, event.urgent);
   }
@@ -326,6 +387,7 @@ async function loadSdk(connectionString: string): Promise<void> {
 /** Test hook: forget everything. */
 export function resetTelemetryForTests(next: Sink | null = null): void {
   sink = next;
+  pinnedOperation = null;
   buffered = [];
   disabled = false;
   starting = null;

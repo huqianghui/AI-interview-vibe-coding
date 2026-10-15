@@ -15,9 +15,9 @@
  * The tab hooks are called here, not inside the tabs, so a tab's state (a selected question, an
  * unsaved connection edit) survives switching to another tab and back.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Body1, Button, Tab, TabList, Title2 } from "@fluentui/react-components";
 import * as auth from "../api/auth";
 import { AppShell } from "../components/AppShell";
@@ -27,16 +27,19 @@ import { ConnectionTab } from "./admin/ConnectionTab";
 import { ContentTab } from "./admin/ContentTab";
 import { InterviewsTab } from "./admin/InterviewsTab";
 import { JobsTab } from "./admin/JobsTab";
+import { PerformanceTab } from "./admin/PerformanceTab";
 import { SopTab } from "./admin/SopTab";
 import { UsersTab } from "./admin/UsersTab";
 import { useConnectionTab } from "./admin/useConnectionTab";
 import { useInterviewsTab } from "./admin/useInterviewsTab";
 import { useJobsTab } from "./admin/useJobsTab";
+import { normalizeOperationId, usePerformanceTab } from "./admin/usePerformanceTab";
 import { useSopTab } from "./admin/useSopTab";
 import { useContentTab } from "./admin/useContentTab";
 import { useUsersTab } from "./admin/useUsersTab";
 
-type AdminTab = "content" | "sop" | "connection" | "users" | "results" | "jobs";
+type AdminTab = "content" | "sop" | "connection" | "users" | "results" | "jobs" | "performance";
+const TABS: AdminTab[] = ["content", "sop", "connection", "users", "results", "jobs", "performance"];
 
 export function AdminPage() {
   const styles = useAdminStyles();
@@ -51,7 +54,22 @@ export function AdminPage() {
   // InterviewPage's), so the login flow tracks it separately just for the card's disabled state.
   const [loginBusy, setLoginBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<AdminTab>("content");
+  // The tab (and the Performance tab's Operation id) live in the URL, so an admin can share
+  // `/admin?tab=performance&op=<id>` with another admin.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlTab = searchParams.get("tab") as AdminTab | null;
+  const [tab, setTabState] = useState<AdminTab>(
+    urlTab && TABS.includes(urlTab) ? urlTab : "content",
+  );
+  const setTab = useCallback(
+    (next: AdminTab, operationId?: string) => {
+      setTabState(next);
+      const params: Record<string, string> = { tab: next };
+      if (operationId) params.op = operationId;
+      setSearchParams(params, { replace: true });
+    },
+    [setSearchParams],
+  );
 
   const guard = useCallback(async (fn: () => Promise<void>) => {
     setError(null);
@@ -68,6 +86,8 @@ export function AdminPage() {
   const results = useInterviewsTab(authed && tab === "results");
   const jobs = useJobsTab(authed && tab === "jobs");
   const sop = useSopTab(authed && tab === "sop");
+  const performance = usePerformanceTab(authed && tab === "performance");
+  const { lookup: lookupOperation } = performance;
   const { refreshBanks } = content;
   const { refreshConfig, refreshExternalConfig } = connection;
 
@@ -95,6 +115,30 @@ export function AdminPage() {
       void refreshExternalConfig();
     }
   }, [authed, refreshBanks, refreshConfig, refreshExternalConfig]);
+
+  // Arrived on `?op=<id>`: look it up once signed in.
+  const urlOperation = searchParams.get("op");
+  const lookedUpRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!authed || tab !== "performance" || !urlOperation) return;
+    if (lookedUpRef.current === urlOperation) return;
+    lookedUpRef.current = urlOperation;
+    void lookupOperation(urlOperation);
+  }, [authed, tab, urlOperation, lookupOperation]);
+
+  // A lookup (from the tab's own box or from Interview results) also goes into the URL.
+  const lookupAndShare = (raw: string) => {
+    const id = normalizeOperationId(raw);
+    if (id) {
+      lookedUpRef.current = id;
+      setTab("performance", id);
+    }
+    void lookupOperation(raw);
+  };
+  const openInterview = (interviewId: string) => {
+    setTab("results");
+    void results.open(interviewId);
+  };
 
   const onLogin = (username: string, password: string) => {
     setLoginBusy(true);
@@ -165,14 +209,26 @@ export function AdminPage() {
           <Tab value="jobs" data-testid="admin-tab-jobs">
             {t("admin.jobs.tab")}
           </Tab>
+          <Tab value="performance" data-testid="admin-tab-performance">
+            {t("admin.performance.tab")}
+          </Tab>
         </TabList>
 
         {tab === "content" && <ContentTab state={content} guard={guard} />}
         {tab === "sop" && <SopTab state={sop} />}
         {tab === "connection" && <ConnectionTab state={connection} guard={guard} />}
         {tab === "users" && <UsersTab state={users} />}
-        {tab === "results" && <InterviewsTab state={results} />}
+        {tab === "results" && (
+          <InterviewsTab state={results} onOpenPerformance={lookupAndShare} />
+        )}
         {tab === "jobs" && <JobsTab state={jobs} />}
+        {tab === "performance" && (
+          <PerformanceTab
+            state={performance}
+            onLookup={lookupAndShare}
+            onOpenInterview={openInterview}
+          />
+        )}
 
         {error && (
           <Body1 role="alert" className={styles.errorText}>
