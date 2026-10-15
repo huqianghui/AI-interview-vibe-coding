@@ -17,7 +17,7 @@
     "azureFoundryEndpoint": { "value": "https://<existing-foundry-account>.cognitiveservices.azure.com/" },
     "foundryProjectEndpoint": { "value": "https://<existing-foundry-account>.services.ai.azure.com/api/projects/<project>" },
     "azureFoundryDefaultProject": { "value": "<existing-project-name>" },
-    "_comment_models": "Project defaults: agent + voice gpt-6-luna, judge + scoring gpt-6-sol. foundryAgentModel and judgeModel must be chat deployments that exist on your Foundry resource. voiceLiveDefaultModel must be a model Voice Live hosts natively in your region (Learn: Speech regions → Voice Live tab); gpt-6-luna, gpt-6-sol and gpt-5-mini are accepted on swedencentral (probed 2026-10-15).",
+    "_comment_models": "Project defaults: agent + voice gpt-6-luna, judge + scoring gpt-6-sol; all three are fallbacks for admin-page values (judgeModel ← Connection Inference model, foundryAgentModel ← agent editor per persona, voiceLiveDefaultModel ← after the Connection voice override and the persona model). foundryAgentModel and judgeModel must be chat deployments that exist on your Foundry resource. voiceLiveDefaultModel must be a model Voice Live hosts natively in your region (Learn: Speech regions → Voice Live tab); gpt-6-luna, gpt-6-sol and gpt-5-mini are accepted on swedencentral (probed 2026-10-15).",
     "foundryAgentModel": { "value": "gpt-6-luna" },
     "judgeModel": { "value": "gpt-6-sol" },
     "voiceLiveDefaultModel": { "value": "gpt-6-luna" },

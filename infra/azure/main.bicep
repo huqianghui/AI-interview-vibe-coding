@@ -78,13 +78,13 @@ param foundryProjectEndpoint string = ''
 @description('Existing Foundry default project name (AZURE_FOUNDRY_DEFAULT_PROJECT).')
 param azureFoundryDefaultProject string = ''
 
-@description('Interviewer-agent model deployment name (FOUNDRY_AGENT_MODEL). Must exist on the reused Foundry resource. Project default gpt-6-luna.')
+@description('Fallback agent model for a persona with no model of its own (FOUNDRY_AGENT_MODEL); the agent editor sets it per persona. Must exist on the reused Foundry resource. Project default gpt-6-luna.')
 param foundryAgentModel string = 'gpt-6-luna'
 
-@description('Judge + scoring model deployment name (JUDGE_MODEL). Must exist on the reused Foundry resource; empty = use foundryAgentModel. Project default gpt-6-sol.')
+@description('Judge + scoring (inference) model deployment name (JUDGE_MODEL), the fallback for the Connection tab Inference model. Must exist on the reused Foundry resource. Project default gpt-6-sol.')
 param judgeModel string = 'gpt-6-sol'
 
-@description('Voice Live MODEL-mode model (VOICE_LIVE_DEFAULT_MODEL). Must be a model Voice Live hosts natively in the region (Learn: Speech regions → Voice Live tab), NOT an arbitrary deployment. Project default gpt-6-luna (gpt-6-luna, gpt-6-sol and gpt-5-mini accepted on swedencentral, probed 2026-10-15; a rejected model fails with "Model X is not supported in this region" and the interview silently degrades to text).')
+@description('Last-resort Voice Live MODEL-mode model (VOICE_LIVE_DEFAULT_MODEL), after the Connection tab voice override and the persona model. Must be a model Voice Live hosts natively in the region (Learn: Speech regions → Voice Live tab), NOT an arbitrary deployment. Project default gpt-6-luna (gpt-6-luna, gpt-6-sol and gpt-5-mini accepted on swedencentral, probed 2026-10-15; a rejected model fails with "Model X is not supported in this region" and the interview silently degrades to text).')
 param voiceLiveDefaultModel string = 'gpt-6-luna'
 
 @description('Voice Live realtime api-version (VOICE_LIVE_API_VERSION).')

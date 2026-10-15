@@ -198,7 +198,10 @@ Runtime config precedence is **DB > .env > code default**:
   secret-free) documents every knob. Copy to `backend/.env` (gitignored) and fill in real values.
   Leaving the providers as `mock` needs zero Azure.
 - **Model deployments (gotcha)** — project default is `gpt-6-luna` for both the agent chat model and
-  the Voice Live model, and `gpt-6-sol` for judge + scoring (`JUDGE_MODEL`, v0.71.0.0).
+  the Voice Live model, and `gpt-6-sol` for judge + scoring (`JUDGE_MODEL`, v0.71.0.0). Since
+  v0.72.0.0 the three are independent: the Connection tab's Inference model is judge + scoring only,
+  the agent's model is per persona (agent editor), and voice follows the persona's model unless the
+  Connection tab's voice model overrides it.
   `FOUNDRY_AGENT_MODEL` and `JUDGE_MODEL` must be deployments on the Foundry resource;
   `VOICE_LIVE_DEFAULT_MODEL` must be a model Voice Live hosts natively in the region (own deployments
   don't count; `gpt-6-luna`, `gpt-6-sol` and `gpt-5-mini` accepted on swedencentral, probed
