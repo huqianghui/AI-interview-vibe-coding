@@ -1,7 +1,7 @@
-/** The admin "Performance" tab (spec-admin-performance-tab): an Operation id lookup with the network
- * that interview ran on (graded A to E, docs/network-grades.md) and its links into Application
- * Insights; a live network check from this browser; and the workbook. Every interview is one
- * operation, whose id is the interview id without the dashes. */
+/** The admin "Performance" tab (spec-admin-performance-tab): an Operation id lookup with the
+ * network that interview ran on (graded A to E, docs/network-grades.md) and its links into
+ * Application Insights; a live network check from this browser; and the workbook. Every interview
+ * is one operation, whose id is the interview id without the dashes. */
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -21,7 +21,7 @@ import {
 import type { InterviewNetwork } from "../../api/admin";
 import { formatWhenShort } from "../../components/transcriptText";
 import type { Grade, GradeResult } from "./networkGrade";
-import { percentile } from "./performanceProbe";
+import { formatRate, percentile } from "./performanceProbe";
 import { RttChart } from "./RttChart";
 import { useAdminStyles } from "./shared";
 import {
@@ -434,7 +434,7 @@ export function PerformanceTab({
             <Text data-testid="performance-downlink">
               {live.downKbps === null
                 ? t("admin.performance.rttWaiting")
-                : t("admin.performance.downlinkValue", { kbps: live.downKbps })}
+                : t("admin.performance.downlinkValue", { value: formatRate(live.downKbps) })}
             </Text>
             <Text className={local.label}>{t("admin.performance.browserNet")}</Text>
             <Text data-testid="performance-browser">

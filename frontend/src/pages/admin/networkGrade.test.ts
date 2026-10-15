@@ -53,8 +53,9 @@ describe("gradeNetwork", () => {
     expect(gradeNetwork(net({}))?.estimated).toBe(false);
   });
 
-  it("no RTT, no grade", () => {
+  it("no RTT (or not a number), no grade", () => {
     expect(gradeNetwork(net({ rttMs: null }))).toBeNull();
+    expect(gradeNetwork(net({ rttMs: Number.NaN }))).toBeNull();
   });
 });
 
@@ -81,10 +82,26 @@ describe("an interview's grade", () => {
   });
 
   it("an avatar that never connected, or a fallback to voice over the WebSocket, is E", () => {
-    const failed = { ...photo, media: null, avatar: { connected: 0, failed: 2, via_relay: 0, voice_over_ws: 0 } };
+    const failed = {
+      ...photo,
+      media: null,
+      avatar: { connected: 0, failed: 2, via_relay: 0, voice_over_ws: 0 },
+    };
     expect(interviewGrade(failed)?.grade).toBe("E");
-    const ws = { ...photo, media: null, avatar: { connected: 0, failed: 0, via_relay: 0, voice_over_ws: 1 } };
+    const ws = {
+      ...photo,
+      media: null,
+      avatar: { connected: 0, failed: 0, via_relay: 0, voice_over_ws: 1 },
+    };
     expect(interviewGrade(ws)?.grade).toBe("E");
+  });
+
+  it("an avatar that failed once and then connected passed the UDP gate", () => {
+    const retried = {
+      ...photo,
+      avatar: { connected: 1, failed: 1, via_relay: 1, voice_over_ws: 0 },
+    };
+    expect(interviewGrade(retried)?.grade).toBe("B");
   });
 
   it("no media and nothing failed: no grade", () => {
@@ -103,6 +120,7 @@ describe("this browser's grade", () => {
     rtt: rtts.map((ms, i) => ({ at: i, ms })),
     ws: null,
     stun: { ok: true, ms: 80 },
+    stunFailures: 0,
     downKbps: 8000,
     browser: null,
     ...over,
@@ -110,10 +128,25 @@ describe("this browser's grade", () => {
 
   it("needs three answers, then grades the p95, always as an estimate", () => {
     expect(liveGrade(live([100, null, 100]))).toBeNull();
-    expect(liveGrade(live([100, 120, 310]))).toEqual({ grade: "C", boundary: false, estimated: true });
+    expect(liveGrade(live([100, 120, 310]))).toEqual({
+      grade: "C",
+      boundary: false,
+      estimated: true,
+    });
   });
 
-  it("a blocked STUN is E", () => {
-    expect(liveGrade(live([50, 50, 50], { stun: { ok: false, reason: "x" } }))?.grade).toBe("E");
+  it("STUN blocked twice in a row is E; once is not yet", () => {
+    const failed = { ok: false as const, reason: "x" };
+    expect(liveGrade(live([50, 50, 50], { stun: failed, stunFailures: 1 }))).toEqual({
+      grade: "A",
+      boundary: false,
+      estimated: true,
+    });
+    expect(liveGrade(live([50, 50, 50], { stun: failed, stunFailures: 2 }))?.grade).toBe("E");
   });
+
+  it("no grade while the app mostly stops answering", () => {
+    expect(liveGrade(live([50, 50, 50, null, null, null]))).toBeNull();
+  });
+
 });

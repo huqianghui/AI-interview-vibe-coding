@@ -779,13 +779,16 @@ export const getInterviewNetwork = (operationId: string) =>
     `/admin/performance/operations/${encodeURIComponent(operationId)}/network`,
   );
 
-/** The downlink check's payload: `kb` KiB of random bytes, timed by the caller. */
-export async function fetchDownloadProbe(kb: number): Promise<number> {
+/** The downlink check: `kb` KiB of random bytes, timed from the response headers to the last byte,
+ * so the request's own round trip is not counted as transfer time. */
+export async function fetchDownloadProbe(kb: number): Promise<{ bytes: number; ms: number }> {
   const resp = await apiFetch(
     `/admin/performance/download?kb=${kb}`,
     { cache: "no-store" },
     { bearer: getAdminToken() },
     { json: false },
   );
-  return (await resp.arrayBuffer()).byteLength;
+  const started = performance.now();
+  const bytes = (await resp.arrayBuffer()).byteLength;
+  return { bytes, ms: performance.now() - started };
 }

@@ -533,13 +533,13 @@ export const resources = {
           rttWaiting: "Measuring…",
           chartTooltip: "{{time}} · {{ms}}",
           chartFailed: "failed",
+          chartMedian: "median {{ms}}",
           stun: "UDP to Azure's relay (STUN, port 3478)",
           stunOk: "open, answered in {{ms}} ms (to the nearest relay, not the region)",
           stunFailed: "blocked: {{reason}}",
           downlink: "Downlink",
-          downlinkValue: "{{kbps}} kbit/s",
+          downlinkValue: "{{value}}",
           gradeLive: "Estimated grade for this browser",
-          gradeInterview: "Grade of the network this interview ran on",
           gradeLabel: "Grade {{grade}}",
           gradeNone: "Not enough data to grade yet.",
           interviewNetwork: "Network during the interview",
@@ -555,7 +555,6 @@ export const resources = {
           legacyNote:
             "This interview predates the fixed Operation id: it ran under {{count}} operations, " +
             "each with its own Logs link.",
-          operationsTitle: "Operations",
           rec: {
             A: "Video avatar at the default bitrate; start with video.",
             B:
@@ -1147,13 +1146,13 @@ export const resources = {
           rttWaiting: "测量中…",
           chartTooltip: "{{time}} · {{ms}}",
           chartFailed: "失败",
+          chartMedian: "中位数 {{ms}}",
           stun: "到 Azure 中继的 UDP（STUN，端口 3478）",
           stunOk: "可达，{{ms}} ms 收到应答（到最近的中继，不代表到区域）",
           stunFailed: "不通：{{reason}}",
           downlink: "下行带宽",
-          downlinkValue: "{{kbps}} kbit/s",
+          downlinkValue: "{{value}}",
           gradeLive: "当前浏览器的估计分级",
-          gradeInterview: "这场面试所在网络的分级",
           gradeLabel: "{{grade}} 级",
           gradeNone: "数据还不够，暂时无法分级。",
           interviewNetwork: "面试期间的网络",
@@ -1168,7 +1167,6 @@ export const resources = {
           avatarPhoto: "照片数字人",
           legacyNote:
             "这场面试早于固定 Operation id：它跑在 {{count}} 个 operation 下，每个都有自己的 Logs 链接。",
-          operationsTitle: "Operations",
           rec: {
             A: "视频数字人，默认码率，以视频起步。",
             B:

@@ -133,7 +133,7 @@ describe("Operation id lookup", () => {
     expect(screen.getByTestId("performance-workbook")).toHaveAttribute("href", LOOKUP.workbook_url);
   });
 
-  it("a pasted interview id (dashes and all) is looked up as its Operation id, into the URL", async () => {
+  it("a pasted interview id (dashes and all) is looked up as its Operation id", async () => {
     const user = userEvent.setup();
     renderAt("/admin?tab=performance");
     await user.type(await screen.findByTestId("performance-operation-input"), INTERVIEW_ID);
@@ -287,7 +287,7 @@ describe("Interview results → Performance", () => {
 });
 
 describe("live network check", () => {
-  it("starts on its own when the tab opens, with the chart, every reading and a grade", async () => {
+  it("starts on its own when the tab opens, with the chart and every reading", async () => {
     renderAt("/admin?tab=performance");
     expect(await screen.findByTestId("performance-api")).toHaveTextContent(
       "42 ms now · median 42 · p95 42 · 0 failed",
@@ -299,7 +299,7 @@ describe("live network check", () => {
     );
     expect(probe.measureWs).toHaveBeenCalledWith("jwt");
     expect(screen.getByTestId("performance-stun")).toHaveTextContent(/open, answered in 80 ms/);
-    expect(screen.getByTestId("performance-downlink")).toHaveTextContent("8000 kbit/s");
+    expect(screen.getByTestId("performance-downlink")).toHaveTextContent("8.0 Mbit/s");
     expect(screen.getByTestId("performance-browser")).toHaveTextContent("Not available");
   });
 
@@ -309,8 +309,11 @@ describe("live network check", () => {
     LIVE_CHECK.rttMs = 20;
     try {
       renderAt("/admin?tab=performance");
-      await waitFor(() => expect(vi.mocked(probe.apiRttOnce).mock.calls.length).toBeGreaterThanOrEqual(3));
-      expect(await screen.findByTestId("performance-live-grade-badge")).toHaveTextContent("Grade A");
+      await waitFor(() =>
+        expect(vi.mocked(probe.apiRttOnce).mock.calls.length).toBeGreaterThanOrEqual(3),
+      );
+      const badge = await screen.findByTestId("performance-live-grade-badge");
+      expect(badge).toHaveTextContent("Grade A");
       expect(screen.getByTestId("performance-live-grade")).toHaveTextContent(/Estimated/);
     } finally {
       LIVE_CHECK.rttMs = saved;
@@ -330,7 +333,12 @@ describe("live network check", () => {
 
   it("does not run on any other tab", async () => {
     renderAt("/admin?tab=results");
-    vi.spyOn(admin, "listInterviewResults").mockResolvedValue({ items: [], total: 0, limit: 20, offset: 0 });
+    vi.spyOn(admin, "listInterviewResults").mockResolvedValue({
+      items: [],
+      total: 0,
+      limit: 20,
+      offset: 0,
+    });
     await screen.findByTestId("results-tab");
     expect(probe.apiRttOnce).not.toHaveBeenCalled();
   });
@@ -441,13 +449,15 @@ describe("probe helpers", () => {
     vi.stubGlobal("RTCPeerConnection", FakePc);
     const open = probe.measureStun();
     expect(made[0].config.iceServers).toEqual([{ urls: probe.AZURE_STUN }]);
-    made[0].onicecandidate?.({ candidate: { candidate: "candidate:1 1 udp 1 10.0.0.1 5 typ host" } });
-    made[0].onicecandidate?.({ candidate: { candidate: "candidate:2 1 udp 1 1.2.3.4 5 typ srflx raddr 0" } });
+    const host = { candidate: "candidate:1 1 udp 1 10.0.0.1 5 typ host" };
+    const srflx = { candidate: "candidate:2 1 udp 1 1.2.3.4 5 typ srflx raddr 0" };
+    made[0].onicecandidate?.({ candidate: host });
+    made[0].onicecandidate?.({ candidate: srflx });
     expect(await open).toEqual({ ok: true, ms: expect.any(Number) });
     expect(made[0].closed).toBe(true);
 
     const blocked = probe.measureStun();
-    made[1].onicecandidate?.({ candidate: { candidate: "candidate:1 1 udp 1 10.0.0.1 5 typ host" } });
+    made[1].onicecandidate?.({ candidate: host });
     made[1].onicecandidate?.({ candidate: null });
     expect(await blocked).toEqual({ ok: false, reason: expect.stringMatching(/3478/) });
     vi.unstubAllGlobals();
@@ -455,8 +465,11 @@ describe("probe helpers", () => {
 
   it("measureDownlink turns the bytes and time into kbit/s, null on a failure", async () => {
     vi.mocked(probe.measureDownlink).mockRestore();
-    const fetchProbe = vi.spyOn(admin, "fetchDownloadProbe").mockResolvedValue(512 * 1024);
-    expect(await probe.measureDownlink(512)).toBeGreaterThan(0);
+    const fetchProbe = vi
+      .spyOn(admin, "fetchDownloadProbe")
+      .mockResolvedValue({ bytes: 512 * 1024, ms: 400 });
+    // 4 Mbit in 0.4 s of transfer: about 10 Mbit/s.
+    expect(await probe.measureDownlink(512)).toBe(Math.round((512 * 1024 * 8) / 400));
     expect(fetchProbe).toHaveBeenCalledWith(512);
     fetchProbe.mockRejectedValue(new Error("nope"));
     expect(await probe.measureDownlink()).toBeNull();

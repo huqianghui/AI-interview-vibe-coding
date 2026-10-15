@@ -20,6 +20,8 @@ import json
 import logging
 import math
 import re
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from urllib.parse import quote
 
@@ -190,49 +192,64 @@ def _first_item_query(operation_id: str) -> str:
     )
 
 
-async def _run_query(kql: str, settings: Settings) -> list[dict]:
-    """Rows of one Logs query against the workspace, as dicts (columns by name).
+class _LogsSession:
+    """One token and one HTTP client for the Logs queries of one lookup (a lookup runs up to three:
+    a fresh credential and TLS client per query cost a token round trip each)."""
 
-    Raises :class:`LookupUnavailable` when the workspace is not configured, the managed identity
-    has no token, the query is refused (most likely: no Log Analytics Data Reader role), or the
-    answer is not the shape the API documents."""
+    def __init__(self, settings: Settings, token: str, client: httpx.AsyncClient):
+        self._url = LOGS_QUERY_URL.format(workspace=settings.log_analytics_workspace_id)
+        self._token = token
+        self._client = client
+
+    async def run(self, kql: str) -> list[dict]:
+        """Rows of one query, as dicts (columns by name). Raises :class:`LookupUnavailable` when
+        the query is refused (most likely: no Log Analytics Data Reader role), does not answer, or
+        answers a shape the API does not document."""
+        try:
+            response = await self._client.post(
+                self._url,
+                headers={"Authorization": f"Bearer {self._token}"},
+                json={"query": kql, "timespan": LOOKUP_TIMESPAN},
+            )
+        except httpx.HTTPError as exc:
+            reason = f"The Logs query API did not answer ({type(exc).__name__})"
+            raise LookupUnavailable(reason) from exc
+        if response.status_code in (401, 403):
+            raise LookupUnavailable(
+                "The Logs query API refused the managed identity (needs Log Analytics Data Reader)"
+            )
+        if response.status_code >= 400:
+            raise LookupUnavailable(f"The Logs query API answered {response.status_code}")
+        try:
+            tables = response.json().get("tables") or []
+            if not tables:
+                return []
+            columns = [c["name"] for c in tables[0]["columns"]]
+            return [dict(zip(columns, row, strict=False)) for row in tables[0].get("rows") or []]
+        except (ValueError, KeyError, TypeError, AttributeError, IndexError) as exc:
+            reason = f"The Logs query API answered something unexpected ({type(exc).__name__})"
+            raise LookupUnavailable(reason) from exc
+
+
+@asynccontextmanager
+async def _logs_session(settings: Settings) -> AsyncIterator[_LogsSession]:
+    """Raises :class:`LookupUnavailable` when the workspace is not configured or the managed
+    identity has no token."""
     if not settings.log_analytics_workspace_id:
         raise LookupUnavailable("The Log Analytics workspace is not configured")
     token = await azure_auth.get_bearer_token(azure_auth.LOG_ANALYTICS_SCOPE)
     if token is None:
         raise LookupUnavailable("No Azure credential for the Logs query API")
-    try:
-        async with httpx.AsyncClient(timeout=LOOKUP_TIMEOUT_S) as client:
-            response = await client.post(
-                LOGS_QUERY_URL.format(workspace=settings.log_analytics_workspace_id),
-                headers={"Authorization": f"Bearer {token}"},
-                json={"query": kql, "timespan": LOOKUP_TIMESPAN},
-            )
-    except httpx.HTTPError as exc:
-        reason = f"The Logs query API did not answer ({type(exc).__name__})"
-        raise LookupUnavailable(reason) from exc
-    if response.status_code in (401, 403):
-        raise LookupUnavailable(
-            "The Logs query API refused the managed identity (needs Log Analytics Data Reader)"
-        )
-    if response.status_code >= 400:
-        raise LookupUnavailable(f"The Logs query API answered {response.status_code}")
-    try:
-        tables = response.json().get("tables") or []
-        if not tables:
-            return []
-        columns = [c["name"] for c in tables[0]["columns"]]
-        return [dict(zip(columns, row, strict=False)) for row in tables[0].get("rows") or []]
-    except (ValueError, KeyError, TypeError, AttributeError, IndexError) as exc:
-        reason = f"The Logs query API answered something unexpected ({type(exc).__name__})"
-        raise LookupUnavailable(reason) from exc
+    async with httpx.AsyncClient(timeout=LOOKUP_TIMEOUT_S) as client:
+        yield _LogsSession(settings, token, client)
 
 
 async def first_item(operation_id: str, settings: Settings) -> FirstItem | None:
     """The operation's earliest page view, request or dependency; None when there is none (yet:
     telemetry reaches the workspace minutes after it happened). Raises
-    :class:`LookupUnavailable` (see :func:`_run_query`)."""
-    rows = await _run_query(_first_item_query(operation_id), settings)
+    :class:`LookupUnavailable` (see :class:`_LogsSession`)."""
+    async with _logs_session(settings) as logs:
+        rows = await logs.run(_first_item_query(operation_id))
     if not rows:
         return None
     item_id, timestamp = rows[0].get("_ItemId"), rows[0].get("TimeGenerated")
@@ -244,6 +261,16 @@ async def first_item(operation_id: str, settings: Settings) -> FirstItem | None:
 # --- the network an interview ran on --------------------------------------------------------
 
 _INTERVIEW_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+# `voice.avatar` outcomes (frontend/src/hooks/useAvatarStream.ts): the handshake got media, or it
+# failed on the network. The rest (closed, superseded, rebuilt) say nothing about the network.
+AVATAR_CONNECTED = ("frame", "audio")
+AVATAR_FAILED = ("ice_failed", "no_frame", "sdp_timeout", "handshake_failed")
+
+
+def _kql_list(values: tuple[str, ...]) -> str:
+    return ", ".join(f'"{v}"' for v in values)
+
+
 # An interview that predates the fixed operation id ran under several page operations.
 MAX_LEGACY_OPERATIONS = 20
 
@@ -313,11 +340,15 @@ def _legacy_operations_query(interview_id: str) -> str:
     )
 
 
-def _network_query(operation_ids: list[str]) -> str:
+def _network_query(operation_ids: list[str], interview_id: str) -> str:
     ids = ", ".join(f'"{_checked(o)}"' for o in operation_ids)
-    # Two summaries joined on a constant: there is no percentileif in this dialect (measured).
+    if not _INTERVIEW_ID.fullmatch(interview_id):
+        raise ValueError("not an interview id")
+    # Two summaries joined on a constant: there is no percentileif in this dialect (measured). The
+    # interview id narrows it: an old page operation can span several interviews.
     return f"""let ev = AppEvents
-    | where OperationId in ({ids}) and Name in ("voice.media", "voice.avatar", "voice.setup");
+    | where OperationId in ({ids}) and Name in ("voice.media", "voice.avatar", "voice.setup")
+    | where tostring(Properties.interview_id) == "{interview_id}";
 let media = ev
     | where Name == "voice.media" and isnotnull(Measurements.rtt_ms)
     | summarize samples = count(), rtt_p95 = percentile(todouble(Measurements.rtt_ms), 95),
@@ -327,36 +358,36 @@ let media = ev
 let rest = ev
     | summarize
         avatar_ok = countif(Name == "voice.avatar"
-            and tostring(Properties.outcome) in ("frame", "audio")),
-        avatar_failed = countif(Name == "voice.avatar" and tostring(Properties.outcome)
-            in ("ice_failed", "no_frame", "sdp_timeout", "handshake_failed")),
+            and tostring(Properties.outcome) in ({_kql_list(AVATAR_CONNECTED)})),
+        avatar_failed = countif(Name == "voice.avatar"
+            and tostring(Properties.outcome) in ({_kql_list(AVATAR_FAILED)})),
         relay = countif(Name == "voice.avatar" and tostring(Properties.local_candidate) == "relay"),
-        ws_audio = countif(Name == "voice.setup" and tostring(Properties.audio_path) == "ws");
+        ws_audio = countif(Name == "voice.setup" and tostring(Properties.audio_path) == "ws"
+            and tostring(Properties.avatar) == "true");
 media | extend k = 1 | join kind=inner (rest | extend k = 1) on k | project-away k, k1"""
 
 
 async def interview_network(
-    operation_id: str, interview_id: str | None, settings: Settings
+    operation_id: str, interview_id: str, settings: Settings
 ) -> InterviewNetwork | None:
     """The network the interview behind ``operation_id`` ran on, from its own telemetry; None
     when App Insights has nothing for it (yet). Raises :class:`LookupUnavailable`."""
     operations: list[tuple[str, str | None]] = [(operation_id, None)]
     legacy = False
-    counted = await _run_query(_has_items_query(operation_id), settings)
-    items = int(_number(counted[0].get("n")) or 0) if counted else 0
-    if items == 0:
-        if interview_id is None:
-            return None
-        found = await _run_query(_legacy_operations_query(interview_id), settings)
-        operations = [
-            (str(r["OperationId"]), str(r.get("seen") or "") or None)
-            for r in found
-            if r.get("OperationId") and normalize(str(r["OperationId"]))
-        ]
-        if not operations:
-            return None
-        legacy = True
-    rows = await _run_query(_network_query([o for o, _ in operations]), settings)
+    async with _logs_session(settings) as logs:
+        counted = await logs.run(_has_items_query(operation_id))
+        items = int(_number(counted[0].get("n")) or 0) if counted else 0
+        if items == 0:
+            found = await logs.run(_legacy_operations_query(interview_id))
+            operations = []
+            for r in found:
+                normalized = normalize(str(r.get("OperationId") or ""))
+                if normalized:
+                    operations.append((normalized, str(r.get("seen") or "") or None))
+            if not operations:
+                return None
+            legacy = True
+        rows = await logs.run(_network_query([o for o, _ in operations], interview_id))
     row = rows[0] if rows else {}
     media = MediaStats(
         samples=int(_number(row.get("samples")) or 0),

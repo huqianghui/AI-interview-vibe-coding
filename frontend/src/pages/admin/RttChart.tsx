@@ -12,7 +12,7 @@ const H = 140;
 const PAD = { left: 40, right: 12, top: 10, bottom: 18 };
 
 const useStyles = makeStyles({
-  wrap: { position: "relative", width: "100%", maxWidth: "720px" },
+  wrap: { position: "relative", width: "100%", maxWidth: "960px" },
   svg: { width: "100%", height: "auto", display: "block", overflow: "visible" },
   tip: {
     position: "absolute",
@@ -109,8 +109,8 @@ export function RttChart({ samples, capacity }: { samples: RttSample[]; capacity
         {median !== null && p95 !== null && (
           <>
             {[
-              { v: median, label: "median" },
-              { v: p95, label: "p95" },
+              { v: median, label: t("admin.performance.chartMedian", { ms: Math.round(median) }) },
+              { v: p95, label: `p95 ${Math.round(p95)}` },
             ].map(({ v, label }) => (
               <g key={label}>
                 <line
@@ -122,8 +122,18 @@ export function RttChart({ samples, capacity }: { samples: RttSample[]; capacity
                   strokeWidth={1}
                   strokeDasharray="4 4"
                 />
-                <text x={W - PAD.right} y={y(v) - 4} textAnchor="end" fontSize={11} fill={ink}>
-                  {`${label} ${Math.round(v)}`}
+                {/* At the plot's left, haloed in the card colour, so the newest point and the
+                    label never paint over each other. */}
+                <text
+                  x={PAD.left + 4}
+                  y={y(v) - 4}
+                  fontSize={11}
+                  fill={ink}
+                  stroke={tokens.colorNeutralBackground1}
+                  strokeWidth={3}
+                  paintOrder="stroke"
+                >
+                  {label}
                 </text>
               </g>
             ))}
@@ -132,7 +142,14 @@ export function RttChart({ samples, capacity }: { samples: RttSample[]; capacity
         <path d={d} fill="none" stroke={line} strokeWidth={2} strokeLinejoin="round" />
         {samples.map((s, i) =>
           s.ms === null ? (
-            <text key={i} x={x(i)} y={H - PAD.bottom + 12} textAnchor="middle" fontSize={11} fill={ink}>
+            <text
+              key={i}
+              x={x(i)}
+              y={H - PAD.bottom + 12}
+              textAnchor="middle"
+              fontSize={11}
+              fill={ink}
+            >
               ×
             </text>
           ) : null,
@@ -148,14 +165,26 @@ export function RttChart({ samples, capacity }: { samples: RttSample[]; capacity
           />
         )}
         {hovered && hover !== null && (
-          <line
-            x1={x(hover)}
-            x2={x(hover)}
-            y1={PAD.top}
-            y2={H - PAD.bottom}
-            stroke={ink}
-            strokeWidth={1}
-          />
+          <>
+            <line
+              x1={x(hover)}
+              x2={x(hover)}
+              y1={PAD.top}
+              y2={H - PAD.bottom}
+              stroke={ink}
+              strokeWidth={1}
+            />
+            {hovered.ms !== null && (
+              <circle
+                cx={x(hover)}
+                cy={y(hovered.ms)}
+                r={4}
+                fill={line}
+                stroke={tokens.colorNeutralBackground1}
+                strokeWidth={2}
+              />
+            )}
+          </>
         )}
         <rect
           x={PAD.left}
@@ -171,7 +200,8 @@ export function RttChart({ samples, capacity }: { samples: RttSample[]; capacity
       {hovered && hover !== null && (
         <div
           className={styles.tip}
-          style={{ left: `${(x(hover) / W) * 100}%` }}
+          // Kept inside the chart at the first and last sample.
+          style={{ left: `${Math.min(88, Math.max(12, (x(hover) / W) * 100))}%` }}
           data-testid="performance-rtt-tip"
         >
           {t("admin.performance.chartTooltip", {

@@ -7,6 +7,7 @@ import json
 import os
 import re
 import uuid
+from pathlib import Path
 from urllib.parse import unquote
 
 import httpx
@@ -19,6 +20,10 @@ from tests.candidate_helpers import mint_candidate_headers
 pytestmark = pytest.mark.asyncio
 
 TRACE = "4bf92f3577b34da6a3ce929d0e0e4736"
+# The page's avatar code, for checking the outcome names the network query counts.
+_AVATAR_STREAM_SOURCE = (
+    Path(__file__).resolve().parents[2] / "frontend/src/hooks/useAvatarStream.ts"
+).read_text()
 TRACEPARENT = f"00-{TRACE}-00f067aa0ba902b7-01"
 
 
@@ -472,7 +477,8 @@ def _logs_by_query(monkeypatch, *, items, legacy=None, stats=_STATS, seen=None):
 async def test_network_of_an_interview_with_the_fixed_id(monkeypatch):
     seen = []
     _logs_by_query(monkeypatch, items=186, seen=seen)
-    found = await performance_service.interview_network(TRACE, None, _settings())
+    interview_id = performance_service.interview_id_for(TRACE)
+    found = await performance_service.interview_network(TRACE, interview_id, _settings())
     assert found.legacy is False
     assert found.operations == [(TRACE, None)]
     assert found.media == performance_service.MediaStats(
@@ -482,6 +488,10 @@ async def test_network_of_an_interview_with_the_fixed_id(monkeypatch):
         connected=1, failed=0, via_relay=1, voice_over_ws=0
     )
     assert f'OperationId in ("{TRACE}")' in seen[-1]
+    # An old page operation can span several interviews: only this one's events count.
+    assert f'tostring(Properties.interview_id) == "{interview_id}"' in seen[-1]
+    # Voice over the WebSocket is a network failure only where an avatar was asked for.
+    assert 'tostring(Properties.avatar) == "true"' in seen[-1]
 
 
 async def test_an_old_interview_is_found_through_its_voice_events(monkeypatch):
@@ -496,12 +506,42 @@ async def test_an_old_interview_is_found_through_its_voice_events(monkeypatch):
     assert all(f'"{o}"' in seen[2] for o in old)
 
 
-@pytest.mark.parametrize(
-    ("interview_id", "legacy"), [(None, None), ("a64af22c-c52a-4cc3-9894-da87634b1695", [])]
-)
-async def test_no_telemetry_at_all_is_none(monkeypatch, interview_id, legacy):
+@pytest.mark.parametrize("legacy", [[], ["not-an-operation-id"]])
+async def test_no_telemetry_at_all_is_none(monkeypatch, legacy):
     _logs_by_query(monkeypatch, items=0, legacy=legacy)
+    interview_id = "a64af22c-c52a-4cc3-9894-da87634b1695"
     assert await performance_service.interview_network(TRACE, interview_id, _settings()) is None
+
+
+async def test_legacy_ids_are_normalized_before_they_reach_a_query(monkeypatch):
+    seen = []
+    _logs_by_query(monkeypatch, items=0, legacy=["D92D8F18-36BE-417C-B930-4FED0D0D78CA"], seen=seen)
+    interview_id = "a64af22c-c52a-4cc3-9894-da87634b1695"
+    found = await performance_service.interview_network(TRACE, interview_id, _settings())
+    assert [o for o, _ in found.operations] == ["d92d8f1836be417cb9304fed0d0d78ca"]
+    assert '"d92d8f1836be417cb9304fed0d0d78ca"' in seen[-1]
+
+
+async def test_one_token_for_every_query_of_a_lookup(monkeypatch):
+    tokens = []
+
+    async def _token(scope):
+        tokens.append(scope)
+        return "token"
+
+    _logs_by_query(monkeypatch, items=0, legacy=["c" * 32])
+    monkeypatch.setattr(performance_service.azure_auth, "get_bearer_token", _token)
+    interview_id = "a64af22c-c52a-4cc3-9894-da87634b1695"
+    await performance_service.interview_network(TRACE, interview_id, _settings())
+    assert len(tokens) == 1, "three queries, one credential"
+
+
+async def test_the_outcome_lists_are_ones_the_page_sends():
+    """The query counts `voice.avatar` outcomes by name; a name the page never sends counts
+    nothing, silently."""
+    sent = set(re.findall(r'finish\("([a-z_]+)"\)', _AVATAR_STREAM_SOURCE))
+    for outcome in (*performance_service.AVATAR_CONNECTED, *performance_service.AVATAR_FAILED):
+        assert outcome in sent, outcome
 
 
 async def test_no_media_samples_reads_as_no_value_not_nan(monkeypatch):
@@ -517,7 +557,9 @@ async def test_no_media_samples_reads_as_no_value_not_nan(monkeypatch):
         ws_audio=1,
     )
     _logs_by_query(monkeypatch, items=3, stats=empty)
-    found = await performance_service.interview_network(TRACE, None, _settings())
+    found = await performance_service.interview_network(
+        TRACE, performance_service.interview_id_for(TRACE), _settings()
+    )
     assert found.media == performance_service.MediaStats(0, None, None, None, None)
     assert found.avatar.voice_over_ws == 1
 
@@ -525,6 +567,8 @@ async def test_no_media_samples_reads_as_no_value_not_nan(monkeypatch):
 async def test_the_legacy_query_takes_only_an_interview_id():
     with pytest.raises(ValueError):
         performance_service._legacy_operations_query('x" or 1==1')
+    with pytest.raises(ValueError):
+        performance_service._network_query([TRACE], 'x" or 1==1')
 
 
 async def test_network_route(client, admin_auth, configured, monkeypatch):
@@ -592,8 +636,9 @@ async def test_download_is_bounded_and_admin_only(client, admin_auth):
 )
 async def test_interview_network_against_the_real_workspace():
     settings = _settings(log_analytics_workspace_id=os.environ["E2E_LOG_ANALYTICS_WORKSPACE_ID"])
+    operation_id = os.environ["E2E_NETWORK_OPERATION_ID"]
     found = await performance_service.interview_network(
-        os.environ["E2E_NETWORK_OPERATION_ID"], os.environ.get("E2E_NETWORK_INTERVIEW_ID"), settings
+        operation_id, performance_service.interview_id_for(operation_id), settings
     )
     assert found is not None
     assert found.media.samples > 0

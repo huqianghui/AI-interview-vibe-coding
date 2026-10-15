@@ -41,7 +41,7 @@
 | RTT 到媒体服务器 | `rtt_ms`（选中候选对的 `currentRoundTripTime`） | 整场 p95 |
 | UDP 丢包 | `audio_loss_pct`（音频轨，与视频码率无关，最干净的读数） | 整场平均 |
 | 下行 | `available_in_kbps`（`availableIncomingBitrate`） | 整场 p50 |
-| UDP 3478 门 | `voice.avatar` 的结果：连上过 = 通过；只失败过，或 `voice.setup` 走了 WebSocket 音频 = E | — |
+| UDP 3478 门 | `voice.avatar` 的结果：连上过（哪怕之前失败过）= 通过；只失败过，或要了数字人却走了 WebSocket 音频（`voice.setup` 的 `avatar` 为 true、`audio_path` 为 ws）= E。本来就不带数字人的纯语音面试不算 | — |
 
 **下行只对视频数字人参与分级。** `availableIncomingBitrate` 是 Chrome 的带宽估计，它只会升到发送端实际在
 发的量：照片数字人（`resolution` 为 `512x512`）只发约 0.8 Mbps，读数反映的是需求而不是链路容量。若按表
@@ -49,6 +49,8 @@
 视频数字人（`1920x1080`）的下行照常参与。
 
 选中的候选对经过 TURN 中继时（`local_candidate` 为 `relay`），RTT 已包含中继这一跳，页面会注明。
+
+所有统计都按 `interview_id` 再筛一遍：早期的一个页面 operation 可能跨了好几场面试，不能把别的面试的采样算进来。
 
 早于固定 Operation id（v0.73.0.0）的面试，id 不是它的 operation：页面通过它的 `voice.*` 事件（带
 `interview_id`）找到它实际跑过的那些 operation，合并后分级，并逐个给出 Logs 链接。
@@ -60,10 +62,12 @@ Performance 页打开且可见时持续测量，页签隐藏即暂停，不保�
 | 测什么 | 怎么测 | 频率 | 与表的关系 |
 |---|---|---|---|
 | RTT | `GET /api/health` 往返（后端与 Voice Live 同在 swedencentral） | 每 2 秒，图上显示最近一分钟 | 到区域的 TCP 往返，是媒体路径 RTT 的**下界** |
-| UDP 3478 门 | 浏览器向 `stun:relay.communication.microsoft.com:3478` 发 STUN Binding，拿到 srflx 候选即通过 | 每 60 秒 | 门本身；它的耗时是到**最近的中继**，不代表到区域 |
-| 下行 | 从后端下载 512 KiB 随机字节计时 | 每 30 秒 | 链路吞吐，参与分级 |
+| UDP 3478 门 | 浏览器向 `stun:relay.communication.microsoft.com:3478` 发 STUN Binding，拿到 srflx 候选即通过；**连续两次**拿不到才判为不通（UDP 偶尔丢一个应答不等于端口被封） | 每 60 秒 | 门本身；它的耗时是到**最近的中继**，不代表到区域 |
+| 下行 | 从后端下载 512 KiB 随机字节，从收到响应头开始计时到最后一个字节 | 每 30 秒 | 链路吞吐，参与分级；这么小的冷传输在远距离链路上会偏低（TCP 慢启动），是下界 |
 | 语音连接 | 打开语音 WebSocket 的探测模式（不开 Voice Live 会话） | 每 15 秒 | 不参与分级，只看能否建连 |
 | 丢包 | 测不到（需要真正的媒体会话） | — | 缺项，结果标为“估计” |
+
+最近 5 次往返里有 3 次失败时不给分级：应用已经基本不应答，旧的成功采样不能代表现在。
 
 估计值只能回答“这个座位大概在哪一级”。系列 12 7.6.6 的两个错位在这里同样成立：中继的 RTT 不代表区域的
 RTT（本机 80 对 252 ms），企业安全客户端下能拿到 srflx 也不保证连通检查会过（系列 17）。**以面试自身的分级为准。**

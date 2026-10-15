@@ -2,7 +2,8 @@
  * The A-to-E network grade of docs/network-grades.md (from the Voice Live weak-network study,
  * §7.6.2): three numbers (RTT, UDP loss, downlink) plus a UDP gate pick the starting form of the
  * interview. Used twice: on an interview's own WebRTC telemetry (authoritative) and on this
- * browser's quick check (an estimate: no UDP loss, TCP RTT to the region instead of the media path).
+ * browser's quick check (an estimate: no UDP loss, TCP RTT to the region instead of the media
+ * path).
  */
 
 export type Grade = "A" | "B" | "C" | "D" | "E";
@@ -14,15 +15,16 @@ export interface GradeInput {
   /** Audio packet loss in percent; null = not measured (the browser check). */
   lossPct: number | null;
   downKbps: number | null;
-  /** Whether downlink is a capacity reading. Chrome's `availableIncomingBitrate` only rises to
-   * what is being sent, so a photo avatar's ~0.8 Mbps says nothing about the link: there it is
-   * shown, not graded. */
+  /** Whether downlink is a capacity reading. Chrome's `availableIncomingBitrate` only rises
+   * to what is being sent, so a photo avatar's ~0.8 Mbps says nothing about the link: there it
+   * is shown, not graded. */
   downCounts: boolean;
 }
 
 export interface GradeResult {
   grade: Grade;
-  /** Between two rows of the table (e.g. RTT 500 to 600 ms): graded as the worse, the safer start. */
+  /** Between two rows of the table (e.g. RTT 500 to 600 ms): graded as the worse one, the safer
+   * start. */
   boundary: boolean;
   /** Something the grade needed was not measured, so it may be better or worse than shown. */
   estimated: boolean;
@@ -50,7 +52,7 @@ export function gradeNetwork(input: GradeInput): GradeResult | null {
   const { udpOk, rttMs, lossPct, downKbps, downCounts } = input;
   const estimated = lossPct === null || udpOk === null || (downCounts && downKbps === null);
   if (udpOk === false) return { grade: "E", boundary: false, estimated: false };
-  if (rttMs === null) return null;
+  if (rttMs === null || !Number.isFinite(rttMs)) return null;
   const down = downCounts ? downKbps : null;
   const loss = lossPct ?? 0;
   if (loss >= D_LOSS || rttMs >= D_RTT || (down !== null && down < D_DOWN)) {

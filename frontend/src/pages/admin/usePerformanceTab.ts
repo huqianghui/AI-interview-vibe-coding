@@ -32,7 +32,8 @@ export function normalizeOperationId(raw: string): string | null {
 }
 
 /** How often each part of the live check runs while the tab is open and visible. Exported so a
- * test can shorten them. The RTT is cheap (a health check); the rest cost more and change slower. */
+ * test can shorten them. The RTT is cheap (a health check); the rest cost more and change
+ * slower. */
 export const LIVE_CHECK = {
   rttMs: 2000,
   wsMs: 15_000,
@@ -52,11 +53,25 @@ export interface LiveNetwork {
   rtt: RttSample[];
   ws: WsReach | null;
   stun: StunReach | null;
+  /** STUN failures in a row: one lost UDP answer is not a blocked port. */
+  stunFailures: number;
   downKbps: number | null;
   browser: BrowserNetwork | null;
 }
 
-const EMPTY_LIVE: LiveNetwork = { rtt: [], ws: null, stun: null, downKbps: null, browser: null };
+const EMPTY_LIVE: LiveNetwork = {
+  rtt: [],
+  ws: null,
+  stun: null,
+  stunFailures: 0,
+  downKbps: null,
+  browser: null,
+};
+/** STUN failures in a row before the UDP gate counts as closed. */
+export const STUN_FAILURES_FOR_CLOSED = 2;
+/** Of the last RECENT round trips, this many failing means the app is not answering: no grade. */
+const RECENT = 5;
+const RECENT_FAILED = 3;
 
 /** The RTTs that answered, oldest first. */
 export function okRtts(samples: RttSample[]): number[] {
@@ -68,8 +83,12 @@ export function okRtts(samples: RttSample[]): number[] {
 export function liveGrade(live: LiveNetwork): GradeResult | null {
   const rtts = okRtts(live.rtt);
   if (rtts.length < 3) return null;
+  if (live.rtt.slice(-RECENT).filter((s) => s.ms === null).length >= RECENT_FAILED) return null;
+  let udpOk: boolean | null = null;
+  if (live.stun?.ok) udpOk = true;
+  else if (live.stunFailures >= STUN_FAILURES_FOR_CLOSED) udpOk = false;
   return gradeNetwork({
-    udpOk: live.stun ? live.stun.ok : null,
+    udpOk,
     rttMs: percentile(rtts, 95),
     lossPct: null,
     downKbps: live.downKbps,
@@ -134,16 +153,19 @@ function useVisible(): boolean {
   return visible;
 }
 
-/** Run `fn` now and every `ms` while `on`; a slow run is never overlapped by the next. */
-function useEvery(on: boolean, ms: number, fn: () => Promise<void>) {
+/** Run `fn` now and every `ms` while `on`; a slow run is never overlapped by the next. `fn` gets
+ * `live()`: false once this run of the loop has stopped, so a reading that lands after the tab
+ * was hidden or left is dropped instead of written. */
+function useEvery(on: boolean, ms: number, fn: (live: () => boolean) => Promise<void>) {
   const fnRef = useRef(fn);
   fnRef.current = fn;
   useEffect(() => {
     if (!on) return;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const live = () => !stopped;
     const tick = async () => {
-      await fnRef.current().catch(() => undefined);
+      await fnRef.current(live).catch(() => undefined);
       if (!stopped) timer = setTimeout(() => void tick(), ms);
     };
     void tick();
@@ -174,25 +196,27 @@ export function usePerformanceTab(active: boolean) {
   // The live check runs only while someone is looking at it: the tab is open and the page visible.
   const visible = useVisible();
   const running = active && visible;
-  useEvery(running, LIVE_CHECK.rttMs, async () => {
+  useEvery(running, LIVE_CHECK.rttMs, async (isLive) => {
     const ms = await apiRttOnce();
+    if (!isLive()) return;
     setLive((l) => ({
       ...l,
       rtt: [...l.rtt, { at: Date.now(), ms }].slice(-LIVE_CHECK.samples),
       browser: browserNetwork(),
     }));
   });
-  useEvery(running, LIVE_CHECK.wsMs, async () => {
+  useEvery(running, LIVE_CHECK.wsMs, async (isLive) => {
     const ws = await measureWs(auth.getAdminToken());
-    setLive((l) => ({ ...l, ws }));
+    if (isLive()) setLive((l) => ({ ...l, ws }));
   });
-  useEvery(running, LIVE_CHECK.downMs, async () => {
+  useEvery(running, LIVE_CHECK.downMs, async (isLive) => {
     const downKbps = await measureDownlink();
-    setLive((l) => ({ ...l, downKbps }));
+    if (isLive()) setLive((l) => ({ ...l, downKbps }));
   });
-  useEvery(running, LIVE_CHECK.stunMs, async () => {
+  useEvery(running, LIVE_CHECK.stunMs, async (isLive) => {
     const stun = await measureStun();
-    setLive((l) => ({ ...l, stun }));
+    if (!isLive()) return;
+    setLive((l) => ({ ...l, stun, stunFailures: stun.ok ? 0 : l.stunFailures + 1 }));
   });
 
   /** Look an id up (from the input, or from Interview results), then the network it ran on. */
