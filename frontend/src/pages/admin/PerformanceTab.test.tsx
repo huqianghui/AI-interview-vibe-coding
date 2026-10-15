@@ -130,7 +130,6 @@ beforeEach(() => {
   vi.spyOn(probe, "measureWs").mockResolvedValue({ ok: true, ms: 120 });
   vi.spyOn(probe, "measureStun").mockResolvedValue({ ok: true, ms: 80 });
   vi.spyOn(probe, "measureDownlink").mockResolvedValue(8000);
-  vi.spyOn(probe, "browserNetwork").mockReturnValue(null);
 });
 
 afterEach(() => {
@@ -173,14 +172,12 @@ describe("Operation id lookup", () => {
     expect(screen.getByTestId("performance-logs")).toBeInTheDocument();
   });
 
-  it("finds the end-to-end transaction on demand", async () => {
-    const user = userEvent.setup();
+  it("finds the end-to-end view by itself: one click from Interview results to the link", async () => {
     const find = vi
       .spyOn(admin, "getTransactionLink")
       .mockResolvedValue({ status: "found", url: "https://portal.azure.com/#view/e2e" });
     renderAt(`/admin?tab=performance&op=${OP}`);
-    await user.click(await screen.findByTestId("performance-transaction-find"));
-    expect(find).toHaveBeenCalledWith(OP);
+    await waitFor(() => expect(find).toHaveBeenCalledWith(OP));
     expect(await screen.findByTestId("performance-transaction-link")).toHaveAttribute(
       "href",
       "https://portal.azure.com/#view/e2e",
@@ -191,11 +188,39 @@ describe("Operation id lookup", () => {
     [{ status: "not_found" as const }, /Not in App Insights yet/],
     [{ status: "unavailable" as const, reason: "needs a role" }, /Unavailable: needs a role/],
   ])("says why there is no transaction link (%o)", async (link, text) => {
-    const user = userEvent.setup();
     vi.spyOn(admin, "getTransactionLink").mockResolvedValue(link);
     renderAt(`/admin?tab=performance&op=${OP}`);
-    await user.click(await screen.findByTestId("performance-transaction-find"));
     expect(await screen.findByText(text)).toBeInTheDocument();
+  });
+
+  it("not there yet: one click looks again", async () => {
+    const user = userEvent.setup();
+    const find = vi
+      .spyOn(admin, "getTransactionLink")
+      .mockResolvedValueOnce({ status: "not_found" })
+      .mockResolvedValueOnce({ status: "found", url: "https://portal.azure.com/#view/e2e" });
+    renderAt(`/admin?tab=performance&op=${OP}`);
+    await user.click(await screen.findByTestId("performance-transaction-retry"));
+    expect(await screen.findByTestId("performance-transaction-link")).toBeInTheDocument();
+    expect(find).toHaveBeenCalledTimes(2);
+  });
+
+  it("no lookup of the end-to-end view where the deployment has none", async () => {
+    vi.mocked(admin.getPerformanceLinks).mockResolvedValue({
+      workbook_url: null,
+      logs: false,
+      transaction: false,
+    });
+    const find = vi.spyOn(admin, "getTransactionLink");
+    renderAt("/admin?tab=performance");
+    await waitFor(() => expect(admin.getPerformanceLinks).toHaveBeenCalled());
+    // Wait for the links to land before looking up, as an admin would.
+    await new Promise((r) => setTimeout(r, 0));
+    const user = userEvent.setup();
+    await user.type(await screen.findByTestId("performance-operation-input"), OP);
+    await user.click(screen.getByTestId("performance-lookup"));
+    await screen.findByTestId("performance-result");
+    expect(find).not.toHaveBeenCalled();
   });
 
   it("opens the interview's result from the lookup", async () => {
@@ -240,7 +265,7 @@ describe("tab URL and states", () => {
     expect(await screen.findByTestId("performance-not-configured")).toBeInTheDocument();
     await screen.findByTestId("performance-result");
     expect(screen.getAllByText(/not configured/i)).toHaveLength(1);
-    expect(screen.queryByTestId("performance-transaction-find")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("performance-transaction-link")).not.toBeInTheDocument();
   });
 
   it("an answer to an older lookup never replaces the newer one", async () => {
@@ -315,7 +340,6 @@ describe("live network check", () => {
     expect(probe.measureWs).toHaveBeenCalledWith("jwt");
     expect(screen.getByTestId("performance-stun")).toHaveTextContent(/open, answered in 80 ms/);
     expect(screen.getByTestId("performance-downlink")).toHaveTextContent("8.0 Mbit/s");
-    expect(screen.getByTestId("performance-browser")).toHaveTextContent("Not available");
   });
 
   it("compares this browser's grade with the default interviewer", async () => {
@@ -624,16 +648,5 @@ describe("probe helpers", () => {
     sockets[1].onclose?.({ code: 1008 });
     expect(await refused).toEqual({ ok: false, reason: "closed (1008)" });
     vi.unstubAllGlobals();
-  });
-
-  it("browserNetwork reads navigator.connection where there is one", () => {
-    vi.mocked(probe.browserNetwork).mockRestore();
-    Object.defineProperty(navigator, "connection", {
-      configurable: true,
-      value: { effectiveType: "4g", rtt: 50, downlink: 10 },
-    });
-    expect(probe.browserNetwork()).toEqual({ type: "4g", rtt: 50, downlink: 10 });
-    Object.defineProperty(navigator, "connection", { configurable: true, value: undefined });
-    expect(probe.browserNetwork()).toBeNull();
   });
 });

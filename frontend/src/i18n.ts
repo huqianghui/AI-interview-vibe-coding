@@ -494,9 +494,6 @@ export const resources = {
           ws: "Voice connection (WebSocket)",
           wsOk: "reachable, {{ms}} ms to open",
           wsFailed: "not reachable: {{reason}}",
-          browserNet: "Browser's network estimate",
-          browserNetValue: "{{type}} · RTT {{rtt}} ms · {{downlink}} Mbit/s",
-          notAvailable: "Not available in this browser",
           lookupTitle: "Look up an Operation id",
           lookupHint:
             "Every interview has one Operation id: its interview id without the dashes. Paste " +
@@ -510,7 +507,7 @@ export const resources = {
           noInterview: "No interview has this id (it is another page's operation).",
           logs: "Raw trace (Logs)",
           transaction: "End-to-end transaction",
-          transactionFind: "Find the end-to-end transaction",
+          transactionRetry: "Look again",
           transactionFinding: "Finding it…",
           transactionNotFound:
             "Not in App Insights yet: telemetry arrives a few minutes after it happens.",
@@ -1164,9 +1161,6 @@ export const resources = {
           ws: "语音连接（WebSocket）",
           wsOk: "可连通，建立连接用时 {{ms}} ms",
           wsFailed: "无法连通：{{reason}}",
-          browserNet: "浏览器估计的网络状况",
-          browserNetValue: "{{type}} · RTT {{rtt}} ms · {{downlink}} Mbit/s",
-          notAvailable: "当前浏览器不提供",
           lookupTitle: "查询 Operation id",
           lookupHint:
             "每场面试有一个 Operation id，即去掉短横线的面试 id。两种都可以粘贴，" +
@@ -1180,7 +1174,7 @@ export const resources = {
           noInterview: "没有面试使用这个 id（它属于其他页面的操作）。",
           logs: "原始链路日志（Logs）",
           transaction: "端到端事务",
-          transactionFind: "查找端到端事务",
+          transactionRetry: "重新查找",
           transactionFinding: "查找中…",
           transactionNotFound: "App Insights 里还没有：遥测数据会在发生几分钟后才到达。",
           transactionUnavailable: "不可用：{{reason}}",

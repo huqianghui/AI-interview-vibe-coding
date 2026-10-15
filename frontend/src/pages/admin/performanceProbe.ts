@@ -1,18 +1,12 @@
 /** The Performance tab's network check, run from the admin's own browser (nothing is stored):
  * the API round trip, whether the voice WebSocket opens, whether UDP reaches Azure's STUN/TURN
- * relay, the downlink, and the browser's own network estimate. The avatar's media path itself is
+ * relay, and the downlink. The avatar's media path itself is
  * not tested here: that needs a real avatar session, which Azure rate-limits; every real
  * interview reports it (`voice.media`), and the tab grades that per interview. */
 import { fetchDownloadProbe } from "../../api/admin";
 import { API_BASE } from "../../api/http";
 
 export type WsReach = { ok: true; ms: number } | { ok: false; reason: string };
-
-export interface BrowserNetwork {
-  type: string;
-  rtt: number | null;
-  downlink: number | null;
-}
 
 /** The p-th percentile (nearest rank) of `values`; 0 for none. */
 export function percentile(values: number[], p: number): number {
@@ -79,21 +73,6 @@ export function measureWs(token: string, timeoutMs = 8000): Promise<WsReach> {
     ws.onerror = () => finish({ ok: false, reason: "connection failed" });
     ws.onclose = (event) => finish({ ok: false, reason: `closed (${event.code})` });
   });
-}
-
-/** `navigator.connection` (Chromium only); null where the browser does not expose it. */
-export function browserNetwork(): BrowserNetwork | null {
-  const conn = (
-    navigator as Navigator & {
-      connection?: { effectiveType?: string; rtt?: number; downlink?: number };
-    }
-  ).connection;
-  if (!conn) return null;
-  return {
-    type: conn.effectiveType ?? "?",
-    rtt: typeof conn.rtt === "number" ? conn.rtt : null,
-    downlink: typeof conn.downlink === "number" ? conn.downlink : null,
-  };
 }
 
 /** The STUN/TURN relay Azure hands every avatar session (docs/network-grades.md). */
