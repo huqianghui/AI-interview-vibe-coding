@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.75.0.0 (2026-10-15)
+
+### Added
+- **Every grade says what to change, compared with the current settings, and whose.** Below a grade
+  the page lists, one line each, what differs from the grade's recommendation: the interviewer's
+  digital human (video, photo or none), `VOICE_LIVE_AVATAR_VIDEO_BITRATE` and the uplink sample rate.
+  With no interview chosen it compares with the default interviewer; for a looked-up interview, with
+  the interviewer that interview was pinned to (the default, said so, when none is recorded).
+- **The five grades beside every grade**, the current one marked, plus **why** (which number crossed
+  which grade's limit, e.g. "RTT 294 ms > 150 ms (A's limit)") and **how often it updates** (the
+  browser estimate every 2 s from the last minute; an interview's grade once, when looked up).
+
+### Changed
+- **The browser's downlink is measured over 2 MiB every 2 minutes, timed from the first chunk**, so a
+  distant but healthy link no longer reads under 1 Mbit/s. A D from the downlink alone says so, gives
+  the grade the other numbers make, and its advice follows that grade.
+- **The workbook link moved into the lookup** ("paste this Operation id"), plus one line at the top
+  for the cross-interview sections; the standalone card is gone.
+
 ## 0.74.0.0 (2026-10-15)
 
 ### Added
