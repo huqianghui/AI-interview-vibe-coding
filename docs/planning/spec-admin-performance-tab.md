@@ -141,3 +141,16 @@ One feature PR (new admin route + tab + infra role), full `/ship` flow.
    its `voice.media` (RTT p95, audio loss mean, downlink p50; downlink graded only for a video
    avatar, owner decision) and `voice.avatar` (the UDP gate); for this browser as an estimate.
    New routes: `GET /admin/performance/operations/{id}/network`, `GET /admin/performance/download`.
+
+## Revision 3 (owner feedback, 2026-10-15)
+
+- Every grade shows the five grades beside it (current highlighted), the reason (which number
+  crossed which grade's limit) and how often it updates.
+- The recommendation is compared with the current settings: the interviewer's digital human and the
+  deployment's avatar bitrate and uplink sample rate, one line per difference. Whose settings
+  (owner): no interview chosen = the default interviewer; a looked-up interview = the interviewer it
+  was pinned to (the default, said so, when it has none). New route `GET /admin/performance/config`.
+- Downlink: 2 MiB every 2 min, timed from the first chunk; a D caused only by the downlink says so
+  and gives the grade the other numbers make.
+- The standalone workbook card is gone: the workbook link is in the lookup ("paste this Operation
+  id") and one line at the top for the cross-interview sections.
