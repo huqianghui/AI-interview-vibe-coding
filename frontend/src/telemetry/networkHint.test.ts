@@ -56,4 +56,36 @@ describe("networkHint", () => {
     expect(() => recordMediaWindow(300, 0)).not.toThrow();
     expect(networkHint()).toEqual({ rttMs: null, lossPct: null });
   });
+
+  it("only the last five windows count, so a recovered network is not held to an old call", () => {
+    [900, 900, 900].forEach((rtt) => recordMediaWindow(rtt, 2));
+    [200, 210, 220, 230, 240].forEach((rtt) => recordMediaWindow(rtt, 0));
+    expect(networkHint()).toEqual({ rttMs: 240, lossPct: 0 });
+  });
+
+  it("ignores stored values that are not numbers", () => {
+    localStorage.setItem(
+      "ai-interview.network-hint",
+      JSON.stringify({ at: Date.now(), rtts: ["abc", null, 310], losses: ["x"] }),
+    );
+    expect(networkHint()).toEqual({ rttMs: 310, lossPct: null });
+  });
+
+  it("a ping that never answers is given up on", async () => {
+    vi.useFakeTimers();
+    try {
+      const hang = vi.fn(
+        (_url: string, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) =>
+            init?.signal?.addEventListener("abort", () => reject(new Error("aborted"))),
+          ),
+      ) as unknown as typeof fetch;
+      const done = measurePreconnect(hang);
+      await vi.advanceTimersByTimeAsync(2000);
+      await done;
+      expect(networkHint().rttMs).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

@@ -46,8 +46,10 @@ export interface GradeResult {
   /** C only because of the downlink: on the browser check, a measurement that underestimates a
    * distant link. */
   downlinkOnly: boolean;
-  /** With `downlinkOnly`: the grade the other numbers alone give. */
+  /** With `downlinkOnly`: the grade the other numbers alone give, and whether that grade is in
+   * B's upper half (the advice follows that grade). */
   withoutDownlink?: Grade;
+  withoutDownlinkAutoBitrate?: boolean;
   /** B in its upper half (RTT > 300 ms or loss > 0.5%): there the backend lowers a photo
    * avatar's video bitrate for each new session by itself. */
   autoBitrate: boolean;
@@ -113,11 +115,12 @@ export function gradeNetwork(input: GradeInput): GradeResult | null {
   if (triggers.length) {
     const graded = result("C", triggers);
     if (triggers.every((r) => r.metric === "down")) {
-      const rest = gradeNetwork({ ...input, downCounts: false })?.grade;
+      const rest = gradeNetwork({ ...input, downCounts: false });
       // Only worth saying when the other numbers alone give a better start.
-      if (rest && rest !== "C") {
+      if (rest && rest.grade !== "C") {
         graded.downlinkOnly = true;
-        graded.withoutDownlink = rest;
+        graded.withoutDownlink = rest.grade;
+        graded.withoutDownlinkAutoBitrate = rest.autoBitrate;
       }
     }
     return graded;

@@ -201,11 +201,10 @@ function GradeView({
   ];
   // A D from the browser's downlink alone (a reading that underestimates distant links) advises
   // from what the other numbers give, so a slow probe never demands voice-only.
-  const adviceGrade =
-    result.downlinkOnly && result.withoutDownlink ? result.withoutDownlink : result.grade;
-  const advice = config
-    ? adviseConfig(adviceGrade, config, { autoBitrate: result.autoBitrate })
-    : [];
+  const fromRest = result.downlinkOnly && result.withoutDownlink !== undefined;
+  const adviceGrade = fromRest ? (result.withoutDownlink as Grade) : result.grade;
+  const autoBitrate = fromRest ? Boolean(result.withoutDownlinkAutoBitrate) : result.autoBitrate;
+  const advice = config ? adviseConfig(adviceGrade, config, { autoBitrate }) : [];
   return (
     <span className={local.gradeLayout}>
       <span className={`${local.grade} ${local.gradeMain}`} data-testid={testId}>

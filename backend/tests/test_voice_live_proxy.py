@@ -40,6 +40,7 @@ from app.services.voice_live_proxy import (  # noqa: E402
     build_audio_append,
     build_avatar_session,
     choose_avatar_bitrate,
+    session_avatar_bitrate,
     session_has_avatar,
 )
 
@@ -273,6 +274,39 @@ def test_a_video_avatar_keeps_the_default_whatever_the_network():
 def test_a_configured_bitrate_always_wins():
     assert choose_avatar_bitrate(PHOTO, NetworkHint(rtt_ms=450), 500000) == (500000, "configured")
     assert choose_avatar_bitrate(FakePersona(), None, 800000) == (800000, "configured")
+
+
+def test_a_session_without_the_avatar_reports_no_bitrate(monkeypatch):
+    """A voice-only fallback (avatar=off) or a persona without a digital human sends no bitrate,
+    so it must not report one either: the reported value feeds the 300 kbit/s comparison."""
+    from app.config import get_settings
+
+    weak = NetworkHint(rtt_ms=450)
+    assert session_avatar_bitrate(PHOTO, weak, avatar_off=True) == (None, "none")
+    assert session_avatar_bitrate(FakePersona(character=""), weak) == (None, "none")
+    get_settings.cache_clear()
+    monkeypatch.setenv("VOICE_LIVE_AVATAR_VIDEO_BITRATE", "500000")
+    try:
+        assert session_avatar_bitrate(PHOTO, weak, avatar_off=True) == (None, "none")
+        assert session_avatar_bitrate(PHOTO, weak) == (500000, "configured")
+    finally:
+        get_settings.cache_clear()
+
+
+def test_the_thresholds_match_the_performance_tab():
+    """The tab says "the backend lowers the bitrate here" by the same numbers the backend uses."""
+    import re as _re
+    from pathlib import Path
+
+    from app.services import voice_live_proxy as vlp
+
+    source = (
+        Path(__file__).resolve().parents[2] / "frontend/src/pages/admin/networkGrade.ts"
+    ).read_text()
+    rtt = _re.search(r"AUTO_BITRATE_RTT_MS = (\d+)", source)
+    loss = _re.search(r"AUTO_BITRATE_LOSS_PCT = ([\d.]+)", source)
+    assert rtt and float(rtt.group(1)) == vlp.AUTO_BITRATE_RTT_MS
+    assert loss and float(loss.group(1)) == vlp.AUTO_BITRATE_LOSS_PCT
 
 
 def test_the_session_carries_the_automatic_bitrate():

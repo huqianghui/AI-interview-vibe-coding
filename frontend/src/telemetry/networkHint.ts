@@ -18,9 +18,11 @@ import { API_BASE } from "../api/http";
 const KEY = "ai-interview.network-hint";
 /** Media numbers older than this describe another day's network. */
 export const MEDIA_FRESH_MS = 24 * 60 * 60 * 1000;
-/** The last this many media windows (15 s each) are kept: about the last five minutes of a call. */
-const WINDOWS = 20;
+/** The last this many media windows (15 s each) count: about the last minute and a quarter, so a
+ * candidate who moved to a better network is not held to an old bad call for long. */
+const WINDOWS = 5;
 const PRECONNECT_PINGS = 3;
+const PING_TIMEOUT_MS = 2000;
 
 interface Stored {
   at: number;
@@ -35,7 +37,10 @@ function read(): Stored | null {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Stored;
-    return Array.isArray(parsed.rtts) && Array.isArray(parsed.losses) ? parsed : null;
+    if (!Array.isArray(parsed.rtts) || !Array.isArray(parsed.losses)) return null;
+    // Only finite numbers: anything else (a stale format, a hand edit) would weaken the hint.
+    const finite = (xs: unknown[]) => xs.filter((x): x is number => Number.isFinite(x));
+    return { at: Number(parsed.at) || 0, rtts: finite(parsed.rtts), losses: finite(parsed.losses) };
   } catch {
     return null;
   }
@@ -58,18 +63,28 @@ export function recordMediaWindow(rttMs: number | undefined, lossPct: number | u
   }
 }
 
-/** A few round trips to the backend, kept for the next voice connection. Never throws. */
+/** A few round trips to the backend at once, each given up after PING_TIMEOUT_MS, kept for the
+ * next voice connection: started when the interview page opens, so they are in before the
+ * candidate starts. Never throws. */
 export async function measurePreconnect(fetchFn: typeof fetch = fetch): Promise<void> {
-  const times: number[] = [];
-  for (let i = 0; i < PRECONNECT_PINGS; i += 1) {
+  const ping = async (): Promise<number | null> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), PING_TIMEOUT_MS);
     const started = performance.now();
     try {
-      const res = await fetchFn(`${API_BASE}/health`, { cache: "no-store" });
-      if (res.ok) times.push(performance.now() - started);
+      const res = await fetchFn(`${API_BASE}/health`, {
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      return res.ok ? performance.now() - started : null;
     } catch {
-      /* a failed ping says nothing about the RTT */
+      return null; // a failed or timed-out ping says nothing about the RTT
+    } finally {
+      clearTimeout(timer);
     }
-  }
+  };
+  const results = await Promise.all(Array.from({ length: PRECONNECT_PINGS }, ping));
+  const times = results.filter((t): t is number => t !== null);
   if (times.length) {
     times.sort((a, b) => a - b);
     preconnectRttMs = times[Math.floor(times.length / 2)];

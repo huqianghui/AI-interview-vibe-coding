@@ -91,6 +91,14 @@ describe("gradeNetwork", () => {
     expect(notOnly?.withoutDownlink).toBeUndefined();
   });
 
+  it("a downlink-only C in B's upper half keeps that for the advice", () => {
+    expect(gradeNetwork(net({ rttMs: 420, downKbps: 800 }))).toMatchObject({
+      grade: "C",
+      withoutDownlink: "B",
+      withoutDownlinkAutoBitrate: true,
+    });
+  });
+
   it("not 'downlink only' in the downlink gap, nor when the rest is C anyway", () => {
     expect(gradeNetwork(net({ rttMs: 250, downKbps: 1200 }))).toMatchObject({
       grade: "C",

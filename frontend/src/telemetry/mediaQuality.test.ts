@@ -8,6 +8,7 @@ import {
   windowMeasurements,
 } from "./mediaQuality";
 import { voiceMetrics } from "./voiceTimeline";
+import { networkHint, resetNetworkHintForTests } from "./networkHint";
 
 /** A getStats report shaped like Chrome's, from cumulative counters. */
 function report(c: {
@@ -196,5 +197,18 @@ describe("MediaQualityWindow", () => {
     expect(() => w.sample(bad, 0, "video")).not.toThrow();
     w.sample(report(ZERO), 0, "video");
     expect(() => w.sample(report(AFTER_15S), MEDIA_WINDOW_MS, "video")).not.toThrow();
+  });
+});
+
+describe("the next session's network hint", () => {
+  it("every window sent is remembered (RTT and audio loss), for the next session's bitrate", () => {
+    resetNetworkHintForTests();
+    const w = new MediaQualityWindow(() => undefined);
+    w.sample(report(ZERO), 0, "video");
+    w.sample(report(AFTER_15S), MEDIA_WINDOW_MS, "video");
+    // The report's pair RTT is 0.25 s.
+    expect(networkHint().rttMs).toBe(250);
+    expect(networkHint().lossPct).toEqual(expect.any(Number));
+    resetNetworkHintForTests();
   });
 });

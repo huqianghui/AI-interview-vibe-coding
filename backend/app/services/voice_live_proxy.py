@@ -335,6 +335,17 @@ def choose_avatar_bitrate(
     return (AUTO_AVATAR_BITRATE, "auto") if weak else (None, "default")
 
 
+def session_avatar_bitrate(
+    persona: InterviewerPersona, hint: NetworkHint | None, *, avatar_off: bool = False
+) -> tuple[int | None, str]:
+    """The bitrate THIS session asks Azure for and why: :func:`choose_avatar_bitrate` when it
+    carries the digital human, else none at all (``(None, "none")``). The one decision both the
+    session builder and ``proxy.connected`` read, so what is reported is what was sent."""
+    if not session_has_avatar(persona, avatar_off=avatar_off):
+        return None, "none"
+    return choose_avatar_bitrate(persona, hint, get_settings().voice_live_avatar_video_bitrate)
+
+
 def build_avatar_session(
     persona: InterviewerPersona,
     *,
@@ -482,9 +493,7 @@ def build_avatar_session(
         # Built with plain statements rather than nested conditional dict-spreads: the previous
         # one-liner buried "codec, optional bitrate, optional background" under three layers.
         video_params: dict[str, Any] = dict(VideoParams(codec="h264"))
-        bitrate, _reason = choose_avatar_bitrate(
-            persona, network_hint, settings.voice_live_avatar_video_bitrate
-        )
+        bitrate, _reason = session_avatar_bitrate(persona, network_hint, avatar_off=avatar_off)
         if bitrate:
             # Unset means Azure's own default, which already adapts its bitrate on its own.
             video_params["bitrate"] = bitrate
@@ -689,8 +698,8 @@ async def run_proxy(
                 network_hint=network_hint,
             )
             await conn.session.update(session=session)
-            bitrate, bitrate_reason = choose_avatar_bitrate(
-                persona, network_hint, get_settings().voice_live_avatar_video_bitrate
+            bitrate, bitrate_reason = session_avatar_bitrate(
+                persona, network_hint, avatar_off=avatar_off
             )
 
             # Pin the session language BEFORE any response can be generated (see

@@ -273,7 +273,7 @@ function toRtcIceServers(raw: unknown): RTCIceServer[] {
     }));
 }
 
-function buildWsUrl(
+export function buildWsUrl(
   token: string,
   personaId: string | undefined,
   locale: string,
@@ -293,9 +293,13 @@ function buildWsUrl(
   if (avatarOff) params.set("avatar", "off");
   // What this browser knows about its network: the backend picks a photo avatar's bitrate from it
   // (Azure takes the bitrate only when the session is created; docs/network-grades.md).
-  const hint = networkHint();
-  if (hint.rttMs !== null) params.set("net_rtt", String(hint.rttMs));
-  if (hint.lossPct !== null) params.set("net_loss", hint.lossPct.toFixed(2));
+  try {
+    const hint = networkHint();
+    if (hint.rttMs !== null) params.set("net_rtt", String(hint.rttMs));
+    if (hint.lossPct !== null) params.set("net_loss", hint.lossPct.toFixed(2));
+  } catch (err) {
+    console.debug("[voice] no network hint", err); // never a reason not to connect
+  }
   return `${protocol}//${window.location.host}/api/voice-live/ws?${params.toString()}`;
 }
 
