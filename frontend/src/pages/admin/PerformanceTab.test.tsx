@@ -2,14 +2,14 @@
  * the way in from Interview results, the URL that carries both, and the network check. Admin API
  * mocked; the probe module tested on its own below. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import "../../i18n";
 import { AdminPage } from "../AdminPage";
 import * as admin from "../../api/admin";
-import type { InterviewResultItem, OperationLookup } from "../../api/admin";
+import type { InterviewNetwork, InterviewResultItem, OperationLookup } from "../../api/admin";
 import * as auth from "../../api/auth";
 import * as personas from "../../api/personas";
 import * as probe from "./performanceProbe";
@@ -40,6 +40,20 @@ const LOOKUP: OperationLookup = {
   interview: ROW,
   logs_url: "https://portal.azure.com/#@t/blade/logs",
   workbook_url: "https://portal.azure.com/#@t/resource/workbook",
+};
+
+const NETWORK: InterviewNetwork = {
+  status: "found",
+  legacy: false,
+  operations: [{ operation_id: OP, seen: null, logs_url: LOOKUP.logs_url }],
+  media: {
+    samples: 5,
+    rtt_p95_ms: 294,
+    audio_loss_pct: 0,
+    available_in_p50_kbps: 846,
+    resolution: "512x512",
+  },
+  avatar: { connected: 1, failed: 0, via_relay: 1, voice_over_ws: 0 },
 };
 
 let lastSearch = "";
@@ -95,6 +109,13 @@ beforeEach(() => {
     transaction: true,
   });
   vi.spyOn(admin, "lookupOperation").mockResolvedValue(LOOKUP);
+  vi.spyOn(admin, "getInterviewNetwork").mockResolvedValue(NETWORK);
+  // The live check: deterministic stand-ins for the network.
+  vi.spyOn(probe, "apiRttOnce").mockResolvedValue(42);
+  vi.spyOn(probe, "measureWs").mockResolvedValue({ ok: true, ms: 120 });
+  vi.spyOn(probe, "measureStun").mockResolvedValue({ ok: true, ms: 80 });
+  vi.spyOn(probe, "measureDownlink").mockResolvedValue(8000);
+  vi.spyOn(probe, "browserNetwork").mockReturnValue(null);
 });
 
 afterEach(() => {
@@ -112,7 +133,7 @@ describe("Operation id lookup", () => {
     expect(screen.getByTestId("performance-workbook")).toHaveAttribute("href", LOOKUP.workbook_url);
   });
 
-  it("a pasted interview id (dashes and all) is looked up as its Operation id, into the URL", async () => {
+  it("a pasted interview id (dashes and all) is looked up as its Operation id", async () => {
     const user = userEvent.setup();
     renderAt("/admin?tab=performance");
     await user.type(await screen.findByTestId("performance-operation-input"), INTERVIEW_ID);
@@ -265,20 +286,117 @@ describe("Interview results → Performance", () => {
   });
 });
 
-describe("network check", () => {
-  it("shows the API round trip, the voice socket and the browser estimate", async () => {
-    const user = userEvent.setup();
-    vi.spyOn(probe, "measureApi").mockResolvedValue({ median: 42, p95: 90, failed: 1, total: 10 });
-    vi.spyOn(probe, "measureWs").mockResolvedValue({ ok: true, ms: 120 });
-    vi.spyOn(probe, "browserNetwork").mockReturnValue(null);
+describe("live network check", () => {
+  it("starts on its own when the tab opens, with the chart and every reading", async () => {
     renderAt("/admin?tab=performance");
-    await user.click(await screen.findByTestId("performance-run-check"));
     expect(await screen.findByTestId("performance-api")).toHaveTextContent(
-      "median 42 ms · p95 90 ms · 1 of 10 failed",
+      "42 ms now · median 42 · p95 42 · 0 failed",
+    );
+    expect(screen.getByTestId("performance-live-state")).toHaveTextContent(/live/i);
+    expect(screen.getByTestId("performance-rtt-chart")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByTestId("performance-ws")).toHaveTextContent("reachable, 120 ms to open"),
     );
     expect(probe.measureWs).toHaveBeenCalledWith("jwt");
-    expect(screen.getByTestId("performance-ws")).toHaveTextContent("reachable, 120 ms to open");
+    expect(screen.getByTestId("performance-stun")).toHaveTextContent(/open, answered in 80 ms/);
+    expect(screen.getByTestId("performance-downlink")).toHaveTextContent("8.0 Mbit/s");
     expect(screen.getByTestId("performance-browser")).toHaveTextContent("Not available");
+  });
+
+  it("keeps sampling, so the chart moves and the grade appears", async () => {
+    const { LIVE_CHECK } = await import("./usePerformanceTab");
+    const saved = LIVE_CHECK.rttMs;
+    LIVE_CHECK.rttMs = 20;
+    try {
+      renderAt("/admin?tab=performance");
+      await waitFor(() =>
+        expect(vi.mocked(probe.apiRttOnce).mock.calls.length).toBeGreaterThanOrEqual(3),
+      );
+      const badge = await screen.findByTestId("performance-live-grade-badge");
+      expect(badge).toHaveTextContent("Grade A");
+      expect(screen.getByTestId("performance-live-grade")).toHaveTextContent(/Estimated/);
+    } finally {
+      LIVE_CHECK.rttMs = saved;
+    }
+  });
+
+  it("pauses while the page is hidden", async () => {
+    renderAt("/admin?tab=performance");
+    await screen.findByTestId("performance-api");
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(await screen.findByTestId("performance-live-state")).toHaveTextContent(/paused/i);
+    visibility.mockRestore();
+  });
+
+  it("does not run on any other tab", async () => {
+    renderAt("/admin?tab=results");
+    vi.spyOn(admin, "listInterviewResults").mockResolvedValue({
+      items: [],
+      total: 0,
+      limit: 20,
+      offset: 0,
+    });
+    await screen.findByTestId("results-tab");
+    expect(probe.apiRttOnce).not.toHaveBeenCalled();
+  });
+
+  it("the chart shows a sample's time and value on hover", async () => {
+    renderAt("/admin?tab=performance");
+    await screen.findByTestId("performance-api");
+    const hit = screen.getByTestId("performance-rtt-hit");
+    hit.getBoundingClientRect = () => ({ left: 0, width: 548, top: 0, height: 112 }) as DOMRect;
+    fireEvent.mouseMove(hit, { clientX: 547 });
+    expect(await screen.findByTestId("performance-rtt-tip")).toHaveTextContent("42 ms");
+  });
+});
+
+describe("the network an interview ran on", () => {
+  it("is read on lookup and graded: a photo avatar on RTT and loss only", async () => {
+    renderAt(`/admin?tab=performance&op=${OP}`);
+    expect(await screen.findByTestId("performance-interview-metrics")).toHaveTextContent(
+      "RTT p95 294 ms · audio loss 0.0% · downlink p50 846 kbit/s · 5 samples · photo avatar",
+    );
+    expect(admin.getInterviewNetwork).toHaveBeenCalledWith(OP);
+    expect(screen.getByTestId("performance-interview-grade-badge")).toHaveTextContent("Grade B");
+    const grade = screen.getByTestId("performance-interview-grade");
+    expect(grade).toHaveTextContent(/Photo avatar at the default bitrate/);
+    expect(grade).toHaveTextContent(/Downlink not graded/);
+    expect(grade).toHaveTextContent(/TURN relay/);
+  });
+
+  it("an interview from before the fixed id lists the operations it ran under", async () => {
+    vi.mocked(admin.getInterviewNetwork).mockResolvedValue({
+      ...NETWORK,
+      legacy: true,
+      operations: [
+        { operation_id: "a".repeat(32), seen: "2026-10-15T05:09:08Z", logs_url: "https://x/1" },
+        { operation_id: "b".repeat(32), seen: "2026-10-15T06:21:34Z", logs_url: "https://x/2" },
+      ],
+    });
+    renderAt(`/admin?tab=performance&op=${OP}`);
+    const legacy = await screen.findByTestId("performance-legacy");
+    expect(legacy).toHaveTextContent(/2 operations/);
+    expect(legacy).toHaveTextContent("a".repeat(32));
+    expect(screen.queryByTestId("performance-logs")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("performance-transaction")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [{ status: "not_found" as const }, /No telemetry for this interview/],
+    [{ status: "unavailable" as const, reason: "needs a role" }, /Unavailable: needs a role/],
+  ])("says why there is no grade (%o)", async (network, text) => {
+    vi.mocked(admin.getInterviewNetwork).mockResolvedValue(network);
+    renderAt(`/admin?tab=performance&op=${OP}`);
+    expect(await screen.findByText(text)).toBeInTheDocument();
+  });
+
+  it("the workbook is linked once, in its own card", async () => {
+    renderAt(`/admin?tab=performance&op=${OP}`);
+    await screen.findByTestId("performance-result");
+    expect(screen.getAllByTestId("performance-workbook")).toHaveLength(1);
   });
 });
 
@@ -295,20 +413,70 @@ describe("probe helpers", () => {
     expect(probe.percentile([1, 2, 3, 4, 5, 6, 7, 8, 9, 100], 95)).toBe(100);
   });
 
-  it("measureApi times each call and counts the failures", async () => {
-    let n = 0;
-    const fetchFn = vi.fn(async () => {
-      n += 1;
-      if (n === 2) throw new Error("down");
-      return new Response("{}", { status: n === 3 ? 503 : 200 });
+  it("apiRttOnce times one health call, null on a failure", async () => {
+    vi.mocked(probe.apiRttOnce).mockRestore();
+    const ok = vi.fn(async () => new Response("{}")) as unknown as typeof fetch;
+    expect(await probe.apiRttOnce(ok)).toEqual(expect.any(Number));
+    expect(ok).toHaveBeenCalledWith("/api/health", { cache: "no-store" });
+    const bad = vi.fn(async () => new Response("", { status: 503 })) as unknown as typeof fetch;
+    expect(await probe.apiRttOnce(bad)).toBeNull();
+    const down = vi.fn(async () => {
+      throw new Error("offline");
     }) as unknown as typeof fetch;
-    const result = await probe.measureApi(4, fetchFn);
-    expect(fetchFn).toHaveBeenCalledWith("/api/health", { cache: "no-store" });
-    expect(result.total).toBe(4);
-    expect(result.failed).toBe(2);
+    expect(await probe.apiRttOnce(down)).toBeNull();
+  });
+
+  it("measureStun asks Azure's relay and reads a server-reflexive candidate as open", async () => {
+    vi.mocked(probe.measureStun).mockRestore();
+    const made: FakePc[] = [];
+    class FakePc {
+      config: RTCConfiguration;
+      onicecandidate: ((e: { candidate: { candidate: string } | null }) => void) | null = null;
+      closed = false;
+      constructor(config: RTCConfiguration) {
+        this.config = config;
+        made.push(this);
+      }
+      createDataChannel() {}
+      async createOffer() {
+        return {};
+      }
+      async setLocalDescription() {}
+      close() {
+        this.closed = true;
+      }
+    }
+    vi.stubGlobal("RTCPeerConnection", FakePc);
+    const open = probe.measureStun();
+    expect(made[0].config.iceServers).toEqual([{ urls: probe.AZURE_STUN }]);
+    const host = { candidate: "candidate:1 1 udp 1 10.0.0.1 5 typ host" };
+    const srflx = { candidate: "candidate:2 1 udp 1 1.2.3.4 5 typ srflx raddr 0" };
+    made[0].onicecandidate?.({ candidate: host });
+    made[0].onicecandidate?.({ candidate: srflx });
+    expect(await open).toEqual({ ok: true, ms: expect.any(Number) });
+    expect(made[0].closed).toBe(true);
+
+    const blocked = probe.measureStun();
+    made[1].onicecandidate?.({ candidate: host });
+    made[1].onicecandidate?.({ candidate: null });
+    expect(await blocked).toEqual({ ok: false, reason: expect.stringMatching(/3478/) });
+    vi.unstubAllGlobals();
+  });
+
+  it("measureDownlink turns the bytes and time into kbit/s, null on a failure", async () => {
+    vi.mocked(probe.measureDownlink).mockRestore();
+    const fetchProbe = vi
+      .spyOn(admin, "fetchDownloadProbe")
+      .mockResolvedValue({ bytes: 512 * 1024, ms: 400 });
+    // 4 Mbit in 0.4 s of transfer: about 10 Mbit/s.
+    expect(await probe.measureDownlink(512)).toBe(Math.round((512 * 1024 * 8) / 400));
+    expect(fetchProbe).toHaveBeenCalledWith(512);
+    fetchProbe.mockRejectedValue(new Error("nope"));
+    expect(await probe.measureDownlink()).toBeNull();
   });
 
   it("measureWs resolves ok on probe.ok and reports a close otherwise", async () => {
+    vi.mocked(probe.measureWs).mockRestore();
     const sockets: FakeSocket[] = [];
     class FakeSocket {
       url: string;
@@ -334,6 +502,7 @@ describe("probe helpers", () => {
   });
 
   it("browserNetwork reads navigator.connection where there is one", () => {
+    vi.mocked(probe.browserNetwork).mockRestore();
     Object.defineProperty(navigator, "connection", {
       configurable: true,
       value: { effectiveType: "4g", rtt: 50, downlink: 10 },

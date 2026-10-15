@@ -335,6 +335,10 @@ async function loadSdk(connectionString: string): Promise<void> {
     config: {
       connectionString,
       enableAutoRouteTracking: true,
+      // The Performance tab's live check polls these every few seconds while it is open: as
+      // dependencies they would be ~1800 items an hour per open tab, and say nothing about an
+      // interview.
+      excludeRequestFromAutoTrackingPatterns: [/\/api\/health$/, /\/api\/admin\/performance\/download/],
       distributedTracingMode: DistributedTracingModes.W3C,
       // No cookies: the voice timings are keyed by interview id, and candidates are not tracked
       // across visits.

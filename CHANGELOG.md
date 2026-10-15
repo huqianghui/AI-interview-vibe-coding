@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.74.0.0 (2026-10-15)
+
+### Added
+- **Each interview's network is graded A to E, with what to configure.** Looking up an Operation id
+  now reads the network the interview actually ran on from its own WebRTC telemetry (RTT p95, audio
+  loss, downlink, whether the avatar connected over UDP) and grades it against the table from the
+  weak-network study, with the starting form and settings that grade calls for (video or photo
+  avatar, `VOICE_LIVE_AVATAR_VIDEO_BITRATE`, voice-only, allow UDP 3478). A photo avatar's downlink is
+  shown but not graded: it only reflects what the avatar sends. See `docs/network-grades.md`.
+- **The network check is live.** It starts when the Performance tab opens and keeps measuring while
+  the tab is open and visible: the API round trip every 2 s on a one-minute chart (median and p95),
+  the voice connection, UDP to Azure's relay (the port 3478 gate), and the downlink, with an
+  estimated grade for this browser. It pauses when the tab is hidden and stores nothing.
+
+### Changed
+- **Interviews from before the fixed Operation id work in the lookup.** Their telemetry is found
+  through their voice events, and each operation they ran under gets its own Logs link.
+- **The workbook is linked once**, in its own card, with how to use it for one interview and across
+  interviews.
+- The Performance tab's own polling is no longer recorded in App Insights.
+
 ## 0.73.0.0 (2026-10-15)
 
 ### Added

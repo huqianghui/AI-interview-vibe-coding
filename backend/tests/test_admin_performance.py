@@ -3,9 +3,11 @@ interview <-> operation mapping, the portal links, the end-to-end lookup, and th
 
 import base64
 import gzip
+import json
 import os
 import re
 import uuid
+from pathlib import Path
 from urllib.parse import unquote
 
 import httpx
@@ -18,6 +20,10 @@ from tests.candidate_helpers import mint_candidate_headers
 pytestmark = pytest.mark.asyncio
 
 TRACE = "4bf92f3577b34da6a3ce929d0e0e4736"
+# The page's avatar code, for checking the outcome names the network query counts.
+_AVATAR_STREAM_SOURCE = (
+    Path(__file__).resolve().parents[2] / "frontend/src/hooks/useAvatarStream.ts"
+).read_text()
 TRACEPARENT = f"00-{TRACE}-00f067aa0ba902b7-01"
 
 
@@ -419,3 +425,236 @@ async def test_first_item_against_the_real_workspace():
     assert item is not None
     assert re.fullmatch(r"[0-9a-f-]{36}", item.item_id)
     assert item.timestamp.startswith("20")
+
+
+# --- the network an interview ran on --------------------------------------------------------
+
+
+def _table(**row):
+    return {"tables": [{"columns": [{"name": k} for k in row], "rows": [list(row.values())]}]}
+
+
+_STATS = _table(
+    samples=5,
+    rtt_p95=294,
+    loss_avg=0,
+    down_p50=846,
+    resolution="512x512",
+    avatar_ok=1,
+    avatar_failed=0,
+    relay=1,
+    ws_audio=0,
+)
+
+
+def _logs_by_query(monkeypatch, *, items, legacy=None, stats=_STATS, seen=None):
+    """A Logs API that answers each of the three network queries by its shape."""
+
+    def handler(request):
+        query = json.loads(request.content)["query"]
+        if seen is not None:
+            seen.append(query)
+        if "summarize n = count()" in query:
+            return httpx.Response(200, json=_table(n=items))
+        if "summarize seen = min(TimeGenerated)" in query:
+            rows = legacy or []
+            return httpx.Response(
+                200,
+                json={
+                    "tables": [
+                        {
+                            "columns": [{"name": "OperationId"}, {"name": "seen"}],
+                            "rows": [[o, "2026-10-15T05:09:08Z"] for o in rows],
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(200, json=stats)
+
+    _logs_api(monkeypatch, handler)
+
+
+async def test_network_of_an_interview_with_the_fixed_id(monkeypatch):
+    seen = []
+    _logs_by_query(monkeypatch, items=186, seen=seen)
+    interview_id = performance_service.interview_id_for(TRACE)
+    found = await performance_service.interview_network(TRACE, interview_id, _settings())
+    assert found.legacy is False
+    assert found.operations == [(TRACE, None)]
+    assert found.media == performance_service.MediaStats(
+        samples=5, rtt_p95_ms=294, audio_loss_pct=0, available_in_p50_kbps=846, resolution="512x512"
+    )
+    assert found.avatar == performance_service.AvatarOutcomes(
+        connected=1, failed=0, via_relay=1, voice_over_ws=0
+    )
+    assert f'OperationId in ("{TRACE}")' in seen[-1]
+    # An old page operation can span several interviews: only this one's events count.
+    assert f'tostring(Properties.interview_id) == "{interview_id}"' in seen[-1]
+    # Voice over the WebSocket is a network failure only where an avatar was asked for.
+    assert 'tostring(Properties.avatar) == "true"' in seen[-1]
+
+
+async def test_an_old_interview_is_found_through_its_voice_events(monkeypatch):
+    seen = []
+    old = ["d92d8f1836be417cb9304fed0d0d78ca", "b5c703de6a28463bb8e115c4b4419c47"]
+    _logs_by_query(monkeypatch, items=0, legacy=old, seen=seen)
+    interview_id = "a64af22c-c52a-4cc3-9894-da87634b1695"
+    found = await performance_service.interview_network(TRACE, interview_id, _settings())
+    assert found.legacy is True
+    assert [o for o, _ in found.operations] == old
+    assert f'tostring(Properties.interview_id) == "{interview_id}"' in seen[1]
+    assert all(f'"{o}"' in seen[2] for o in old)
+
+
+@pytest.mark.parametrize("legacy", [[], ["not-an-operation-id"]])
+async def test_no_telemetry_at_all_is_none(monkeypatch, legacy):
+    _logs_by_query(monkeypatch, items=0, legacy=legacy)
+    interview_id = "a64af22c-c52a-4cc3-9894-da87634b1695"
+    assert await performance_service.interview_network(TRACE, interview_id, _settings()) is None
+
+
+async def test_legacy_ids_are_normalized_before_they_reach_a_query(monkeypatch):
+    seen = []
+    _logs_by_query(monkeypatch, items=0, legacy=["D92D8F18-36BE-417C-B930-4FED0D0D78CA"], seen=seen)
+    interview_id = "a64af22c-c52a-4cc3-9894-da87634b1695"
+    found = await performance_service.interview_network(TRACE, interview_id, _settings())
+    assert [o for o, _ in found.operations] == ["d92d8f1836be417cb9304fed0d0d78ca"]
+    assert '"d92d8f1836be417cb9304fed0d0d78ca"' in seen[-1]
+
+
+async def test_one_token_for_every_query_of_a_lookup(monkeypatch):
+    tokens = []
+
+    async def _token(scope):
+        tokens.append(scope)
+        return "token"
+
+    _logs_by_query(monkeypatch, items=0, legacy=["c" * 32])
+    monkeypatch.setattr(performance_service.azure_auth, "get_bearer_token", _token)
+    interview_id = "a64af22c-c52a-4cc3-9894-da87634b1695"
+    await performance_service.interview_network(TRACE, interview_id, _settings())
+    assert len(tokens) == 1, "three queries, one credential"
+
+
+async def test_the_outcome_lists_are_ones_the_page_sends():
+    """The query counts `voice.avatar` outcomes by name; a name the page never sends counts
+    nothing, silently."""
+    sent = set(re.findall(r'finish\("([a-z_]+)"\)', _AVATAR_STREAM_SOURCE))
+    for outcome in (*performance_service.AVATAR_CONNECTED, *performance_service.AVATAR_FAILED):
+        assert outcome in sent, outcome
+
+
+async def test_no_media_samples_reads_as_no_value_not_nan(monkeypatch):
+    empty = _table(
+        samples=0,
+        rtt_p95=None,
+        loss_avg="NaN",
+        down_p50=None,
+        resolution="",
+        avatar_ok=0,
+        avatar_failed=1,
+        relay=0,
+        ws_audio=1,
+    )
+    _logs_by_query(monkeypatch, items=3, stats=empty)
+    found = await performance_service.interview_network(
+        TRACE, performance_service.interview_id_for(TRACE), _settings()
+    )
+    assert found.media == performance_service.MediaStats(0, None, None, None, None)
+    assert found.avatar.voice_over_ws == 1
+
+
+async def test_the_legacy_query_takes_only_an_interview_id():
+    with pytest.raises(ValueError):
+        performance_service._legacy_operations_query('x" or 1==1')
+    with pytest.raises(ValueError):
+        performance_service._network_query([TRACE], 'x" or 1==1')
+
+
+async def test_network_route(client, admin_auth, configured, monkeypatch):
+    headers = await mint_candidate_headers(client)
+    await client.post("/candidate/interview/start", headers={**headers, "traceparent": TRACEPARENT})
+    _logs_by_query(monkeypatch, items=10)
+    body = (
+        await client.get(f"/admin/performance/operations/{TRACE}/network", headers=admin_auth)
+    ).json()
+    assert body["status"] == "found"
+    assert body["legacy"] is False
+    assert body["operations"] == [
+        {
+            "operation_id": TRACE,
+            "seen": None,
+            "logs_url": performance_service.logs_url(TRACE, configured),
+        }
+    ]
+    assert body["media"]["rtt_p95_ms"] == 294
+    assert body["avatar"]["via_relay"] == 1
+
+
+async def test_network_route_not_found(client, admin_auth, monkeypatch):
+    settings = _settings()
+    monkeypatch.setattr("app.api.admin_performance.get_settings", lambda: settings)
+    path = f"/admin/performance/operations/{TRACE}/network"
+    _logs_by_query(monkeypatch, items=0)
+    assert (await client.get(path, headers=admin_auth)).json()["status"] == "not_found"
+
+
+async def test_network_route_unavailable(client, admin_auth, monkeypatch):
+    settings = _settings()
+    monkeypatch.setattr("app.api.admin_performance.get_settings", lambda: settings)
+    path = f"/admin/performance/operations/{TRACE}/network"
+    _logs_api(monkeypatch, lambda r: httpx.Response(403, json={}))
+    body = (await client.get(path, headers=admin_auth)).json()
+    assert body["status"] == "unavailable"
+    assert "Log Analytics Data Reader" in body["reason"]
+
+
+async def test_download(client, admin_auth):
+    resp = await client.get("/admin/performance/download?kb=8", headers=admin_auth)
+    assert resp.status_code == 200
+    assert len(resp.content) == 8 * 1024
+    assert resp.headers["cache-control"] == "no-store"
+    again = await client.get("/admin/performance/download?kb=8", headers=admin_auth)
+    assert again.content != resp.content, "random, so nothing in front of the app can compress it"
+
+
+async def test_download_is_bounded_and_admin_only(client, admin_auth):
+    assert (
+        await client.get("/admin/performance/download?kb=4096", headers=admin_auth)
+    ).status_code == 422
+    assert (
+        await client.get("/admin/performance/download?kb=0", headers=admin_auth)
+    ).status_code == 422
+    assert (await client.get("/admin/performance/download")).status_code == 401
+
+
+@pytest.mark.skipif(
+    bool(os.environ.get("CI"))
+    or not os.environ.get("E2E_LOG_ANALYTICS_WORKSPACE_ID")
+    or not os.environ.get("E2E_NETWORK_OPERATION_ID"),
+    reason="needs a real Log Analytics workspace (local only)",
+)
+async def test_interview_network_against_the_real_workspace():
+    settings = _settings(log_analytics_workspace_id=os.environ["E2E_LOG_ANALYTICS_WORKSPACE_ID"])
+    operation_id = os.environ["E2E_NETWORK_OPERATION_ID"]
+    found = await performance_service.interview_network(
+        operation_id, performance_service.interview_id_for(operation_id), settings
+    )
+    assert found is not None
+    assert found.media.samples > 0
+    assert found.media.rtt_p95_ms and found.media.rtt_p95_ms > 0
+
+
+async def test_network_route_finds_an_old_interview_without_its_row(
+    client, admin_auth, configured, monkeypatch
+):
+    """The voice events carry the dashed interview id: no database row is needed to find them."""
+    seen = []
+    _logs_by_query(monkeypatch, items=0, legacy=["c" * 32], seen=seen)
+    body = (
+        await client.get(f"/admin/performance/operations/{TRACE}/network", headers=admin_auth)
+    ).json()
+    assert body["status"] == "found"
+    assert body["legacy"] is True
+    assert [o["operation_id"] for o in body["operations"]] == ["c" * 32]
+    assert performance_service.interview_id_for(TRACE) in seen[1]

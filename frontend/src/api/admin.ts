@@ -755,3 +755,40 @@ export const getTransactionLink = (operationId: string) =>
   adminRequest<TransactionLink>(
     `/admin/performance/operations/${encodeURIComponent(operationId)}/transaction`,
   );
+
+/** The network one interview ran on, from its telemetry. Mirrors `InterviewNetworkOut`. */
+export interface InterviewNetwork {
+  status: "found" | "not_found" | "unavailable";
+  reason?: string | null;
+  /** An interview from before the fixed operation id: `operations` are the ones it ran under. */
+  legacy?: boolean;
+  operations?: { operation_id: string; seen?: string | null; logs_url: string | null }[];
+  media?: {
+    samples: number;
+    rtt_p95_ms: number | null;
+    audio_loss_pct: number | null;
+    available_in_p50_kbps: number | null;
+    resolution: string | null;
+  } | null;
+  avatar?: { connected: number; failed: number; via_relay: number; voice_over_ws: number } | null;
+}
+
+/** Asks the Logs query API (a few seconds). */
+export const getInterviewNetwork = (operationId: string) =>
+  adminRequest<InterviewNetwork>(
+    `/admin/performance/operations/${encodeURIComponent(operationId)}/network`,
+  );
+
+/** The downlink check: `kb` KiB of random bytes, timed from the response headers to the last byte,
+ * so the request's own round trip is not counted as transfer time. */
+export async function fetchDownloadProbe(kb: number): Promise<{ bytes: number; ms: number }> {
+  const resp = await apiFetch(
+    `/admin/performance/download?kb=${kb}`,
+    { cache: "no-store" },
+    { bearer: getAdminToken() },
+    { json: false },
+  );
+  const started = performance.now();
+  const bytes = (await resp.arrayBuffer()).byteLength;
+  return { bytes, ms: performance.now() - started };
+}

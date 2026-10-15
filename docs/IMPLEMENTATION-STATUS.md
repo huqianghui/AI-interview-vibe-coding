@@ -107,6 +107,7 @@ acknowledgement, never a local report.
 | Voice WebSocket traced end to end (browser `traceparent` → backend `voice.session` child), WebRTC quality samples (`voice.media`), voice-only playback gaps | ✅ Done | v0.66.0.0, v0.66.0.1 | ✅ verified 2026-10-10 (live avatar interview: socket ↔ backend session joined, close by tab via beacon, quality windows, full request chain in the workbook) |
 | "AI Interview — Voice performance" workbook (`modules/voice-workbook.bicep`) | ✅ Done | v0.65.0.0 | ✅ deployed to `appi-aiinterview-public`; all 16 queries run |
 | One operation per interview (the interview adopts the page's trace id) + admin Performance tab (Operation id lookup, Logs / end-to-end / workbook links, network check) — [`planning/spec-admin-performance-tab.md`](planning/spec-admin-performance-tab.md) | ✅ Done | v0.73.0.0 | ✅ live 2026-10-15: MI role + 6 env vars applied, workbook redeployed; a live interview with a reload stayed in one operation (browser page view/events/calls + backend requests/dependencies), lookup and end-to-end link found via the MI |
+| Network grades A to E per interview (`voice.media` RTT / loss / downlink + the UDP gate) with settings, live browser check with chart, old interviews found via their voice events — [`network-grades.md`](network-grades.md) | ✅ Done | v0.74.0.0 | Local: real Logs API and real STUN to Azure's relay verified; live: pending deploy |
 
 ## Background jobs + scale-out ([`planning/spec-jobs-and-scale-out.md`](planning/spec-jobs-and-scale-out.md))
 
