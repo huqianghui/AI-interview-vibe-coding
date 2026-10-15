@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.config import JUDGE_MODEL_DEFAULT
 from app.services.agents.adapters.foundry_llm import (
     FoundryLLMAdapter,
     LLMAdapterError,
@@ -90,7 +91,7 @@ class TestRegistration:
         registry._register_foundry_llm()
         assert registry._LLM_ADAPTERS.get("azure").__class__.__name__ == "FoundryLLMAdapter"
 
-    def test_runs_on_judge_model_and_falls_back_to_agent_model(self, monkeypatch):
+    def test_runs_on_judge_model_never_the_agent_model(self, monkeypatch):
         from app.config import get_settings
         from app.services.agents import registry
 
@@ -102,9 +103,10 @@ class TestRegistration:
         monkeypatch.setattr(settings, "judge_model", "judge-dep", False)
         registry._register_foundry_llm()
         assert registry._LLM_ADAPTERS["azure"]._model == "judge-dep"
+        # Blank JUDGE_MODEL falls to the code default, never to the (unrelated) agent model.
         monkeypatch.setattr(settings, "judge_model", "", False)
         registry._register_foundry_llm()
-        assert registry._LLM_ADAPTERS["azure"]._model == "agent-dep"
+        assert registry._LLM_ADAPTERS["azure"]._model == JUDGE_MODEL_DEFAULT
         registry._LLM_ADAPTERS.pop("azure", None)
 
     def test_noop_without_endpoint(self, monkeypatch):

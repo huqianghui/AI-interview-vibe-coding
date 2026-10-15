@@ -13,6 +13,9 @@ from functools import lru_cache
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Code default for the inference model (judge + scoring); also used when JUDGE_MODEL is set blank.
+JUDGE_MODEL_DEFAULT = "gpt-6-sol"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -113,14 +116,14 @@ class Settings(BaseSettings):
     # Foundry project for interviewer-agent sync (SPEC F5). Empty in dev/CI → no agent sync.
     default_agent_sync_provider: str = "mock"
     foundry_project_endpoint: str = ""
-    # Model the interviewer Foundry agent runs on. MUST name a deployment that exists on the target
-    # Azure resource. Project default is gpt-6-luna; the real value comes from the DB master config
-    # (admin page) in prod, or FOUNDRY_AGENT_MODEL in .env for dev.
+    # Fallback model for an interviewer agent whose persona has no model of its own. The agent's
+    # model is chosen per persona in the agent editor; this env value is only the fallback and is
+    # unrelated to the inference model below. MUST name a deployment on the target resource.
     foundry_agent_model: str = "gpt-6-luna"
-    # Model the plain-model judgments run on: the in-interview judge and report scoring (and the
-    # SOP coverage audit / document summaries, which share the same adapter). A deployment on the
-    # same resource. Empty = use foundry_agent_model. Project default gpt-6-sol.
-    judge_model: str = "gpt-6-sol"
+    # The INFERENCE model: the in-interview judge and report scoring (and the SOP coverage audit /
+    # document summaries, which share the same adapter). Independent of the agent's model. Real
+    # value: the admin Connection tab's "Inference model" (DB) → JUDGE_MODEL in .env → this default.
+    judge_model: str = JUDGE_MODEL_DEFAULT
     foundry_api_key: str = ""
 
     # Azure Foundry / Voice Live resource. The browser never talks to it directly: the backend's
@@ -133,7 +136,9 @@ class Settings(BaseSettings):
     # AZURE_FOUNDRY_ENDPOINT resource; empty = keyword search only (dev and CI without Azure).
     sop_embedding_deployment: str = "text-embedding-3-small"
     sop_embedding_api_version: str = "2024-10-21"
-    # Model Voice Live runs the session on (MODEL mode). Voice Live only accepts models it hosts
+    # Last-resort model Voice Live runs the session on (MODEL mode), after the Connection tab's
+    # voice model override and the persona's own model (app.api.voice_live_ws.resolve_voice_model).
+    # Voice Live only accepts models it hosts
     # natively in the resource's region (Learn: Speech regions → Voice Live tab) — NOT arbitrary
     # deployments. Project default gpt-6-luna; gpt-6-luna, gpt-6-sol and gpt-5-mini are all accepted
     # on Sweden Central (probed 2026-10-15, scripts/voice_live_model_probe.py — the list drifts, so

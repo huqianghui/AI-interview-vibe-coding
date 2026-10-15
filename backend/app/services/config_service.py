@@ -106,7 +106,7 @@ async def resolve_foundry_connection(db: AsyncSession) -> tuple[str, str, str, s
     api_key = (
         (await get_decrypted_key(db)) or settings.azure_foundry_api_key or settings.foundry_api_key
     )
-    model = (master.model_or_deployment if master else "") or settings.foundry_agent_model
+    model = (master.model_or_deployment if master else "") or settings.judge_model
     return endpoint, project, api_key, model
 
 
@@ -132,8 +132,8 @@ async def upsert_master_config(
     ``clear_api_key=True`` deletes the stored key instead (Entra ID / Managed Identity auth only)
     and wins over ``api_key``. Saving always marks the row active.
 
-    ``model_or_deployment`` is the INFERENCE model (the Foundry agent; judge / scoring too unless
-    ``JUDGE_MODEL`` is set);
+    ``model_or_deployment`` is the INFERENCE model (judge / scoring), independent of the agent's
+    model;
     ``voice_model`` + ``voice_model_mode`` + ``voice_byom_profile`` are the separate Voice Live
     session model. They are two settings because the legal values differ (see the ServiceConfig
     docstring). The voice args default to the pre-split behaviour, so existing callers that only
@@ -209,7 +209,7 @@ async def seed_master_config_from_env(db: AsyncSession) -> ServiceConfig | None:
         is_master=True,
         endpoint=endpoint,
         default_project=settings.azure_foundry_default_project,
-        model_or_deployment=settings.foundry_agent_model,
+        model_or_deployment=settings.judge_model,
         is_active=True,
         updated_by="boot-seed",
     )

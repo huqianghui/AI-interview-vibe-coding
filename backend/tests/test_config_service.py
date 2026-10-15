@@ -141,7 +141,7 @@ async def test_seed_from_env_creates_row_when_absent(db_session, monkeypatch):
     s = get_settings()
     monkeypatch.setattr(s, "azure_foundry_endpoint", "https://seed.services.ai.azure.com")
     monkeypatch.setattr(s, "azure_foundry_default_project", "proj-boot")
-    monkeypatch.setattr(s, "foundry_agent_model", "gpt-5.4-mini")
+    monkeypatch.setattr(s, "judge_model", "gpt-5.4-mini")
 
     master = await config_service.seed_master_config_from_env(db_session)
     assert master is not None

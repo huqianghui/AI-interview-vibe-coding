@@ -5,11 +5,11 @@ shared endpoint, API key (Fernet-encrypted), default project, and the models. It
 source of truth: overlaid onto the settings singleton at startup and after each save (see
 ``app.services.config_overlay``), giving the precedence DB > .env > code default.
 
-**Two models, not one.** ``model_or_deployment`` is the INFERENCE model (the Foundry agent, and
-judge / scoring when the deployment sets no ``JUDGE_MODEL``) and must be a deployment in this
-resource; ``voice_model`` is the Voice Live SESSION
-model and must be a name Voice Live hosts natively in the region, unless ``voice_model_mode`` says
-``byom``. They were one field until v0.43 and that is exactly what produced "Model X is not
+**Two models, not one.** ``model_or_deployment`` is the INFERENCE model (judge / scoring; the
+agent's model is per persona, set in the agent editor) and must be a deployment in this resource;
+``voice_model`` is the Voice Live SESSION model OVERRIDE (empty = each persona's own model) and
+must be a name Voice Live hosts natively in the region, unless ``voice_model_mode`` says ``byom``.
+They were one field until v0.43 and that is exactly what produced "Model X is not
 supported in this region" whenever an operator saved their own deployment.
 
 Right-sized for this project's 4 services (LLM, retrieval, agent-sync, voice-live) — a single master
@@ -34,10 +34,10 @@ class ServiceConfig(TimestampMixin, Base):
     endpoint: Mapped[str] = mapped_column(String(500), default="", nullable=False)
     # Fernet token (see app.utils.encryption); never the plaintext key.
     api_key_encrypted: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    # The INFERENCE model: judge (judged-mode wait/nudge), scoring, checklist drafting, SOP
-    # coverage, and the Foundry agent's own model all resolve to this (via
-    # settings.foundry_agent_model, see config_overlay). It is a DEPLOYMENT NAME in this Foundry
-    # resource — the Responses API and the Agents service address models by deployment.
+    # The INFERENCE model: judge (judged-mode wait/nudge), scoring, checklist drafting and SOP
+    # coverage resolve to this (via settings.judge_model, see config_overlay). The Foundry agent's
+    # model is NOT this: it is per persona. A DEPLOYMENT NAME in this Foundry resource — the
+    # Responses API addresses models by deployment.
     # It deliberately no longer feeds Voice Live: see voice_model below.
     model_or_deployment: Mapped[str] = mapped_column(String(100), default="", nullable=False)
     # The VOICE-SESSION model, split out from model_or_deployment in v0.43 because the two take

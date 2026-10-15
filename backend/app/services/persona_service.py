@@ -243,10 +243,8 @@ async def reconcile_persona(db: AsyncSession, persona: InterviewerPersona) -> In
     Fail-soft: a never-synced persona, an unavailable agent, or any read error is a no-op (the
     persona is returned unchanged). Never raises — a plain page-load must not 500 on Azure trouble.
 
-    When the reconciled persona is the enabled default, its model also drives the global runtime
-    config (``foundry_agent_model`` / Voice Live default): the master ``service_configs`` row is
-    updated and re-overlaid onto the settings singleton — the runtime override, without rewriting
-    the physical ``.env`` file.
+    The reconciled model stays on the persona. It never writes the master config: the master's
+    "Inference model" is the judge/scoring model and is independent of any agent's model.
     """
     # Never synced → no remote agent to reconcile against.
     if not persona.agent_id or not persona.agent_version:
@@ -276,7 +274,6 @@ async def reconcile_persona(db: AsyncSession, persona: InterviewerPersona) -> In
     if not version_changed and not needs_backfill and not instructions_changed:
         return persona
 
-    model_changed = bool(remote_model) and remote_model != persona.model
     if remote_version:
         persona.agent_version = remote_version
     if remote_model:
@@ -290,48 +287,7 @@ async def reconcile_persona(db: AsyncSession, persona: InterviewerPersona) -> In
     persona.agent_sync_error = None
     await db.commit()
 
-    # The default persona's model is the global runtime model — propagate it (runtime overlay only).
-    if persona.is_default and model_changed and remote_model:
-        await _propagate_default_model(db, remote_model)
-
     return persona
-
-
-async def _propagate_default_model(db: AsyncSession, model: str) -> None:
-    """Push the default persona's reconciled model into the master config + settings overlay.
-
-    Preserves the saved endpoint/key/project/kb (empty ``api_key`` keeps the stored secret); only
-    the model changes. Fail-soft — a missing master row (creds only in ``.env``) or an overlay error
-    must not break reconciliation, so any error here is swallowed.
-    """
-    from app.services import config_service
-    from app.services.config_overlay import apply_master_config_to_settings
-
-    master = await config_service.get_master_config(db)
-    if master is None or not master.endpoint:
-        # No saved master row yet — the overlay is driven by .env; nothing to update at runtime.
-        return
-    try:
-        await config_service.upsert_master_config(
-            db,
-            endpoint=master.endpoint,
-            api_key="",  # preserve the existing encrypted key
-            default_project=master.default_project,
-            model_or_deployment=model,
-            updated_by="reconcile",
-            knowledge_base=master.knowledge_base,
-            knowledge_source=master.knowledge_source,
-            # Echo the voice settings back: upsert_master_config rewrites every field, so omitting
-            # these would reset the operator's Voice Live model/mode on every reconcile. The
-            # per-persona model propagates to the INFERENCE model only — the voice leg is global.
-            voice_model=master.voice_model,
-            voice_model_mode=master.voice_model_mode,
-            voice_byom_profile=master.voice_byom_profile,
-        )
-        await db.commit()
-        await apply_master_config_to_settings(db)
-    except Exception:  # noqa: BLE001 — runtime propagation is best-effort, never fatal
-        await db.rollback()
 
 
 # --- internals -------------------------------------------------------------

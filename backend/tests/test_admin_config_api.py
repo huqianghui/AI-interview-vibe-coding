@@ -120,6 +120,7 @@ async def test_overlay_makes_db_win_over_default(db_session, _restore_settings):
 
     settings = get_settings()
     voice_model_before = settings.voice_live_default_model
+    agent_model_before = settings.foundry_agent_model
     # Precondition: no azure adapters registered on a mock-only boot.
     registry._AGENT_SYNC_ADAPTERS.pop("azure", None)
     registry._RETRIEVAL_ADAPTERS.pop("azure", None)
@@ -138,11 +139,11 @@ async def test_overlay_makes_db_win_over_default(db_session, _restore_settings):
     applied = await apply_master_config_to_settings(db_session)
     assert applied is True
 
-    # The singleton now carries the DB values (overlay won over the code default).
-    assert settings.foundry_agent_model == "gpt-5.4"
-    # …EXCEPT the Voice Live model: model_or_deployment is the agent's CHAT deployment, and
-    # overlaying it onto the voice model broke model-mode voice sessions ("Model X is not
-    # supported in this region", issue 4). The voice model stays env/code-configured.
+    # The saved inference model is the judge/scoring model (overlay won over the code default)…
+    assert settings.judge_model == "gpt-5.4"
+    # …and it touches neither the agent's fallback model (per persona, in the agent editor) nor
+    # the Voice Live model (a native-hosted name; overlaying a deployment broke voice, issue 4).
+    assert settings.foundry_agent_model == agent_model_before
     assert settings.voice_live_default_model == voice_model_before
     assert settings.foundry_project_endpoint == "https://demo.services.ai.azure.com"
     assert settings.default_agent_sync_provider == "azure"
@@ -386,7 +387,7 @@ async def test_model_deployments_env_fallback_without_db_row(
     s.azure_foundry_endpoint = "https://envdemo.services.ai.azure.com"
     s.azure_foundry_api_key = "env-key"
     s.azure_foundry_default_project = "env-prj"
-    s.foundry_agent_model = "gpt-5.4-env"
+    s.judge_model = "gpt-5.4-env"  # the inference list falls back to the inference model
     _mock_bearer(monkeypatch, None)
     # Both live probes fail → falls through to the configured model name from .env.
     _FakeAsyncClient._responses = [_FakeResp(500, {}), _FakeResp(500, {})]
