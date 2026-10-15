@@ -213,14 +213,43 @@ describe("Operation id lookup", () => {
     });
     const find = vi.spyOn(admin, "getTransactionLink");
     renderAt("/admin?tab=performance");
-    await waitFor(() => expect(admin.getPerformanceLinks).toHaveBeenCalled());
-    // Wait for the links to land before looking up, as an admin would.
-    await new Promise((r) => setTimeout(r, 0));
+    // The links have landed once the page says nothing is configured.
+    await screen.findByTestId("performance-not-configured");
     const user = userEvent.setup();
     await user.type(await screen.findByTestId("performance-operation-input"), OP);
     await user.click(screen.getByTestId("performance-lookup"));
     await screen.findByTestId("performance-result");
     expect(find).not.toHaveBeenCalled();
+    expect(screen.getByTestId("performance-transaction-none")).toHaveTextContent("—");
+  });
+
+  it("an end-to-end answer for an older lookup never lands under a newer one", async () => {
+    const user = userEvent.setup();
+    const OTHER = "b".repeat(32);
+    let releaseOld: (v: { status: "found"; url: string }) => void = () => undefined;
+    vi.spyOn(admin, "getTransactionLink").mockImplementation((id: string) =>
+      id === OP
+        ? new Promise((resolve) => (releaseOld = resolve))
+        : Promise.resolve({ status: "found" as const, url: "https://portal.azure.com/#view/new" }),
+    );
+    vi.mocked(admin.lookupOperation).mockImplementation(async (id: string) => ({
+      ...LOOKUP,
+      operation_id: id,
+    }));
+    renderAt(`/admin?tab=performance&op=${OP}`);
+    await screen.findByTestId("performance-result");
+    const input = screen.getByTestId("performance-operation-input");
+    await user.clear(input);
+    await user.type(input, OTHER);
+    await user.click(screen.getByTestId("performance-lookup"));
+    const link = await screen.findByTestId("performance-transaction-link");
+    expect(link).toHaveAttribute("href", "https://portal.azure.com/#view/new");
+    releaseOld({ status: "found", url: "https://portal.azure.com/#view/old" });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.getByTestId("performance-transaction-link")).toHaveAttribute(
+      "href",
+      "https://portal.azure.com/#view/new",
+    );
   });
 
   it("opens the interview's result from the lookup", async () => {
@@ -265,7 +294,7 @@ describe("tab URL and states", () => {
     expect(await screen.findByTestId("performance-not-configured")).toBeInTheDocument();
     await screen.findByTestId("performance-result");
     expect(screen.getAllByText(/not configured/i)).toHaveLength(1);
-    expect(screen.queryByTestId("performance-transaction-link")).not.toBeInTheDocument();
+    expect(screen.getByTestId("performance-transaction-none")).toHaveTextContent("—");
   });
 
   it("an answer to an older lookup never replaces the newer one", async () => {

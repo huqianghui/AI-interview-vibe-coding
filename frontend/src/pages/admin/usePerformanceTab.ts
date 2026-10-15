@@ -228,6 +228,8 @@ export function usePerformanceTab(active: boolean) {
   // The links are read once; a lookup only asks for the end-to-end view when it can exist.
   const linksRef = useRef<PerformanceLinks | null>(null);
   linksRef.current = links;
+  // The lookup the shown result belongs to: a retry answers for it, never for a newer one.
+  const resultSeqRef = useRef(0);
 
   /** The end-to-end transaction link for `id` (a Logs query, a few seconds); an answer that lands
    * after a newer lookup is dropped. */
@@ -264,6 +266,7 @@ export function usePerformanceTab(active: boolean) {
     try {
       const found = await admin.lookupOperation(id);
       if (!current()) return;
+      resultSeqRef.current = seq;
       setResult(found);
     } catch (e) {
       if (current()) {
@@ -291,7 +294,7 @@ export function usePerformanceTab(active: boolean) {
   /** Ask again (the telemetry was not in App Insights yet: it arrives a few minutes late). */
   const findTransaction = useCallback(async () => {
     const id = result?.operation_id;
-    if (id) await findTransactionFor(id, lookupSeq.current);
+    if (id) await findTransactionFor(id, resultSeqRef.current);
   }, [result, findTransactionFor]);
 
   return {

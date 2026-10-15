@@ -517,31 +517,34 @@ export function PerformanceTab({
                 <>
                   <Text className={local.label}>{t("admin.performance.transaction")}</Text>
                   <span className={local.linkRow} data-testid="performance-transaction">
-                    {transaction.kind === "idle" && links?.transaction === false && none}
-                    {transaction.kind === "finding" && (
-                      <Text>{t("admin.performance.transactionFinding")}</Text>
-                    )}
-                    {transaction.kind === "done" && transaction.link.status === "found" && (
-                      <Link
-                        href={transaction.link.url ?? undefined}
-                        {...external}
-                        data-testid="performance-transaction-link"
-                      >
-                        {t("admin.performance.openTransaction")}
-                      </Link>
-                    )}
-                    {transaction.kind === "done" && transaction.link.status === "not_found" && (
+                    {links?.transaction === false ? (
+                      <span data-testid="performance-transaction-none">{none}</span>
+                    ) : (
                       <>
-                        <Text className={local.hint}>
-                          {t("admin.performance.transactionNotFound")}
-                        </Text>
-                        <Button
-                          size="small"
-                          onClick={() => void state.findTransaction()}
-                          data-testid="performance-transaction-retry"
+                      {transaction.kind === "finding" && (
+                        <Text>{t("admin.performance.transactionFinding")}</Text>
+                      )}
+                      {transaction.kind === "done" && transaction.link.status === "found" && (
+                        <Link
+                          href={transaction.link.url ?? undefined}
+                          {...external}
+                          data-testid="performance-transaction-link"
                         >
-                          {t("admin.performance.transactionRetry")}
-                        </Button>
+                          {t("admin.performance.openTransaction")}
+                        </Link>
+                      )}
+                      {transaction.kind === "done" && transaction.link.status === "not_found" && (
+                        <>
+                          <Text className={local.hint}>
+                            {t("admin.performance.transactionNotFound")}
+                          </Text>
+                          <Button
+                            size="small"
+                            onClick={() => void state.findTransaction()}
+                            data-testid="performance-transaction-retry"
+                          >
+                            {t("admin.performance.transactionRetry")}
+                          </Button>
                       </>
                     )}
                     {transaction.kind === "done" && transaction.link.status === "unavailable" && (
@@ -557,6 +560,8 @@ export function PerformanceTab({
                           reason: transaction.message,
                         })}
                       </Text>
+                    )}
+                      </>
                     )}
                   </span>
                 </>
