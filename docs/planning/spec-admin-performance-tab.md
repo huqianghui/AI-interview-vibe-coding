@@ -130,7 +130,7 @@ One feature PR (new admin route + tab + infra role), full `/ship` flow.
 
 1. **Live network check.** Starts when the tab opens and keeps sampling while it is open and the
    page visible: API round trip every 2 s (a one-minute line chart with median and p95), voice WS
-   probe every 15 s, a 512 KiB download every 30 s, a STUN Binding to Azure's relay every 60 s.
+   probe every 15 s, a download (2 MiB every 2 min since revision 3), a STUN Binding to Azure's relay every 60 s.
 2. **The workbook once.** The per-interview workbook row is gone (the portal cannot pre-fill it, so
    it was the same generic link twice); one Workbook card says how to use it for one interview and
    across interviews.
@@ -141,3 +141,16 @@ One feature PR (new admin route + tab + infra role), full `/ship` flow.
    its `voice.media` (RTT p95, audio loss mean, downlink p50; downlink graded only for a video
    avatar, owner decision) and `voice.avatar` (the UDP gate); for this browser as an estimate.
    New routes: `GET /admin/performance/operations/{id}/network`, `GET /admin/performance/download`.
+
+## Revision 3 (owner feedback, 2026-10-15)
+
+- Every grade shows the five grades beside it (current highlighted), the reason (which number
+  crossed which grade's limit) and how often it updates.
+- The recommendation is compared with the current settings: the interviewer's digital human and the
+  deployment's avatar bitrate and uplink sample rate, one line per difference. Whose settings
+  (owner): no interview chosen = the default interviewer; a looked-up interview = the interviewer it
+  was pinned to (the default, said so, when it has none). New route `GET /admin/performance/config`.
+- Downlink: 2 MiB every 2 min, timed from the first chunk; a D caused only by the downlink says so
+  and gives the grade the other numbers make.
+- The standalone workbook card is gone: the workbook link is in the lookup ("paste this Operation
+  id") and one line at the top for the cross-interview sections.

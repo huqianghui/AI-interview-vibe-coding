@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as admin from "../../api/admin";
 import type {
+  CurrentConfig,
   InterviewNetwork,
   OperationLookup,
   PerformanceLinks,
@@ -37,7 +38,8 @@ export function normalizeOperationId(raw: string): string | null {
 export const LIVE_CHECK = {
   rttMs: 2000,
   wsMs: 15_000,
-  downMs: 30_000,
+  // 2 MiB each: often enough to follow the link, rare enough for ~60 MB an hour per open tab.
+  downMs: 120_000,
   stunMs: 60_000,
   /** The chart's window: 30 samples = the last minute. */
   samples: 30,
@@ -186,12 +188,21 @@ export function usePerformanceTab(active: boolean) {
   const [error, setError] = useState<string | null>(null);
   const [transaction, setTransaction] = useState<TransactionState>({ kind: "idle" });
   const [interviewNetwork, setInterviewNetwork] = useState<NetworkState>({ kind: "idle" });
+  // What a grade is compared with: the default interviewer's settings (no interview chosen) and
+  // the looked-up interview's own interviewer.
+  const [defaultConfig, setDefaultConfig] = useState<CurrentConfig | null>(null);
+  const [interviewConfig, setInterviewConfig] = useState<CurrentConfig | null>(null);
   const lookupSeq = useRef(0);
 
   useEffect(() => {
     if (!active || links) return;
     admin.getPerformanceLinks().then(setLinks, () => undefined);
   }, [active, links]);
+  // Read each time the tab opens: someone may have changed the default interviewer meanwhile.
+  useEffect(() => {
+    if (!active) return;
+    admin.getCurrentConfig().then(setDefaultConfig, () => undefined);
+  }, [active]);
 
   // The live check runs only while someone is looking at it: the tab is open and the page visible.
   const visible = useVisible();
@@ -225,6 +236,7 @@ export function usePerformanceTab(active: boolean) {
     setError(null);
     setTransaction({ kind: "idle" });
     setInterviewNetwork({ kind: "idle" });
+    setInterviewConfig(null);
     const id = normalizeOperationId(raw);
     setInvalid(id === null);
     // Bumped first, so a lookup still in flight cannot land after this one (valid or not).
@@ -250,6 +262,10 @@ export function usePerformanceTab(active: boolean) {
       if (current()) setLooking(false);
     }
     setInterviewNetwork({ kind: "loading" });
+    admin.getCurrentConfig(id).then(
+      (config) => current() && setInterviewConfig(config),
+      () => undefined,
+    );
     try {
       const network = await admin.getInterviewNetwork(id);
       if (current()) setInterviewNetwork({ kind: "done", network });
@@ -287,6 +303,8 @@ export function usePerformanceTab(active: boolean) {
     transaction,
     findTransaction,
     interviewNetwork,
+    defaultConfig,
+    interviewConfig,
   };
 }
 

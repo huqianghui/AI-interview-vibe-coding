@@ -34,7 +34,11 @@ describe("gradeNetwork", () => {
   it.each([[{ rttMs: 550 }], [{ lossPct: 2 }], [{ downKbps: 1200 }]])(
     "%o falls between C and D: graded D, marked as a boundary",
     (over) => {
-      expect(gradeNetwork(net(over))).toEqual({ grade: "D", boundary: true, estimated: false });
+      expect(gradeNetwork(net(over))).toMatchObject({
+        grade: "D",
+        boundary: true,
+        estimated: false,
+      });
     },
   );
 
@@ -51,6 +55,46 @@ describe("gradeNetwork", () => {
     expect(gradeNetwork(net({ udpOk: null }))?.estimated).toBe(true);
     expect(gradeNetwork(net({ downKbps: null }))?.estimated).toBe(true);
     expect(gradeNetwork(net({}))?.estimated).toBe(false);
+  });
+
+  it("says why: the limits of the grade above, or D's own triggers", () => {
+    expect(gradeNetwork(net({ rttMs: 100 }))?.reasons).toEqual([]);
+    expect(gradeNetwork(net({ rttMs: 400, lossPct: 0.8 }))?.reasons).toEqual([
+      { metric: "rtt", value: 400, limit: 300, row: "B" },
+      { metric: "loss", value: 0.8, limit: 0.5, row: "B" },
+    ]);
+    expect(gradeNetwork(net({ rttMs: 700, lossPct: 4 }))?.reasons).toEqual([
+      { metric: "loss", value: 4, limit: 3, row: "D" },
+      { metric: "rtt", value: 700, limit: 600, row: "D" },
+    ]);
+    expect(gradeNetwork(net({ rttMs: 550 }))?.reasons).toEqual([
+      { metric: "rtt", value: 550, limit: 500, row: "C" },
+    ]);
+    expect(gradeNetwork(net({ udpOk: false }))?.reasons).toEqual([
+      { metric: "udp", value: null, limit: 3478, row: "E" },
+    ]);
+  });
+
+  it("a D caused only by the downlink says so, and what the rest gives", () => {
+    const onlyDown = gradeNetwork(net({ rttMs: 250, downKbps: 800 }));
+    expect(onlyDown).toMatchObject({ grade: "D", downlinkOnly: true, withoutDownlink: "B" });
+    const notOnly = gradeNetwork(net({ rttMs: 700, downKbps: 800 }));
+    expect(notOnly).toMatchObject({ grade: "D", downlinkOnly: false });
+    expect(notOnly?.withoutDownlink).toBeUndefined();
+  });
+
+  it("not 'downlink only' in the downlink gap, nor when the rest is D anyway", () => {
+    // 1000 to 1500 kbit/s is the C/D gap, not D's downlink trigger.
+    expect(gradeNetwork(net({ rttMs: 250, downKbps: 1200 }))).toMatchObject({
+      grade: "D",
+      boundary: true,
+      downlinkOnly: false,
+    });
+    // RTT in the 500 to 600 gap makes the rest D too: nothing better to point at.
+    expect(gradeNetwork(net({ rttMs: 550, downKbps: 800 }))).toMatchObject({
+      grade: "D",
+      downlinkOnly: false,
+    });
   });
 
   it("no RTT (or not a number), no grade", () => {
@@ -73,7 +117,11 @@ describe("an interview's grade", () => {
   };
 
   it("a photo avatar is graded on RTT and loss (the owner's own interview: B)", () => {
-    expect(interviewGrade(photo)).toEqual({ grade: "B", boundary: false, estimated: false });
+    expect(interviewGrade(photo)).toMatchObject({ grade: "B", boundary: false, estimated: false });
+    // Why not A: the RTT, against A's limit.
+    expect(interviewGrade(photo)?.reasons).toEqual([
+      { metric: "rtt", value: 294, limit: 150, row: "A" },
+    ]);
   });
 
   it("a video avatar's downlink counts", () => {
@@ -128,7 +176,7 @@ describe("this browser's grade", () => {
 
   it("needs three answers, then grades the p95, always as an estimate", () => {
     expect(liveGrade(live([100, null, 100]))).toBeNull();
-    expect(liveGrade(live([100, 120, 310]))).toEqual({
+    expect(liveGrade(live([100, 120, 310]))).toMatchObject({
       grade: "C",
       boundary: false,
       estimated: true,
@@ -137,7 +185,7 @@ describe("this browser's grade", () => {
 
   it("STUN blocked twice in a row is E; once is not yet", () => {
     const failed = { ok: false as const, reason: "x" };
-    expect(liveGrade(live([50, 50, 50], { stun: failed, stunFailures: 1 }))).toEqual({
+    expect(liveGrade(live([50, 50, 50], { stun: failed, stunFailures: 1 }))).toMatchObject({
       grade: "A",
       boundary: false,
       estimated: true,

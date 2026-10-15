@@ -779,8 +779,9 @@ export const getInterviewNetwork = (operationId: string) =>
     `/admin/performance/operations/${encodeURIComponent(operationId)}/network`,
   );
 
-/** The downlink check: `kb` KiB of random bytes, timed from the response headers to the last byte,
- * so the request's own round trip is not counted as transfer time. */
+/** The downlink check: `kb` KiB of random bytes, timed from the FIRST chunk to the last, counting
+ * only the bytes after it: the request's round trip and the start of TCP slow start (which made a
+ * distant but healthy link read under 1 Mbit/s) are left out. */
 export async function fetchDownloadProbe(kb: number): Promise<{ bytes: number; ms: number }> {
   const resp = await apiFetch(
     `/admin/performance/download?kb=${kb}`,
@@ -788,7 +789,54 @@ export async function fetchDownloadProbe(kb: number): Promise<{ bytes: number; m
     { bearer: getAdminToken() },
     { json: false },
   );
-  const started = performance.now();
-  const bytes = (await resp.arrayBuffer()).byteLength;
-  return { bytes, ms: performance.now() - started };
+  const reader = resp.body?.getReader();
+  if (!reader) {
+    const started = performance.now();
+    const bytes = (await resp.arrayBuffer()).byteLength;
+    return { bytes, ms: performance.now() - started };
+  }
+  const headers = performance.now();
+  let started: number | null = null;
+  let total = 0;
+  let tail = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (started === null) started = performance.now();
+    else tail += value.byteLength;
+  }
+  const end = performance.now();
+  // A body that came in one or two big chunks (a buffering proxy) leaves too little after the
+  // first to time: then the whole body from the headers is the better reading.
+  if (started === null || tail < TAIL_MIN_BYTES || end - started < TAIL_MIN_MS) {
+    return { bytes: total, ms: end - headers };
+  }
+  return { bytes: tail, ms: end - started };
+}
+
+const TAIL_MIN_BYTES = 256 * 1024;
+const TAIL_MIN_MS = 20;
+
+/** The interviewer and settings a grade is compared with. Mirrors `CurrentConfig`. */
+export interface CurrentConfig {
+  /** default: no interview chosen; interview: that interview's own interviewer; default_fallback:
+   * the interview predates the pin (or its interviewer was deleted), so the default stands in. */
+  source: "default" | "interview" | "default_fallback";
+  interviewer: {
+    id: string;
+    name: string;
+    avatar: "video" | "photo" | "none";
+    character: string;
+  } | null;
+  /** Deployment setting; null = Azure's default (2 Mbit/s). */
+  avatar_video_bitrate: number | null;
+  input_sampling_rate: number;
+}
+
+export function getCurrentConfig(operationId?: string) {
+  const params = new URLSearchParams();
+  if (operationId) params.set("operation_id", operationId);
+  // Always "?…": one literal path keeps the static route check able to read it.
+  return adminRequest<CurrentConfig>(`/admin/performance/config?${params.toString()}`);
 }

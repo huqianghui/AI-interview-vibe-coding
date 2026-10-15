@@ -18,9 +18,10 @@ import {
   makeStyles,
   tokens,
 } from "@fluentui/react-components";
-import type { InterviewNetwork } from "../../api/admin";
+import type { CurrentConfig, InterviewNetwork } from "../../api/admin";
 import { formatWhenShort } from "../../components/transcriptText";
-import type { Grade, GradeResult } from "./networkGrade";
+import { adviseConfig } from "./gradeAdvice";
+import type { Grade, GradeReason, GradeResult } from "./networkGrade";
 import { formatRate, percentile } from "./performanceProbe";
 import { RttChart } from "./RttChart";
 import { useAdminStyles } from "./shared";
@@ -60,6 +61,30 @@ const useStyles = makeStyles({
     columnGap: tokens.spacingHorizontalS,
   },
   grade: { display: "flex", flexDirection: "column", rowGap: tokens.spacingVerticalXS },
+  // The grade on the left, the A-to-E legend on the right; stacked when narrow.
+  gradeLayout: {
+    display: "flex",
+    flexWrap: "wrap",
+    columnGap: tokens.spacingHorizontalXXL,
+    rowGap: tokens.spacingVerticalM,
+    alignItems: "flex-start",
+  },
+  gradeMain: { flex: "1 1 360px", minWidth: 0 },
+  legend: {
+    flex: "0 1 340px",
+    display: "grid",
+    gridTemplateColumns: "max-content 1fr",
+    columnGap: tokens.spacingHorizontalS,
+    rowGap: tokens.spacingVerticalXXS,
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground2,
+    fontSize: tokens.fontSizeBase200,
+  },
+  legendRow: { color: tokens.colorNeutralForeground3 },
+  legendCurrent: { color: tokens.colorNeutralForeground1, fontWeight: tokens.fontWeightSemibold },
+  advice: { margin: 0, paddingLeft: tokens.spacingHorizontalL },
+  topLine: { color: tokens.colorNeutralForeground3 },
   ops: { margin: 0, paddingLeft: tokens.spacingHorizontalL },
 });
 
@@ -92,43 +117,157 @@ function CopyButton({ value, testId }: { value: string; testId: string }) {
   );
 }
 
-/** A grade, the starting form and settings it recommends, and the caveats behind it. */
+const GRADES: Grade[] = ["A", "B", "C", "D", "E"];
+
+/** The five grades in one line each, the current one highlighted. */
+function GradeLegend({ current }: { current: Grade | null }) {
+  const local = useStyles();
+  const { t } = useTranslation();
+  return (
+    <div className={local.legend} data-testid="performance-grade-legend">
+      <Text weight="semibold" style={{ gridColumn: "1 / -1" }}>
+        {t("admin.performance.legendTitle")}
+      </Text>
+      {GRADES.map((g) => (
+        <span key={g} style={{ display: "contents" }}>
+          <Badge
+            appearance={g === current ? "filled" : "tint"}
+            color={GRADE_COLOR[g]}
+            size="small"
+            data-testid={g === current ? "performance-legend-current" : undefined}
+          >
+            {g}
+          </Badge>
+          <Text className={g === current ? local.legendCurrent : local.legendRow}>
+            {t(`admin.performance.legend.${g}`)}
+          </Text>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+type T = (key: string, o?: Record<string, unknown>) => string;
+
+function reasonText(t: T, r: GradeReason): string {
+  if (r.metric === "udp") return t("admin.performance.reason.udp");
+  const raw = r.value ?? 0;
+  // One more decimal where rounding would print the limit itself ("RTT 150 ms > 150 ms").
+  const digits = r.metric === "loss" ? 1 : 0;
+  const atLimit = raw.toFixed(digits) === (r.limit ?? 0).toFixed(digits);
+  const shown = raw.toFixed(atLimit ? digits + 1 : digits);
+  const value = r.metric === "down" ? formatRate(raw) : shown;
+  const limit = r.metric === "down" ? formatRate(r.limit ?? 0) : r.limit;
+  const key = r.row === "D" ? `${r.metric}D` : r.metric;
+  return t(`admin.performance.reason.${key}`, { value, limit, row: r.row });
+}
+
+/** A grade: why, the starting form it recommends, what to change compared with the current
+ * settings (and with whose), when it updates, and the five grades beside it. */
 function GradeView({
   result,
   notes,
+  config,
+  cadence,
   testId,
 }: {
   result: GradeResult | null;
   notes: string[];
+  config: CurrentConfig | null;
+  cadence: string;
   testId: string;
 }) {
   const local = useStyles();
   const { t } = useTranslation();
   if (!result) {
     return (
-      <Text className={local.hint} data-testid={testId}>
-        {t("admin.performance.gradeNone")}
-      </Text>
+      <span className={local.gradeLayout}>
+        <span className={local.gradeMain}>
+          <Text className={local.hint} data-testid={testId}>
+            {t("admin.performance.gradeNone")}
+          </Text>
+        </span>
+        <GradeLegend current={null} />
+      </span>
     );
   }
   const all = [
+    ...(result.downlinkOnly && result.withoutDownlink
+      ? [t("admin.performance.noteDownlinkOnly", { grade: result.withoutDownlink })]
+      : []),
     ...(result.estimated ? [t("admin.performance.noteEstimated")] : []),
     ...(result.boundary ? [t("admin.performance.noteBoundary")] : []),
     ...notes,
   ];
+  // A D from the browser's downlink alone (a reading that underestimates distant links) advises
+  // from what the other numbers give, so a slow probe never demands voice-only.
+  const adviceGrade =
+    result.downlinkOnly && result.withoutDownlink ? result.withoutDownlink : result.grade;
+  const advice = config ? adviseConfig(adviceGrade, config) : [];
   return (
-    <span className={local.grade} data-testid={testId}>
-      <span className={local.linkRow}>
-        <Badge appearance="tint" color={GRADE_COLOR[result.grade]} data-testid={`${testId}-badge`}>
-          {t("admin.performance.gradeLabel", { grade: result.grade })}
-        </Badge>
-        <Text>{t(`admin.performance.rec.${result.grade}`)}</Text>
+    <span className={local.gradeLayout}>
+      <span className={`${local.grade} ${local.gradeMain}`} data-testid={testId}>
+        <span className={local.linkRow}>
+          <Badge
+            appearance="tint"
+            color={GRADE_COLOR[result.grade]}
+            data-testid={`${testId}-badge`}
+          >
+            {t("admin.performance.gradeLabel", { grade: result.grade })}
+          </Badge>
+          <Text>{t(`admin.performance.rec.${result.grade}`)}</Text>
+        </span>
+        {result.reasons.length > 0 && (
+          <Text data-testid={`${testId}-why`}>
+            {t("admin.performance.why", {
+              grade: result.grade,
+              reasons: result.reasons.map((r) => reasonText(t, r)).join(" · "),
+            })}
+          </Text>
+        )}
+        {all.map((note) => (
+          <Text key={note} className={local.hint}>
+            {note}
+          </Text>
+        ))}
+        {config && (
+          <span className={local.grade} data-testid={`${testId}-advice`}>
+            <Text weight="semibold">
+              {config.interviewer
+                ? t(`admin.performance.compare.${config.source}`, { name: config.interviewer.name })
+                : t("admin.performance.advice.noInterviewer")}
+            </Text>
+            {config.interviewer && (
+              <ul className={local.advice}>
+                {advice.length === 0 ? (
+                  <li>
+                    <Text>{t("admin.performance.advice.matches")}</Text>
+                  </li>
+                ) : (
+                  advice.map((a) => (
+                    <li key={a.key}>
+                      <Text weight={a.change ? "semibold" : "regular"}>
+                        {t(`admin.performance.advice.${a.key}`, a.params)}
+                      </Text>
+                    </li>
+                  ))
+                )}
+              </ul>
+            )}
+            <Text className={local.hint}>
+              {t("admin.performance.compareSettings", {
+                bitrate:
+                  config.avatar_video_bitrate === null
+                    ? t("admin.performance.bitrateUnset")
+                    : formatRate(config.avatar_video_bitrate / 1000),
+                rate: config.input_sampling_rate,
+              })}
+            </Text>
+          </span>
+        )}
+        <Text className={local.hint}>{cadence}</Text>
       </span>
-      {all.map((note) => (
-        <Text key={note} className={local.hint}>
-          {note}
-        </Text>
-      ))}
+      <GradeLegend current={result.grade} />
     </span>
   );
 }
@@ -138,7 +277,13 @@ function fmt(v: number | null | undefined, digits = 0): string {
 }
 
 /** What the interview's own telemetry says about its network. */
-function InterviewNetworkView({ network }: { network: InterviewNetwork }) {
+function InterviewNetworkView({
+  network,
+  config,
+}: {
+  network: InterviewNetwork;
+  config: CurrentConfig | null;
+}) {
   const local = useStyles();
   const { t } = useTranslation();
   const media = network.media;
@@ -167,6 +312,8 @@ function InterviewNetworkView({ network }: { network: InterviewNetwork }) {
       <GradeView
         result={interviewGrade(network)}
         notes={notes}
+        config={config}
+        cadence={t("admin.performance.interviewCadence")}
         testId="performance-interview-grade"
       />
     </span>
@@ -203,6 +350,13 @@ export function PerformanceTab({
 
   return (
     <div className={local.stack} data-testid="performance-tab">
+      {links?.workbook_url && (
+        <Text className={local.topLine} data-testid="performance-workbook-across">
+          <Link href={links.workbook_url} {...external}>
+            {t("admin.performance.workbookTop")}
+          </Link>
+        </Text>
+      )}
       <Card className={styles.card}>
         <CardHeader header={<Title3>{t("admin.performance.lookupTitle")}</Title3>} />
         <div className={local.body}>
@@ -288,7 +442,9 @@ export function PerformanceTab({
                 {interviewNetwork.kind === "loading" && (
                   <Text className={local.hint}>{t("admin.performance.networkLoading")}</Text>
                 )}
-                {net?.status === "found" && <InterviewNetworkView network={net} />}
+                {net?.status === "found" && (
+                  <InterviewNetworkView network={net} config={state.interviewConfig} />
+                )}
                 {net?.status === "not_found" && (
                   <Text className={local.hint}>{t("admin.performance.networkNotFound")}</Text>
                 )}
@@ -338,6 +494,22 @@ export function PerformanceTab({
                 </Link>
               ) : (
                 none
+              )}
+
+              {result.workbook_url && (
+                <>
+                  <Text className={local.label}>{t("admin.performance.workbookRow")}</Text>
+                  <span className={local.linkRow}>
+                    <Link
+                      href={result.workbook_url}
+                      {...external}
+                      data-testid="performance-workbook"
+                    >
+                      {t("admin.performance.openWorkbook")}
+                    </Link>
+                    <Text className={local.hint}>{t("admin.performance.workbookRowHint")}</Text>
+                  </span>
+                </>
               )}
 
               {!legacy && (
@@ -447,21 +619,15 @@ export function PerformanceTab({
                 : t("admin.performance.notAvailable")}
             </Text>
             <Text className={local.label}>{t("admin.performance.gradeLive")}</Text>
-            <GradeView result={liveGrade(live)} notes={[]} testId="performance-live-grade" />
+            <GradeView
+              result={liveGrade(live)}
+              notes={[]}
+              config={state.defaultConfig}
+              cadence={t("admin.performance.liveCadence")}
+              testId="performance-live-grade"
+            />
           </div>
           <Text className={local.hint}>{t("admin.performance.gradesDoc")}</Text>
-        </div>
-      </Card>
-
-      <Card className={styles.card}>
-        <CardHeader header={<Title3>{t("admin.performance.workbookTitle")}</Title3>} />
-        <div className={local.body}>
-          <Body1 className={local.hint}>{t("admin.performance.workbookCardHint")}</Body1>
-          {links?.workbook_url && (
-            <Link href={links.workbook_url} {...external} data-testid="performance-workbook">
-              {t("admin.performance.openWorkbook")}
-            </Link>
-          )}
         </div>
       </Card>
     </div>

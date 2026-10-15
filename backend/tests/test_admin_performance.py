@@ -658,3 +658,109 @@ async def test_network_route_finds_an_old_interview_without_its_row(
     assert body["legacy"] is True
     assert [o["operation_id"] for o in body["operations"]] == ["c" * 32]
     assert performance_service.interview_id_for(TRACE) in seen[1]
+
+
+# --- the settings a grade is compared with --------------------------------------------------
+
+
+async def test_config_without_an_interview_is_the_default_interviewer(
+    client, admin_auth, db_session, monkeypatch
+):
+    from app.services import persona_service as psvc
+
+    await psvc.create_persona(
+        db_session, name="Ava", character="lisa", style="casual-sitting", is_default=True
+    )
+    settings = _settings(voice_live_avatar_video_bitrate=300000)
+    monkeypatch.setattr("app.api.admin_performance.get_settings", lambda: settings)
+    body = (await client.get("/admin/performance/config", headers=admin_auth)).json()
+    assert body["source"] == "default"
+    assert body["interviewer"]["name"] == "Ava"
+    assert body["interviewer"]["avatar"] == "video"
+    assert body["avatar_video_bitrate"] == 300000
+    assert body["input_sampling_rate"] == 16000
+
+
+async def test_config_for_an_interview_is_its_own_interviewer(client, admin_auth, db_session):
+    from app.services import persona_service as psvc
+
+    await psvc.create_persona(
+        db_session, name="Default", character="lisa", style="casual-sitting", is_default=True
+    )
+    headers = await mint_candidate_headers(client)
+    await client.post("/candidate/interview/start", headers={**headers, "traceparent": TRACEPARENT})
+    # The default changes after the interview started: the interview keeps its own interviewer.
+    await psvc.create_persona(db_session, name="Later", character="amara", is_default=True)
+    body = (
+        await client.get(f"/admin/performance/config?operation_id={TRACE}", headers=admin_auth)
+    ).json()
+    assert body["source"] == "interview"
+    assert body["interviewer"]["name"] == "Default"
+
+
+async def test_config_for_an_interview_without_a_pinned_interviewer(client, admin_auth, db_session):
+    from app.services import persona_service as psvc
+
+    headers = await mint_candidate_headers(client)
+    await client.post("/candidate/interview/start", headers={**headers, "traceparent": TRACEPARENT})
+    await psvc.create_persona(db_session, name="Photo", character="amara", is_default=True)
+    body = (
+        await client.get(f"/admin/performance/config?operation_id={TRACE}", headers=admin_auth)
+    ).json()
+    assert body["source"] == "default_fallback"
+    assert body["interviewer"] == {
+        "id": body["interviewer"]["id"],
+        "name": "Photo",
+        "avatar": "photo",
+        "character": "amara",
+    }
+
+
+async def test_config_of_an_unknown_id_falls_back_to_the_default_and_a_bad_id_is_422(
+    client, admin_auth, db_session
+):
+    from app.services import persona_service as psvc
+
+    await psvc.create_persona(db_session, name="Voice only", is_default=True)
+    body = (
+        await client.get(f"/admin/performance/config?operation_id={'d' * 32}", headers=admin_auth)
+    ).json()
+    assert body["source"] == "default_fallback"
+    assert body["interviewer"]["avatar"] == "none"
+    bad = await client.get("/admin/performance/config?operation_id=nope", headers=admin_auth)
+    assert bad.status_code == 422
+
+
+async def test_config_with_no_interviewer_at_all(client, admin_auth):
+    body = (await client.get("/admin/performance/config", headers=admin_auth)).json()
+    assert body["interviewer"] is None
+
+
+async def test_config_when_the_pinned_interviewer_cannot_be_read(
+    client, admin_auth, db_session, monkeypatch
+):
+    """The foreign key sets a deleted persona's pins to NULL, so this is the guard for a pin that
+    still cannot be read (a race with the delete): the default stands in, said so."""
+    from app.services import persona_service as psvc
+
+    await psvc.create_persona(db_session, name="Pinned", character="lisa", is_default=True)
+    headers = await mint_candidate_headers(client)
+    await client.post("/candidate/interview/start", headers={**headers, "traceparent": TRACEPARENT})
+    await psvc.create_persona(db_session, name="Now", character="amara", is_default=True)
+
+    async def _gone(db, persona_id):
+        raise psvc.PersonaNotFound(persona_id)
+
+    monkeypatch.setattr(psvc, "get_persona", _gone)
+    body = (
+        await client.get(f"/admin/performance/config?operation_id={TRACE}", headers=admin_auth)
+    ).json()
+    assert body["source"] == "default_fallback"
+    assert body["interviewer"]["name"] == "Now"
+
+
+async def test_config_bitrate_zero_reads_as_unset(client, admin_auth, monkeypatch):
+    settings = _settings(voice_live_avatar_video_bitrate=0)
+    monkeypatch.setattr("app.api.admin_performance.get_settings", lambda: settings)
+    body = (await client.get("/admin/performance/config", headers=admin_auth)).json()
+    assert body["avatar_video_bitrate"] is None

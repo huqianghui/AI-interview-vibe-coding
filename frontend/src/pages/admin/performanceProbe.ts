@@ -149,12 +149,12 @@ export function measureStun(timeoutMs = 5000): Promise<StunReach> {
 }
 
 /** Download `kb` KiB of random bytes from the backend and return the rate in kbit/s, or null on a
- * failure. Random, so the compression in front of the app cannot shrink what is timed. A cold
- * transfer this small still reads low on a distant link (TCP slow start): a lower bound. */
-export async function measureDownlink(kb = 512): Promise<number | null> {
+ * failure. Random, so the compression in front of the app cannot shrink what is timed. Timed after
+ * the first chunk (see fetchDownloadProbe); still a lower bound for a distant link. */
+export async function measureDownlink(kb = 2048): Promise<number | null> {
   try {
     const { bytes, ms } = await fetchDownloadProbe(kb);
-    return ms > 0 ? Math.round((bytes * 8) / ms) : null;
+    return ms > 0 && bytes > 0 ? Math.round((bytes * 8) / ms) : null;
   } catch {
     return null;
   }

@@ -109,9 +109,14 @@ export function RttChart({ samples, capacity }: { samples: RttSample[]; capacity
         {median !== null && p95 !== null && (
           <>
             {[
-              { v: median, label: t("admin.performance.chartMedian", { ms: Math.round(median) }) },
-              { v: p95, label: `p95 ${Math.round(p95)}` },
-            ].map(({ v, label }) => (
+              {
+                v: median,
+                label: t("admin.performance.chartMedian", { ms: Math.round(median) }),
+                // Below its line when the two guides are too close for both labels above.
+                below: Math.abs(y(p95) - y(median)) < 14,
+              },
+              { v: p95, label: `p95 ${Math.round(p95)}`, below: false },
+            ].map(({ v, label, below }) => (
               <g key={label}>
                 <line
                   x1={PAD.left}
@@ -126,7 +131,7 @@ export function RttChart({ samples, capacity }: { samples: RttSample[]; capacity
                     label never paint over each other. */}
                 <text
                   x={PAD.left + 4}
-                  y={y(v) - 4}
+                  y={below ? y(v) + 12 : y(v) - 4}
                   fontSize={11}
                   fill={ink}
                   stroke={tokens.colorNeutralBackground1}

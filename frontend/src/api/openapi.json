@@ -956,6 +956,53 @@
         "title": "ConnectionTestResult",
         "type": "object"
       },
+      "CurrentConfig": {
+        "description": "The settings a grade's recommendation is compared with (docs/network-grades.md §2).",
+        "properties": {
+          "avatar_video_bitrate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Video Bitrate"
+          },
+          "input_sampling_rate": {
+            "title": "Input Sampling Rate",
+            "type": "integer"
+          },
+          "interviewer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InterviewerOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "enum": [
+              "default",
+              "interview",
+              "default_fallback"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "interviewer",
+          "avatar_video_bitrate",
+          "input_sampling_rate"
+        ],
+        "title": "CurrentConfig",
+        "type": "object"
+      },
       "CurrentQuestionOut": {
         "properties": {
           "follow_ups_asked": {
@@ -1625,6 +1672,39 @@
           "offset"
         ],
         "title": "InterviewResultsPage",
+        "type": "object"
+      },
+      "InterviewerOut": {
+        "properties": {
+          "avatar": {
+            "enum": [
+              "video",
+              "photo",
+              "none"
+            ],
+            "title": "Avatar",
+            "type": "string"
+          },
+          "character": {
+            "title": "Character",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "avatar",
+          "character"
+        ],
+        "title": "InterviewerOut",
         "type": "object"
       },
       "JobOut": {
@@ -5331,6 +5411,61 @@
         "summary": "Retry Job",
         "tags": [
           "admin-jobs"
+        ]
+      }
+    },
+    "/admin/performance/config": {
+      "get": {
+        "description": "The interviewer and settings to compare a grade with: the interview's own interviewer when\n``operation_id`` names an interview, else the default interviewer.",
+        "operationId": "current_config_admin_performance_config_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "operation_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Operation Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentConfig"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Current Config",
+        "tags": [
+          "admin-performance"
         ]
       }
     },
