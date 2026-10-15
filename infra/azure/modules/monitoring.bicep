@@ -10,6 +10,13 @@ param environmentName string
 param location string
 param tags object
 
+@description('The backend managed identity, granted Log Analytics Data Reader on the workspace: the admin Performance tab looks an operation up through the Logs query API (spec-admin-performance-tab). Empty = no grant.')
+param backendIdentityPrincipalId string = ''
+
+// Log Analytics Data Reader: run queries, read workspace metadata and table data. The minimal built-in
+// role for the Logs query API (there is no "Application Insights Reader").
+var logAnalyticsDataReaderRoleDefinitionId = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '3b03c2da-16b3-4a49-8834-0f8130efdd3b')
+
 var workspaceName = 'law-${namePrefix}-${environmentName}'
 var appInsightsName = 'appi-${namePrefix}-${environmentName}'
 
@@ -43,6 +50,16 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
   }
 }
 
+resource backendLogsReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(backendIdentityPrincipalId)) {
+  name: guid(workspace.id, backendIdentityPrincipalId, 'log-analytics-data-reader')
+  scope: workspace
+  properties: {
+    principalId: backendIdentityPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: logAnalyticsDataReaderRoleDefinitionId
+  }
+}
+
 module voiceWorkbook './voice-workbook.bicep' = {
   name: '${deployment().name}-voice-workbook'
   params: {
@@ -65,3 +82,7 @@ output summary object = {
 
 output logAnalyticsWorkspaceName string = workspace.name
 output applicationInsightsConnectionString string = appInsights.properties.ConnectionString
+// For the admin Performance tab's links (container-apps.bicep passes them to the backend).
+output applicationInsightsName string = appInsights.name
+output logAnalyticsCustomerId string = workspace.properties.customerId
+output voiceWorkbookName string = voiceWorkbook.outputs.workbookName

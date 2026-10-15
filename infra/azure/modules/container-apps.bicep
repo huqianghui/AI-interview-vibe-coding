@@ -24,6 +24,10 @@ param tags object
 
 param logAnalyticsWorkspaceName string
 param applicationInsightsConnectionString string
+// The admin Performance tab's links into App Insights (spec-admin-performance-tab). Empty hides them.
+param applicationInsightsName string = ''
+param logAnalyticsCustomerId string = ''
+param perfWorkbookId string = ''
 param registryLoginServer string
 param backendIdentityId string
 param backendIdentityClientId string
@@ -238,6 +242,32 @@ var backendEnv = [
   {
     name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
     value: applicationInsightsConnectionString
+  }
+  // The admin Performance tab's portal links and its Logs query (spec-admin-performance-tab).
+  // App Insights lives in this resource group (monitoring.bicep).
+  {
+    name: 'MONITOR_TENANT_ID'
+    value: tenant().tenantId
+  }
+  {
+    name: 'MONITOR_SUBSCRIPTION_ID'
+    value: subscription().subscriptionId
+  }
+  {
+    name: 'MONITOR_RESOURCE_GROUP'
+    value: resourceGroup().name
+  }
+  {
+    name: 'APP_INSIGHTS_NAME'
+    value: applicationInsightsName
+  }
+  {
+    name: 'LOG_ANALYTICS_WORKSPACE_ID'
+    value: logAnalyticsCustomerId
+  }
+  {
+    name: 'PERF_WORKBOOK_ID'
+    value: perfWorkbookId
   }
 ]
 resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {

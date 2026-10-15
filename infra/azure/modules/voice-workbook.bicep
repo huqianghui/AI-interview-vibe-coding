@@ -32,3 +32,4 @@ resource workbook 'Microsoft.Insights/workbooks@2023-06-01' = {
 }
 
 output workbookId string = workbook.id
+output workbookName string = workbook.name
