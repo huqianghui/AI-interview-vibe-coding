@@ -137,11 +137,12 @@ cp .env.example .env     # then fill in real endpoints/keys — .env is gitignor
 Flip the providers to real (`DEFAULT_LLM_PROVIDER=azure_openai`, `DEFAULT_RETRIEVAL_PROVIDER=azure`,
 `DEFAULT_AGENT_SYNC_PROVIDER=azure`) and boot as in Layer 2.
 
-**Critical deploy knob — model deployments.** Project default is `gpt-5-mini` for both the agent
-chat model and the Voice Live model (second choice `gpt-4.1-mini`). `FOUNDRY_AGENT_MODEL` must be a
-deployment on your Foundry resource; `VOICE_LIVE_DEFAULT_MODEL` must be a model Voice Live hosts
-natively in your region (your own deployments do not count — `gpt-5.6-luna/sol`, `gpt-5.4-mini` and
-`gpt-6-*` are rejected on swedencentral). Override in the config page or via those two env vars. For
+**Critical deploy knob — model deployments.** Project default is `gpt-6-luna` for both the agent
+chat model and the Voice Live model, and `gpt-6-sol` for judge + scoring (`JUDGE_MODEL`).
+`FOUNDRY_AGENT_MODEL` and `JUDGE_MODEL` must be deployments on your Foundry resource;
+`VOICE_LIVE_DEFAULT_MODEL` must be a model Voice Live hosts natively in your region (your own
+deployments do not count — `gpt-6-luna`, `gpt-6-sol` and `gpt-5-mini` are accepted on swedencentral,
+probed 2026-10-15). Override in the config page or via those env vars. For
 persistent encrypted config across restarts, set `ENCRYPTION_KEY`. See `backend/.env.example` for
 every knob.
 

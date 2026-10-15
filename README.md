@@ -175,7 +175,7 @@ configures it — it is derived from the voice model you pick in `/admin`
 
 | Voice model | Pipeline | EoU detector | `timeout_ms` |
 | --- | --- | --- | --- |
-| A chat deployment (`gpt-5-mini`, the default) | cascaded | `semantic_detection_v1_multilingual` | 1500 |
+| A chat deployment (`gpt-6-luna`, the default) | cascaded | `semantic_detection_v1_multilingual` | 1500 |
 | A realtime model (`gpt-realtime-*`, `azure-realtime`) | speech-to-speech | `smart_end_of_turn_detection` | 1000 |
 | BYOM `byom-azure-openai-realtime` | speech-to-speech | `smart_end_of_turn_detection` | 1000 |
 | BYOM, any other profile | cascaded | `semantic_detection_v1_multilingual` | 1500 |
