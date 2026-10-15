@@ -23,6 +23,7 @@ import asyncio
 import base64
 import json
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -34,7 +35,11 @@ from app.models.persona import (
     build_read_directive,
     default_external_reader_prompt,
 )
-from app.services.agents.voice_live_metadata import build_avatar_config, resolve_voice
+from app.services.agents.voice_live_metadata import (
+    build_avatar_config,
+    is_photo_avatar,
+    resolve_voice,
+)
 from app.services.azure_auth import COGNITIVE_SERVICES_SCOPE, get_azure_credential_cached
 from app.services.recording_service import MARKER_TYPE
 
@@ -295,6 +300,41 @@ def session_has_avatar(persona: InterviewerPersona, *, avatar_off: bool = False)
     return not avatar_off and bool((persona.character or "").strip())
 
 
+@dataclass(frozen=True)
+class NetworkHint:
+    """What the page knew about its network when it opened the voice connection: a round trip to
+    the backend measured just before, or this browser's last in-session media RTT and loss
+    (``getStats``, the authoritative numbers), whichever is worse. None = not measured."""
+
+    rtt_ms: float | None = None
+    loss_pct: float | None = None
+
+
+# docs/network-grades.md: a photo avatar covers grade B, whose upper half (RTT 300 to 500 ms, loss
+# 0.5 to 1%: the weak-network study's grade C) streams stop-and-go. There a lower bitrate is the one
+# lever left, and Azure takes it only when the session is created, never mid-session (study §3).
+AUTO_AVATAR_BITRATE = 300_000
+AUTO_BITRATE_RTT_MS = 300
+AUTO_BITRATE_LOSS_PCT = 0.5
+
+
+def choose_avatar_bitrate(
+    persona: InterviewerPersona, hint: NetworkHint | None, configured: int | None
+) -> tuple[int | None, str]:
+    """The avatar video bitrate for a new session (None = Azure's default) and why.
+
+    ``configured`` (``VOICE_LIVE_AVATAR_VIDEO_BITRATE``) is an explicit override and always wins.
+    Otherwise a PHOTO avatar on a network in the study's grade-C range gets
+    :data:`AUTO_AVATAR_BITRATE`; a video avatar (whose grade there is "do not start with it") and
+    every other case keep Azure's default. Reasons: ``configured``, ``auto``, ``default``."""
+    if configured:
+        return configured, "configured"
+    if not is_photo_avatar(persona.character, persona.style) or hint is None:
+        return None, "default"
+    weak = (hint.rtt_ms or 0) > AUTO_BITRATE_RTT_MS or (hint.loss_pct or 0) > AUTO_BITRATE_LOSS_PCT
+    return (AUTO_AVATAR_BITRATE, "auto") if weak else (None, "default")
+
+
 def build_avatar_session(
     persona: InterviewerPersona,
     *,
@@ -303,6 +343,7 @@ def build_avatar_session(
     background: str | None = None,
     realtime_pipeline: bool = False,
     avatar_off: bool = False,
+    network_hint: NetworkHint | None = None,
 ) -> Any:
     """Build the Azure SDK ``RequestSession`` for a persona's avatar/voice Voice Live session.
 
@@ -441,10 +482,12 @@ def build_avatar_session(
         # Built with plain statements rather than nested conditional dict-spreads: the previous
         # one-liner buried "codec, optional bitrate, optional background" under three layers.
         video_params: dict[str, Any] = dict(VideoParams(codec="h264"))
-        if settings.voice_live_avatar_video_bitrate:
-            # Escape hatch only (see Settings.voice_live_avatar_video_bitrate): unset means
-            # Azure's own default, and Azure already adapts its bitrate on its own.
-            video_params["bitrate"] = settings.voice_live_avatar_video_bitrate
+        bitrate, _reason = choose_avatar_bitrate(
+            persona, network_hint, settings.voice_live_avatar_video_bitrate
+        )
+        if bitrate:
+            # Unset means Azure's own default, which already adapts its bitrate on its own.
+            video_params["bitrate"] = bitrate
         if background:
             # 6-hex RGB from the page's ``avatar_bg``: Azure paints it behind the digital
             # human. The page sends the photo avatar's own thumbnail backdrop (the frontend
@@ -587,6 +630,7 @@ async def run_proxy(
     avatar_background: str | None = None,
     avatar_off: bool = False,
     recorder: Any = None,
+    network_hint: NetworkHint | None = None,
 ) -> None:  # pragma: no cover — live Azure connect + relay, no Azure in CI
     """Hold the Azure Voice Live SDK connection and relay browser <-> Azure.
 
@@ -642,8 +686,12 @@ async def run_proxy(
                 background=avatar_background,
                 realtime_pipeline=realtime_pipeline,
                 avatar_off=avatar_off,
+                network_hint=network_hint,
             )
             await conn.session.update(session=session)
+            bitrate, bitrate_reason = choose_avatar_bitrate(
+                persona, network_hint, get_settings().voice_live_avatar_video_bitrate
+            )
 
             # Pin the session language BEFORE any response can be generated (see
             # build_language_pin_item) — the raw client-event send is the same path
@@ -686,6 +734,11 @@ async def run_proxy(
                         # end-of-utterance detector went on the wire.
                         "realtime_pipeline": realtime_pipeline,
                         "avatar_enabled": session_has_avatar(persona, avatar_off=avatar_off),
+                        # The bitrate this session asked Azure for (None = Azure's default) and
+                        # why: the page records it, so the effect of the automatic choice can be
+                        # measured (docs/network-grades.md).
+                        "avatar_video_bitrate": bitrate,
+                        "avatar_bitrate_reason": bitrate_reason,
                         "persona_id": persona.id,
                         "read_directive": read_directive,
                         # Observability for the live E2E spec / console: the turn contract this

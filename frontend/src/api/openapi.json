@@ -1309,7 +1309,7 @@
         "type": "object"
       },
       "InterviewNetworkOut": {
-        "description": "The network one interview ran on, from its own telemetry; the page grades it (A to E).",
+        "description": "The network one interview ran on, from its own telemetry; the page grades it (A to D).",
         "properties": {
           "avatar": {
             "anyOf": [

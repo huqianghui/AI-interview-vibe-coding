@@ -369,3 +369,32 @@ async def test_anything_but_probe_1_is_a_normal_session(db_session, proxy_calls,
     await _run(ws)
     assert ws.sent == []
     assert len(proxy_calls) == 1
+
+
+# --- the page's network hint ------------------------------------------------------------------
+
+
+async def test_the_network_hint_reaches_the_proxy(db_session, proxy_calls):
+    await _default_persona(db_session)
+    ws = _FakeWs(token=await _anon_token(db_session), net_rtt="420", net_loss="0.8")
+    await _run(ws)
+    (call,) = proxy_calls
+    assert call["network_hint"] == voice_live_ws.NetworkHint(rtt_ms=420, loss_pct=0.8)
+
+
+@pytest.mark.parametrize(
+    ("rtt", "loss", "expected"),
+    [
+        ("", "", None),
+        ("abc", "-1", None),
+        ("99999", "200", None),
+        ("250", "", voice_live_ws.NetworkHint(rtt_ms=250)),
+        ("", "0.4", voice_live_ws.NetworkHint(loss_pct=0.4)),
+    ],
+)
+async def test_an_implausible_hint_is_dropped(db_session, proxy_calls, rtt, loss, expected):
+    await _default_persona(db_session)
+    ws = _FakeWs(token=await _anon_token(db_session), net_rtt=rtt, net_loss=loss)
+    await _run(ws)
+    (call,) = proxy_calls
+    assert call["network_hint"] == expected
