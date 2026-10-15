@@ -470,6 +470,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/performance/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Current Config
+         * @description The interviewer and settings to compare a grade with: the interview's own interviewer when
+         *     ``operation_id`` names an interview, else the default interviewer.
+         */
+        get: operations["current_config_admin_performance_config_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/performance/download": {
         parameters: {
             query?: never;
@@ -2191,6 +2212,22 @@ export interface components {
             /** Success */
             success: boolean;
         };
+        /**
+         * CurrentConfig
+         * @description The settings a grade's recommendation is compared with (docs/network-grades.md §2).
+         */
+        CurrentConfig: {
+            /** Avatar Video Bitrate */
+            avatar_video_bitrate: number | null;
+            /** Input Sampling Rate */
+            input_sampling_rate: number;
+            interviewer: components["schemas"]["InterviewerOut"] | null;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "default" | "interview" | "default_fallback";
+        };
         /** CurrentQuestionOut */
         CurrentQuestionOut: {
             /**
@@ -2412,6 +2449,20 @@ export interface components {
             offset: number;
             /** Total */
             total: number;
+        };
+        /** InterviewerOut */
+        InterviewerOut: {
+            /**
+             * Avatar
+             * @enum {string}
+             */
+            avatar: "video" | "photo" | "none";
+            /** Character */
+            character: string;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
         };
         /** JobOut */
         JobOut: {
@@ -4036,6 +4087,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JobOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    current_config_admin_performance_config_get: {
+        parameters: {
+            query?: {
+                operation_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurrentConfig"];
                 };
             };
             /** @description Validation Error */

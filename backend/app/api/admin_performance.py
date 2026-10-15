@@ -17,8 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.db import get_db
 from app.dependencies import require_role
+from app.models.interview import InterviewSession
 from app.schemas.history import InterviewResultItem
-from app.services import interview_history_service, performance_service
+from app.services import interview_history_service, performance_service, persona_service
+from app.services.agents.voice_live_metadata import is_photo_avatar
 
 router = APIRouter(
     prefix="/admin/performance",
@@ -86,6 +88,28 @@ class InterviewNetworkOut(BaseModel):
     operations: list[OperationLink] = []
     media: MediaStatsOut | None = None
     avatar: AvatarOutcomesOut | None = None
+
+
+class InterviewerOut(BaseModel):
+    id: str
+    name: str
+    # The digital human: a 1080p video avatar, a 512x512 photo avatar, or none (voice-only).
+    avatar: Literal["video", "photo", "none"]
+    character: str
+
+
+class CurrentConfig(BaseModel):
+    """The settings a grade's recommendation is compared with (docs/network-grades.md §2)."""
+
+    # default: no interview chosen, so the default interviewer (what a new candidate gets unless
+    # assigned another); interview: the interviewer that interview was pinned to; default_fallback:
+    # an id was looked up but no interviewer is recorded for it (the interview predates the pin,
+    # its interviewer was deleted, or it is not in this database), so the default stands in.
+    source: Literal["default", "interview", "default_fallback"]
+    interviewer: InterviewerOut | None
+    # Deployment settings (the same for every interviewer). None = Azure's default (2 Mbps).
+    avatar_video_bitrate: int | None
+    input_sampling_rate: int
 
 
 # The download check: enough to time over a slow link, small enough to repeat every half minute.
@@ -186,4 +210,49 @@ async def download(kb: Annotated[int, Query(ge=1, le=MAX_DOWNLOAD_KB)] = 256) ->
         content=os.urandom(kb * 1024),
         media_type="application/octet-stream",
         headers={"Cache-Control": "no-store"},
+    )
+
+
+def _interviewer(persona) -> InterviewerOut | None:  # noqa: ANN001
+    if persona is None:
+        return None
+    character = (persona.character or "").strip()
+    if not character:
+        avatar = "none"
+    elif is_photo_avatar(character, persona.style):
+        avatar = "photo"
+    else:
+        avatar = "video"
+    return InterviewerOut(id=persona.id, name=persona.name, avatar=avatar, character=character)
+
+
+@router.get("/config", response_model=CurrentConfig)
+async def current_config(
+    operation_id: str | None = None, db: AsyncSession = Depends(get_db)
+) -> CurrentConfig:
+    """The interviewer and settings to compare a grade with: the interview's own interviewer when
+    ``operation_id`` names an interview, else the default interviewer."""
+    settings = get_settings()
+    source: Literal["default", "interview", "default_fallback"] = "default"
+    persona = None
+    if operation_id is not None:
+        interview_id = performance_service.interview_id_for(_operation_or_422(operation_id))
+        session = await db.get(InterviewSession, interview_id)
+        # An id that is no interview here: still a lookup, so not "no interview chosen".
+        source = "default_fallback"
+        if session is not None:
+            pinned = None
+            if session.persona_id:
+                try:
+                    pinned = await persona_service.get_persona(db, session.persona_id)
+                except persona_service.PersonaNotFound:
+                    pinned = None
+            persona, source = (pinned, "interview") if pinned else (None, "default_fallback")
+    if persona is None:
+        persona = await persona_service.get_default_persona(db)
+    return CurrentConfig(
+        source=source,
+        interviewer=_interviewer(persona),
+        avatar_video_bitrate=settings.voice_live_avatar_video_bitrate,
+        input_sampling_rate=settings.voice_live_input_sampling_rate,
     )
