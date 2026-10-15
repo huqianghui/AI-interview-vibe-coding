@@ -1,5 +1,5 @@
 /** The admin "Performance" tab (spec-admin-performance-tab): an Operation id lookup with the
- * network that interview ran on (graded A to E, docs/network-grades.md) and its links into
+ * network that interview ran on (graded A to D, docs/network-grades.md) and its links into
  * Application Insights; a live network check from this browser; and the workbook. Every interview
  * is one operation, whose id is the interview id without the dashes. */
 import { useState } from "react";
@@ -61,7 +61,7 @@ const useStyles = makeStyles({
     columnGap: tokens.spacingHorizontalS,
   },
   grade: { display: "flex", flexDirection: "column", rowGap: tokens.spacingVerticalXS },
-  // The grade on the left, the A-to-E legend on the right; stacked when narrow.
+  // The grade on the left, the A-to-D legend on the right; stacked when narrow.
   gradeLayout: {
     display: "flex",
     flexWrap: "wrap",
@@ -94,7 +94,6 @@ const GRADE_COLOR: Record<Grade, "success" | "warning" | "danger"> = {
   B: "success",
   C: "warning",
   D: "danger",
-  E: "danger",
 };
 
 function CopyButton({ value, testId }: { value: string; testId: string }) {
@@ -117,9 +116,9 @@ function CopyButton({ value, testId }: { value: string; testId: string }) {
   );
 }
 
-const GRADES: Grade[] = ["A", "B", "C", "D", "E"];
+const GRADES: Grade[] = ["A", "B", "C", "D"];
 
-/** The five grades in one line each, the current one highlighted. */
+/** The four grades in one line each, the current one highlighted. */
 function GradeLegend({ current }: { current: Grade | null }) {
   const local = useStyles();
   const { t } = useTranslation();
@@ -158,12 +157,13 @@ function reasonText(t: T, r: GradeReason): string {
   const shown = raw.toFixed(atLimit ? digits + 1 : digits);
   const value = r.metric === "down" ? formatRate(raw) : shown;
   const limit = r.metric === "down" ? formatRate(r.limit ?? 0) : r.limit;
-  const key = r.row === "D" ? `${r.metric}D` : r.metric;
+  // C's own triggers read "≥ limit"; the others read against the better grade's limit.
+  const key = r.row === "C" ? `${r.metric}C` : r.metric;
   return t(`admin.performance.reason.${key}`, { value, limit, row: r.row });
 }
 
 /** A grade: why, the starting form it recommends, what to change compared with the current
- * settings (and with whose), when it updates, and the five grades beside it. */
+ * settings (and with whose), when it updates, and the four grades beside it. */
 function GradeView({
   result,
   notes,
@@ -203,7 +203,9 @@ function GradeView({
   // from what the other numbers give, so a slow probe never demands voice-only.
   const adviceGrade =
     result.downlinkOnly && result.withoutDownlink ? result.withoutDownlink : result.grade;
-  const advice = config ? adviseConfig(adviceGrade, config) : [];
+  const advice = config
+    ? adviseConfig(adviceGrade, config, { autoBitrate: result.autoBitrate })
+    : [];
   return (
     <span className={local.gradeLayout}>
       <span className={`${local.grade} ${local.gradeMain}`} data-testid={testId}>

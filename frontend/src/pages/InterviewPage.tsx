@@ -58,6 +58,7 @@ import { ScoringProgressCard } from "./interview/ScoringProgressCard";
 import { StatusLegend } from "./interview/StatusLegend";
 import { useInterviewStyles } from "./interview/styles";
 import { renewOperation, setInterviewOperation } from "../telemetry/appInsights";
+import { measurePreconnect } from "../telemetry/networkHint";
 import { useScoringFlow } from "./interview/useScoringFlow";
 import { voiceMetrics } from "../telemetry/voiceTimeline";
 
@@ -238,6 +239,11 @@ export function InterviewPage() {
     setInterviewOperation(interviewIdForPin);
   }
   useEffect(() => () => setInterviewOperation(null), []);
+  // A few round trips before the voice session opens: its photo avatar's bitrate is picked from
+  // them when this browser has no media numbers of its own yet (telemetry/networkHint.ts).
+  useEffect(() => {
+    void measurePreconnect();
+  }, []);
 
   const voice = useInterviewVoice(interview?.interview_session_id ?? "", {
     locale: i18n.language,

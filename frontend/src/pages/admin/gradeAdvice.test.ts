@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { CurrentConfig } from "../../api/admin";
 import { adviseConfig } from "./gradeAdvice";
+import type { Grade } from "./networkGrade";
 
 const config = (
   avatar: "video" | "photo" | "none",
@@ -14,39 +15,34 @@ const config = (
   ...over,
 });
 
-const keys = (grade: "A" | "B" | "C" | "D" | "E", c: CurrentConfig) =>
-  adviseConfig(grade, c).map((a) => `${a.key}${a.change ? "!" : ""}`);
+const keys = (grade: Grade, c: CurrentConfig, autoBitrate = false) =>
+  adviseConfig(grade, c, { autoBitrate }).map((a) => `${a.key}${a.change ? "!" : ""}`);
 
 describe("adviseConfig", () => {
   it.each([
     ["A", "video", []],
     ["A", "photo", ["videoPossible"]],
-    // B is fine at Azure's default bitrate: no line for it unset.
     ["B", "photo", []],
     ["B", "video", ["switchToPhoto!"]],
     ["B", "none", ["photoPossible"]],
-    ["C", "photo", ["setBitrateUnset!"]],
-    ["C", "video", ["switchToPhoto!", "setBitrateUnset!"]],
-    ["D", "photo", ["startVoiceOnly!"]],
+    ["C", "photo", ["startVoiceOnly!"]],
+    ["C", "none", []],
+    ["D", "video", ["avatarCannotConnect!"]],
     ["D", "none", []],
-    ["E", "video", ["avatarCannotConnect!"]],
-    ["E", "none", []],
   ] as const)("grade %s with a %s avatar: %o", (grade, avatar, expected) => {
     expect(keys(grade, config(avatar))).toEqual(expected);
   });
 
-  it("C with the bitrate already at 300 kbit/s or lower needs no bitrate change", () => {
-    expect(keys("C", config("photo", { avatar_video_bitrate: 300000 }))).toEqual([]);
-    expect(adviseConfig("C", config("photo", { avatar_video_bitrate: 500000 }))).toEqual([
-      { key: "setBitrate", params: { value: 300000, current: 500000 }, change: true },
-    ]);
+  it("B's upper half: the backend lowers a photo avatar's bitrate, said as a note", () => {
+    expect(keys("B", config("photo"), true)).toEqual(["autoBitrate"]);
+    // A video avatar is told to switch; the automatic bitrate is for photo avatars only.
+    expect(keys("B", config("video"), true)).toEqual(["switchToPhoto!"]);
   });
 
-  it("B flags only a cap set above 500 kbit/s", () => {
-    expect(keys("B", config("photo", { avatar_video_bitrate: 800000 }))).toEqual([
-      "bitrateOptional",
+  it("a configured bitrate overrides the backend's choice, and B says so", () => {
+    expect(keys("B", config("photo", { avatar_video_bitrate: 500000 }), true)).toEqual([
+      "overrideBitrate",
     ]);
-    expect(keys("B", config("photo", { avatar_video_bitrate: 400000 }))).toEqual([]);
   });
 
   it("A notes a bitrate cap it does not need", () => {

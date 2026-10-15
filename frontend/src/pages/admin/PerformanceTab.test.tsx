@@ -396,7 +396,7 @@ describe("the network an interview ran on", () => {
     expect(admin.getInterviewNetwork).toHaveBeenCalledWith(OP);
     expect(screen.getByTestId("performance-interview-grade-badge")).toHaveTextContent("Grade B");
     const grade = screen.getByTestId("performance-interview-grade");
-    expect(grade).toHaveTextContent(/Photo avatar at the default bitrate/);
+    expect(grade).toHaveTextContent(/The backend picks its bitrate for each session/);
     expect(grade).toHaveTextContent(/Downlink not graded/);
     expect(grade).toHaveTextContent(/TURN relay/);
   });
@@ -473,7 +473,23 @@ describe("the network an interview ran on", () => {
     );
   });
 
-  it("shows the five grades beside it, the current one marked", async () => {
+  it("in B's upper half says the backend lowers the photo avatar's bitrate", async () => {
+    vi.mocked(admin.getInterviewNetwork).mockResolvedValue({
+      ...NETWORK,
+      media: { ...NETWORK.media!, rtt_p95_ms: 420 },
+    });
+    vi.mocked(admin.getCurrentConfig).mockResolvedValue({
+      source: "interview",
+      interviewer: { id: "p1", name: "Sakura", avatar: "photo", character: "sakura" },
+      avatar_video_bitrate: null,
+      input_sampling_rate: 16000,
+    });
+    renderAt(`/admin?tab=performance&op=${OP}`);
+    const advice = await screen.findByTestId("performance-interview-grade-advice");
+    expect(advice).toHaveTextContent(/Sakura's new sessions start at 300 kbit\/s automatically/);
+  });
+
+  it("shows the four grades beside it, the current one marked", async () => {
     renderAt(`/admin?tab=performance&op=${OP}`);
     await screen.findByTestId("performance-interview-grade");
     const marked = screen.getAllByTestId("performance-legend-current");

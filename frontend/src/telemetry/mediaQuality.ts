@@ -8,6 +8,7 @@
  * the window; gauges (RTT, jitter) are the window's last reading.
  */
 import { trackEvent } from "./appInsights";
+import { recordMediaWindow } from "./networkHint";
 import { voiceMetrics } from "./voiceTimeline";
 
 export const MEDIA_WINDOW_MS = 15_000;
@@ -201,8 +202,11 @@ export class MediaQualityWindow {
       partial,
     };
     if (gauges.resolution) props.resolution = gauges.resolution;
+    const measurements = windowMeasurements(this.start, counters, gauges);
     // Periodic: rides the SDK's next batch rather than flushing on every window.
-    this.emit("voice.media", windowMeasurements(this.start, counters, gauges), props, false);
+    this.emit("voice.media", measurements, props, false);
+    // The next session's bitrate is picked from these (networkHint.ts).
+    recordMediaWindow(measurements.rtt_ms, measurements.audio_loss_pct);
     this.index += 1;
     this.start = counters;
     this.last = null;

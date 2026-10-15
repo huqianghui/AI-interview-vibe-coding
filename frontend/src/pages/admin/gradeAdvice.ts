@@ -1,8 +1,9 @@
 /**
  * What to change, comparing a grade's recommended starting form and settings
- * (docs/network-grades.md §2, verbatim: change one, change the other) with the current ones: the interviewer's digital human (video,
- * photo, none) and the deployment's avatar bitrate and uplink sample rate. Each line is a change
- * the grade calls for, or a note that something already matches or could be better.
+ * (docs/network-grades.md §2, verbatim: change one, change the other) with the current ones: the
+ * interviewer's digital human (video, photo, none) and the deployment's avatar bitrate override and
+ * uplink sample rate. Each line is a change the grade calls for, or a note that something already
+ * matches or could be better.
  */
 import type { CurrentConfig } from "../../api/admin";
 import type { Grade } from "./networkGrade";
@@ -15,51 +16,43 @@ export interface Advice {
   change: boolean;
 }
 
-/** The bitrate each grade wants at most, in bit/s; null = leave Azure's default. */
-const MAX_BITRATE: Record<Grade, number | null> = {
-  A: null,
-  B: 500_000,
-  C: 300_000,
-  D: null,
-  E: null,
-};
 const SAMPLE_RATE = 16_000;
+/** An override below this lowers a video avatar's picture for no reason on grade A. */
+const VIDEO_BITRATE_FLOOR = 1_000_000;
 
-export function adviseConfig(grade: Grade, config: CurrentConfig): Advice[] {
+export function adviseConfig(
+  grade: Grade,
+  config: CurrentConfig,
+  { autoBitrate = false }: { autoBitrate?: boolean } = {},
+): Advice[] {
   const out: Advice[] = [];
   const who = config.interviewer;
+  const override = config.avatar_video_bitrate;
   if (!who) {
     out.push({ key: "noInterviewer", change: false });
   } else {
-    const name = who.name;
-    const avatar = who.avatar;
+    const { name, avatar } = who;
     if (grade === "A") {
       if (avatar !== "video") out.push({ key: "videoPossible", params: { name }, change: false });
-    } else if (grade === "B" || grade === "C") {
+      if (avatar !== "none" && override !== null && override < VIDEO_BITRATE_FLOOR) {
+        out.push({ key: "bitrateTooLow", params: { current: override }, change: false });
+      }
+    } else if (grade === "B") {
       if (avatar === "video") out.push({ key: "switchToPhoto", params: { name }, change: true });
       if (avatar === "none") out.push({ key: "photoPossible", params: { name }, change: false });
-    } else if (grade === "D") {
+      if (avatar !== "none") {
+        // The backend picks the bitrate per session; an override switches that off.
+        if (override !== null) {
+          out.push({ key: "overrideBitrate", params: { current: override }, change: false });
+        } else if (autoBitrate && avatar === "photo") {
+          out.push({ key: "autoBitrate", params: { name }, change: false });
+        }
+      }
+    } else if (grade === "C") {
       if (avatar !== "none") out.push({ key: "startVoiceOnly", params: { name }, change: true });
     } else if (avatar !== "none") {
       out.push({ key: "avatarCannotConnect", params: { name }, change: true });
     }
-  }
-  const usesAvatar = who !== null && who.avatar !== "none" && grade !== "D" && grade !== "E";
-  const cap = MAX_BITRATE[grade];
-  const bitrate = config.avatar_video_bitrate;
-  // C needs the cap; B is fine at Azure's default and only flags a cap set above 500 k.
-  const overCap = cap !== null && (bitrate === null ? grade === "C" : bitrate > cap);
-  if (usesAvatar && overCap && cap !== null) {
-    // A separate key when unset: the text says "not set (Azure's 2 Mbit/s)" in each language.
-    const key = grade === "C" ? "setBitrate" : "bitrateOptional";
-    out.push({
-      key: bitrate === null ? `${key}Unset` : key,
-      params: bitrate === null ? { value: cap } : { value: cap, current: bitrate },
-      change: grade === "C",
-    });
-  }
-  if (usesAvatar && grade === "A" && bitrate !== null && bitrate < 1_000_000) {
-    out.push({ key: "bitrateTooLow", params: { current: bitrate }, change: false });
   }
   if (config.input_sampling_rate !== SAMPLE_RATE) {
     out.push({
