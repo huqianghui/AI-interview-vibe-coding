@@ -48,7 +48,7 @@ export const resources = {
         // The one thing this screen knows that the idle screen could not: the question count.
         headlineLead: "{{total}} questions,",
         headlineAccent: "at your pace",
-        lede: "Lisa will ask each one out loud. The question stays on screen the whole time, so you can re-read it while you think.",
+        lede: "{{name}} will ask each one out loud. The question stays on screen the whole time, so you can re-read it while you think.",
         railLabel: "The interview at a glance",
         fact1Title: "Answer however suits you",
         fact1Body: "Speak or type, and switch between them whenever you like.",
@@ -531,9 +531,9 @@ export const resources = {
         // can honestly say and points forward for the count.
         idle: {
           kicker: "You're signed in",
-          headlineLead: "Lisa is ready",
+          headlineLead: "{{name}} is ready",
           headlineAccent: "when you are",
-          lede: "She'll ask the questions out loud and listen to your answers. Nothing starts until you press the button.",
+          lede: "Each question is asked out loud, and your answers are listened to. Nothing starts until you press the button.",
           fact1Title: "Speak or type",
           fact1Body: "Answer out loud, or switch to typing at any point in the interview. Both work the whole way through.",
           fact2Title: "You decide when an answer is finished",
@@ -542,9 +542,6 @@ export const resources = {
           fact3Body: "Take the time you need on every question. You can also start over from the beginning if you need to.",
           startNote: "You'll see how many questions there are on the next screen.",
         },
-        // Shown as the portrait's caption on the pre-auth sign-in screen, where no persona is
-        // loaded yet — it names the deployment's DEFAULT interviewer (DEFAULT_AVATAR_CHARACTER).
-        defaultInterviewerName: "Lisa",
         wrongCredentials: "Incorrect username or password.",
         signOut: "Sign out",
         // "Start over" (v0.38.3.0): abandon the live interview and begin a fresh one. Destructive,
@@ -591,7 +588,7 @@ export const resources = {
         begin: "我准备好了",
         headlineLead: "{{total}} 道题,",
         headlineAccent: "按你的节奏",
-        lede: "Lisa 会把每道题念出来。题目会一直留在屏幕上,方便你边想边重读。",
+        lede: "{{name}} 会把每道题念出来。题目会一直留在屏幕上,方便你边想边重读。",
         railLabel: "面试概览",
         fact1Title: "怎么答都行",
         fact1Body: "说或打字,随时互相切换。",
@@ -1039,9 +1036,9 @@ export const resources = {
         yourInterviewer: "你的面试官",
         idle: {
           kicker: "已登录",
-          headlineLead: "Lisa 已就位,",
+          headlineLead: "{{name}} 已就位,",
           headlineAccent: "等你开始",
-          lede: "她会把问题念出来并听你回答。不按按钮就不会开始。",
+          lede: "每道题都会念出来,并听你回答。不按按钮就不会开始。",
           fact1Title: "说或打字都行",
           fact1Body: "你可以开口回答,也可以随时切换成打字。整场面试两种方式都一直可用。",
           fact2Title: "什么时候算答完由你决定",
@@ -1050,7 +1047,6 @@ export const resources = {
           fact3Body: "每道题你想花多久都可以。需要的话也可以从头重新开始。",
           startNote: "下一屏会告诉你一共有几道题。",
         },
-        defaultInterviewerName: "Lisa",
         loginBody: "请使用主办方提供的用户名和密码登录,开始你的面试。",
         wrongCredentials: "用户名或密码错误。",
         signOut: "退出登录",

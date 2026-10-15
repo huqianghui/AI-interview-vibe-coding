@@ -132,7 +132,8 @@ async def upsert_master_config(
     ``clear_api_key=True`` deletes the stored key instead (Entra ID / Managed Identity auth only)
     and wins over ``api_key``. Saving always marks the row active.
 
-    ``model_or_deployment`` is the INFERENCE model (judge / scoring / the Foundry agent);
+    ``model_or_deployment`` is the INFERENCE model (the Foundry agent; judge / scoring too unless
+    ``JUDGE_MODEL`` is set);
     ``voice_model`` + ``voice_model_mode`` + ``voice_byom_profile`` are the separate Voice Live
     session model. They are two settings because the legal values differ (see the ServiceConfig
     docstring). The voice args default to the pre-split behaviour, so existing callers that only

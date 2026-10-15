@@ -893,6 +893,7 @@ export function InterviewPage() {
           <CandidateOrientation
             total={q.total}
             isExternal={isExternal}
+            character={interview?.voice_avatar_character}
             onBegin={() => setPhase("interviewing")}
             recordingDays={interview?.audio_recorded ? (interview.recording_retention_days ?? 0) : 0}
           />

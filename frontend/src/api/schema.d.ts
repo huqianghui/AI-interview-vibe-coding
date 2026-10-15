@@ -1803,6 +1803,11 @@ export interface components {
             endpoint: string;
             /** Is Active */
             is_active: boolean;
+            /**
+             * Judge Model
+             * @default
+             */
+            judge_model: string;
             /** Knowledge Base */
             knowledge_base: string;
             /** Knowledge Source */

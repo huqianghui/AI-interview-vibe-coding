@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.71.0.0 (2026-10-15)
+
+### Changed
+- **New defaults, so a fresh deploy or test run needs no setup.** The agent and the Voice Live
+  session default to `gpt-6-luna`. Judge and report scoring get their own setting, `JUDGE_MODEL`,
+  which defaults to `gpt-6-sol` (empty = use the agent's model); the SOP coverage audit and SOP
+  summaries share that adapter, so they follow it. All three models were checked against the live
+  swedencentral resource on 2026-10-15: each is a deployment there, and Voice Live accepts
+  `gpt-6-luna` and `gpt-6-sol` as session models. The admin Connection tab shows the model judge
+  and scoring actually run on. Code, `.env.example`, bicep and the parameter example all carry
+  the new values.
+- **The judge's "reasoning off" works on gpt-6.** gpt-6 answers `reasoning.effort: "minimal"`
+  with a 400 and accepts `"none"` (gpt-5-mini is the reverse, measured), so the fast path now
+  picks the effort per model family. Without this every judge call on gpt-6 would have failed.
+- **The default interviewer is Sakura, a photo avatar.** The candidate sign-in, idle and
+  orientation screens no longer hardcode "Lisa": the name and portrait come from the avatar
+  roster. Sign-in and idle show the default avatar; orientation shows the session's own avatar.
+  Photo portraits fill the frame (they are opaque squares, not cut-outs). The README and other
+  docs keep their Lisa screenshots on purpose; the screenshot ledger can now record an image as
+  deliberately kept, with the reason.
+
 ## 0.70.4.0 (2026-10-14)
 
 ### Changed

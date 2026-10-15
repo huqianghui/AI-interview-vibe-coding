@@ -375,12 +375,12 @@ chat-completion 调用（`POST /{id}/judge` → `app.interview.judge.run_judge`�
 
 三个最容易误会的点：
 
-1. **"写死"只剩兜底。** `config.py:86` 的 `foundry_agent_model: str = "gpt-5-mini"`、`config.py:104`
-   的 `voice_live_default_model: str = "gpt-5-mini"`、`azure_agent_sync.py:44` 的 `_MODEL_ENV_DEFAULT`
-   都只是**配置缺失时的兜底**，admin 一填就被盖掉。
+1. **"写死"只剩兜底。** `config.py` 的 `foundry_agent_model` / `voice_live_default_model`（默认
+   `gpt-6-luna`）、`judge_model`（默认 `gpt-6-sol`）和 `azure_agent_sync.py` 的 `_MODEL_ENV_DEFAULT`
+   都只是**配置缺失时的兜底**，admin 或 `.env` 一填就被盖掉。
 2. **`get_llm_adapter(name)` 的 `name` 是 provider（`azure` / `mock`），不是模型名。** 模型在注册时就
-   固定在 adapter 实例上，调用方选不了。推论：**judge 和打分今天必然是同一个模型**，想让它们用不同模型
-   需要新开关（目前没有）。另外 judge / 打分**都不读 `persona.model`**——per-persona model 只影响
+   固定在 adapter 实例上，调用方选不了。推论：**judge 和打分必然是同一个模型**——
+   v0.71.0.0 起由 `JUDGE_MODEL` 决定（空则沿用 agent 的模型），与 agent 模型分开。另外 judge / 打分**都不读 `persona.model`**——per-persona model 只影响
    agent 同步和 Voice Live 连接。
 3. **admin 那一个 model 字段，一条链喂三处用途。** 它同时是 ① judge/打分的 chat 模型、② agent 同步时的
    底层模型、③ Voice Live 的 `model=`。前两个接受**你自己的 deployment 名**，第三个只认**本 region 的

@@ -30,6 +30,7 @@ from app.config import get_settings
 from app.models.interview import BRAIN_MODES
 from app.models.persona import InterviewerPersona
 from app.services import persona_service as svc
+from app.services.agents.voice_live_metadata import DEFAULT_AVATAR_CHARACTER
 
 logger = logging.getLogger(__name__)
 
@@ -149,8 +150,8 @@ async def seed_default_persona(db: AsyncSession) -> InterviewerPersona | None:
     persona = InterviewerPersona(
         id=DEFAULT_PERSONA_ID,
         name=DEFAULT_PERSONA_NAME,
-        character="lisa",
-        style="casual-sitting",
+        character=DEFAULT_AVATAR_CHARACTER,
+        style="",
         prompt_fragment=_PROMPT_FRAGMENT,
         interview_brain=brain,
         external_reader_prompt=reader_prompt,

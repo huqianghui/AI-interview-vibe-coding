@@ -90,6 +90,23 @@ class TestRegistration:
         registry._register_foundry_llm()
         assert registry._LLM_ADAPTERS.get("azure").__class__.__name__ == "FoundryLLMAdapter"
 
+    def test_runs_on_judge_model_and_falls_back_to_agent_model(self, monkeypatch):
+        from app.config import get_settings
+        from app.services.agents import registry
+
+        settings = get_settings()
+        monkeypatch.setattr(
+            settings, "foundry_project_endpoint", "https://demo.services.ai.azure.com", False
+        )
+        monkeypatch.setattr(settings, "foundry_agent_model", "agent-dep", False)
+        monkeypatch.setattr(settings, "judge_model", "judge-dep", False)
+        registry._register_foundry_llm()
+        assert registry._LLM_ADAPTERS["azure"]._model == "judge-dep"
+        monkeypatch.setattr(settings, "judge_model", "", False)
+        registry._register_foundry_llm()
+        assert registry._LLM_ADAPTERS["azure"]._model == "agent-dep"
+        registry._LLM_ADAPTERS.pop("azure", None)
+
     def test_noop_without_endpoint(self, monkeypatch):
         from app.config import get_settings
         from app.services.agents import registry
@@ -107,6 +124,14 @@ class TestFastCompletionKwargs:
         assert kwargs["reasoning"] == {"effort": "minimal"}
         assert kwargs["text"] == {"format": {"type": "json_object"}, "verbosity": "low"}
         assert kwargs["max_output_tokens"] == 320
+
+    def test_fast_on_gpt6_uses_none_effort_because_minimal_is_rejected(self):
+        # Measured 2026-10-15: gpt-6-luna / gpt-6-sol answer `minimal` with a 400 and take `none`.
+        for model in ("gpt-6-sol", "gpt-6-luna"):
+            kwargs = _build_completion_kwargs(model, "judge", json_mode=True, fast=True)
+            assert kwargs["reasoning"] == {"effort": "none"}
+            assert kwargs["text"] == {"format": {"type": "json_object"}, "verbosity": "low"}
+            assert kwargs["max_output_tokens"] == 320
 
     def test_fast_on_non_reasoning_model_sends_no_reasoning_or_verbosity(self):
         # gpt-4.1-mini (and any non gpt-5 / o-series model) must not receive reasoning knobs it

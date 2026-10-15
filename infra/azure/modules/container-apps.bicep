@@ -63,8 +63,9 @@ param clientBundleBlob string = ''
 param azureFoundryEndpoint string
 param foundryProjectEndpoint string
 param azureFoundryDefaultProject string = ''
-param foundryAgentModel string = 'gpt-5-mini'
-param voiceLiveDefaultModel string = 'gpt-5-mini'
+param foundryAgentModel string = 'gpt-6-luna'
+param judgeModel string = 'gpt-6-sol'
+param voiceLiveDefaultModel string = 'gpt-6-luna'
 param voiceLiveApiVersion string = '2026-01-01-preview'
 param sopEmbeddingDeployment string = 'text-embedding-3-small'
 
@@ -193,6 +194,10 @@ var backendEnv = [
   {
     name: 'FOUNDRY_AGENT_MODEL'
     value: foundryAgentModel
+  }
+  {
+    name: 'JUDGE_MODEL'
+    value: judgeModel
   }
   {
     name: 'VOICE_LIVE_DEFAULT_MODEL'

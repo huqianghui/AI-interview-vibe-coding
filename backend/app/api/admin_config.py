@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.db import get_db
 from app.dependencies import require_role
 from app.services import config_service
@@ -65,6 +66,9 @@ class AiFoundryConfigOut(BaseModel):
     # What the save-time live check concluded about the voice model. Informational: a definitive
     # rejection never reaches here (it is a 422), and "could not check" still saves.
     voice_model_check: str = ""
+    # The model judge + scoring actually run on: JUDGE_MODEL when set, else the inference model.
+    # Read-only (deployment config), so the Connection tab can say where judgments go.
+    judge_model: str = ""
 
 
 class ConnectionTestResult(BaseModel):
@@ -77,9 +81,16 @@ class Option(BaseModel):
     label: str
 
 
+def _effective_judge_model(master) -> str:
+    settings = get_settings()
+    inference = (master.model_or_deployment if master else "") or settings.foundry_agent_model
+    return settings.judge_model or inference
+
+
 def _to_out(master, masked_key: str, voice_model_check: str = "") -> AiFoundryConfigOut:
     if master is None:
         return AiFoundryConfigOut(
+            judge_model=_effective_judge_model(None),
             endpoint="",
             masked_key="",
             default_project="",
@@ -103,6 +114,7 @@ def _to_out(master, masked_key: str, voice_model_check: str = "") -> AiFoundryCo
         knowledge_source=master.knowledge_source,
         is_active=master.is_active,
         voice_model_check=voice_model_check,
+        judge_model=_effective_judge_model(master),
     )
 
 

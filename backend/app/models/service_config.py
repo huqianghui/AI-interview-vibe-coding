@@ -5,8 +5,9 @@ shared endpoint, API key (Fernet-encrypted), default project, and the models. It
 source of truth: overlaid onto the settings singleton at startup and after each save (see
 ``app.services.config_overlay``), giving the precedence DB > .env > code default.
 
-**Two models, not one.** ``model_or_deployment`` is the INFERENCE model (judge / scoring / the
-Foundry agent) and must be a deployment in this resource; ``voice_model`` is the Voice Live SESSION
+**Two models, not one.** ``model_or_deployment`` is the INFERENCE model (the Foundry agent, and
+judge / scoring when the deployment sets no ``JUDGE_MODEL``) and must be a deployment in this
+resource; ``voice_model`` is the Voice Live SESSION
 model and must be a name Voice Live hosts natively in the region, unless ``voice_model_mode`` says
 ``byom``. They were one field until v0.43 and that is exactly what produced "Model X is not
 supported in this region" whenever an operator saved their own deployment.

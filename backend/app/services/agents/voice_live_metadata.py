@@ -27,10 +27,13 @@ from typing import Any
 VOICE_LIVE_ENABLED_KEY = "microsoft.voice-live.enabled"
 VOICE_LIVE_CONFIG_KEY = "microsoft.voice-live.configuration"
 
-# Persona avatar/voice fallbacks (only used when the persona leaves a field blank).
-DEFAULT_AVATAR_CHARACTER = "lisa"
-# Azure Voice Live expects the real style slug. A VIDEO persona's style is passed through verbatim;
-# PHOTO avatars have no styles and any stored style is dropped (see build_avatar_config).
+# Persona avatar/voice fallbacks (only used when the persona leaves a field blank). The default is a
+# PHOTO avatar, so it has no style. Mirrors DEFAULT_AVATAR_CHARACTER in
+# frontend/src/data/avatarCharacters.ts.
+DEFAULT_AVATAR_CHARACTER = "sakura"
+# Fallback style for a VIDEO avatar whose own default is unknown (lisa's slug). Azure Voice Live
+# expects the real style slug. A VIDEO persona's style is passed through verbatim; PHOTO avatars
+# have no styles and any stored style is dropped (see build_avatar_config).
 DEFAULT_AVATAR_STYLE = "casual-sitting"
 
 # Azure ships TWO kinds of standard avatar, and Voice Live validates the `session.avatar` block
@@ -208,7 +211,7 @@ def build_avatar_config(
 ) -> dict[str, Any]:
     """The snake_case ``session.avatar`` block for a persona's ``character``/``style``.
 
-    Blank character → the video default (``lisa`` / ``casual-sitting``). Photo avatars get
+    Blank character → the default (``sakura``, a photo avatar). Photo avatars get
     ``type``/``model`` and NO ``style``; video avatars get ``character`` + ``style`` (a blank style
     falls back to THAT character's default from ``VIDEO_AVATAR_DEFAULT_STYLES``, since Azure
     rejects both ``style: null`` and a slug the character doesn't have).

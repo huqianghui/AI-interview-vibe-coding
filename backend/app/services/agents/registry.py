@@ -80,7 +80,8 @@ def _register_foundry_llm() -> None:
         endpoint=settings.foundry_project_endpoint,
         project=settings.azure_foundry_default_project,
         api_key=settings.foundry_api_key,
-        model=settings.foundry_agent_model,
+        # Judgments run on their own model (JUDGE_MODEL); empty falls back to the agent's model.
+        model=settings.judge_model or settings.foundry_agent_model,
     )
 
 
