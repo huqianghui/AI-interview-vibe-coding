@@ -89,6 +89,7 @@ export type ApiContract = [
   Holds<Refines<Admin.PerformanceLinks, Schemas["PerformanceLinks"]>>,
   Holds<Refines<Admin.OperationLookup, Schemas["OperationLookup"]>>,
   Holds<Refines<Admin.TransactionLink, Schemas["TransactionLink"]>>,
+  Holds<Refines<Admin.InterviewNetwork, Schemas["InterviewNetworkOut"]>>,
   // Runtime config for the browser (App Insights).
   Holds<Refines<Telemetry.ClientConfig, Schemas["ClientConfig"]>>,
 ];

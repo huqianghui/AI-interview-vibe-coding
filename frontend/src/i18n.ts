@@ -485,14 +485,12 @@ export const resources = {
         },
         performance: {
           tab: "Performance",
-          networkTitle: "Network check (this browser)",
+          networkTitle: "Live network check (this browser)",
           networkHint:
-            "Measures the network between this browser and the app. Nothing is stored. The " +
-            "avatar's own connection (ICE / TURN) is in the workbook, per real interview.",
-          run: "Run check",
-          running: "Checking…",
+            "Runs while this tab is open: the round trip to the app, the voice connection, UDP " +
+            "to Azure's relay and the downlink, graded against the table for where to start. " +
+            "Nothing is stored. The avatar's own media path is graded per interview, above.",
           apiRtt: "API round trip",
-          apiRttValue: "median {{median}} ms · p95 {{p95}} ms · {{failed}} of {{total}} failed",
           ws: "Voice connection (WebSocket)",
           wsOk: "reachable, {{ms}} ms to open",
           wsFailed: "not reachable: {{reason}}",
@@ -517,18 +515,72 @@ export const resources = {
           transactionNotFound:
             "Not in App Insights yet: telemetry arrives a few minutes after it happens.",
           transactionUnavailable: "Unavailable: {{reason}}",
-          workbook: "Voice performance workbook",
-          workbookHint: "Paste the Operation id into the workbook's Operation id box.",
           openLogs: "Open in Logs",
           openTransaction: "Open the end-to-end view",
           openWorkbook: "Open the workbook",
           copy: "Copy",
           copied: "Copied",
           notConfigured: "Application Insights links are not configured for this deployment.",
-          acrossTitle: "Across interviews",
-          acrossHint:
-            "Connection setup, the avatar handshake, turn latency, page load and API latency " +
-            "across all interviews are in the workbook.",
+          workbookTitle: "Voice performance workbook",
+          workbookCardHint:
+            "One interview: paste its Operation id into the workbook's Operation id box (or pick " +
+            "it in Interview). Across interviews: connection setup, avatar handshake, turn latency, " +
+            "page load and API latency, further down the same workbook.",
+          live: "Live · updates every 2 s",
+          paused: "Paused while this tab is hidden",
+          rttChart: "API round trip, last minute (ms)",
+          rttNow: "{{now}} ms now · median {{median}} · p95 {{p95}} · {{failed}} failed",
+          rttWaiting: "Measuring…",
+          chartTooltip: "{{time}} · {{ms}}",
+          chartFailed: "failed",
+          stun: "UDP to Azure's relay (STUN, port 3478)",
+          stunOk: "open, answered in {{ms}} ms (to the nearest relay, not the region)",
+          stunFailed: "blocked: {{reason}}",
+          downlink: "Downlink",
+          downlinkValue: "{{kbps}} kbit/s",
+          gradeLive: "Estimated grade for this browser",
+          gradeInterview: "Grade of the network this interview ran on",
+          gradeLabel: "Grade {{grade}}",
+          gradeNone: "Not enough data to grade yet.",
+          interviewNetwork: "Network during the interview",
+          networkLoading: "Reading the interview's WebRTC telemetry…",
+          networkNotFound: "No telemetry for this interview (yet: it arrives a few minutes later).",
+          networkUnavailable: "Unavailable: {{reason}}",
+          networkMetrics:
+            "RTT p95 {{rtt}} ms · audio loss {{loss}}% · downlink p50 {{down}} kbit/s · " +
+            "{{samples}} samples · {{avatar}}",
+          noMedia: "No avatar media samples (voice-only or too short).",
+          avatarVideo: "video avatar",
+          avatarPhoto: "photo avatar",
+          legacyNote:
+            "This interview predates the fixed Operation id: it ran under {{count}} operations, " +
+            "each with its own Logs link.",
+          operationsTitle: "Operations",
+          rec: {
+            A: "Video avatar at the default bitrate; start with video.",
+            B:
+              "Photo avatar at the default bitrate (or VOICE_LIVE_AVATAR_VIDEO_BITRATE=500000); " +
+              "start with video. A video avatar already freezes at this RTT.",
+            C:
+              "Photo avatar with VOICE_LIVE_AVATAR_VIDEO_BITRATE=300000; expect stop-and-go video. " +
+              "Do not start with a video avatar: the automatic switch turns its picture off within " +
+              "seconds.",
+            D:
+              "Start voice-only (the candidate turns video off, or an interviewer without a " +
+              "digital human). At this loss or RTT even a photo avatar's media dies.",
+            E:
+              "UDP 3478 is blocked: no digital human of any kind, only voice over the WebSocket " +
+              "(the app falls back to it by itself). Ask the network team to allow outbound UDP 3478.",
+          },
+          noteEstimated:
+            "Estimated: no UDP loss reading here, and the RTT is TCP to the region, a lower bound " +
+            "for the media path. An interview's own grade is the authoritative one.",
+          noteBoundary: "Between two rows of the table: graded as the worse one, the safer start.",
+          noteDownNotGraded:
+            "Downlink not graded: a photo avatar sends about 0.8 Mbit/s, so the estimate cannot " +
+            "show the link's capacity.",
+          noteRelay: "Ran through the TURN relay: the RTT includes the relay hop.",
+          gradesDoc: "Grades and settings: docs/network-grades.md",
         },
       },
       // Candidate sign-in gate (#102) — shown on the interview page whenever no candidate JWT is
@@ -1049,14 +1101,11 @@ export const resources = {
         },
         performance: {
           tab: "性能",
-          networkTitle: "网络检测（当前浏览器）",
+          networkTitle: "实时网络检测（当前浏览器）",
           networkHint:
-            "测量当前浏览器到应用之间的网络，不保存任何数据。数字人自身的连接（ICE / TURN）" +
-            "在 workbook 里按每场真实面试查看。",
-          run: "开始检测",
-          running: "检测中…",
+            "此页签打开期间持续测量：到应用的往返、语音连接、到 Azure 中继的 UDP 和下行带宽，" +
+            "并按分级表给出起步建议。不保存任何数据。数字人自身的媒体路径按每场面试分级，见上方。",
           apiRtt: "API 往返时间",
-          apiRttValue: "中位数 {{median}} ms · p95 {{p95}} ms · {{total}} 次中失败 {{failed}} 次",
           ws: "语音连接（WebSocket）",
           wsOk: "可连通，建立连接用时 {{ms}} ms",
           wsFailed: "无法连通：{{reason}}",
@@ -1080,16 +1129,68 @@ export const resources = {
           transactionFinding: "查找中…",
           transactionNotFound: "App Insights 里还没有：遥测数据会在发生几分钟后才到达。",
           transactionUnavailable: "不可用：{{reason}}",
-          workbook: "语音性能 workbook",
-          workbookHint: "把 Operation id 粘贴到 workbook 的 Operation id 输入框。",
           openLogs: "在 Logs 中打开",
           openTransaction: "打开端到端视图",
           openWorkbook: "打开 workbook",
           copy: "复制",
           copied: "已复制",
           notConfigured: "这个部署没有配置 Application Insights 链接。",
-          acrossTitle: "跨面试统计",
-          acrossHint: "所有面试的连接建立、数字人握手、每轮延迟、页面加载和 API 延迟都在 workbook 里。",
+          workbookTitle: "语音性能 workbook",
+          workbookCardHint:
+            "看单场面试：把 Operation id 粘贴到 workbook 的 Operation id 输入框（或在 Interview " +
+            "下拉里选）。跨面试：连接建立、数字人握手、每轮延迟、页面加载和 API 延迟，在同一个 " +
+            "workbook 的下方。",
+          live: "实时 · 每 2 秒更新",
+          paused: "此页签隐藏时暂停",
+          rttChart: "API 往返时间，最近一分钟（ms）",
+          rttNow: "当前 {{now}} ms · 中位数 {{median}} · p95 {{p95}} · 失败 {{failed}} 次",
+          rttWaiting: "测量中…",
+          chartTooltip: "{{time}} · {{ms}}",
+          chartFailed: "失败",
+          stun: "到 Azure 中继的 UDP（STUN，端口 3478）",
+          stunOk: "可达，{{ms}} ms 收到应答（到最近的中继，不代表到区域）",
+          stunFailed: "不通：{{reason}}",
+          downlink: "下行带宽",
+          downlinkValue: "{{kbps}} kbit/s",
+          gradeLive: "当前浏览器的估计分级",
+          gradeInterview: "这场面试所在网络的分级",
+          gradeLabel: "{{grade}} 级",
+          gradeNone: "数据还不够，暂时无法分级。",
+          interviewNetwork: "面试期间的网络",
+          networkLoading: "正在读取这场面试的 WebRTC 遥测…",
+          networkNotFound: "这场面试还没有遥测数据（数据会在几分钟后到达）。",
+          networkUnavailable: "不可用：{{reason}}",
+          networkMetrics:
+            "RTT p95 {{rtt}} ms · 音频丢包 {{loss}}% · 下行 p50 {{down}} kbit/s · " +
+            "{{samples}} 个采样 · {{avatar}}",
+          noMedia: "没有数字人媒体采样（纯语音，或时间太短）。",
+          avatarVideo: "视频数字人",
+          avatarPhoto: "照片数字人",
+          legacyNote:
+            "这场面试早于固定 Operation id：它跑在 {{count}} 个 operation 下，每个都有自己的 Logs 链接。",
+          operationsTitle: "Operations",
+          rec: {
+            A: "视频数字人，默认码率，以视频起步。",
+            B:
+              "照片数字人，默认码率（或 VOICE_LIVE_AVATAR_VIDEO_BITRATE=500000），以视频起步。" +
+              "这个 RTT 下视频数字人已经会卡。",
+            C:
+              "照片数字人，VOICE_LIVE_AVATAR_VIDEO_BITRATE=300000；画面会“动一下停一下”。" +
+              "不要以视频数字人起步：自动降级会在十几秒内把画面关掉。",
+            D:
+              "以纯音频起步（候选人关闭视频，或使用不带数字人的面试官）。这种丢包或 RTT 下，" +
+              "照片数字人的媒体也会断。",
+            E:
+              "UDP 3478 不通：任何数字人都不可用，只能走 WebSocket 纯语音（应用会自动降级）。" +
+              "请网络团队放行出向 UDP 3478。",
+          },
+          noteEstimated:
+            "估计值：这里测不到 UDP 丢包，RTT 是到区域的 TCP 往返，只是媒体路径的下界。" +
+            "以面试自身的分级为准。",
+          noteBoundary: "落在表中两级之间：按较差的一级判定，从更稳妥的形态起步。",
+          noteDownNotGraded: "下行未参与分级：照片数字人只发约 0.8 Mbit/s，这个估计反映不了链路容量。",
+          noteRelay: "经过 TURN 中继：RTT 包含中继这一跳。",
+          gradesDoc: "分级与配置：docs/network-grades.md",
         },
       },
       // 候选人登录门(#102)——面试页在没有候选人 JWT 时展示。候选人使用与管理员相同的
