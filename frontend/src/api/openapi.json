@@ -239,11 +239,6 @@
             "title": "Is Active",
             "type": "boolean"
           },
-          "judge_model": {
-            "default": "",
-            "title": "Judge Model",
-            "type": "string"
-          },
           "knowledge_base": {
             "title": "Knowledge Base",
             "type": "string"
@@ -2249,6 +2244,11 @@
           },
           "voice_map": {
             "title": "Voice Map",
+            "type": "string"
+          },
+          "voice_model_check": {
+            "default": "",
+            "title": "Voice Model Check",
             "type": "string"
           },
           "voice_temperature": {

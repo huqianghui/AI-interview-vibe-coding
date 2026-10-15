@@ -206,7 +206,7 @@ export function AgentEditorPage() {
         const saved = isNew
           ? await personas.createPersona(payload)
           : await personas.updatePersona(selectedId!, payload);
-        setStatus("Saved.");
+        setStatus(saved.voice_model_check ? `Saved. ${saved.voice_model_check}` : "Saved.");
         setCurrent(saved);
         setSelectedId(saved.id);
         setForm(personaToForm(saved));

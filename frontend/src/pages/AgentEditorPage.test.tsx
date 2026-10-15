@@ -279,6 +279,29 @@ describe("AgentEditorPage", () => {
     expect(JSON.parse(payload.voice_map!)["zh-CN"]).toBe("zh-CN-XiaoxiaoNeural");
   });
 
+  it("shows the save-time Voice Live warning when the saved model is rejected", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    mockDiscovery();
+    mockKnowledge();
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([PERSONA]);
+    vi.spyOn(personas, "getPersona").mockResolvedValue(PERSONA);
+    vi.spyOn(personas, "updatePersona").mockResolvedValue({
+      ...PERSONA,
+      voice_model_check: "Voice Live does not accept gpt-5.4-mini in this region.",
+    });
+
+    renderPage();
+    await signIn(user);
+    await pickPersona(user, "p1");
+    await waitFor(() => expect(screen.getByTestId("persona-name")).toHaveValue("Demo Interviewer"));
+    await user.click(screen.getByTestId("persona-save"));
+
+    expect(await screen.findByTestId("editor-status")).toHaveTextContent(
+      "Saved. Voice Live does not accept gpt-5.4-mini in this region.",
+    );
+  });
+
   it("avatar grid selection sets character/style on save", async () => {
     const user = userEvent.setup();
     mockAdminLogin();

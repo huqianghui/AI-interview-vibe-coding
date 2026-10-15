@@ -77,6 +77,9 @@ export interface PersonaOut {
   // Auto-generated EXTERNAL-mode reader prompt used when external_reader_prompt is null/blank —
   // shown in the editor as the placeholder default (parallel to default_instructions).
   default_external_reader_prompt: string;
+  // Save-time live Voice Live check of `model`, set only when the save changed it and voice
+  // sessions follow it (no Connection-tab override). A warning; the save still happened.
+  voice_model_check?: string;
 }
 
 /** Fields accepted on create (server owns id + agent-sync bookkeeping + computed defaults). */
@@ -90,6 +93,7 @@ export type PersonaCreate = Omit<
   | "default_instructions"
   | "default_external_reader_prompt"
   | "judge_contract"
+  | "voice_model_check"
 >;
 
 /** All fields optional on update (backend PersonaUpdate). */

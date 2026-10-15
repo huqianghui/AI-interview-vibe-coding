@@ -498,7 +498,7 @@ describe("AdminPage", () => {
     // Native mode (default): the voice dropdown lists what a real connection ACCEPTED here, which
     // is a different set from the resource's deployments.
     expect(screen.getByTestId("cfg-voice-native-hint")).toHaveTextContent(
-      /two separate settings and both need a value/i,
+      /differs from the inference list/i,
     );
     await user.click(screen.getByTestId("cfg-voice-model-dropdown"));
     expect(await screen.findByRole("option", { name: "gpt-5-mini" })).toBeInTheDocument();
@@ -608,7 +608,7 @@ describe("AdminPage", () => {
     } as unknown as Awaited<ReturnType<typeof personas.listPersonas>>[number];
   }
 
-  it("names the personas whose own model ignores the inference setting", async () => {
+  it("without a voice override, says voice follows each persona and names their models", async () => {
     const user = userEvent.setup();
     mockAdminLogin();
     vi.spyOn(admin, "listBanks").mockResolvedValue([]);
@@ -628,15 +628,40 @@ describe("AdminPage", () => {
     await signIn(user);
     await user.click(await screen.findByTestId("admin-tab-connection"));
 
-    const notice = await screen.findByTestId("cfg-model-overrides");
-    // Only the persona with a non-empty model is listed; "" and null mean "follow the global".
-    expect(notice).toHaveTextContent(/1 persona\(s\) carry their own model/i);
+    const notice = await screen.findByTestId("cfg-voice-follows-persona");
+    // Only the persona with a non-empty model is listed; "" and null fall to the env default.
+    expect(notice).toHaveTextContent(/voice follows each persona/i);
     expect(notice).toHaveTextContent("Interviewer (gpt-5-mini)");
     expect(notice).not.toHaveTextContent("Repro Photo Avatar");
     expect(notice).not.toHaveTextContent("Legacy");
+    // The inference model is judge + scoring only: no persona list hangs off it any more.
+    expect(screen.queryByTestId("cfg-model-overrides")).not.toBeInTheDocument();
   });
 
-  it("says so plainly when no persona overrides the inference model", async () => {
+  it("with a voice override, says it overrides the persona models and can be cleared", async () => {
+    const user = userEvent.setup();
+    mockAdminLogin();
+    vi.spyOn(admin, "listBanks").mockResolvedValue([]);
+    vi.spyOn(admin, "getAiFoundryConfig").mockResolvedValue({
+      ...EMPTY_CFG,
+      endpoint: "https://demo.services.ai.azure.com",
+      voice_model: "gpt-5-mini",
+      is_active: true,
+    });
+    vi.spyOn(personas, "listPersonas").mockResolvedValue([personaRow("Interviewer", "gpt-6-luna")]);
+
+    renderPage();
+    await signIn(user);
+    await user.click(await screen.findByTestId("admin-tab-connection"));
+
+    const notice = await screen.findByTestId("cfg-voice-overrides");
+    expect(notice).toHaveTextContent(/every voice session runs on gpt-5-mini/i);
+    expect(notice).toHaveTextContent("instead of Interviewer (gpt-6-luna)");
+    await user.click(screen.getByTestId("cfg-voice-clear-override"));
+    expect(await screen.findByTestId("cfg-voice-follows-persona")).toBeInTheDocument();
+  });
+
+  it("says voice follows each persona even when no persona has a model", async () => {
     const user = userEvent.setup();
     mockAdminLogin();
     vi.spyOn(admin, "listBanks").mockResolvedValue([]);
@@ -651,8 +676,9 @@ describe("AdminPage", () => {
     await signIn(user);
     await user.click(await screen.findByTestId("admin-tab-connection"));
 
-    expect(await screen.findByTestId("cfg-model-overrides-none")).toBeInTheDocument();
-    expect(screen.queryByTestId("cfg-model-overrides")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("cfg-voice-follows-persona")).toHaveTextContent(
+      /^Not overriding: voice follows each persona\.$/,
+    );
   });
 
   it("keeps the config panel usable when the persona list cannot be read", async () => {
@@ -674,7 +700,7 @@ describe("AdminPage", () => {
     await waitFor(() =>
       expect(screen.getByTestId("cfg-endpoint")).toHaveValue("https://demo.services.ai.azure.com"),
     );
-    expect(screen.getByTestId("cfg-model-overrides-none")).toBeInTheDocument();
+    expect(screen.getByTestId("cfg-voice-follows-persona")).toBeInTheDocument();
   });
 
   // --- The BYOM deployment list must follow the chosen profile -----------------------------------
