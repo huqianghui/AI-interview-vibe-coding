@@ -332,3 +332,40 @@ async def test_the_session_span_is_parented_on_the_browsers_traceparent(
     assert name == "voice.session"
     assert attrs["parent"] == f"ctx:{tp}"
     assert "voice.interview_id" in attrs  # None here: this anonymous session has no interview yet
+
+
+# --- the Performance tab's reachability probe ------------------------------------------------
+
+
+async def test_probe_answers_and_closes_without_a_voice_session(db_session, proxy_calls):
+    ws = _FakeWs(token=await _admin_token(db_session), probe="1")
+    await _run(ws)
+    assert ws.sent == [{"type": "probe.ok"}]
+    assert ws.closed == (1000, "probe")
+    assert proxy_calls == [], "a probe never opens Voice Live"
+
+
+async def test_probe_still_needs_a_valid_token(proxy_calls):
+    ws = _FakeWs(token="not-a-token", probe="1")
+    await _run(ws)
+    assert ws.error_code == "AUTH_FAILED"
+    assert {"type": "probe.ok"} not in ws.sent
+    assert proxy_calls == []
+
+
+async def test_a_candidate_cannot_probe(db_session, proxy_calls):
+    """The probe is the admin tab's: a candidate gets neither the answer nor a voice session."""
+    await _default_persona(db_session)
+    ws = _FakeWs(token=await _anon_token(db_session), probe="1")
+    await _run(ws)
+    assert ws.error_code == "PROBE_ADMIN_ONLY"
+    assert proxy_calls == []
+
+
+@pytest.mark.parametrize("value", ["0", "true", ""])
+async def test_anything_but_probe_1_is_a_normal_session(db_session, proxy_calls, value):
+    await _default_persona(db_session)
+    ws = _FakeWs(token=await _admin_token(db_session), probe=value)
+    await _run(ws)
+    assert ws.sent == []
+    assert len(proxy_calls) == 1

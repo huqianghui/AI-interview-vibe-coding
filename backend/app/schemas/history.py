@@ -29,6 +29,9 @@ class InterviewResultItem(InterviewHistoryItem):
     bank_id: str | None
     # The bank version (questions + rubric) the interview was pinned to; NULL before that.
     bank_version_no: int | None = None
+    # The App Insights operation id the interview's telemetry is filed under (its id without the
+    # dashes; spec-admin-performance-tab).
+    operation_id: str = ""
 
 
 class InterviewResultsPage(BaseModel):

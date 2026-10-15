@@ -14,6 +14,7 @@ from app.api import (
     admin_external_config,
     admin_interviews,
     admin_jobs,
+    admin_performance,
     admin_personas,
     admin_questions,
     admin_sop,
@@ -227,6 +228,7 @@ app.include_router(auth.router)
 app.include_router(admin_users.router)
 app.include_router(admin_interviews.router)
 app.include_router(admin_jobs.router)
+app.include_router(admin_performance.router)
 app.include_router(candidate_history.router)
 app.include_router(admin_config.router)
 app.include_router(admin_external_config.router)

@@ -368,6 +368,8 @@ export interface InterviewResultItem extends InterviewHistoryItem {
   persona_id: string | null;
   bank_id: string | null;
   bank_version_no?: number | null;
+  /** The App Insights operation id the interview is filed under: its id without the dashes. */
+  operation_id?: string;
 }
 
 /** One page of results. `total` counts every match, for the pager. Mirrors `InterviewResultsPage`. */
@@ -719,3 +721,37 @@ export const retryJob = (jobId: string) =>
 /** Cancel a queued job, or ask a running one to stop. */
 export const cancelJob = (jobId: string) =>
   adminRequest<JobItem>(`/admin/jobs/${jobId}/cancel`, { method: "POST" });
+
+/** What this deployment's Performance tab can link to. Mirrors `PerformanceLinks`. */
+export interface PerformanceLinks {
+  workbook_url: string | null;
+  logs: boolean;
+  transaction: boolean;
+}
+
+/** An operation id's interview and links. Mirrors `OperationLookup`. */
+export interface OperationLookup {
+  operation_id: string;
+  /** null: no interview has this id (another page's operation). */
+  interview: InterviewResultItem | null;
+  logs_url: string | null;
+  workbook_url: string | null;
+}
+
+/** The end-to-end transaction link. Mirrors `TransactionLink`. */
+export interface TransactionLink {
+  status: "found" | "not_found" | "unavailable";
+  url?: string | null;
+  reason?: string | null;
+}
+
+export const getPerformanceLinks = () => adminRequest<PerformanceLinks>("/admin/performance/links");
+
+export const lookupOperation = (operationId: string) =>
+  adminRequest<OperationLookup>(`/admin/performance/operations/${encodeURIComponent(operationId)}`);
+
+/** Asks the Logs query API (a few seconds), so the page calls it on demand. */
+export const getTransactionLink = (operationId: string) =>
+  adminRequest<TransactionLink>(
+    `/admin/performance/operations/${encodeURIComponent(operationId)}/transaction`,
+  );

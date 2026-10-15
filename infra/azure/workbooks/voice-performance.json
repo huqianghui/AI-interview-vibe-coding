@@ -62,7 +62,7 @@
             "name": "Operation",
             "label": "Operation id (overrides the interview)",
             "type": 1,
-            "value": "17f1202013e449e7a1a5696a94bb3b55",
+            "value": "",
             "timeContextFromParameter": "TimeRange"
           }
         ],

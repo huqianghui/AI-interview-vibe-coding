@@ -18,6 +18,7 @@ the scope matching the API they're hitting; this is the single source of truth f
   - ``FOUNDRY_SCOPE``            — AI Foundry project + model-deployment control plane.
   - ``SEARCH_SCOPE``            — Azure AI Search (Foundry IQ knowledge bases).
   - ``ARM_SCOPE``              — Azure Resource Manager (RemoteTool connection creation).
+  - ``LOG_ANALYTICS_SCOPE``    — Azure Monitor Logs query API (the admin Performance tab).
 
 Helpers:
   - :func:`get_bearer_token` — one-shot async bearer for REST calls (creates + closes a cred).
@@ -39,6 +40,7 @@ COGNITIVE_SERVICES_SCOPE = "https://cognitiveservices.azure.com/.default"
 FOUNDRY_SCOPE = "https://ai.azure.com/.default"
 SEARCH_SCOPE = "https://search.azure.com/.default"
 ARM_SCOPE = "https://management.azure.com/.default"
+LOG_ANALYTICS_SCOPE = "https://api.loganalytics.io/.default"
 
 # Cached sync credential singleton (recreated after a TTL to pick up refreshed tokens).
 _credential_instance: Any = None

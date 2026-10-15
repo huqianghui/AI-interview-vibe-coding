@@ -57,6 +57,7 @@ import { RestartDialog } from "./interview/RestartDialog";
 import { ScoringProgressCard } from "./interview/ScoringProgressCard";
 import { StatusLegend } from "./interview/StatusLegend";
 import { useInterviewStyles } from "./interview/styles";
+import { renewOperation, setInterviewOperation } from "../telemetry/appInsights";
 import { useScoringFlow } from "./interview/useScoringFlow";
 import { voiceMetrics } from "../telemetry/voiceTimeline";
 
@@ -226,6 +227,17 @@ export function InterviewPage() {
     seq: number;
     promise: Promise<import("../api/client").JudgeOut | null>;
   } | null>(null);
+
+  // One interview = one App Insights operation: pin its id (spec-admin-performance-tab). Latched
+  // during render, like the avatar character above: the voice hook may open its WebSocket (carrying
+  // the trace context) in the same commit that delivers a resumed interview.
+  const pinnedInterviewRef = useRef<string | null>(null);
+  const interviewIdForPin = interview?.interview_session_id ?? null;
+  if (pinnedInterviewRef.current !== interviewIdForPin) {
+    pinnedInterviewRef.current = interviewIdForPin;
+    setInterviewOperation(interviewIdForPin);
+  }
+  useEffect(() => () => setInterviewOperation(null), []);
 
   const voice = useInterviewVoice(interview?.interview_session_id ?? "", {
     locale: i18n.language,
@@ -649,7 +661,16 @@ export function InterviewPage() {
       submitSeqRef.current += 1;
       setNudgeText(null);
       await voice.disconnect().catch(() => undefined);
-      const fresh = await restartInterview(iv.interview_session_id);
+      // A new interview is a new operation: the restart call is filed under it, and the backend
+      // adopts it as the new interview's id.
+      renewOperation();
+      let fresh: Interview;
+      try {
+        fresh = await restartInterview(iv.interview_session_id);
+      } catch (e) {
+        setInterviewOperation(iv.interview_session_id); // still on the old interview
+        throw e;
+      }
       spokenQuestionId.current = null;
       setSegments([]);
       setAnswer("");

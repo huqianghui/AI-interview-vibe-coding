@@ -17,9 +17,11 @@ import {
   Select,
   Text,
   Title3,
+  Tooltip,
   makeStyles,
   tokens,
 } from "@fluentui/react-components";
+import { CheckmarkRegular, CopyRegular, OpenRegular } from "@fluentui/react-icons";
 import { fetchInterviewSopDocument } from "../../api/admin";
 import type { HistoryStatus } from "../../api/client";
 import { InterviewDetailView, StatusBadge } from "../../components/InterviewHistory";
@@ -36,6 +38,8 @@ const STATUSES: HistoryStatus[] = ["in_progress", "completed", "scored", "abando
 const OUTCOMES = ["Meets Expectations", "Needs Improvement", "Does Not Meet"] as const;
 
 const useStyles = makeStyles({
+  operation: { display: "inline-flex", alignItems: "center", columnGap: tokens.spacingHorizontalXXS },
+  operationId: { fontFamily: tokens.fontFamilyMonospace },
   statuses: { display: "flex", flexWrap: "wrap", columnGap: tokens.spacingHorizontalS },
   // The whole row: five checkboxes fit on one line at any desktop width (two grid columns did not,
   // so the fifth wrapped); on a narrow screen they wrap inside it.
@@ -93,7 +97,14 @@ function sortOf(state: InterviewsTabState, column: SortKey): DataColumn<unknown>
   };
 }
 
-export function InterviewsTab({ state }: { state: InterviewsTabState }) {
+export function InterviewsTab({
+  state,
+  onOpenPerformance,
+}: {
+  state: InterviewsTabState;
+  /** Open the Performance tab on this operation id (spec-admin-performance-tab). */
+  onOpenPerformance?: (operationId: string) => void;
+}) {
   const styles = useAdminStyles();
   const local = { ...useTableToolbarStyles(), ...useStyles() };
   const { t, i18n } = useTranslation();
@@ -101,6 +112,16 @@ export function InterviewsTab({ state }: { state: InterviewsTabState }) {
   const candidates = state.users.filter((u) => u.role === "user");
   const hasFilters = Object.keys(filters).length > 0;
   const when = (v: string | null) => formatWhenShort(v, i18n.language);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const copy = (rowId: string, value: string) => {
+    navigator.clipboard?.writeText(value).then(
+      () => {
+        setCopiedId(rowId);
+        setTimeout(() => setCopiedId((c) => (c === rowId ? null : c)), 1500);
+      },
+      (e: unknown) => console.warn("[results] copy failed", e),
+    );
+  };
   const columns: DataColumn<InterviewResultItem>[] = [
     {
       id: "candidate",
@@ -164,6 +185,53 @@ export function InterviewsTab({ state }: { state: InterviewsTabState }) {
       header: t("admin.results.outcome"),
       text: (it) => (it.outcome ? t(`report.outcome.${it.outcome}`) : "—"),
       cell: (it) => (it.outcome ? t(`report.outcome.${it.outcome}`) : "—"),
+    },
+    {
+      id: "operation",
+      header: t("admin.results.operation"),
+      text: (it) => (it.operation_id ? it.operation_id.slice(0, 8) : "—"),
+      pad: 64, // the two icon buttons
+      cell: (it) => {
+        const op = it.operation_id;
+        if (!op) return "—";
+        // The row opens the interview; these two must not.
+        const own = (fn: () => void) => (e: { stopPropagation: () => void }) => {
+          e.stopPropagation();
+          fn();
+        };
+        return (
+          <span className={local.operation} data-testid={`result-operation-${it.id}`}>
+            <span className={local.operationId}>{op.slice(0, 8)}</span>
+            <Tooltip
+              content={
+                copiedId === it.id ? t("admin.results.copiedOperation") : t("admin.results.copyOperation")
+              }
+              relationship="label"
+            >
+              <Button
+                size="small"
+                appearance="subtle"
+                icon={copiedId === it.id ? <CheckmarkRegular /> : <CopyRegular />}
+                onClick={own(() => copy(it.id, op))}
+                onKeyDown={(e) => e.stopPropagation()}
+                data-testid={`result-operation-copy-${it.id}`}
+              />
+            </Tooltip>
+            {onOpenPerformance && (
+              <Tooltip content={t("admin.results.openPerformance")} relationship="label">
+                <Button
+                  size="small"
+                  appearance="subtle"
+                  icon={<OpenRegular />}
+                  onClick={own(() => onOpenPerformance(op))}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  data-testid={`result-operation-open-${it.id}`}
+                />
+              </Tooltip>
+            )}
+          </span>
+        );
+      },
     },
   ];
 

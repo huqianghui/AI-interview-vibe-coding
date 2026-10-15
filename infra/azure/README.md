@@ -17,7 +17,7 @@ A deliberately small footprint (subscription-scope `main.bicep` creates the reso
 | PostgreSQL flexible server (Burstable B2s, v16, `max_connections` 429) | the app's **persistent** database: personas, assignments, every interview and its report survive deploys and restarts. Private only (VNet-integrated, public access disabled), **Entra-only login** (password auth disabled); the backend managed identity is the Entra admin and logs in with a token (`DATABASE_AUTH=entra`, `backend/app/db.py`) (`modules/postgres.bicep`) |
 | Container Apps (backend + frontend) | backend **1–2 replicas** × (3 uvicorn workers + the `jobs` job-runner sidecar), frontend single replica; every cross-request guard lives in the database (`docs/planning/spec-jobs-and-scale-out.md`); **VNet-integrated** env (frontend ingress external; backend ingress **internal**, reachable only through the frontend's `/api` proxy; private egress to storage + PostgreSQL); the four runtime secrets are Container App **native secrets** (see note below) |
 | GitHub OIDC identity | keyless deploy from GitHub Actions |
-| Role assignments | AcrPull / Storage Blob Data Reader (backend MI); Contributor / AcrPush (deploy MI) |
+| Role assignments | AcrPull / Storage Blob Data Reader (backend MI); Log Analytics Data Reader on the workspace (backend MI: the admin Performance tab's end-to-end lookup); Contributor / AcrPush (deploy MI) |
 
 > **Runtime secrets.** The three secrets (`secret-key`, `encryption-key`, `seed-admin-password`)
 > are delivered as Container App **native secrets** (encrypted at rest by the

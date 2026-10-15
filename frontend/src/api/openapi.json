@@ -1399,6 +1399,11 @@
             "title": "Id",
             "type": "string"
           },
+          "operation_id": {
+            "default": "",
+            "title": "Operation Id",
+            "type": "string"
+          },
           "outcome": {
             "anyOf": [
               {
@@ -1809,6 +1814,54 @@
         "title": "LoginRequest",
         "type": "object"
       },
+      "OperationLookup": {
+        "properties": {
+          "interview": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InterviewResultItem"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "logs_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Logs Url"
+          },
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "workbook_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workbook Url"
+          }
+        },
+        "required": [
+          "operation_id",
+          "interview",
+          "logs_url",
+          "workbook_url"
+        ],
+        "title": "OperationLookup",
+        "type": "object"
+      },
       "Option": {
         "properties": {
           "label": {
@@ -1825,6 +1878,37 @@
           "label"
         ],
         "title": "Option",
+        "type": "object"
+      },
+      "PerformanceLinks": {
+        "description": "What this deployment can link to (an empty setting hides the link that needs it).",
+        "properties": {
+          "logs": {
+            "title": "Logs",
+            "type": "boolean"
+          },
+          "transaction": {
+            "title": "Transaction",
+            "type": "boolean"
+          },
+          "workbook_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workbook Url"
+          }
+        },
+        "required": [
+          "workbook_url",
+          "logs",
+          "transaction"
+        ],
+        "title": "PerformanceLinks",
         "type": "object"
       },
       "PersonaCreate": {
@@ -3673,6 +3757,46 @@
         "title": "TokenResponse",
         "type": "object"
       },
+      "TransactionLink": {
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "status": {
+            "enum": [
+              "found",
+              "not_found",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "TransactionLink",
+        "type": "object"
+      },
       "TranscriptTurn": {
         "properties": {
           "content": {
@@ -5019,6 +5143,128 @@
         "summary": "Retry Job",
         "tags": [
           "admin-jobs"
+        ]
+      }
+    },
+    "/admin/performance/links": {
+      "get": {
+        "operationId": "links_admin_performance_links_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PerformanceLinks"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Links",
+        "tags": [
+          "admin-performance"
+        ]
+      }
+    },
+    "/admin/performance/operations/{operation_id}": {
+      "get": {
+        "description": "The interview an operation id belongs to, and its Logs and workbook links. 422 when the id\nis not 32 hex (an interview id with its dashes is accepted too).",
+        "operationId": "lookup_admin_performance_operations__operation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "title": "Operation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationLookup"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Lookup",
+        "tags": [
+          "admin-performance"
+        ]
+      }
+    },
+    "/admin/performance/operations/{operation_id}/transaction": {
+      "get": {
+        "description": "The end-to-end transaction link, found through the Logs query API (a few seconds).",
+        "operationId": "transaction_admin_performance_operations__operation_id__transaction_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "title": "Operation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransactionLink"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Transaction",
+        "tags": [
+          "admin-performance"
         ]
       }
     },
@@ -7363,6 +7609,22 @@
         "parameters": [
           {
             "in": "header",
+            "name": "traceparent",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Traceparent"
+            }
+          },
+          {
+            "in": "header",
             "name": "X-Anon-Session",
             "required": false,
             "schema": {
@@ -7950,6 +8212,22 @@
             "schema": {
               "title": "Interview Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "traceparent",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Traceparent"
             }
           },
           {

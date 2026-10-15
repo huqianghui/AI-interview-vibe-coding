@@ -136,6 +136,7 @@ module monitoring './modules/monitoring.bicep' = {
     environmentName: environmentName
     location: location
     tags: commonTags
+    backendIdentityPrincipalId: managedIdentity.outputs.backendIdentityPrincipalId
   }
 }
 
@@ -250,6 +251,9 @@ module containerApps './modules/container-apps.bicep' = {
     tags: commonTags
     logAnalyticsWorkspaceName: monitoring.outputs.logAnalyticsWorkspaceName
     applicationInsightsConnectionString: monitoring.outputs.applicationInsightsConnectionString
+    applicationInsightsName: monitoring.outputs.applicationInsightsName
+    logAnalyticsCustomerId: monitoring.outputs.logAnalyticsCustomerId
+    perfWorkbookId: monitoring.outputs.voiceWorkbookName
     registryLoginServer: containerRegistry.outputs.registryLoginServer
     backendIdentityId: managedIdentity.outputs.backendIdentityId
     backendIdentityClientId: managedIdentity.outputs.backendIdentityClientId

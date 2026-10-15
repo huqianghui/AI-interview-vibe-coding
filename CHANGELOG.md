@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.73.0.0 (2026-10-15)
+
+### Added
+- **Admin Performance tab.** Paste an Operation id (or an interview id) and see which interview it
+  is, with one-click links to its raw trace in Logs, App Insights' end-to-end transaction view and the
+  Voice performance workbook. The links are built from the deployment's own settings, so a client
+  tenant gets links into its own App Insights. A network check measures this browser's API round
+  trip (median / p95), whether the voice WebSocket opens, and the browser's own network estimate;
+  nothing is stored. The tab's URL (`/admin?tab=performance&op=<id>`) can be shared with another
+  admin.
+- **Every interview row in Interview results shows its Operation id**, with copy and Open in
+  Performance. Nobody has to ask the candidate for anything: the candidate's page shows no id.
+
+### Changed
+- **One interview is one App Insights operation, with one fixed id.** A fresh interview takes the
+  page's operation id as its own id, so the sign-in page, the start of the interview and the whole
+  interview share it. The interview page keeps that id through reloads, reconnects and voice
+  reconnects; a Restart starts a new one. Without telemetry (dev, CI) an interview gets a random id
+  as before.
+- The Voice performance workbook no longer opens on a stale example operation: its Operation id box
+  starts empty, so it shows the newest interview.
+
+### Infrastructure
+- The backend's managed identity gets **Log Analytics Data Reader** on the workspace (the
+  end-to-end lookup), and the backend gets the portal coordinates it builds links from
+  (`MONITOR_TENANT_ID`, `MONITOR_SUBSCRIPTION_ID`, `MONITOR_RESOURCE_GROUP`, `APP_INSIGHTS_NAME`,
+  `LOG_ANALYTICS_WORKSPACE_ID`, `PERF_WORKBOOK_ID`). Any one left empty hides only the link that
+  needs it.
+
 ## 0.72.0.0 (2026-10-15)
 
 ### Changed

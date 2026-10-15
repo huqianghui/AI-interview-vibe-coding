@@ -167,6 +167,21 @@ class Settings(BaseSettings):
     # bandwidth lever. None ⇒ omit the field (Azure default). Unset until the probe settles a value.
     voice_live_avatar_video_bitrate: int | None = None
 
+    # Application Insights in the Azure portal, for the admin Performance tab's links
+    # (docs/planning/spec-admin-performance-tab.md). The deployment sets them
+    # (container-apps.bicep); any one empty hides only the links that need it, so dev, CI and a
+    # client tenant still work.
+    monitor_tenant_id: str = ""
+    monitor_subscription_id: str = ""
+    monitor_resource_group: str = ""
+    app_insights_name: str = ""
+    # The Log Analytics workspace's customer id (a GUID). The end-to-end transaction link needs the
+    # operation's first item, looked up through the Logs query API with the managed identity (role:
+    # Log Analytics Data Reader on the workspace).
+    log_analytics_workspace_id: str = ""
+    # The Voice performance workbook's name (a GUID; voice-workbook.bicep). Empty hides its link.
+    perf_workbook_id: str = ""
+
     # External interview API/server (SPEC Phase 2, vendor-neutral). The backend drives the client's
     # interview brain turn-by-turn as an API client (never a Foundry-agent tool). Empty in CI/dev →
     # the mock external provider answers, so the flow is exercisable without a live gateway. Real

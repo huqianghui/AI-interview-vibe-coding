@@ -25,7 +25,7 @@ from app.schemas.history import (
     InterviewResultsPage,
     TranscriptTurn,
 )
-from app.services import bank_version_service
+from app.services import bank_version_service, performance_service
 
 # ``started_at`` carries microseconds, ``created_at`` may not (two interviews in one second tie).
 # NULLS LAST spelled out: PostgreSQL puts NULLs FIRST on DESC (SQLite last), which would float a
@@ -151,6 +151,8 @@ class ResultFilters:
     """What the admin results table can filter on. Every field is optional (None = no filter)."""
 
     user_id: str | None = None
+    # One interview (the Performance tab's operation lookup).
+    interview_id: str | None = None
     statuses: tuple[str, ...] = field(default_factory=tuple)
     persona_id: str | None = None
     bank_id: str | None = None
@@ -194,6 +196,8 @@ async def search_results(
     )
     if filters.user_id:
         stmt = stmt.where(AnonymousCandidateSession.user_id == filters.user_id)
+    if filters.interview_id:
+        stmt = stmt.where(InterviewSession.id == filters.interview_id)
     if filters.statuses:
         stmt = stmt.where(InterviewSession.status.in_(filters.statuses))
     if filters.persona_id:
@@ -235,6 +239,7 @@ async def search_results(
             persona_id=session.persona_id,
             bank_id=session.bank_id,
             bank_version_no=numbers.get(session.bank_version_id or ""),
+            operation_id=performance_service.operation_id_for(session.id),
         )
         for session, persona_name, bank_name, user_id, username in result_rows
     ]

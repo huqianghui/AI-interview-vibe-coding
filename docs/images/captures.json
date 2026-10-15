@@ -1,53 +1,37 @@
 {
   "00-signin.png": {
-    "sha256": "a81d038445967aa8aa76cd54d9c90cdd939bed934972577788e68a65ed60c138",
-    "sources": "899955330fbd4fa19a0d5b419bb28d5ea24a45ff254505a568dff9c28bca109a",
-    "capturedAt": "2026-10-14T13:17:19.743Z",
-    "kept": {
-      "reason": "Owner 2026-10-15: the README keeps the Lisa capture on purpose (Lisa is the most widely used avatar and still right for documentation). Only the default interviewer moved to Sakura; the screen's layout did not change.",
-      "sources": "40e3cb0c07be7d0c1bbb281440988fdb62c0c1895d734c2606315ebc384af1b8"
-    }
+    "sha256": "30c24cbb329d11b588dbb720d35c57ad22fdfdfa803bb86b21a641254179f7ce",
+    "sources": "40e3cb0c07be7d0c1bbb281440988fdb62c0c1895d734c2606315ebc384af1b8",
+    "capturedAt": "2026-10-15T07:11:43.417Z"
   },
   "01-landing.png": {
-    "sha256": "3385340d976877aa73d1d5b8d7a156c7b77d38a508c9658f164d8a0e8efe0298",
-    "sources": "f22d3ddbaa86ec6dc89acbb410d5c31df475718319eebd626f7728919af91fba",
-    "capturedAt": "2026-10-14T13:17:21.618Z",
-    "kept": {
-      "reason": "Owner 2026-10-15: the README keeps the Lisa capture on purpose (Lisa is the most widely used avatar and still right for documentation). Only the default interviewer moved to Sakura; the screen's layout did not change.",
-      "sources": "da2ee040dd1d88efebaf39b6960a3a3c9d1df054a9d4313935c94f37d621f19d"
-    }
+    "sha256": "3e3e84e1d53a1ea9d2defb926beb0dd7bd9668a74468dce29ba84ce8216f7563",
+    "sources": "da2ee040dd1d88efebaf39b6960a3a3c9d1df054a9d4313935c94f37d621f19d",
+    "capturedAt": "2026-10-15T07:11:46.493Z"
   },
   "01b-orientation.png": {
-    "sha256": "7253bd1f2044884c909695b1f4ebe43802893363064e5d3fce6e6700f17eb23f",
-    "sources": "205528a77d00b97db92fbe1431bd261b772a34a432bd6b1f5922c3a39b094b42",
-    "capturedAt": "2026-10-14T13:17:21.909Z",
-    "kept": {
-      "reason": "Owner 2026-10-15: the README keeps the Lisa capture on purpose (Lisa is the most widely used avatar and still right for documentation). Only the default interviewer moved to Sakura; the screen's layout did not change.",
-      "sources": "ab810ec322f19a9b2f4fa3df2237e3d1a993183e4ecf6f128ad958db8af66d76"
-    }
+    "sha256": "937bbd71340179536c2ea2d8c8ae1516bfb771c431d1ac002fd3046b0f82d5d4",
+    "sources": "ab810ec322f19a9b2f4fa3df2237e3d1a993183e4ecf6f128ad958db8af66d76",
+    "capturedAt": "2026-10-15T07:11:46.838Z"
   },
   "02-interview-question.png": {
-    "sha256": "8e8ca3fdee99dcce1b202c1c99013853f2b61bf8b1e21d6fb3a3d6f62f2ee2d3",
-    "sources": "be24c8e8b911219e84521586423a7f8450fd3901b9d6d5c6a13c67e6a6e9994f",
-    "capturedAt": "2026-10-14T13:17:26.224Z",
-    "kept": {
-      "reason": "Owner 2026-10-15: the README keeps the Lisa capture on purpose (Lisa is the most widely used avatar and still right for documentation). Only the default interviewer moved to Sakura; the screen's layout did not change.",
-      "sources": "95e92e6adb499d22b8bce19e93ad35f611b68183285ac868d076ee7e23b42948"
-    }
+    "sha256": "e1044e40944efffaff47820ac8b03d688a0f8006d31942fb0a6730921375e934",
+    "sources": "6caae6a658ef5385326c5c299d2e9a229144991d86eb8a0720586b3ac36e92c9",
+    "capturedAt": "2026-10-15T07:11:50.702Z"
   },
   "04-review-before-scoring.png": {
     "sha256": "ca7864a27abdbb41795c5e7914e3f2e32789cfc363df47e9265ebd7650c2717d",
     "sources": "3a56f7438d5d97e92c529b9da2ab1f00d97e48f45f93448e0937ce4e389f9ca5",
-    "capturedAt": "2026-10-14T13:17:27.232Z"
+    "capturedAt": "2026-10-15T07:11:51.696Z"
   },
   "05-report-executive.png": {
-    "sha256": "84890fe9f1bc6e894e277cd41f671ebf632b2beff4b51f1876bbdfd700e3fd1d",
+    "sha256": "e5dca533c968383f39cd45fcf3a2dc6ae47dd1298888deb881c338e71f7fd610",
     "sources": "ca93ceeb0d1a76dec539e4f21eb78a2f68e76ceda82cc355c20e8944468b2f70",
-    "capturedAt": "2026-10-14T13:17:47.426Z"
+    "capturedAt": "2026-10-15T07:11:59.168Z"
   },
   "06-report-detail.png": {
-    "sha256": "e86f5e92d37c6e92e4168ed62ab106174aae96ae3e0faabc03eb36dccb13e898",
+    "sha256": "e47f2a96c0a2784890fa3638a8d6329a79289542ae183345a298d349b1137aaf",
     "sources": "ca93ceeb0d1a76dec539e4f21eb78a2f68e76ceda82cc355c20e8944468b2f70",
-    "capturedAt": "2026-10-14T13:17:47.944Z"
+    "capturedAt": "2026-10-15T07:11:59.609Z"
   }
 }
