@@ -184,7 +184,6 @@ describe("this browser's grade", () => {
     stun: { ok: true, ms: 80 },
     stunFailures: 0,
     downKbps: 8000,
-    browser: null,
     ...over,
   });
 

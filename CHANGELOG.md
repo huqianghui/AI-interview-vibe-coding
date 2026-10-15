@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.76.1.0 (2026-10-15)
+
+### Changed
+- **One click from Interview results to App Insights' end-to-end view.** The Performance tab now looks
+  the end-to-end transaction up together with the interview, so the "Open the end-to-end view" link
+  appears by itself; a "Look again" button shows only while App Insights has nothing yet.
+
+### Removed
+- **The "Browser's network estimate" row.** It showed Chrome's own estimate (`navigator.connection`:
+  a speed class like "3g" across all sites, rounded), which read like the network type and was not
+  used for grading.
+
 ## 0.76.0.0 (2026-10-15)
 
 ### Changed

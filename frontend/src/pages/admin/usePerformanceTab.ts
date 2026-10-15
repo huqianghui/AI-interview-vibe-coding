@@ -16,12 +16,10 @@ import { operationIdFor } from "../../telemetry/appInsights";
 import { gradeNetwork, type GradeResult } from "./networkGrade";
 import {
   apiRttOnce,
-  browserNetwork,
   measureDownlink,
   measureStun,
   measureWs,
   percentile,
-  type BrowserNetwork,
   type StunReach,
   type WsReach,
 } from "./performanceProbe";
@@ -58,7 +56,6 @@ export interface LiveNetwork {
   /** STUN failures in a row: one lost UDP answer is not a blocked port. */
   stunFailures: number;
   downKbps: number | null;
-  browser: BrowserNetwork | null;
 }
 
 const EMPTY_LIVE: LiveNetwork = {
@@ -67,7 +64,6 @@ const EMPTY_LIVE: LiveNetwork = {
   stun: null,
   stunFailures: 0,
   downKbps: null,
-  browser: null,
 };
 /** STUN failures in a row before the UDP gate counts as closed. */
 export const STUN_FAILURES_FOR_CLOSED = 2;
@@ -213,7 +209,6 @@ export function usePerformanceTab(active: boolean) {
     setLive((l) => ({
       ...l,
       rtt: [...l.rtt, { at: Date.now(), ms }].slice(-LIVE_CHECK.samples),
-      browser: browserNetwork(),
     }));
   });
   useEvery(running, LIVE_CHECK.wsMs, async (isLive) => {
@@ -230,7 +225,27 @@ export function usePerformanceTab(active: boolean) {
     setLive((l) => ({ ...l, stun, stunFailures: stun.ok ? 0 : l.stunFailures + 1 }));
   });
 
-  /** Look an id up (from the input, or from Interview results), then the network it ran on. */
+  // The links are read once; a lookup only asks for the end-to-end view when it can exist.
+  const linksRef = useRef<PerformanceLinks | null>(null);
+  linksRef.current = links;
+  // The lookup the shown result belongs to: a retry answers for it, never for a newer one.
+  const resultSeqRef = useRef(0);
+
+  /** The end-to-end transaction link for `id` (a Logs query, a few seconds); an answer that lands
+   * after a newer lookup is dropped. */
+  const findTransactionFor = useCallback(async (id: string, seq: number) => {
+    const current = () => seq === lookupSeq.current;
+    setTransaction({ kind: "finding" });
+    try {
+      const link = await admin.getTransactionLink(id);
+      if (current()) setTransaction({ kind: "done", link });
+    } catch (e) {
+      if (current()) setTransaction({ kind: "failed", message: errorText(e) });
+    }
+  }, []);
+
+  /** Look an id up (from the input, or from Interview results), then, at once, the network it ran
+   * on and its end-to-end view: one click from Interview results to the link. */
   const lookup = useCallback(async (raw: string) => {
     setInput(raw);
     setError(null);
@@ -251,6 +266,7 @@ export function usePerformanceTab(active: boolean) {
     try {
       const found = await admin.lookupOperation(id);
       if (!current()) return;
+      resultSeqRef.current = seq;
       setResult(found);
     } catch (e) {
       if (current()) {
@@ -261,6 +277,7 @@ export function usePerformanceTab(active: boolean) {
     } finally {
       if (current()) setLooking(false);
     }
+    if (linksRef.current?.transaction !== false) void findTransactionFor(id, seq);
     setInterviewNetwork({ kind: "loading" });
     admin.getCurrentConfig(id).then(
       (config) => current() && setInterviewConfig(config),
@@ -272,22 +289,13 @@ export function usePerformanceTab(active: boolean) {
     } catch (e) {
       if (current()) setInterviewNetwork({ kind: "failed", message: errorText(e) });
     }
-  }, []);
+  }, [findTransactionFor]);
 
+  /** Ask again (the telemetry was not in App Insights yet: it arrives a few minutes late). */
   const findTransaction = useCallback(async () => {
     const id = result?.operation_id;
-    if (!id) return;
-    setTransaction({ kind: "finding" });
-    const seq = lookupSeq.current;
-    // A new lookup since this started owns the card now: drop this answer.
-    const current = () => seq === lookupSeq.current;
-    try {
-      const link = await admin.getTransactionLink(id);
-      if (current()) setTransaction({ kind: "done", link });
-    } catch (e) {
-      if (current()) setTransaction({ kind: "failed", message: errorText(e) });
-    }
-  }, [result]);
+    if (id) await findTransactionFor(id, resultSeqRef.current);
+  }, [result, findTransactionFor]);
 
   return {
     links,
