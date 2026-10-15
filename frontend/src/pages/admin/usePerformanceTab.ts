@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as admin from "../../api/admin";
 import type { OperationLookup, PerformanceLinks, TransactionLink } from "../../api/admin";
 import * as auth from "../../api/auth";
+import { operationIdFor } from "../../telemetry/appInsights";
 import {
   browserNetwork,
   measureApi,
@@ -14,10 +15,10 @@ import {
   type WsReach,
 } from "./performanceProbe";
 
-/** A pasted Operation id (or interview id) as 32 lowercase hex, or null. */
+/** A pasted Operation id (or interview id) as 32 lowercase hex, or null. The backend's
+ * `performance_service.normalize` is the same rule. */
 export function normalizeOperationId(raw: string): string | null {
-  const id = raw.trim().toLowerCase().replace(/-/g, "");
-  return /^[0-9a-f]{32}$/.test(id) && !/^0+$/.test(id) ? id : null;
+  return operationIdFor(raw.trim());
 }
 
 export interface NetworkResult {
@@ -32,7 +33,7 @@ export type TransactionState =
   | { kind: "done"; link: TransactionLink }
   | { kind: "failed"; message: string };
 
-function message(e: unknown): string {
+function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
@@ -70,11 +71,13 @@ export function usePerformanceTab(active: boolean) {
     setTransaction({ kind: "idle" });
     const id = normalizeOperationId(raw);
     setInvalid(id === null);
+    // Bumped first, so a lookup still in flight cannot land after this one (valid or not).
+    const seq = ++lookupSeq.current;
     if (id === null) {
       setResult(null);
+      setLooking(false);
       return;
     }
-    const seq = ++lookupSeq.current;
     setLooking(true);
     try {
       const found = await admin.lookupOperation(id);
@@ -82,7 +85,7 @@ export function usePerformanceTab(active: boolean) {
     } catch (e) {
       if (seq === lookupSeq.current) {
         setResult(null);
-        setError(message(e));
+        setError(errorText(e));
       }
     } finally {
       if (seq === lookupSeq.current) setLooking(false);
@@ -93,11 +96,14 @@ export function usePerformanceTab(active: boolean) {
     const id = result?.operation_id;
     if (!id) return;
     setTransaction({ kind: "finding" });
+    const seq = lookupSeq.current;
+    // A new lookup since this started owns the card now: drop this answer.
+    const current = () => seq === lookupSeq.current;
     try {
       const link = await admin.getTransactionLink(id);
-      setTransaction({ kind: "done", link });
+      if (current()) setTransaction({ kind: "done", link });
     } catch (e) {
-      setTransaction({ kind: "failed", message: message(e) });
+      if (current()) setTransaction({ kind: "failed", message: errorText(e) });
     }
   }, [result]);
 

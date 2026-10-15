@@ -664,7 +664,13 @@ export function InterviewPage() {
       // A new interview is a new operation: the restart call is filed under it, and the backend
       // adopts it as the new interview's id.
       renewOperation();
-      const fresh = await restartInterview(iv.interview_session_id);
+      let fresh: Interview;
+      try {
+        fresh = await restartInterview(iv.interview_session_id);
+      } catch (e) {
+        setInterviewOperation(iv.interview_session_id); // still on the old interview
+        throw e;
+      }
       spokenQuestionId.current = null;
       setSegments([]);
       setAnswer("");

@@ -59,12 +59,10 @@ def _operation_or_422(raw: str) -> str:
 @router.get("/links", response_model=PerformanceLinks)
 async def links() -> PerformanceLinks:
     settings = get_settings()
-    probe = "0" * 31 + "1"
     return PerformanceLinks(
         workbook_url=performance_service.workbook_url(settings),
-        logs=performance_service.logs_url(probe, settings) is not None,
-        transaction=bool(settings.log_analytics_workspace_id)
-        and performance_service.end_to_end_url("x", "x", settings) is not None,
+        logs=performance_service.logs_configured(settings),
+        transaction=performance_service.transaction_configured(settings),
     )
 
 

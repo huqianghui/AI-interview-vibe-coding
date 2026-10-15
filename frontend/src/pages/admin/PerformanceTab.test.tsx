@@ -182,7 +182,68 @@ describe("Operation id lookup", () => {
   });
 });
 
+describe("tab URL and states", () => {
+  it("an unknown ?tab= opens the default tab", async () => {
+    renderAt("/admin?tab=bogus");
+    expect(await screen.findByTestId("admin-tab-content")).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByTestId("performance-tab")).not.toBeInTheDocument();
+  });
+
+  it("with no App Insights links at all, says so once instead of on every row", async () => {
+    vi.mocked(admin.getPerformanceLinks).mockResolvedValue({
+      workbook_url: null,
+      logs: false,
+      transaction: false,
+    });
+    vi.mocked(admin.lookupOperation).mockResolvedValue({
+      ...LOOKUP,
+      logs_url: null,
+      workbook_url: null,
+    });
+    renderAt(`/admin?tab=performance&op=${OP}`);
+    expect(await screen.findByTestId("performance-not-configured")).toBeInTheDocument();
+    await screen.findByTestId("performance-result");
+    expect(screen.getAllByText(/not configured/i)).toHaveLength(1);
+    expect(screen.queryByTestId("performance-transaction-find")).not.toBeInTheDocument();
+  });
+
+  it("an answer to an older lookup never replaces the newer one", async () => {
+    const user = userEvent.setup();
+    let release: (v: OperationLookup) => void = () => undefined;
+    vi.mocked(admin.lookupOperation).mockImplementationOnce(
+      () => new Promise<OperationLookup>((resolve) => (release = resolve)),
+    );
+    renderAt("/admin?tab=performance");
+    const input = await screen.findByTestId("performance-operation-input");
+    await user.type(input, OP);
+    await user.click(screen.getByTestId("performance-lookup")); // slow, still pending
+    await user.clear(input);
+    await user.type(input, "nope");
+    await user.click(screen.getByTestId("performance-lookup")); // invalid: newer
+    release(LOOKUP);
+    expect(await screen.findByText(/32 hexadecimal characters/)).toBeInTheDocument();
+    expect(screen.queryByTestId("performance-result")).not.toBeInTheDocument();
+  });
+});
+
 describe("Interview results → Performance", () => {
+  it("the copy button copies the full id and does not open the row", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    vi.spyOn(admin, "listInterviewResults").mockResolvedValue({
+      items: [ROW],
+      total: 1,
+      limit: 20,
+      offset: 0,
+    });
+    const detail = vi.spyOn(admin, "getInterview");
+    renderAt("/admin?tab=results");
+    await user.click(await screen.findByTestId(`result-operation-copy-${INTERVIEW_ID}`));
+    expect(writeText).toHaveBeenCalledWith(OP);
+    expect(detail).not.toHaveBeenCalled();
+  });
+
   it("a row's Operation id opens the Performance tab on it, without opening the row", async () => {
     const user = userEvent.setup();
     vi.spyOn(admin, "listInterviewResults").mockResolvedValue({

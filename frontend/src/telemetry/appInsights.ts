@@ -128,6 +128,8 @@ const randomHex = (bytes: number): string =>
  * back right after (see {@link loadSdk}).
  */
 let pinnedOperation: string | null = null;
+/** The history methods are wrapped once per page, however many times the SDK is loaded. */
+let historyWrapped = false;
 
 /** The operation id an interview's telemetry is filed under: its id without the dashes. */
 export function operationIdFor(interviewId: string): string | null {
@@ -369,14 +371,17 @@ async function loadSdk(connectionString: string): Promise<void> {
   // The SDK gives every route change a new trace id, synchronously inside pushState/replaceState
   // (and on popstate): put the interview's pin back right after. Wrapped AFTER loadAppInsights, so
   // ours runs once the SDK's own hook has.
-  for (const method of ["pushState", "replaceState"] as const) {
-    const original = history[method].bind(history);
-    history[method] = (...args: Parameters<History["pushState"]>) => {
-      original(...args);
-      applyPin();
-    };
+  if (!historyWrapped) {
+    historyWrapped = true;
+    for (const method of ["pushState", "replaceState"] as const) {
+      const original = history[method].bind(history);
+      history[method] = (...args: Parameters<History["pushState"]>) => {
+        original(...args);
+        applyPin();
+      };
+    }
+    window.addEventListener("popstate", applyPin);
   }
-  window.addEventListener("popstate", applyPin);
   applyPin();
   for (const event of buffered) {
     sink.trackEvent(event.name, event.measurements, event.properties, event.urgent);

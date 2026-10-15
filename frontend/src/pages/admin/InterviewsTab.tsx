@@ -21,7 +21,7 @@ import {
   makeStyles,
   tokens,
 } from "@fluentui/react-components";
-import { CopyRegular, OpenRegular } from "@fluentui/react-icons";
+import { CheckmarkRegular, CopyRegular, OpenRegular } from "@fluentui/react-icons";
 import { fetchInterviewSopDocument } from "../../api/admin";
 import type { HistoryStatus } from "../../api/client";
 import { InterviewDetailView, StatusBadge } from "../../components/InterviewHistory";
@@ -112,6 +112,16 @@ export function InterviewsTab({
   const candidates = state.users.filter((u) => u.role === "user");
   const hasFilters = Object.keys(filters).length > 0;
   const when = (v: string | null) => formatWhenShort(v, i18n.language);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const copy = (rowId: string, value: string) => {
+    navigator.clipboard?.writeText(value).then(
+      () => {
+        setCopiedId(rowId);
+        setTimeout(() => setCopiedId((c) => (c === rowId ? null : c)), 1500);
+      },
+      (e: unknown) => console.warn("[results] copy failed", e),
+    );
+  };
   const columns: DataColumn<InterviewResultItem>[] = [
     {
       id: "candidate",
@@ -192,12 +202,17 @@ export function InterviewsTab({
         return (
           <span className={local.operation} data-testid={`result-operation-${it.id}`}>
             <span className={local.operationId}>{op.slice(0, 8)}</span>
-            <Tooltip content={t("admin.results.copyOperation")} relationship="label">
+            <Tooltip
+              content={
+                copiedId === it.id ? t("admin.results.copiedOperation") : t("admin.results.copyOperation")
+              }
+              relationship="label"
+            >
               <Button
                 size="small"
                 appearance="subtle"
-                icon={<CopyRegular />}
-                onClick={own(() => void navigator.clipboard?.writeText(op))}
+                icon={copiedId === it.id ? <CheckmarkRegular /> : <CopyRegular />}
+                onClick={own(() => copy(it.id, op))}
                 onKeyDown={(e) => e.stopPropagation()}
                 data-testid={`result-operation-copy-${it.id}`}
               />

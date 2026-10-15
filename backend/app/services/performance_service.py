@@ -84,8 +84,26 @@ def _app_insights_id(settings: Settings) -> str | None:
     )
 
 
+def _checked(operation_id: str) -> str:
+    """The id goes into KQL verbatim, so only ever 32 hex (what :func:`normalize` returns)."""
+    if not _OPERATION_ID.fullmatch(operation_id):
+        raise ValueError("not a normalized operation id")
+    return operation_id
+
+
+def logs_configured(settings: Settings) -> bool:
+    """Whether the Logs link can be built (the tenant and the App Insights resource are set)."""
+    return bool(settings.monitor_tenant_id) and _app_insights_id(settings) is not None
+
+
+def transaction_configured(settings: Settings) -> bool:
+    """Whether the end-to-end lookup can run (the workspace and the App Insights resource)."""
+    return bool(settings.log_analytics_workspace_id) and _app_insights_id(settings) is not None
+
+
 def logs_query(operation_id: str) -> str:
     """Every telemetry item of one operation, browser and backend, in time order."""
+    operation_id = _checked(operation_id)
     return (
         "union requests, dependencies, customEvents, pageViews, traces, exceptions\n"
         f'| where operation_Id == "{operation_id}"\n'
@@ -100,7 +118,7 @@ def logs_url(operation_id: str, settings: Settings) -> str | None:
 
     The portal's share-link format: the query gzipped, base64, then URL-encoded."""
     resource = _app_insights_id(settings)
-    if resource is None or not settings.monitor_tenant_id:
+    if resource is None or not logs_configured(settings):
         return None
     packed = base64.b64encode(gzip.compress(logs_query(operation_id).encode())).decode()
     return (
@@ -160,8 +178,11 @@ class FirstItem:
 
 
 def _first_item_query(operation_id: str) -> str:
+    # isfuzzy: a workspace that has no rows of one kind yet has no such table, and a plain union
+    # then fails the whole query (measured).
+    operation_id = _checked(operation_id)
     return (
-        "union AppPageViews, AppRequests, AppDependencies\n"
+        "union isfuzzy=true AppPageViews, AppRequests, AppDependencies\n"
         f'| where OperationId == "{operation_id}"\n'
         "| summarize arg_min(TimeGenerated, _ItemId)\n"
         "| where isnotempty(_ItemId)"
@@ -195,12 +216,16 @@ async def first_item(operation_id: str, settings: Settings) -> FirstItem | None:
         )
     if response.status_code >= 400:
         raise LookupUnavailable(f"The Logs query API answered {response.status_code}")
-    tables = response.json().get("tables") or []
-    rows = tables[0].get("rows") if tables else None
-    if not rows:
-        return None
-    columns = [c["name"] for c in tables[0]["columns"]]
-    row = dict(zip(columns, rows[0], strict=False))
+    try:
+        tables = response.json().get("tables") or []
+        rows = tables[0].get("rows") if tables else None
+        if not rows:
+            return None
+        columns = [c["name"] for c in tables[0]["columns"]]
+        row = dict(zip(columns, rows[0], strict=False))
+    except (ValueError, KeyError, TypeError, AttributeError, IndexError) as exc:
+        reason = f"The Logs query API answered something unexpected ({type(exc).__name__})"
+        raise LookupUnavailable(reason) from exc
     item_id, timestamp = row.get("_ItemId"), row.get("TimeGenerated")
     if not item_id or not timestamp:
         return None

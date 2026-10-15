@@ -19,6 +19,7 @@ import * as auth from "../api/auth";
 import { layout } from "../theme";
 import type { TranscriptSegment } from "../types/voice";
 import { voiceMetrics } from "../telemetry/voiceTimeline";
+import { pinnedOperationId } from "../telemetry/appInsights";
 
 function seg(id: string, content: string, role: "user" | "assistant", isFinal: boolean): TranscriptSegment {
   return { id, content, role, isFinal, timestamp: 0 };
@@ -1321,6 +1322,53 @@ describe("InterviewPage restart (start over, v0.38.3.0)", () => {
     await user.click(screen.getByRole("button", { name: /i'm ready/i }));
     await screen.findByText("Question one?");
     expect(screen.getByRole("textbox")).toHaveValue("");
+  });
+
+  // One interview = one App Insights operation (spec-admin-performance-tab).
+  const A = "0af76519-16cd-43dd-8448-eb211c80319c";
+  const B = "4bf92f35-77b3-4da6-a3ce-929d0e0e4736";
+  const strip = (id: string) => id.replace(/-/g, "");
+
+  it("pins the interview's operation id, renews it for a restart, then pins the new interview", async () => {
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockResolvedValue({ ...liveInterview, interview_session_id: A });
+    let pinnedDuringRestart: string | null = null;
+    vi.spyOn(client, "restartInterview").mockImplementation(async () => {
+      pinnedDuringRestart = pinnedOperationId();
+      return { ...liveInterview, interview_session_id: B };
+    });
+    const { unmount } = renderPage();
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+    await screen.findByText("Question one?");
+    expect(pinnedOperationId()).toBe(strip(A));
+
+    await user.click(screen.getByTestId("candidate-restart"));
+    await user.click(await screen.findByTestId("candidate-restart-confirm"));
+    await screen.findByRole("button", { name: /i'm ready/i });
+    // The restart call ran under a NEW operation (the backend adopts it), not the old interview's.
+    expect(pinnedDuringRestart).toMatch(/^[0-9a-f]{32}$/);
+    expect(pinnedDuringRestart).not.toBe(strip(A));
+    expect(pinnedOperationId()).toBe(strip(B));
+
+    unmount();
+    expect(pinnedOperationId()).toBeNull();
+  });
+
+  it("a failed restart puts the old interview's operation back", async () => {
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    vi.spyOn(client, "startInterview").mockResolvedValue({ ...liveInterview, interview_session_id: A });
+    vi.spyOn(client, "restartInterview").mockRejectedValue(new Error("refused"));
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /start interview/i }));
+    await user.click(await screen.findByRole("button", { name: /i'm ready/i }));
+    await screen.findByText("Question one?");
+    await user.click(screen.getByTestId("candidate-restart"));
+    await user.click(await screen.findByTestId("candidate-restart-confirm"));
+    await screen.findByText(/refused/i);
+    expect(pinnedOperationId()).toBe(strip(A));
   });
 
   it("restart: a backend refusal (409) surfaces as the error banner and keeps the live interview", async () => {

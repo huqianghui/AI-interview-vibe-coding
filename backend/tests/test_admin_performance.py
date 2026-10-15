@@ -94,6 +94,45 @@ async def test_a_malformed_traceparent_is_ignored(client):
     assert uuid.UUID(body["interview_session_id"]).version == 4
 
 
+async def test_an_external_interview_takes_the_pages_operation_id(client, db_session):
+    from app.services import persona_service as psvc
+
+    await psvc.create_persona(
+        db_session, name="Interviewer", is_default=True, interview_brain="external"
+    )
+    headers = await mint_candidate_headers(client)
+    body = (
+        await client.post(
+            "/candidate/interview/start", headers={**headers, "traceparent": TRACEPARENT}
+        )
+    ).json()
+    assert body["external_phase"] is not None
+    assert body["interview_session_id"] == performance_service.interview_id_for(TRACE)
+
+
+async def test_an_adopted_id_taken_at_insert_falls_back_to_a_random_one(client, monkeypatch):
+    """Another candidate's interview took the id between the check and the insert."""
+    other = await mint_candidate_headers(client)
+    taken = (
+        await client.post(
+            "/candidate/interview/start", headers={**other, "traceparent": TRACEPARENT}
+        )
+    ).json()["interview_session_id"]
+
+    async def _stale_check(db, traceparent):
+        return taken  # what a check that ran before the other insert would have said
+
+    monkeypatch.setattr(performance_service, "adoptable_id", _stale_check)
+    headers = await mint_candidate_headers(client)
+    resp = await client.post(
+        "/candidate/interview/start", headers={**headers, "traceparent": TRACEPARENT}
+    )
+    assert resp.status_code == 200
+    fresh = resp.json()["interview_session_id"]
+    assert fresh != taken
+    assert uuid.UUID(fresh).version == 4
+
+
 async def test_restart_takes_the_new_operation_id(client):
     headers = await mint_candidate_headers(client)
     first = (
@@ -155,6 +194,29 @@ async def test_a_missing_setting_hides_the_logs_link(missing):
     assert performance_service.logs_url(TRACE, _settings(**{missing: ""})) is None
 
 
+async def test_queries_take_only_a_normalized_id():
+    with pytest.raises(ValueError):
+        performance_service.logs_query('x" | union *')
+    with pytest.raises(ValueError):
+        performance_service._first_item_query(TRACE.upper())
+
+
+@pytest.mark.parametrize(
+    ("missing", "workbook", "transaction"),
+    [
+        ("monitor_tenant_id", False, True),
+        ("monitor_subscription_id", False, False),
+        ("monitor_resource_group", False, False),
+        ("app_insights_name", True, False),
+        ("log_analytics_workspace_id", True, False),
+    ],
+)
+async def test_each_setting_hides_only_what_needs_it(missing, workbook, transaction):
+    settings = _settings(**{missing: ""})
+    assert (performance_service.workbook_url(settings) is not None) is workbook
+    assert performance_service.transaction_configured(settings) is transaction
+
+
 async def test_workbook_url():
     assert performance_service.workbook_url(_settings()) == (
         "https://portal.azure.com/#@tenant-1/resource/subscriptions/sub-1/resourceGroups/rg-1"
@@ -177,7 +239,11 @@ async def test_end_to_end_url():
 
 async def test_the_routes_are_admin_only(client):
     headers = await mint_candidate_headers(client)
-    for path in ("/admin/performance/links", f"/admin/performance/operations/{TRACE}"):
+    for path in (
+        "/admin/performance/links",
+        f"/admin/performance/operations/{TRACE}",
+        f"/admin/performance/operations/{TRACE}/transaction",
+    ):
         assert (await client.get(path)).status_code == 401
         assert (await client.get(path, headers=headers)).status_code in (401, 403)
 
@@ -185,7 +251,8 @@ async def test_the_routes_are_admin_only(client):
 async def test_links(client, admin_auth, configured):
     body = (await client.get("/admin/performance/links", headers=admin_auth)).json()
     assert body == {
-        "workbook_url": performance_service.workbook_url(configured),
+        "workbook_url": "https://portal.azure.com/#@tenant-1/resource/subscriptions/sub-1"
+        "/resourceGroups/rg-1/providers/Microsoft.Insights/workbooks/wb-1/workbook",
         "logs": True,
         "transaction": True,
     }
@@ -287,6 +354,46 @@ async def test_transaction_refused_names_the_role(client, admin_auth, configured
     ).json()
     assert body["status"] == "unavailable"
     assert "Log Analytics Data Reader" in body["reason"]
+
+
+@pytest.mark.parametrize(
+    ("response", "reason"),
+    [
+        (httpx.Response(500, json={}), "answered 500"),
+        (httpx.Response(401, json={}), "Log Analytics Data Reader"),
+        (httpx.Response(200, content=b"<html>"), "unexpected"),
+        (httpx.Response(200, json={"tables": [{"rows": [["x"]]}]}), "unexpected"),
+        (httpx.Response(200, json={"tables": "nope"}), "unexpected"),
+    ],
+)
+async def test_first_item_turns_every_bad_answer_into_unavailable(monkeypatch, response, reason):
+    _logs_api(monkeypatch, lambda r: response)
+    with pytest.raises(performance_service.LookupUnavailable, match=reason):
+        await performance_service.first_item(TRACE, _settings())
+
+
+async def test_first_item_when_the_api_does_not_answer(monkeypatch):
+    def _down(request):
+        raise httpx.ConnectTimeout("no route", request=request)
+
+    _logs_api(monkeypatch, _down)
+    with pytest.raises(performance_service.LookupUnavailable, match="ConnectTimeout"):
+        await performance_service.first_item(TRACE, _settings())
+
+
+async def test_first_item_without_a_credential(monkeypatch):
+    async def _none(scope):
+        return None
+
+    monkeypatch.setattr(performance_service.azure_auth, "get_bearer_token", _none)
+    with pytest.raises(performance_service.LookupUnavailable, match="No Azure credential"):
+        await performance_service.first_item(TRACE, _settings())
+
+
+async def test_first_item_row_without_an_item_id_is_not_found(monkeypatch):
+    table = {"columns": [{"name": "TimeGenerated"}, {"name": "_ItemId"}], "rows": [["t", None]]}
+    _logs_api(monkeypatch, lambda r: httpx.Response(200, json={"tables": [table]}))
+    assert await performance_service.first_item(TRACE, _settings()) is None
 
 
 async def test_transaction_without_a_workspace(client, admin_auth, monkeypatch):

@@ -26,7 +26,7 @@ const useStyles = makeStyles({
     display: "flex",
     flexDirection: "column",
     rowGap: tokens.spacingVerticalM,
-    padding: "0 16px 16px",
+    padding: `0 ${tokens.spacingHorizontalL} ${tokens.spacingVerticalL}`,
   },
   hint: { color: tokens.colorNeutralForeground3 },
   rows: {
@@ -84,6 +84,10 @@ export function PerformanceTab({
   const { t, i18n } = useTranslation();
   const { network, result, transaction, links } = state;
   const external = { target: "_blank", rel: "noreferrer" } as const;
+  // One notice for a deployment with no App Insights links at all, not one per row.
+  const nothingConfigured =
+    links !== null && !links.logs && !links.transaction && !links.workbook_url;
+  const none = <Text className={local.hint}>—</Text>;
 
   return (
     <div className={local.stack} data-testid="performance-tab">
@@ -91,6 +95,11 @@ export function PerformanceTab({
         <CardHeader header={<Title3>{t("admin.performance.lookupTitle")}</Title3>} />
         <div className={local.body}>
           <Body1 className={local.hint}>{t("admin.performance.lookupHint")}</Body1>
+          {nothingConfigured && (
+            <Body1 className={local.hint} data-testid="performance-not-configured">
+              {t("admin.performance.notConfigured")}
+            </Body1>
+          )}
           <form
             className={local.lookupRow}
             onSubmit={(e) => {
@@ -114,7 +123,8 @@ export function PerformanceTab({
             <Button
               appearance="primary"
               type="submit"
-              disabled={state.looking || !state.input.trim()}
+              // Not disabled while a lookup is pending: a newer one supersedes it.
+              disabled={!state.input.trim()}
               data-testid="performance-lookup"
             >
               {t("admin.performance.lookup")}
@@ -164,17 +174,15 @@ export function PerformanceTab({
               <Text className={local.label}>{t("admin.performance.logs")}</Text>
               {result.logs_url ? (
                 <Link href={result.logs_url} {...external} data-testid="performance-logs">
-                  {t("admin.performance.logs")}
+                  {t("admin.performance.openLogs")}
                 </Link>
               ) : (
-                <Text className={local.hint}>{t("admin.performance.notConfigured")}</Text>
+                none
               )}
 
               <Text className={local.label}>{t("admin.performance.transaction")}</Text>
               <span className={local.linkRow} data-testid="performance-transaction">
-                {transaction.kind === "idle" && links?.transaction === false && (
-                  <Text className={local.hint}>{t("admin.performance.notConfigured")}</Text>
-                )}
+                {transaction.kind === "idle" && links?.transaction === false && none}
                 {transaction.kind === "idle" && links?.transaction !== false && (
                   <Button
                     size="small"
@@ -193,7 +201,7 @@ export function PerformanceTab({
                     {...external}
                     data-testid="performance-transaction-link"
                   >
-                    {t("admin.performance.transaction")}
+                    {t("admin.performance.openTransaction")}
                   </Link>
                 )}
                 {transaction.kind === "done" && transaction.link.status === "not_found" && (
@@ -217,12 +225,12 @@ export function PerformanceTab({
               {result.workbook_url ? (
                 <span className={local.linkRow}>
                   <Link href={result.workbook_url} {...external} data-testid="performance-workbook">
-                    {t("admin.performance.workbook")}
+                    {t("admin.performance.openWorkbook")}
                   </Link>
                   <Text className={local.hint}>{t("admin.performance.workbookHint")}</Text>
                 </span>
               ) : (
-                <Text className={local.hint}>{t("admin.performance.notConfigured")}</Text>
+                none
               )}
             </div>
           )}
@@ -273,12 +281,10 @@ export function PerformanceTab({
         <CardHeader header={<Title3>{t("admin.performance.acrossTitle")}</Title3>} />
         <div className={local.body}>
           <Body1 className={local.hint}>{t("admin.performance.acrossHint")}</Body1>
-          {links?.workbook_url ? (
+          {links?.workbook_url && (
             <Link href={links.workbook_url} {...external} data-testid="performance-across-workbook">
-              {t("admin.performance.workbook")}
+              {t("admin.performance.openWorkbook")}
             </Link>
-          ) : (
-            links && <Text className={local.hint}>{t("admin.performance.notConfigured")}</Text>
           )}
         </div>
       </Card>

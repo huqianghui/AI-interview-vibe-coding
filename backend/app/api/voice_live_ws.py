@@ -171,9 +171,10 @@ async def voice_live_websocket(ws: WebSocket) -> None:
       - ``avatar`` (optional): ``off`` opens a VOICE-ONLY session even when the persona has a
         digital human — the page's fallback for a network that cannot carry the avatar's WebRTC
         media (see voice_live_proxy.session_has_avatar). Anything else keeps the persona's choice.
-      - ``probe`` (optional): ``1`` = the admin Performance tab's reachability check. Once
-        authenticated the socket answers ``{"type": "probe.ok"}`` and closes normally: no persona,
-        no Voice Live session, no Azure call (and so no avatar rate limit).
+      - ``probe`` (optional): ``1`` = the admin Performance tab's reachability check. Once an
+        admin is authenticated the socket answers ``{"type": "probe.ok"}`` and closes normally:
+        no persona, no Voice Live session, no Azure call (and so no avatar rate limit). Anyone
+        else is refused.
     """
     token = ws.query_params.get("token")
     persona_id = ws.query_params.get("persona_id")
@@ -195,6 +196,9 @@ async def voice_live_websocket(ws: WebSocket) -> None:
         await _send_error_and_close(ws, "Authentication failed: invalid token", "AUTH_FAILED")
         return
     if ws.query_params.get("probe") == "1":
+        if caller != "admin":
+            await _send_error_and_close(ws, "Only an admin can probe", "PROBE_ADMIN_ONLY")
+            return
         await ws.send_text(json.dumps({"type": "probe.ok"}))
         await ws.close(code=1000, reason="probe")
         return

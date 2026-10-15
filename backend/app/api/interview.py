@@ -16,6 +16,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, field_validator
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db, get_session_factory
@@ -353,6 +354,21 @@ async def _start_fresh(
     the interview and its App Insights trace share one id from sign-in on.
     """
     session_id = await performance_service.adoptable_id(db, traceparent)
+    try:
+        return await _create(db, candidate, session_id)
+    except IntegrityError:
+        # The adopted id was taken between the check and the insert (another candidate sent the
+        # same trace id). Not this candidate's double click: that resumes inside the engine.
+        if session_id is None:
+            raise
+        logger.warning("Adopted interview id %s was taken; starting with a random id", session_id)
+        await db.refresh(candidate)  # the engine's rollback expired it
+        return await _create(db, candidate, None)
+
+
+async def _create(
+    db: AsyncSession, candidate: AnonymousCandidateSession, session_id: str | None
+) -> InterviewSession:
     assigned = await assignment_service.resolve_for_candidate(db, candidate)
     persona = assigned.persona
     persona_id = persona.id if persona else None
