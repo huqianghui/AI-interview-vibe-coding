@@ -38,16 +38,20 @@ Those are exactly the interviews with performance problems, so the page pins one
                                        (#4 MI role + link config, needed by #3's lookup links)
 ```
 
-### 1. One fixed Operation id per interview (frontend)
+### 1. One fixed Operation id per interview
 
-- Operation id = the interview id (a UUID4) without its dashes: 32 hex, a valid W3C trace id.
-- The interview page pins it as soon as it knows the interview id (`getTraceCtx().setTraceId`), and
-  again after every page view the route tracker records (it resets the trace id). From then on every
-  `/api` call, every voice WS (its `traceparent`) and the backend spans parented on them carry it,
-  through reloads, reconnects and WS rebuilds.
-- Not covered, by design: telemetry before the interview exists (sign-in, the `/start` call that
-  creates it) stays on the page's own id. A Restart is a NEW interview, so a new id.
-- No table, no backfill (owner, 2026-10-15). The backend computes the id where it shows it.
+- Operation id = the interview id without its dashes (32 hex, a valid W3C trace id).
+- A fresh interview ADOPTS the page's operation id as its own id (owner, 2026-10-15): the backend
+  reads the trace id from the `/start` (or `/restart`) call's `traceparent` and creates the interview
+  with it, formatted as a UUID. So sign-in, `/start` and the whole interview are one operation.
+  Falls back to a random UUID when there is no usable trace id (telemetry off, malformed) or the id
+  is already an interview's; a collision at insert time retries with a random one.
+- The interview page then pins that id as the SDK's trace id (`getTraceCtx().setTraceId`), again
+  after every route change (the route tracker resets it), so reloads, reconnects and WS rebuilds stay
+  in it. A voice WS opened before the SDK loads (a reload) still carries the pinned id.
+- Restart: the page starts a new operation BEFORE calling `/restart`, the new interview adopts it;
+  the old id stays with the abandoned interview. A failed restart re-pins the old interview.
+- No table, no backfill (owner, 2026-10-15).
 
 ### 2. Results: Operation id column
 
@@ -64,7 +68,8 @@ Three cards:
 
 - **Network check (this browser)**, on demand ("Run check"), nothing stored:
   - API round trip: 10 × `GET /api/health`, median + p95 + failures.
-  - Voice WS reachability: open + close a WS to the backend proxy without starting a Voice Live
+  - Voice WS reachability (admin only; a candidate's probe is refused): open + close a WS to the
+    backend proxy without starting a Voice Live
     session (needs a cheap ping path on the WS endpoint; no avatar, no Azure cost, no rate-limit hit).
   - `navigator.connection` (effective type, RTT, downlink) where the browser exposes it (Chromium only;
     shown as "not available" elsewhere).
