@@ -19,6 +19,7 @@ import {
   tokens,
 } from "@fluentui/react-components";
 import { InterviewerPortrait } from "./InterviewerPortrait";
+import { interviewerIdentity } from "../data/avatarCharacters";
 import { fonts, layout, palette } from "../theme";
 
 const useStyles = makeStyles({
@@ -154,6 +155,8 @@ export interface CandidateOrientationProps {
   onBegin: () => void;
   /** Spoken answers are recorded and kept this many days; 0 or absent = not recorded. */
   recordingDays?: number;
+  /** The session's avatar character; blank = the deployment's default interviewer. */
+  character?: string | null;
 }
 
 export function CandidateOrientation({
@@ -161,6 +164,7 @@ export function CandidateOrientation({
   isExternal,
   onBegin,
   recordingDays = 0,
+  character,
 }: CandidateOrientationProps) {
   const styles = useStyles();
   const { t } = useTranslation();
@@ -171,7 +175,12 @@ export function CandidateOrientation({
 
   return (
     <div className={styles.split} data-testid="candidate-orientation-split">
-      <InterviewerPortrait shape="square" state="ready" className={styles.portrait} />
+      <InterviewerPortrait
+        shape="square"
+        state="ready"
+        character={character}
+        className={styles.portrait}
+      />
 
       <section className={styles.brief}>
         <p className={styles.kicker}>{t("orientation.title")}</p>
@@ -187,7 +196,7 @@ export function CandidateOrientation({
             </>
           )}
         </h2>
-        {!isExternal && <Body1 className={styles.lede}>{t("orientation.lede")}</Body1>}
+        {!isExternal && <Body1 className={styles.lede}>{t("orientation.lede", { name: interviewerIdentity(character).name })}</Body1>}
 
         {ticks > 0 && (
           <div className={styles.railWrap}>

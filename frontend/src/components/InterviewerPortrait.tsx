@@ -8,11 +8,7 @@
  */
 import { useTranslation } from "react-i18next";
 import { makeStyles, mergeClasses, tokens } from "@fluentui/react-components";
-import {
-  CDN_BASE,
-  DEFAULT_AVATAR_CHARACTER,
-  DEFAULT_AVATAR_STYLE,
-} from "../data/avatarCharacters";
+import { interviewerIdentity } from "../data/avatarCharacters";
 import { fonts, palette } from "../theme";
 
 const useStyles = makeStyles({
@@ -52,6 +48,17 @@ const useStyles = makeStyles({
   // to the BOTTOM instead — the obvious choice — crops the head off entirely.
   imgSquare: { top: "-13%", height: "133%", transform: "translateX(-50%)" },
   imgTall: { top: "-6%", height: "116%", transform: "translateX(-50%)" },
+  // A PHOTO avatar's thumbnail is an opaque square with its own wall, so it fills the frame instead
+  // of being cropped like a transparent cut-out (which showed only the top of the head).
+  imgPhoto: {
+    inset: 0,
+    left: 0,
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+    objectPosition: "50% 20%",
+    filter: "none",
+  },
   pill: {
     position: "absolute",
     left: tokens.spacingHorizontalS,
@@ -99,21 +106,24 @@ export interface InterviewerPortraitProps {
   shape?: "square" | "tall";
   /** Pill text. `ready` before the interview starts, `live` once a session is up. */
   state?: "ready" | "live";
+  /** The session's avatar character once known; blank = the deployment's default interviewer. */
+  character?: string | null;
   className?: string;
 }
 
 export function InterviewerPortrait({
   shape = "square",
   state = "ready",
+  character,
   className,
 }: InterviewerPortraitProps) {
   const styles = useStyles();
   const { t } = useTranslation();
 
-  // Every pre-interview screen is either pre-auth or pre-`startInterview()`, so no persona is
-  // loaded and none of them can know a persona-specific character. They all show the deployment's
-  // DEFAULT interviewer, which is the same constant the backend falls back to.
-  const src = `${CDN_BASE}/${DEFAULT_AVATAR_CHARACTER}-${DEFAULT_AVATAR_STYLE}.png`;
+  // Sign-in and idle are pre-auth or pre-`startInterview()`, so no persona is loaded and they show
+  // the deployment's DEFAULT interviewer (the constant the backend falls back to). Orientation runs
+  // after start and passes the session's real character. Name and picture both come from the roster.
+  const { name, portraitUrl: src, isPhoto } = interviewerIdentity(character);
   const tall = shape === "tall";
 
   return (
@@ -123,7 +133,10 @@ export function InterviewerPortrait({
     >
       <div className={mergeClasses(styles.mat, tall ? styles.tall : styles.square)}>
         <img
-          className={mergeClasses(styles.img, tall ? styles.imgTall : styles.imgSquare)}
+          className={mergeClasses(
+            styles.img,
+            isPhoto ? styles.imgPhoto : tall ? styles.imgTall : styles.imgSquare,
+          )}
           src={src}
           alt=""
         />
@@ -134,7 +147,7 @@ export function InterviewerPortrait({
       </div>
       <figcaption className={styles.cap}>
         <span>{t("candidate.yourInterviewer")}</span>
-        <span className={styles.capName}>{t("candidate.defaultInterviewerName")}</span>
+        <span className={styles.capName}>{name}</span>
       </figcaption>
     </figure>
   );

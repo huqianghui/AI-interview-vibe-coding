@@ -23,6 +23,7 @@ import {
   tokens,
 } from "@fluentui/react-components";
 import { InterviewerPortrait } from "./InterviewerPortrait";
+import { interviewerIdentity } from "../data/avatarCharacters";
 import { fonts, layout, palette } from "../theme";
 
 const useStyles = makeStyles({
@@ -156,7 +157,7 @@ export function CandidateIdle({ busy, onStart }: CandidateIdleProps) {
       <section className={styles.brief}>
         <p className={styles.kicker}>{t("candidate.idle.kicker")}</p>
         <h2 className={styles.headline} data-testid="idle-headline">
-          <span className={styles.clause}>{t("candidate.idle.headlineLead")}</span>
+          <span className={styles.clause}>{t("candidate.idle.headlineLead", { name: interviewerIdentity().name })}</span>
           <span className={styles.accent}>{t("candidate.idle.headlineAccent")}</span>
         </h2>
         <Body1 className={styles.lede}>{t("candidate.idle.lede")}</Body1>

@@ -2,8 +2,8 @@
  * Static roster of Azure Voice Live digital-human avatars for the editor's avatar grid.
  *
  * `character` + `style` are the two persona fields the backend maps to the Voice Live avatar config
- * (see backend/app/services/agents/voice_live_metadata.py — DEFAULT_AVATAR_CHARACTER="lisa",
- * DEFAULT_AVATAR_STYLE="casual-sitting"). For VIDEO avatars the backend passes `style` through verbatim
+ * (see backend/app/services/agents/voice_live_metadata.py — DEFAULT_AVATAR_CHARACTER="sakura", a
+ * photo avatar with no style). For VIDEO avatars the backend passes `style` through verbatim
  * to Voice Live, so the style ids here MUST be Azure's real slugs (e.g. "casual-sitting", not "casual");
  * PHOTO avatars have no style and the backend ignores any stored one.
  *
@@ -262,6 +262,28 @@ export function resolveThumbnailUrl(character: string, style: string): string {
   return videoThumbnailUrl(meta.id, resolvedStyle);
 }
 
-/** Backend default when a persona leaves character/style blank. */
-export const DEFAULT_AVATAR_CHARACTER = "lisa";
-export const DEFAULT_AVATAR_STYLE = "casual-sitting";
+/** Backend default when a persona leaves character/style blank. Sakura is a PHOTO avatar, so the
+ * default style is empty (photo avatars have none). */
+export const DEFAULT_AVATAR_CHARACTER = "sakura";
+export const DEFAULT_AVATAR_STYLE = "";
+
+/**
+ * The name and portrait to show for an interviewer, read from the roster so the copy always matches
+ * the avatar on screen. An unknown or blank character means the deployment's default interviewer.
+ */
+export function interviewerIdentity(character?: string | null): {
+  name: string;
+  portraitUrl: string;
+  /** Photo thumbnails are opaque squares with their own wall; video ones are transparent cut-outs. */
+  isPhoto: boolean;
+} {
+  const id = (character ?? "").trim().toLowerCase();
+  const meta = AVATAR_CHARACTER_MAP.get(id) ?? AVATAR_CHARACTER_MAP.get(DEFAULT_AVATAR_CHARACTER);
+  if (!meta) return { name: "", portraitUrl: "", isPhoto: false };
+  const style = meta.id === DEFAULT_AVATAR_CHARACTER ? DEFAULT_AVATAR_STYLE : meta.defaultStyle;
+  return {
+    name: meta.displayName,
+    portraitUrl: resolveThumbnailUrl(meta.id, style),
+    isPhoto: meta.isPhotoAvatar,
+  };
+}

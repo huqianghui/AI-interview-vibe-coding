@@ -15,8 +15,10 @@ import "../i18n";
 import { CandidateSignIn } from "./CandidateSignIn";
 import { appTheme, palette } from "../theme";
 import {
+  AVATAR_CHARACTER_MAP,
   DEFAULT_AVATAR_CHARACTER,
   DEFAULT_AVATAR_STYLE,
+  resolveThumbnailUrl,
 } from "../data/avatarCharacters";
 
 function renderSignIn(props: Partial<React.ComponentProps<typeof CandidateSignIn>> = {}) {
@@ -91,8 +93,8 @@ describe("CandidateSignIn composition", () => {
     expect(img).not.toBeNull();
     // Points at the deployment's DEFAULT interviewer, since the screen is pre-auth and no persona
     // is loaded yet. If the default character ever changes, this follows it.
-    expect(img!.getAttribute("src")).toContain(
-      `${DEFAULT_AVATAR_CHARACTER}-${DEFAULT_AVATAR_STYLE}.png`,
+    expect(img!.getAttribute("src")).toBe(
+      resolveThumbnailUrl(DEFAULT_AVATAR_CHARACTER, DEFAULT_AVATAR_STYLE),
     );
     // Decorative: the caption names the interviewer, so the image must not repeat it to a screen
     // reader.
@@ -115,7 +117,8 @@ describe("CandidateSignIn composition", () => {
     renderSignIn();
     const figure = screen.getByTestId("signin-portrait");
     expect(figure).toHaveTextContent("Interviewer");
-    expect(figure).toHaveTextContent("Lisa");
+    // The name comes from the roster entry of the default character, never a hardcoded string.
+    expect(figure).toHaveTextContent(AVATAR_CHARACTER_MAP.get(DEFAULT_AVATAR_CHARACTER)!.displayName);
     expect(figure).toHaveTextContent("LIVE");
   });
 

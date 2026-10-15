@@ -217,10 +217,13 @@ def test_build_avatar_config_video_keeps_style_and_defaults_blank_style():
     assert build_avatar_config("meg", "")["style"] == "formal"
     assert build_avatar_config("lori", None)["style"] == "casual"
     assert build_avatar_config("lisa", "")["style"] == "casual-sitting"
+    # Blank character → the default interviewer, Sakura: a PHOTO avatar, so no style.
     assert build_avatar_config("", "") == {
-        "character": "lisa",
-        "style": "casual-sitting",
+        "type": "photo-avatar",
+        "model": "vasa-1",
+        "character": "sakura",
         "customized": False,
+        "scene": {"zoom": PHOTO_AVATAR_SCENE_ZOOM, "position_y": PHOTO_AVATAR_SCENE_POSITION_Y},
     }
 
 
@@ -247,10 +250,14 @@ def test_agent_metadata_video_avatar_unchanged():
 def test_build_avatar_config_handles_none_character_and_style():
     # ORM/duck-typed personas may carry None rather than "" — same fallback either way.
     assert build_avatar_config(None, None) == {
-        "character": "lisa",
-        "style": "casual-sitting",
+        "type": "photo-avatar",
+        "model": "vasa-1",
+        "character": "sakura",
         "customized": False,
+        "scene": {"zoom": PHOTO_AVATAR_SCENE_ZOOM, "position_y": PHOTO_AVATAR_SCENE_POSITION_Y},
     }
+    # A stale video style on a blank character is dropped, since the default is a photo avatar.
+    assert "style" not in build_avatar_config("", "casual-sitting")
     assert is_photo_avatar(None, None) is False
 
 
@@ -293,9 +300,11 @@ def test_build_avatar_config_unknown_character_uses_style_heuristic():
     }
 
 
-def test_agent_metadata_blank_character_falls_back_to_video_default():
+def test_agent_metadata_blank_character_falls_back_to_default_photo_avatar():
     avatar = build_agent_metadata_session(FakePersona(character="", style=""))["avatar"]
-    assert avatar == {"character": "lisa", "style": "casual-sitting"}
+    assert avatar["character"] == "sakura"
+    assert avatar["type"] == "photo-avatar"
+    assert "style" not in avatar
 
 
 def test_build_avatar_config_normalizes_case_and_whitespace_on_the_wire():

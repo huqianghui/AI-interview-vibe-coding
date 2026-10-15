@@ -20,13 +20,9 @@
  * needs its own assertions, which is what `CandidateSignIn.test.tsx` is for.
  */
 import { useTranslation } from "react-i18next";
-import { Body1, makeStyles, tokens } from "@fluentui/react-components";
+import { Body1, makeStyles, mergeClasses, tokens } from "@fluentui/react-components";
 import { LoginCard, type LoginCardProps } from "./LoginCard";
-import {
-  CDN_BASE,
-  DEFAULT_AVATAR_CHARACTER,
-  DEFAULT_AVATAR_STYLE,
-} from "../data/avatarCharacters";
+import { interviewerIdentity } from "../data/avatarCharacters";
 import { fonts, layout, palette } from "../theme";
 
 const useStyles = makeStyles({
@@ -154,6 +150,18 @@ const useStyles = makeStyles({
     width: "auto",
     objectFit: "contain",
   },
+  // A PHOTO avatar's thumbnail is an opaque square with its own wall: fill the frame rather than
+  // apply the cut-out crop above, which showed only the top of the head.
+  portraitPhoto: {
+    inset: 0,
+    left: 0,
+    top: 0,
+    transform: "none",
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+    objectPosition: "50% 20%",
+  },
   livePill: {
     position: "absolute",
     left: tokens.spacingHorizontalS,
@@ -216,8 +224,8 @@ export function CandidateSignIn({ error, busy, onSubmit }: CandidateSignInProps)
   const { t } = useTranslation();
 
   // The sign-in screen is pre-auth, so there is no session and no persona yet — the portrait shows
-  // the deployment's DEFAULT interviewer, the same constants the backend falls back to.
-  const portraitUrl = `${CDN_BASE}/${DEFAULT_AVATAR_CHARACTER}-${DEFAULT_AVATAR_STYLE}.png`;
+  // the deployment's DEFAULT interviewer, the same constant the backend falls back to.
+  const { name: interviewerName, portraitUrl, isPhoto } = interviewerIdentity();
 
   return (
     <div className={styles.split} data-testid="candidate-signin-split">
@@ -235,7 +243,11 @@ export function CandidateSignIn({ error, busy, onSubmit }: CandidateSignInProps)
 
         <figure className={styles.frame} data-testid="signin-portrait">
           <div className={styles.mat}>
-            <img className={styles.portrait} src={portraitUrl} alt="" />
+            <img
+              className={mergeClasses(styles.portrait, isPhoto && styles.portraitPhoto)}
+              src={portraitUrl}
+              alt=""
+            />
             <span className={styles.livePill}>
               <i className={styles.liveDot} aria-hidden />
               {t("candidate.livePill")}
@@ -244,7 +256,7 @@ export function CandidateSignIn({ error, busy, onSubmit }: CandidateSignInProps)
           <figcaption className={styles.caption}>
             <span>{t("voice.roleInterviewer")}</span>
             <span className={styles.captionName}>
-              {t("candidate.defaultInterviewerName")}
+              {interviewerName}
             </span>
           </figcaption>
         </figure>
