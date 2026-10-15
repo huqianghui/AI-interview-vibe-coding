@@ -40,8 +40,8 @@ class AiFoundryConfigIn(BaseModel):
     # Identity only. Wins over api_key.
     clear_api_key: bool = False
     default_project: str = Field(default="", max_length=200)
-    # The INFERENCE model: judge, scoring, checklist drafting, SOP coverage, and the Foundry
-    # agent's own model. A deployment name in this resource.
+    # The INFERENCE model: the Foundry agent's own model, and judge / scoring / checklist drafting /
+    # SOP coverage when the deployment sets no JUDGE_MODEL. A deployment name in this resource.
     model_or_deployment: str = Field(default="", max_length=100)
     # The Voice Live SESSION model, separate because its legal values are a different set (see
     # ServiceConfig). Empty falls back to VOICE_LIVE_DEFAULT_MODEL.
