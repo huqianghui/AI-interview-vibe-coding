@@ -6,9 +6,11 @@ transaction link needs the operation's first telemetry item, which only the Logs
 it has a route of its own and the page asks for it on demand.
 """
 
-from typing import Literal
+import os
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,6 +49,47 @@ class TransactionLink(BaseModel):
     status: Literal["found", "not_found", "unavailable"]
     url: str | None = None
     reason: str | None = None
+
+
+class OperationLink(BaseModel):
+    operation_id: str
+    # When it was first seen (an interview from before the fixed operation id only).
+    seen: str | None = None
+    logs_url: str | None
+
+
+class MediaStatsOut(BaseModel):
+    samples: int
+    rtt_p95_ms: float | None
+    audio_loss_pct: float | None
+    available_in_p50_kbps: float | None
+    resolution: str | None
+
+
+class AvatarOutcomesOut(BaseModel):
+    connected: int
+    failed: int
+    via_relay: int
+    voice_over_ws: int
+
+
+class InterviewNetworkOut(BaseModel):
+    """The network one interview ran on, from its own telemetry; the page grades it (A to E)."""
+
+    # found: the fields below are set; not_found: App Insights has nothing for it (yet);
+    # unavailable: the Logs query API cannot be asked, ``reason`` says why.
+    status: Literal["found", "not_found", "unavailable"]
+    reason: str | None = None
+    # True for an interview from before the fixed operation id: ``operations`` are the page
+    # operations its voice events name, each with its own Logs link.
+    legacy: bool = False
+    operations: list[OperationLink] = []
+    media: MediaStatsOut | None = None
+    avatar: AvatarOutcomesOut | None = None
+
+
+# The download check: enough to time over a slow link, small enough to repeat every half minute.
+MAX_DOWNLOAD_KB = 2048
 
 
 def _operation_or_422(raw: str) -> str:
@@ -102,3 +145,45 @@ async def transaction(operation_id: str) -> TransactionLink:
     if url is None:
         return TransactionLink(status="unavailable", reason="App Insights is not configured")
     return TransactionLink(status="found", url=url)
+
+
+@router.get("/operations/{operation_id}/network", response_model=InterviewNetworkOut)
+async def network(operation_id: str) -> InterviewNetworkOut:
+    """The interview's RTT, loss, downlink and avatar outcomes, through the Logs query API (a few
+    seconds). An interview from before the fixed operation id is found through its voice events."""
+    operation_id = _operation_or_422(operation_id)
+    settings = get_settings()
+    # The id with its dashes back is the interview id the voice events carry, whether or not the
+    # interview's row still exists (or is in this database at all).
+    interview_id = performance_service.interview_id_for(operation_id)
+    try:
+        found = await performance_service.interview_network(operation_id, interview_id, settings)
+    except performance_service.LookupUnavailable as exc:
+        return InterviewNetworkOut(status="unavailable", reason=str(exc))
+    if found is None:
+        return InterviewNetworkOut(status="not_found")
+    return InterviewNetworkOut(
+        status="found",
+        legacy=found.legacy,
+        operations=[
+            OperationLink(
+                operation_id=op,
+                seen=seen,
+                logs_url=performance_service.logs_url(op, settings),
+            )
+            for op, seen in found.operations
+        ],
+        media=MediaStatsOut(**vars(found.media)),
+        avatar=AvatarOutcomesOut(**vars(found.avatar)),
+    )
+
+
+@router.get("/download")
+async def download(kb: Annotated[int, Query(ge=1, le=MAX_DOWNLOAD_KB)] = 256) -> Response:
+    """``kb`` KiB of random bytes for the tab's downlink check: incompressible, so the response
+    compression in front of the app cannot shrink what is timed, and never cached."""
+    return Response(
+        content=os.urandom(kb * 1024),
+        media_type="application/octet-stream",
+        headers={"Cache-Control": "no-store"},
+    )

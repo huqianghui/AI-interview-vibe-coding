@@ -470,6 +470,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/performance/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download
+         * @description ``kb`` KiB of random bytes for the tab's downlink check: incompressible, so the response
+         *     compression in front of the app cannot shrink what is timed, and never cached.
+         */
+        get: operations["download_admin_performance_download_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/performance/links": {
         parameters: {
             query?: never;
@@ -500,6 +521,27 @@ export interface paths {
          *     is not 32 hex (an interview id with its dashes is accepted too).
          */
         get: operations["lookup_admin_performance_operations__operation_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/performance/operations/{operation_id}/network": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Network
+         * @description The interview's RTT, loss, downlink and avatar outcomes, through the Logs query API (a few
+         *     seconds). An interview from before the fixed operation id is found through its voice events.
+         */
+        get: operations["network_admin_performance_operations__operation_id__network_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1921,6 +1963,17 @@ export interface components {
             /** Persona Id */
             persona_id?: string | null;
         };
+        /** AvatarOutcomesOut */
+        AvatarOutcomesOut: {
+            /** Connected */
+            connected: number;
+            /** Failed */
+            failed: number;
+            /** Via Relay */
+            via_relay: number;
+            /** Voice Over Ws */
+            voice_over_ws: number;
+        };
         /** BankIn */
         BankIn: {
             /**
@@ -2250,6 +2303,31 @@ export interface components {
             /** Total Score */
             total_score: number | null;
         };
+        /**
+         * InterviewNetworkOut
+         * @description The network one interview ran on, from its own telemetry; the page grades it (A to E).
+         */
+        InterviewNetworkOut: {
+            avatar?: components["schemas"]["AvatarOutcomesOut"] | null;
+            /**
+             * Legacy
+             * @default false
+             */
+            legacy: boolean;
+            media?: components["schemas"]["MediaStatsOut"] | null;
+            /**
+             * Operations
+             * @default []
+             */
+            operations: components["schemas"]["OperationLink"][];
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "found" | "not_found" | "unavailable";
+        };
         /** InterviewOut */
         InterviewOut: {
             /**
@@ -2448,6 +2526,28 @@ export interface components {
             password: string;
             /** Username */
             username: string;
+        };
+        /** MediaStatsOut */
+        MediaStatsOut: {
+            /** Audio Loss Pct */
+            audio_loss_pct: number | null;
+            /** Available In P50 Kbps */
+            available_in_p50_kbps: number | null;
+            /** Resolution */
+            resolution: string | null;
+            /** Rtt P95 Ms */
+            rtt_p95_ms: number | null;
+            /** Samples */
+            samples: number;
+        };
+        /** OperationLink */
+        OperationLink: {
+            /** Logs Url */
+            logs_url: string | null;
+            /** Operation Id */
+            operation_id: string;
+            /** Seen */
+            seen?: string | null;
         };
         /** OperationLookup */
         OperationLookup: {
@@ -3949,6 +4049,37 @@ export interface operations {
             };
         };
     };
+    download_admin_performance_download_get: {
+        parameters: {
+            query?: {
+                kb?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     links_admin_performance_links_get: {
         parameters: {
             query?: never;
@@ -3987,6 +4118,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OperationLookup"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    network_admin_performance_operations__operation_id__network_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InterviewNetworkOut"];
                 };
             };
             /** @description Validation Error */

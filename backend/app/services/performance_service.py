@@ -18,6 +18,7 @@ import base64
 import gzip
 import json
 import logging
+import math
 import re
 from dataclasses import dataclass
 from urllib.parse import quote
@@ -189,12 +190,12 @@ def _first_item_query(operation_id: str) -> str:
     )
 
 
-async def first_item(operation_id: str, settings: Settings) -> FirstItem | None:
-    """The operation's earliest page view, request or dependency; None when there is none (yet:
-    telemetry reaches the workspace minutes after it happened).
+async def _run_query(kql: str, settings: Settings) -> list[dict]:
+    """Rows of one Logs query against the workspace, as dicts (columns by name).
 
     Raises :class:`LookupUnavailable` when the workspace is not configured, the managed identity
-    has no token, or the query is refused (most likely: no Log Analytics Data Reader role)."""
+    has no token, the query is refused (most likely: no Log Analytics Data Reader role), or the
+    answer is not the shape the API documents."""
     if not settings.log_analytics_workspace_id:
         raise LookupUnavailable("The Log Analytics workspace is not configured")
     token = await azure_auth.get_bearer_token(azure_auth.LOG_ANALYTICS_SCOPE)
@@ -205,7 +206,7 @@ async def first_item(operation_id: str, settings: Settings) -> FirstItem | None:
             response = await client.post(
                 LOGS_QUERY_URL.format(workspace=settings.log_analytics_workspace_id),
                 headers={"Authorization": f"Bearer {token}"},
-                json={"query": _first_item_query(operation_id), "timespan": LOOKUP_TIMESPAN},
+                json={"query": kql, "timespan": LOOKUP_TIMESPAN},
             )
     except httpx.HTTPError as exc:
         reason = f"The Logs query API did not answer ({type(exc).__name__})"
@@ -218,15 +219,156 @@ async def first_item(operation_id: str, settings: Settings) -> FirstItem | None:
         raise LookupUnavailable(f"The Logs query API answered {response.status_code}")
     try:
         tables = response.json().get("tables") or []
-        rows = tables[0].get("rows") if tables else None
-        if not rows:
-            return None
+        if not tables:
+            return []
         columns = [c["name"] for c in tables[0]["columns"]]
-        row = dict(zip(columns, rows[0], strict=False))
+        return [dict(zip(columns, row, strict=False)) for row in tables[0].get("rows") or []]
     except (ValueError, KeyError, TypeError, AttributeError, IndexError) as exc:
         reason = f"The Logs query API answered something unexpected ({type(exc).__name__})"
         raise LookupUnavailable(reason) from exc
-    item_id, timestamp = row.get("_ItemId"), row.get("TimeGenerated")
+
+
+async def first_item(operation_id: str, settings: Settings) -> FirstItem | None:
+    """The operation's earliest page view, request or dependency; None when there is none (yet:
+    telemetry reaches the workspace minutes after it happened). Raises
+    :class:`LookupUnavailable` (see :func:`_run_query`)."""
+    rows = await _run_query(_first_item_query(operation_id), settings)
+    if not rows:
+        return None
+    item_id, timestamp = rows[0].get("_ItemId"), rows[0].get("TimeGenerated")
     if not item_id or not timestamp:
         return None
     return FirstItem(item_id=str(item_id), timestamp=str(timestamp))
+
+
+# --- the network an interview ran on --------------------------------------------------------
+
+_INTERVIEW_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+# An interview that predates the fixed operation id ran under several page operations.
+MAX_LEGACY_OPERATIONS = 20
+
+
+@dataclass(frozen=True)
+class MediaStats:
+    """The avatar's WebRTC quality over the interview (`voice.media`, one sample per 15 s)."""
+
+    samples: int
+    rtt_p95_ms: float | None
+    audio_loss_pct: float | None
+    available_in_p50_kbps: float | None
+    # The avatar's video size: 512x512 is a photo avatar, 1920x1080 a video avatar.
+    resolution: str | None
+
+
+@dataclass(frozen=True)
+class AvatarOutcomes:
+    """How the avatar's WebRTC handshakes went (`voice.avatar`, `voice.setup`)."""
+
+    connected: int
+    failed: int
+    via_relay: int
+    voice_over_ws: int
+
+
+@dataclass(frozen=True)
+class InterviewNetwork:
+    # The operations its telemetry is filed under: [the interview's own] or, for an interview
+    # from before the fixed operation id, the ones its voice events name.
+    operations: list[tuple[str, str | None]]
+    legacy: bool
+    media: MediaStats
+    avatar: AvatarOutcomes
+
+
+def _number(value: object) -> float | None:
+    """A query value as a number; None for empty, unparseable, and NaN (``avg`` over no samples
+    answers NaN, measured)."""
+    try:
+        number = None if value in (None, "") else float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return None if number is None or math.isnan(number) else number
+
+
+def _has_items_query(operation_id: str) -> str:
+    operation_id = _checked(operation_id)
+    return (
+        "union isfuzzy=true AppPageViews, AppRequests, AppDependencies, AppEvents\n"
+        f'| where OperationId == "{operation_id}"\n'
+        "| summarize n = count()"
+    )
+
+
+def _legacy_operations_query(interview_id: str) -> str:
+    if not _INTERVIEW_ID.fullmatch(interview_id):
+        raise ValueError("not an interview id")
+    # `seen`, not `first`: that is a reserved word in KQL (measured).
+    return (
+        "AppEvents\n"
+        '| where Name startswith "voice."\n'
+        f'| where tostring(Properties.interview_id) == "{interview_id}"\n'
+        "| summarize seen = min(TimeGenerated) by OperationId\n"
+        "| order by seen asc\n"
+        f"| take {MAX_LEGACY_OPERATIONS}"
+    )
+
+
+def _network_query(operation_ids: list[str]) -> str:
+    ids = ", ".join(f'"{_checked(o)}"' for o in operation_ids)
+    # Two summaries joined on a constant: there is no percentileif in this dialect (measured).
+    return f"""let ev = AppEvents
+    | where OperationId in ({ids}) and Name in ("voice.media", "voice.avatar", "voice.setup");
+let media = ev
+    | where Name == "voice.media" and isnotnull(Measurements.rtt_ms)
+    | summarize samples = count(), rtt_p95 = percentile(todouble(Measurements.rtt_ms), 95),
+        loss_avg = avg(todouble(Measurements.audio_loss_pct)),
+        down_p50 = percentile(todouble(Measurements.available_in_kbps), 50),
+        resolution = take_any(tostring(Properties.resolution));
+let rest = ev
+    | summarize
+        avatar_ok = countif(Name == "voice.avatar"
+            and tostring(Properties.outcome) in ("frame", "audio")),
+        avatar_failed = countif(Name == "voice.avatar" and tostring(Properties.outcome)
+            in ("ice_failed", "no_frame", "sdp_timeout", "handshake_failed")),
+        relay = countif(Name == "voice.avatar" and tostring(Properties.local_candidate) == "relay"),
+        ws_audio = countif(Name == "voice.setup" and tostring(Properties.audio_path) == "ws");
+media | extend k = 1 | join kind=inner (rest | extend k = 1) on k | project-away k, k1"""
+
+
+async def interview_network(
+    operation_id: str, interview_id: str | None, settings: Settings
+) -> InterviewNetwork | None:
+    """The network the interview behind ``operation_id`` ran on, from its own telemetry; None
+    when App Insights has nothing for it (yet). Raises :class:`LookupUnavailable`."""
+    operations: list[tuple[str, str | None]] = [(operation_id, None)]
+    legacy = False
+    counted = await _run_query(_has_items_query(operation_id), settings)
+    items = int(_number(counted[0].get("n")) or 0) if counted else 0
+    if items == 0:
+        if interview_id is None:
+            return None
+        found = await _run_query(_legacy_operations_query(interview_id), settings)
+        operations = [
+            (str(r["OperationId"]), str(r.get("seen") or "") or None)
+            for r in found
+            if r.get("OperationId") and normalize(str(r["OperationId"]))
+        ]
+        if not operations:
+            return None
+        legacy = True
+    rows = await _run_query(_network_query([o for o, _ in operations]), settings)
+    row = rows[0] if rows else {}
+    media = MediaStats(
+        samples=int(_number(row.get("samples")) or 0),
+        rtt_p95_ms=_number(row.get("rtt_p95")),
+        audio_loss_pct=_number(row.get("loss_avg")),
+        available_in_p50_kbps=_number(row.get("down_p50")),
+        resolution=str(row.get("resolution") or "") or None,
+    )
+    avatar = AvatarOutcomes(
+        connected=int(_number(row.get("avatar_ok")) or 0),
+        failed=int(_number(row.get("avatar_failed")) or 0),
+        via_relay=int(_number(row.get("relay")) or 0),
+        voice_over_ws=int(_number(row.get("ws_audio")) or 0),
+    )
+    return InterviewNetwork(operations=operations, legacy=legacy, media=media, avatar=avatar)

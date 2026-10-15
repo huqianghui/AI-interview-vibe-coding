@@ -375,6 +375,34 @@
         "title": "AssignmentIn",
         "type": "object"
       },
+      "AvatarOutcomesOut": {
+        "properties": {
+          "connected": {
+            "title": "Connected",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "via_relay": {
+            "title": "Via Relay",
+            "type": "integer"
+          },
+          "voice_over_ws": {
+            "title": "Voice Over Ws",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "connected",
+          "failed",
+          "via_relay",
+          "voice_over_ws"
+        ],
+        "title": "AvatarOutcomesOut",
+        "type": "object"
+      },
       "BankIn": {
         "properties": {
           "description": {
@@ -1233,6 +1261,69 @@
         "title": "InterviewHistoryItem",
         "type": "object"
       },
+      "InterviewNetworkOut": {
+        "description": "The network one interview ran on, from its own telemetry; the page grades it (A to E).",
+        "properties": {
+          "avatar": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AvatarOutcomesOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "legacy": {
+            "default": false,
+            "title": "Legacy",
+            "type": "boolean"
+          },
+          "media": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaStatsOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operations": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/OperationLink"
+            },
+            "title": "Operations",
+            "type": "array"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "status": {
+            "enum": [
+              "found",
+              "not_found",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "InterviewNetworkOut",
+        "type": "object"
+      },
       "InterviewOut": {
         "properties": {
           "audio_recorded": {
@@ -1812,6 +1903,103 @@
           "password"
         ],
         "title": "LoginRequest",
+        "type": "object"
+      },
+      "MediaStatsOut": {
+        "properties": {
+          "audio_loss_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio Loss Pct"
+          },
+          "available_in_p50_kbps": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available In P50 Kbps"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          },
+          "rtt_p95_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rtt P95 Ms"
+          },
+          "samples": {
+            "title": "Samples",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "samples",
+          "rtt_p95_ms",
+          "audio_loss_pct",
+          "available_in_p50_kbps",
+          "resolution"
+        ],
+        "title": "MediaStatsOut",
+        "type": "object"
+      },
+      "OperationLink": {
+        "properties": {
+          "logs_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Logs Url"
+          },
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "seen": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seen"
+          }
+        },
+        "required": [
+          "operation_id",
+          "logs_url"
+        ],
+        "title": "OperationLink",
         "type": "object"
       },
       "OperationLookup": {
@@ -5146,6 +5334,55 @@
         ]
       }
     },
+    "/admin/performance/download": {
+      "get": {
+        "description": "``kb`` KiB of random bytes for the tab's downlink check: incompressible, so the response\ncompression in front of the app cannot shrink what is timed, and never cached.",
+        "operationId": "download_admin_performance_download_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kb",
+            "required": false,
+            "schema": {
+              "default": 256,
+              "maximum": 2048,
+              "minimum": 1,
+              "title": "Kb",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Download",
+        "tags": [
+          "admin-performance"
+        ]
+      }
+    },
     "/admin/performance/links": {
       "get": {
         "operationId": "links_admin_performance_links_get",
@@ -5215,6 +5452,54 @@
           }
         ],
         "summary": "Lookup",
+        "tags": [
+          "admin-performance"
+        ]
+      }
+    },
+    "/admin/performance/operations/{operation_id}/network": {
+      "get": {
+        "description": "The interview's RTT, loss, downlink and avatar outcomes, through the Logs query API (a few\nseconds). An interview from before the fixed operation id is found through its voice events.",
+        "operationId": "network_admin_performance_operations__operation_id__network_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "title": "Operation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewNetworkOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Network",
         "tags": [
           "admin-performance"
         ]
