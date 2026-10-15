@@ -125,3 +125,19 @@ Three cards:
 ## Ship
 
 One feature PR (new admin route + tab + infra role), full `/ship` flow.
+
+## Revision 2 (owner feedback after testing, 2026-10-15)
+
+1. **Live network check.** Starts when the tab opens and keeps sampling while it is open and the
+   page visible: API round trip every 2 s (a one-minute line chart with median and p95), voice WS
+   probe every 15 s, a 512 KiB download every 30 s, a STUN Binding to Azure's relay every 60 s.
+2. **The workbook once.** The per-interview workbook row is gone (the portal cannot pre-fill it, so
+   it was the same generic link twice); one Workbook card says how to use it for one interview and
+   across interviews.
+3. **Old interviews.** An interview from before the fixed id has no telemetry under its own id; the
+   lookup finds the operations it ran under through its `voice.*` events (`interview_id`) and links
+   each one.
+4. **Grade A to E with settings.** [`docs/network-grades.md`](../network-grades.md): per interview from
+   its `voice.media` (RTT p95, audio loss mean, downlink p50; downlink graded only for a video
+   avatar, owner decision) and `voice.avatar` (the UDP gate); for this browser as an estimate.
+   New routes: `GET /admin/performance/operations/{id}/network`, `GET /admin/performance/download`.

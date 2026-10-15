@@ -45,10 +45,13 @@ The HTML report is public and does not require Azure access.
 | **Interactive performance report**: Application Insights and workbook analysis with playable interview timelines | [Open the report](https://huqianghui.github.io/AI-interview-vibe-coding/) |
 
 Every interview is one operation, and its **Operation id** is the interview id without the dashes.
-In the app, the admin **Performance** tab looks an Operation id up and links to all three views
-above for it (Interview results shows the id on every row, one click away), and runs a network check
-from the admin's browser. In the workbook, pick an interview (the newest is selected by default) or
-paste an **Operation id**.
+In the app, the admin **Performance** tab looks an Operation id up (Interview results shows the id
+on every row, one click away): the interview, the network it ran on graded **A to E** with the
+starting form and settings that grade calls for ([`docs/network-grades.md`](docs/network-grades.md)),
+and its Logs and end-to-end links. While the tab is open it also runs a live network check from the
+admin's browser (round trip chart, voice connection, UDP to Azure's relay, downlink) with an
+estimated grade. In the workbook, pick an interview (the newest is selected by default) or paste an
+**Operation id**.
 What each metric means: [`docs/voice-performance-telemetry.md`](docs/voice-performance-telemetry.md).
 
 ## Key scenarios
@@ -291,5 +294,6 @@ stored cloud credentials, managed identity everywhere, keyless. See
 | [`docs/webrtc-ice-voice-transport.md`](docs/webrtc-ice-voice-transport.md) | WebRTC vs WebSocket for Voice Live: ICE / STUN / TURN candidates, why voice-only has none, Opus vs PCM, and how to verify with chrome://webrtc-internals (中文) |
 | [`docs/candidate-recordings.md`](docs/candidate-recordings.md) | Candidate voice recordings: what is recorded, where it is kept, the 90-day deletion, who can listen (中文) |
 | [`docs/sop-coverage-audit.md`](docs/sop-coverage-audit.md) | The opt-in SOP coverage audit: why binding the SOP to a rubric does not answer "did the rubric miss anything", what it costs, and how the cited SOP sources are chosen (中文) |
+| [`docs/network-grades.md`](docs/network-grades.md) | The A to E network grade (RTT, UDP loss, downlink, the UDP 3478 gate) and the starting form and settings for each, from the weak-network study; how the Performance tab grades an interview and this browser |
 | [`docs/voice-performance-telemetry.md`](docs/voice-performance-telemetry.md) | Where the time goes in a voice interview: the browser and backend timings sent to Application Insights (ICE / STUN / TURN, first frame, STT, the `/answer` hop, first audible sample) and the Voice performance workbook |
 | [`CHANGELOG.md`](CHANGELOG.md) | Release history: every version and what changed in it |
