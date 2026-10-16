@@ -238,14 +238,15 @@ describe("Operation id lookup", () => {
     }));
     renderAt(`/admin?tab=performance&op=${OP}`);
     await screen.findByTestId("performance-result");
+    // The first lookup settled (its network is read last) before the box is changed: on CI the
+    // click otherwise found the box still on the first id, and looked up nothing new.
+    await waitFor(() => expect(admin.getInterviewNetwork).toHaveBeenCalledWith(OP));
     const input = screen.getByTestId("performance-operation-input");
-    await user.clear(input);
-    await user.paste(OTHER); // not typed key by key: 32 keystrokes alone ran past 1 s on CI
+    fireEvent.change(input, { target: { value: OTHER } });
+    await waitFor(() => expect(input).toHaveValue(OTHER));
     await user.click(screen.getByTestId("performance-lookup"));
-    // Step by step, so a failure says which step stalled (CI only; never reproduced locally).
     await waitFor(() => expect(admin.lookupOperation).toHaveBeenLastCalledWith(OTHER));
-    await waitFor(() => expect(admin.getTransactionLink).toHaveBeenLastCalledWith(OTHER));
-    const link = await screen.findByTestId("performance-transaction-link", {}, { timeout: 3000 });
+    const link = await screen.findByTestId("performance-transaction-link");
     expect(link).toHaveAttribute("href", "https://portal.azure.com/#view/new");
     releaseOld({ status: "found", url: "https://portal.azure.com/#view/old" });
     await new Promise((r) => setTimeout(r, 20));
