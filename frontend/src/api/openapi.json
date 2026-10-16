@@ -4886,7 +4886,7 @@
             "required": false,
             "schema": {
               "default": "started_at",
-              "pattern": "^(started_at|total_score)$",
+              "pattern": "^(username|started_at|completed_at|persona_name|bank_name|bank_version_no|status|total_score|outcome)$",
               "title": "Sort",
               "type": "string"
             }
@@ -5220,7 +5220,7 @@
     },
     "/admin/jobs": {
       "get": {
-        "description": "Jobs newest first. ``status`` and ``kind`` may repeat; 422 on an unknown one.",
+        "description": "Jobs newest first unless asked otherwise. ``status`` and ``kind`` may repeat; 422 on an\nunknown one or a bad sort/order. Ties (and blanks) fall back to newest first.",
         "operationId": "list_jobs_admin_jobs_get",
         "parameters": [
           {
@@ -5259,6 +5259,28 @@
                 }
               ],
               "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "created_at",
+              "pattern": "^(kind|status|attempts|created_at|duration|created_by|error)$",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "pattern": "^(asc|desc)$",
+              "title": "Order",
+              "type": "string"
             }
           },
           {

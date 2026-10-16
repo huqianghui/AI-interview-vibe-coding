@@ -393,8 +393,20 @@ export interface InterviewResultFilters {
   score_max?: number;
 }
 
+/** Every column of the results table the server can sort by (all but the operation id). */
+export type InterviewResultSort =
+  | "username"
+  | "started_at"
+  | "completed_at"
+  | "persona_name"
+  | "bank_name"
+  | "bank_version_no"
+  | "status"
+  | "total_score"
+  | "outcome";
+
 export interface InterviewResultsQuery extends InterviewResultFilters {
-  sort?: "started_at" | "total_score";
+  sort?: InterviewResultSort;
   order?: "asc" | "desc";
   limit?: number;
   offset?: number;
@@ -696,14 +708,26 @@ export interface JobsPage {
   total: number;
 }
 
+/** Every column of the Jobs table the server can sort by (all but Retry/Cancel). */
+export type JobSort =
+  | "kind"
+  | "status"
+  | "attempts"
+  | "created_at"
+  | "duration"
+  | "created_by"
+  | "error";
+
 export interface JobsQuery {
   status?: JobStatus[];
   kind?: JobKind[];
+  sort?: JobSort;
+  order?: "asc" | "desc";
   limit?: number;
   offset?: number;
 }
 
-/** Background jobs, newest first. */
+/** Background jobs, newest first unless sorted by another column. */
 export function listJobs(query: JobsQuery = {}) {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {

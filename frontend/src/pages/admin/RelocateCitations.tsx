@@ -62,6 +62,7 @@ function RowsTable({
       long: true,
       maxWidth: 300,
       text: (row) => `${row.question_no}. ${row.question}`,
+      sortValue: (row) => row.question_no,
       cell: (row) => (
         <Text size={200}>
           <Text weight="semibold" size={200}>

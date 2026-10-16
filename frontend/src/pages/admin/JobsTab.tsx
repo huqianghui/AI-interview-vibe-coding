@@ -16,7 +16,7 @@ import {
   mergeClasses,
   tokens,
 } from "@fluentui/react-components";
-import type { JobItem, JobKind, JobStatus } from "../../api/admin";
+import type { JobItem, JobKind, JobSort, JobStatus } from "../../api/admin";
 import { DataTable, type DataColumn } from "../../components/DataTable";
 import { TablePager } from "../../components/TablePager";
 import { useTableToolbarStyles } from "../../components/tableToolbar";
@@ -70,10 +70,19 @@ export function JobsTab({ state }: { state: JobsTabState }) {
     j.kind === "sop_backfill" ? t("admin.jobs.allDocuments") : j.target_label || j.target_id;
   const progress = (j: JobItem) => (j.total ? `${j.done ?? 0}/${j.total}` : "—");
 
+  // Sorted on the server (it pages). Target and progress are worked out per row from other
+  // tables and the job's progress record, so they have no column to sort by there.
+  const sortOf = (key: JobSort): DataColumn<JobItem>["sort"] => ({
+    direction:
+      state.sort === key ? (state.order === "desc" ? "descending" : "ascending") : undefined,
+    onToggle: () => state.toggleSort(key),
+    testId: `jobs-sort-${key}`,
+  });
   const columns: DataColumn<JobItem>[] = [
     {
       id: "kind",
       header: t("admin.jobs.kind"),
+      sort: sortOf("kind"),
       text: (j) => t(`admin.jobs.kinds.${j.kind}`),
       cell: (j) => t(`admin.jobs.kinds.${j.kind}`),
     },
@@ -81,6 +90,7 @@ export function JobsTab({ state }: { state: JobsTabState }) {
     {
       id: "status",
       header: t("history.colStatus"),
+      sort: sortOf("status"),
       text: (j) => t(`admin.jobs.status.${j.status}`),
       pad: 16,
       cell: (j) => (
@@ -99,30 +109,35 @@ export function JobsTab({ state }: { state: JobsTabState }) {
     {
       id: "attempts",
       header: t("admin.jobs.attempts"),
+      sort: sortOf("attempts"),
       text: (j) => `${j.attempts}/${j.max_attempts}`,
       cell: (j) => `${j.attempts}/${j.max_attempts}`,
     },
     {
       id: "created",
       header: t("admin.jobs.created"),
+      sort: sortOf("created_at"),
       text: (j) => when(j.created_at),
       cell: (j) => when(j.created_at),
     },
     {
       id: "duration",
       header: t("admin.jobs.duration"),
+      sort: sortOf("duration"),
       text: (j) => duration(j),
       cell: (j) => duration(j),
     },
     {
       id: "by",
       header: t("admin.jobs.by"),
+      sort: sortOf("created_by"),
       text: (j) => t(`admin.jobs.creators.${j.created_by}`, { defaultValue: j.created_by }),
       cell: (j) => t(`admin.jobs.creators.${j.created_by}`, { defaultValue: j.created_by }),
     },
     {
       id: "error",
       header: t("admin.jobs.error"),
+      sort: sortOf("error"),
       text: (j) => j.error || "—",
       cell: (j) => j.error || "—",
       long: true,

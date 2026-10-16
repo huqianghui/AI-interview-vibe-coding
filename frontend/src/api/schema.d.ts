@@ -417,7 +417,8 @@ export interface paths {
         };
         /**
          * List Jobs
-         * @description Jobs newest first. ``status`` and ``kind`` may repeat; 422 on an unknown one.
+         * @description Jobs newest first unless asked otherwise. ``status`` and ``kind`` may repeat; 422 on an
+         *     unknown one or a bad sort/order. Ties (and blanks) fall back to newest first.
          */
         get: operations["list_jobs_admin_jobs_get"];
         put?: never;
@@ -4009,6 +4010,8 @@ export interface operations {
             query?: {
                 status?: string[] | null;
                 kind?: string[] | null;
+                sort?: string;
+                order?: string;
                 limit?: number;
                 offset?: number;
             };

@@ -109,10 +109,24 @@ export function InterviewHistoryTable({
     return <Body1 data-testid={`${testId}-empty`}>{t("history.empty")}</Body1>;
   }
   const when = (v: string | null) => formatWhenShort(v, i18n.language);
+  // Sorted by when, not by the short text shown (which drops the year).
+  const time = (v: string | null) => (v ? Date.parse(v) : null);
   const score = (it: InterviewHistoryItem) => (it.total_score == null ? "—" : `${it.total_score}/100`);
   const columns: DataColumn<InterviewHistoryItem>[] = [
-    { id: "started", header: t("history.colStarted"), text: (it) => when(it.started_at), cell: (it) => when(it.started_at) },
-    { id: "completed", header: t("history.colCompleted"), text: (it) => when(it.completed_at), cell: (it) => when(it.completed_at) },
+    {
+      id: "started",
+      header: t("history.colStarted"),
+      text: (it) => when(it.started_at),
+      sortValue: (it) => time(it.started_at),
+      cell: (it) => when(it.started_at),
+    },
+    {
+      id: "completed",
+      header: t("history.colCompleted"),
+      text: (it) => when(it.completed_at),
+      sortValue: (it) => time(it.completed_at),
+      cell: (it) => when(it.completed_at),
+    },
     {
       id: "interviewer",
       header: t("history.colInterviewer"),
@@ -132,7 +146,13 @@ export function InterviewHistoryTable({
       pad: 24, // the badge's own padding
       cell: (it) => <StatusBadge status={it.status} />,
     },
-    { id: "score", header: t("history.colScore"), text: score, cell: score },
+    {
+      id: "score",
+      header: t("history.colScore"),
+      text: score,
+      sortValue: (it) => it.total_score,
+      cell: score,
+    },
     {
       id: "open",
       header: "",

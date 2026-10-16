@@ -95,4 +95,94 @@ describe("DataTable", () => {
     await user.click(screen.getByTestId("sort-name"));
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
+
+  it("sorts its own rows from any column with text, and flips on a second click", async () => {
+    const user = userEvent.setup();
+    const rows = [
+      { id: "1", name: "SOP 10", n: 3 },
+      { id: "2", name: "—", n: 9 },
+      { id: "3", name: "SOP 2", n: null },
+    ];
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <DataTable
+          testId="t"
+          items={rows}
+          getRowId={(r) => r.id}
+          rowProps={(r) => ({ "data-testid": `row-${r.id}` })}
+          columns={[
+            { id: "name", header: "Name", text: (r) => r.name, cell: (r) => r.name },
+            {
+              id: "n",
+              header: "N",
+              text: (r) => String(r.n ?? "—"),
+              sortValue: (r) => r.n,
+              cell: (r) => r.n,
+            },
+            { id: "ctl", header: "", width: 80, cell: () => null },
+            { id: "op", header: "Op", sortable: false, text: (r) => r.id, cell: (r) => r.id },
+          ]}
+        />
+      </FluentProvider>,
+    );
+    const order = () =>
+      screen.getAllByTestId(/^row-/).map((r) => r.getAttribute("data-testid")?.slice(4));
+    expect(order()).toEqual(["1", "2", "3"]); // as given until a header is clicked
+    expect(screen.queryByTestId("t-sort-ctl")).toBeNull(); // controls have nothing to sort by
+    expect(screen.queryByTestId("t-sort-op")).toBeNull(); // opted out
+
+    await user.click(screen.getByTestId("t-sort-name"));
+    expect(screen.getByTestId("t-sort-name")).toHaveAttribute("aria-sort", "ascending");
+    expect(order()).toEqual(["3", "1", "2"]); // "SOP 2" before "SOP 10"; the blank "—" last
+    await user.click(screen.getByTestId("t-sort-name"));
+    expect(screen.getByTestId("t-sort-name")).toHaveAttribute("aria-sort", "descending");
+    expect(order()).toEqual(["1", "3", "2"]); // reversed, the blank still last
+
+    await user.click(screen.getByTestId("t-sort-n")); // a number starts largest first
+    expect(screen.getByTestId("t-sort-n")).toHaveAttribute("aria-sort", "descending");
+    expect(screen.getByTestId("t-sort-name")).not.toHaveAttribute("aria-sort", "ascending");
+    expect(order()).toEqual(["2", "1", "3"]);
+    await user.click(screen.getByTestId("t-sort-n"));
+    expect(order()).toEqual(["1", "2", "3"]);
+  });
+
+  it("leaves sorting to the owner once any column has its own sort", () => {
+    renderTable([
+      {
+        id: "name",
+        header: "Name",
+        sort: { onToggle: () => {}, testId: "sort-name" },
+        text: (r) => r.name,
+        cell: (r) => r.name,
+      },
+      { id: "note", header: "Note", text: (r) => r.note, cell: (r) => r.note },
+    ]);
+    // The owner pages the rows: sorting one page here would look right and be wrong.
+    expect(screen.queryByTestId("t-sort-note")).toBeNull();
+    expect(document.querySelectorAll("th[aria-sort]")).toHaveLength(1);
+  });
+
+  it("holds a sorted order while a cell changes, and sorts again when rows come or go", async () => {
+    const user = userEvent.setup();
+    const table = (rows: { id: string; v: string }[]) => (
+      <FluentProvider theme={webLightTheme}>
+        <DataTable
+          testId="t"
+          items={rows}
+          getRowId={(r) => r.id}
+          rowProps={(r) => ({ "data-testid": `row-${r.id}` })}
+          columns={[{ id: "v", header: "V", text: (r) => r.v, cell: (r) => r.v }]}
+        />
+      </FluentProvider>
+    );
+    const { rerender } = render(table([{ id: "1", v: "b" }, { id: "2", v: "a" }]));
+    const order = () =>
+      screen.getAllByTestId(/^row-/).map((r) => r.getAttribute("data-testid")?.slice(4));
+    await user.click(screen.getByTestId("t-sort-v"));
+    expect(order()).toEqual(["2", "1"]);
+    rerender(table([{ id: "1", v: "b" }, { id: "2", v: "z" }])); // an edit: the row stays put
+    expect(order()).toEqual(["2", "1"]);
+    rerender(table([{ id: "1", v: "b" }, { id: "2", v: "z" }, { id: "3", v: "a" }]));
+    expect(order()).toEqual(["3", "1", "2"]); // a new row: sorted again
+  });
 });

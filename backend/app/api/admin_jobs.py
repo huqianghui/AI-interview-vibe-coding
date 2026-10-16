@@ -7,8 +7,10 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import DateTime, Float, func, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.sql.functions import FunctionElement
 
 from app.db import get_db, get_session_factory
 from app.dependencies import require_role
@@ -125,15 +127,63 @@ async def _one_out(db: AsyncSession, job: Job) -> JobOut:
     return _out(job, (await _labels(db, [job]))[job.id])
 
 
+class _epoch(FunctionElement):
+    """A naive UTC timestamp as seconds, in whichever database is running."""
+
+    type = Float()
+    inherit_cache = True
+
+
+@compiles(_epoch, "postgresql")
+def _epoch_pg(element, compiler, **kw):
+    return f"EXTRACT(EPOCH FROM {compiler.process(element.clauses, **kw)})"
+
+
+@compiles(_epoch)
+def _epoch_sqlite(element, compiler, **kw):
+    return f"(julianday({compiler.process(element.clauses, **kw)}) * 86400.0)"
+
+
+# Every column of the Jobs table that has an order (the Retry/Cancel column has none). Kind,
+# status and creator sort by their stored code, not the translated label the table shows.
+JOB_SORTS = (
+    "kind",
+    "status",
+    "attempts",
+    "created_at",
+    "duration",
+    "created_by",
+    "error",
+)
+
+
+def _order(sort: str, *, descending: bool) -> list:
+    """ORDER BY for one column of the table, then newest first so a page is stable."""
+    if sort == "duration":
+        # Seconds from start to finish (to now while running); never started sorts last. The
+        # epoch arithmetic works on both SQLite (tests, dev) and PostgreSQL (live).
+        end = func.coalesce(Job.finished_at, literal(queue.now(), DateTime))
+        column = _epoch(end) - _epoch(Job.started_at)
+    elif sort == "error":
+        column = func.nullif(Job.error, "")  # no error is "" here, and must sort last too
+    else:
+        column = getattr(Job, sort)
+    primary = column.desc() if descending else column.asc()
+    return [primary.nulls_last(), Job.created_at.desc(), Job.id.desc()]
+
+
 @router.get("", response_model=JobsPage)
 async def list_jobs(
     status_in: Annotated[list[str] | None, Query(alias="status")] = None,
     kind: Annotated[list[str] | None, Query()] = None,
+    sort: Annotated[str, Query(pattern=f"^({'|'.join(JOB_SORTS)})$")] = "created_at",
+    order: Annotated[str, Query(pattern="^(asc|desc)$")] = "desc",
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
     db: AsyncSession = Depends(get_db),
 ) -> JobsPage:
-    """Jobs newest first. ``status`` and ``kind`` may repeat; 422 on an unknown one."""
+    """Jobs newest first unless asked otherwise. ``status`` and ``kind`` may repeat; 422 on an
+    unknown one or a bad sort/order. Ties (and blanks) fall back to newest first."""
     statuses = tuple(status_in or ())
     kinds = tuple(kind or ())
     bad = [s for s in statuses if s not in JOB_STATUSES] + [k for k in kinds if k not in JOB_KINDS]
@@ -148,7 +198,9 @@ async def list_jobs(
     jobs = list(
         (
             await db.execute(
-                query.order_by(Job.created_at.desc(), Job.id.desc()).limit(limit).offset(offset)
+                query.order_by(*_order(sort, descending=order == "desc"))
+                .limit(limit)
+                .offset(offset)
             )
         )
         .scalars()

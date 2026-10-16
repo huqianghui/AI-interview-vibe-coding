@@ -34,6 +34,11 @@ describe("sopTable", () => {
       "SOP 2.pdf", "SOP 10.pdf", "New.pdf", "Plan.docx",
     ]);
     expect(sortDocuments(docs, "status", "asc")[0].name).toBe("SOP 10.pdf"); // approved first
+    expect(sortDocuments(docs, "conversion", "desc").map((d) => d.name)).toEqual([
+      "Plan.docx", "New.pdf", "SOP 2.pdf", "SOP 10.pdf", // failed, converting, converted (A to Z)
+    ]);
+    const note = (d: SopDocument) => (d.name === "Plan.docx" ? "a note" : "z note");
+    expect(sortDocuments(docs, "notes", "asc", note)[0].name).toBe("Plan.docx");
   });
 
   it("keeps the page inside the list when the list shrinks", () => {

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.77.0.0 (2026-10-16)
+
+### Added
+- **Every table now sorts by a click on a column header; a second click reverses it.** Text sorts
+  the way people read it ("SOP 2" before "SOP 10"), times and numbers start newest or largest first,
+  and blank cells stay at the bottom both ways. Columns of buttons or other controls, and the
+  interview's operation id, have no sort.
+- **Interview results and Jobs sort on the server, across every page.** Interview results can now
+  be sorted by candidate, completed, interviewer, bank, bank version, status and outcome as well as
+  started and score. Jobs can be sorted by kind, status, attempts, created, duration (a running job
+  by how long it has run so far), created by and error. Target and progress are worked out per row,
+  so they have no sort. Status, kind and outcome sort by their stored value, not the label shown.
+- **SOP documents can also be sorted by conversion and notes.**
+
+### Changed
+- **A sorted list keeps its order while you edit it.** Changing an interviewer, bank or version in
+  the Users tab while it is sorted by that column leaves the row where it is; the list sorts again
+  on the next header click, or when users are added or removed.
+
 ## 0.76.1.0 (2026-10-15)
 
 ### Changed
