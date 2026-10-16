@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.anonymous_session import AnonymousCandidateSession
+from app.models.bank_version import BankVersion
 from app.models.interview import InterviewSession, InterviewTurn
 from app.models.persona import InterviewerPersona
 from app.models.question import QuestionBank
@@ -143,7 +144,19 @@ async def get_detail(
 
 # --- admin "Interview results": every interview, filtered, sorted, paged ---------------------
 
-RESULT_SORTS = ("started_at", "total_score")
+# Every column of the results table but the operation id, which is an id, not an order. Status
+# and outcome sort by their stored value, not the translated label the table shows.
+RESULT_SORTS = (
+    "username",
+    "started_at",
+    "completed_at",
+    "persona_name",
+    "bank_name",
+    "bank_version_no",
+    "status",
+    "total_score",
+    "outcome",
+)
 
 
 @dataclass(frozen=True)
@@ -175,8 +188,8 @@ async def search_results(
 ) -> InterviewResultsPage:
     """One page of every candidate's interviews, newest first unless asked otherwise.
 
-    A score filter matches only scored interviews (an unscored one has no score to compare); NULL
-    scores and start times sort last in both directions, so a page never opens on blanks.
+    A score filter matches only scored interviews (an unscored one has no score to compare); a blank
+    (no score, no candidate) sorts last in both directions, so a page never opens on blanks.
     """
     stmt = (
         select(
@@ -220,7 +233,19 @@ async def search_results(
 
     total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
 
-    column = InterviewSession.total_score if sort == "total_score" else InterviewSession.started_at
+    if sort == "bank_version_no":
+        stmt = stmt.outerjoin(BankVersion, BankVersion.id == InterviewSession.bank_version_id)
+    column = {
+        "username": User.username,
+        "started_at": InterviewSession.started_at,
+        "completed_at": InterviewSession.completed_at,
+        "persona_name": InterviewerPersona.name,
+        "bank_name": QuestionBank.name,
+        "bank_version_no": BankVersion.version_no,
+        "status": InterviewSession.status,
+        "total_score": InterviewSession.total_score,
+        "outcome": InterviewSession.outcome,
+    }.get(sort, InterviewSession.started_at)
     primary = column.desc() if descending else column.asc()
     rows = await db.execute(
         stmt.order_by(primary.nulls_last(), InterviewSession.created_at.desc(), InterviewSession.id)

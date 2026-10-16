@@ -113,6 +113,65 @@ async def test_sort_by_score_puts_unscored_last_both_ways(client, db_session, ad
     assert _keys(low, w["rows"])[:2] == ["b1", "a1"]
 
 
+@pytest.mark.parametrize(
+    ("sort", "field", "ascending"),
+    [
+        ("username", "username", ["alice", "alice", "bob", "bob", None]),
+        ("persona_name", "persona_name", ["Ava", "Ava", "Ben", "Ben", None]),
+        ("bank_name", "bank_name", ["Bank A", "Bank A", "Bank B", "Bank B", None]),
+        ("status", "status", ["abandoned", "completed", "in_progress", "scored", "scored"]),
+        (
+            "outcome",
+            "outcome",
+            ["Does Not Meet", "Meets Expectations", None, None, None],
+        ),
+    ],
+)
+async def test_every_column_sorts_both_ways_with_blanks_last(
+    client, db_session, admin_auth, sort, field, ascending
+):
+    """Each column of the results table sorts on the server, over every page (not just one)."""
+    await _world(db_session)
+    up = await _ids(client, admin_auth, sort=sort, order="asc")
+    assert [i[field] for i in up["items"]] == ascending
+    down = await _ids(client, admin_auth, sort=sort, order="desc")
+    filled = [v for v in ascending if v is not None]
+    blanks = [v for v in ascending if v is None]
+    assert [i[field] for i in down["items"]] == filled[::-1] + blanks
+
+
+async def test_sort_by_completed_and_bank_version_is_accepted(client, db_session, admin_auth):
+    w = await _world(db_session)
+    rows = w["rows"]
+    rows["a1"].completed_at = datetime(2026, 10, 1, 10, 0)
+    rows["b1"].completed_at = datetime(2026, 10, 2, 10, 0)
+    await db_session.commit()
+    done = await _ids(client, admin_auth, sort="completed_at", order="desc")
+    assert _keys(done, rows)[:2] == ["b1", "a1"]
+    versions = await _ids(client, admin_auth, sort="bank_version_no", order="asc")
+    assert versions["total"] == 5  # no versions here: all blank, newest first
+
+
+async def test_sort_by_bank_version_reads_the_pinned_version_number(client, db_session, admin_auth):
+    from app.models.bank_version import BankVersion
+
+    w = await _world(db_session)
+    rows = w["rows"]
+    for no, key in ((2, "a1"), (1, "b1")):
+        v = BankVersion(
+            bank_id=w["bank_a"].id, version_no=no, content_json="{}", content_hash=f"h{no}"
+        )
+        db_session.add(v)
+        await db_session.flush()
+        rows[key].bank_version_id = v.id
+    await db_session.commit()
+    up = await _ids(client, admin_auth, sort="bank_version_no", order="asc")
+    assert _keys(up, rows)[:2] == ["b1", "a1"]  # v1, v2, then the unpinned
+    assert [i["bank_version_no"] for i in up["items"]] == [1, 2, None, None, None]
+    down = await _ids(client, admin_auth, sort="bank_version_no", order="desc")
+    assert _keys(down, rows)[:2] == ["a1", "b1"]
+
+
 async def test_pages_split_the_list_and_total_stays_the_same(client, db_session, admin_auth):
     w = await _world(db_session)
     p1 = await _ids(client, admin_auth, limit=2, offset=0)

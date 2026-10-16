@@ -51,6 +51,68 @@ async def test_jobs_filter_by_status_and_kind_and_page(client, db_session, admin
     assert (await client.get(f"{BASE}?kind=nope", headers=admin_auth)).status_code == 422
 
 
+async def test_jobs_sort_by_any_column_both_ways(client, db_session, admin_auth):
+    """The Jobs table sorts on the server, so a sort covers every page, not just one."""
+    from datetime import timedelta
+
+    t0 = queue.now() - timedelta(hours=1)
+    quick = await _job(
+        db_session,
+        "sop_build",
+        "q",
+        status="succeeded",
+        attempts=1,
+        started_at=t0,
+        finished_at=t0 + timedelta(seconds=5),
+    )
+    slow = await _job(
+        db_session,
+        "score_interview",
+        "s",
+        status="failed",
+        attempts=3,
+        error="boom",
+        started_at=t0,
+        finished_at=t0 + timedelta(seconds=90),
+    )
+    waiting = await _job(db_session, "persona_sync", "w", status="queued", created_by="admin")
+
+    async def order(sort, direction):
+        resp = await client.get(f"{BASE}?sort={sort}&order={direction}", headers=admin_auth)
+        assert resp.status_code == 200, resp.text
+        return [r["job_id"] for r in resp.json()["items"]]
+
+    assert await order("attempts", "desc") == [slow.id, quick.id, waiting.id]
+    assert await order("kind", "asc") == [waiting.id, slow.id, quick.id]
+    assert await order("status", "asc") == [slow.id, waiting.id, quick.id]
+    # "admin" before "system"; ties fall back to newest first.
+    assert await order("created_by", "asc") == [waiting.id, slow.id, quick.id]
+    assert (await order("error", "desc"))[0] == slow.id
+    assert (await order("error", "asc"))[0] == slow.id  # no error ("") sorts last both ways
+    # Duration: never started sorts last whichever way.
+    assert await order("duration", "desc") == [slow.id, quick.id, waiting.id]
+    assert await order("duration", "asc") == [quick.id, slow.id, waiting.id]
+    assert (await client.get(f"{BASE}?sort=nope", headers=admin_auth)).status_code == 422
+    assert (await client.get(f"{BASE}?order=up", headers=admin_auth)).status_code == 422
+
+
+async def test_a_running_job_sorts_by_how_long_it_has_run_so_far(client, db_session, admin_auth):
+    from datetime import timedelta
+
+    now = queue.now()
+    done = await _job(
+        db_session,
+        status="succeeded",
+        started_at=now - timedelta(hours=2),
+        finished_at=now - timedelta(hours=2) + timedelta(seconds=30),
+    )
+    running = await _job(
+        db_session, target="r", status="running", started_at=now - timedelta(minutes=10)
+    )
+    resp = await client.get(f"{BASE}?sort=duration&order=desc", headers=admin_auth)
+    assert [r["job_id"] for r in resp.json()["items"]] == [running.id, done.id]  # 10 min > 30 s
+
+
 async def test_a_failed_job_is_retried_and_a_live_one_cannot_be(
     client, db_session, admin_auth, monkeypatch
 ):

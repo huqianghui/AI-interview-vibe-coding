@@ -45,7 +45,9 @@ async def list_results(
     outcome: str | None = None,
     score_min: Annotated[float | None, Query(ge=0, le=100)] = None,
     score_max: Annotated[float | None, Query(ge=0, le=100)] = None,
-    sort: Annotated[str, Query(pattern="^(started_at|total_score)$")] = "started_at",
+    sort: Annotated[
+        str, Query(pattern=f"^({'|'.join(interview_history_service.RESULT_SORTS)})$")
+    ] = "started_at",
     order: Annotated[str, Query(pattern="^(asc|desc)$")] = "desc",
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
