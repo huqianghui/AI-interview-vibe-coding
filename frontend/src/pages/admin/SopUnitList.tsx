@@ -42,11 +42,18 @@ export function SopUnitList({
         </span>
       ),
     },
-    { id: "pages", header: t("admin.sop.colPages"), text: pages, cell: pages },
+    {
+      id: "pages",
+      header: t("admin.sop.colPages"),
+      text: pages,
+      sortValue: (u) => u.page_start,
+      cell: pages,
+    },
     {
       id: "chars",
       header: t("admin.sop.colChars"),
       text: (u) => String(u.length),
+      sortValue: (u) => u.length,
       cell: (u) => u.length.toLocaleString(),
     },
   ];

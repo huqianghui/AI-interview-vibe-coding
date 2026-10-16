@@ -126,6 +126,34 @@ describe("JobsTab", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("The same work is already queued");
   });
 
+  it("sorts on the server by a header, newest first until one is clicked", async () => {
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    const list = vi.spyOn(admin, "listJobs").mockResolvedValue({ items: [job({})], total: 1 });
+    renderTab();
+    await screen.findByTestId("jobs-table");
+    expect(list).toHaveBeenCalledWith(
+      expect.objectContaining({ sort: "created_at", order: "desc" }),
+    );
+    await user.click(screen.getByTestId("jobs-sort-kind")); // text starts A to Z
+    await waitFor(() =>
+      expect(list).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sort: "kind", order: "asc", offset: 0 }),
+      ),
+    );
+    await user.click(screen.getByTestId("jobs-sort-kind"));
+    await waitFor(() =>
+      expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ order: "desc" })),
+    );
+    await user.click(screen.getByTestId("jobs-sort-duration")); // a number starts largest first
+    await waitFor(() =>
+      expect(list).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sort: "duration", order: "desc" }),
+      ),
+    );
+    expect(screen.queryByTestId("jobs-sort-target")).toBeNull(); // worked out per row: no sort
+  });
+
   it("reports how long a job ran, or has been running", () => {
     const done = job({ started_at: "2026-10-11T06:00:00", finished_at: "2026-10-11T06:03:05" });
     expect(duration(done)).toBe("3 min 5 s");

@@ -126,6 +126,7 @@ export function InterviewsTab({
     {
       id: "candidate",
       header: t("admin.results.candidate"),
+      sort: sortOf(state, "username"),
       text: (it) => it.username ?? t("admin.results.anonymous"),
       cell: (it) => it.username ?? t("admin.results.anonymous"),
     },
@@ -139,18 +140,21 @@ export function InterviewsTab({
     {
       id: "completed",
       header: t("history.colCompleted"),
+      sort: sortOf(state, "completed_at"),
       text: (it) => when(it.completed_at),
       cell: (it) => when(it.completed_at),
     },
     {
       id: "interviewer",
       header: t("history.colInterviewer"),
+      sort: sortOf(state, "persona_name"),
       text: (it) => it.persona_name ?? t("history.notRecorded"),
       cell: (it) => it.persona_name ?? t("history.notRecorded"),
     },
     {
       id: "bank",
       header: t("history.colBank"),
+      sort: sortOf(state, "bank_name"),
       text: (it) => it.bank_name ?? t("history.notRecorded"),
       cell: (it) => it.bank_name ?? t("history.notRecorded"),
     },
@@ -158,6 +162,7 @@ export function InterviewsTab({
       // The bank's version in its own column, as in the Users tab (owner, 2026-10-09).
       id: "version",
       header: t("admin.users.bankVersion"),
+      sort: sortOf(state, "bank_version_no"),
       text: (it) => (it.bank_version_no != null ? `v${it.bank_version_no}` : "—"),
       cell: (it) =>
         it.bank_version_no != null ? (
@@ -169,6 +174,7 @@ export function InterviewsTab({
     {
       id: "status",
       header: t("history.colStatus"),
+      sort: sortOf(state, "status"),
       text: (it) => t(`history.status.${it.status}`),
       pad: 24, // the badge's own padding
       cell: (it) => <StatusBadge status={it.status} />,
@@ -183,6 +189,7 @@ export function InterviewsTab({
     {
       id: "outcome",
       header: t("admin.results.outcome"),
+      sort: sortOf(state, "outcome"),
       text: (it) => (it.outcome ? t(`report.outcome.${it.outcome}`) : "—"),
       cell: (it) => (it.outcome ? t(`report.outcome.${it.outcome}`) : "—"),
     },

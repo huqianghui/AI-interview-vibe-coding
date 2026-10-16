@@ -1167,6 +1167,13 @@ describe("AdminPage", () => {
       await waitFor(() =>
         expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ order: "asc" })),
       );
+      // Every column sorts on the server; a text column starts A to Z.
+      await user.click(screen.getByTestId("results-sort-username"));
+      await waitFor(() =>
+        expect(list).toHaveBeenLastCalledWith(
+          expect.objectContaining({ sort: "username", order: "asc", offset: 0 }),
+        ),
+      );
     });
 
     it("says when no interview matches", async () => {

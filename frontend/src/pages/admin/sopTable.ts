@@ -12,7 +12,7 @@ export interface SopFilters {
   status?: SopSummaryState;
 }
 
-export type SopSortKey = "name" | "sections" | "status";
+export type SopSortKey = "name" | "conversion" | "sections" | "status" | "notes";
 export type SortOrder = "asc" | "desc";
 
 export function conversionOf(d: SopDocument): SopConversion {
@@ -27,6 +27,8 @@ export function summaryStateOf(d: SopDocument): SopSummaryState {
 
 // Status sorts by how far along the summary is: approved, draft, none, failed.
 const STATUS_RANK: Record<SopSummaryState, number> = { reviewed: 0, draft: 1, none: 2, failed: 3 };
+// Conversion the same way: converted, still converting, failed.
+const CONVERSION_RANK: Record<SopConversion, number> = { converted: 0, pending: 1, failed: 2 };
 
 export function filterDocuments(docs: SopDocument[], f: SopFilters): SopDocument[] {
   const name = f.name?.trim().toLowerCase();
@@ -38,15 +40,26 @@ export function filterDocuments(docs: SopDocument[], f: SopFilters): SopDocument
   );
 }
 
-export function sortDocuments(docs: SopDocument[], key: SopSortKey, order: SortOrder) {
-  const by = (d: SopDocument): string | number =>
-    key === "sections" ? d.unit_count : key === "status" ? STATUS_RANK[summaryStateOf(d)] : "";
+/** `note` is the Notes column's text (it is translated, so the page supplies it). */
+export function sortDocuments(
+  docs: SopDocument[],
+  key: SopSortKey,
+  order: SortOrder,
+  note: (d: SopDocument) => string = () => "",
+) {
+  const rank = (d: SopDocument): number =>
+    key === "sections"
+      ? d.unit_count
+      : key === "status"
+        ? STATUS_RANK[summaryStateOf(d)]
+        : CONVERSION_RANK[conversionOf(d)];
+  const text = (d: SopDocument) => (key === "name" ? d.name : note(d));
   const sign = order === "desc" ? -1 : 1;
   return [...docs].sort((a, b) => {
     const diff =
-      key === "name"
-        ? a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" })
-        : (by(a) as number) - (by(b) as number);
+      key === "name" || key === "notes"
+        ? text(a).localeCompare(text(b), undefined, { numeric: true, sensitivity: "base" })
+        : rank(a) - rank(b);
     // Ties keep a stable, readable order: by name, A to Z.
     return sign * diff || a.name.localeCompare(b.name, undefined, { numeric: true });
   });

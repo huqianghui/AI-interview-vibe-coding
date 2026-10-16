@@ -3,7 +3,7 @@
  * page owns this hook, so the filters and page survive switching tabs (#181). */
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as admin from "../../api/admin";
-import type { JobItem, JobKind, JobStatus, JobsQuery } from "../../api/admin";
+import type { JobItem, JobKind, JobSort, JobStatus, JobsQuery } from "../../api/admin";
 import { DEFAULT_PAGE_SIZE } from "../../components/tableToolbar";
 
 /** What the tab shows first: what is going on, and what went wrong. */
@@ -22,11 +22,16 @@ export type JobsNotice =
   | { kind: "cancelled"; job: JobItem }
   | { kind: "failed"; message: string };
 
+const TEXT_SORTS = new Set<JobSort>(["kind", "status", "created_by", "error"]);
+
 export function useJobsTab(active: boolean) {
   const [statuses, setStatusesState] = useState<JobStatus[]>(DEFAULT_STATUSES);
   const [kind, setKindState] = useState<JobKind | "">("");
   const [pageSize, setPageSizeState] = useState<number>(DEFAULT_PAGE_SIZE);
   const [page, setPage] = useState(0);
+  // Newest first until a header is clicked; sorted on the server, so across every page.
+  const [sort, setSort] = useState<JobSort>("created_at");
+  const [order, setOrder] = useState<"asc" | "desc">("desc");
 
   const [items, setItems] = useState<JobItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -39,6 +44,8 @@ export function useJobsTab(active: boolean) {
   const query: JobsQuery = {
     status: statuses,
     kind: kind ? [kind] : undefined,
+    sort,
+    order,
     limit: pageSize,
     offset: page * pageSize,
   };
@@ -87,6 +94,15 @@ export function useJobsTab(active: boolean) {
     setPageSizeState(size);
     setPage(0);
   };
+  /** The same column flips; a new one starts A to Z for text, largest or newest first otherwise. */
+  const toggleSort = (key: JobSort) => {
+    if (key === sort) setOrder((o) => (o === "desc" ? "asc" : "desc"));
+    else {
+      setSort(key);
+      setOrder(TEXT_SORTS.has(key) ? "asc" : "desc");
+    }
+    setPage(0);
+  };
 
   const act = async (job: JobItem, action: "retry" | "cancel") => {
     setBusyId(job.job_id);
@@ -111,6 +127,9 @@ export function useJobsTab(active: boolean) {
     setPage,
     pageSize,
     setPageSize,
+    sort,
+    order,
+    toggleSort,
     items,
     total,
     loading,

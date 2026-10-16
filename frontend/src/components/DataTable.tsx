@@ -6,7 +6,13 @@
  * font — and starts at that width, between `minWidth` and `maxWidth`. A column of controls
  * (selects, buttons) has no text to measure and says its `width` instead. Dragged widths last
  * until the page reloads (owner's choice: not remembered). Built on Fluent's own column sizing,
- * the feature its DataGrid uses. */
+ * the feature its DataGrid uses.
+ *
+ * Sorting (owner, 2026-10-16): a click on a header sorts by that column, a second click reverses
+ * it. A table whose rows are all here sorts them itself (dataTableSort.ts), every column that
+ * shows text. A table whose owner pages the rows (on the server, or a page of a longer list)
+ * must sort before paging, so the owner gives each sortable column its `sort` and the table only
+ * draws the arrows: sorting one page in the browser would look right and be wrong. */
 import {
   type HTMLAttributes,
   type KeyboardEvent,
@@ -29,6 +35,7 @@ import {
   useTableFeatures,
   type TableColumnSizingOptions,
 } from "@fluentui/react-components";
+import { firstOrder, sortRows, sortValueOf, type SortOrder } from "./dataTableSort";
 import { fitWidths, makeMeasure, MIN_WIDTH } from "./dataTableWidths";
 
 export interface DataColumn<T> {
@@ -47,8 +54,14 @@ export interface DataColumn<T> {
   width?: number;
   minWidth?: number;
   maxWidth?: number;
-  /** A sortable header: the current direction (if this is the sorted column) and the toggle. */
+  /** Sorted by the owner: the current direction (if this is the sorted column) and the toggle.
+   * Once any column has one, the table sorts nothing itself. */
   sort?: { direction?: "ascending" | "descending"; onToggle: () => void; testId?: string };
+  /** What the table sorts this column by itself, when that is not its `text` (a date's time, a
+   * number, the name behind a select). */
+  sortValue?: (item: T) => string | number | null | undefined;
+  /** False: a column with text that sorting by would mean nothing (an id). */
+  sortable?: boolean;
 }
 
 export type RowProps = HTMLAttributes<HTMLTableRowElement> & { "data-testid"?: string };
@@ -101,8 +114,8 @@ function LongText({ children, title }: { children: ReactNode; title?: string }) 
 }
 
 export function DataTable<T>({
-  items,
-  columns,
+  items: given,
+  columns: own,
   getRowId,
   rowProps,
   size,
@@ -110,6 +123,47 @@ export function DataTable<T>({
   "aria-busy": ariaBusy,
 }: DataTableProps<T>) {
   const styles = useStyles();
+  // Sorting here, unless the owner sorts (see the header comment). Unsorted until a click.
+  const [sorted, setSorted] = useState<{ id: string; order: SortOrder } | null>(null);
+  const ownerSorts = own.some((c) => c.sort);
+  const columns = ownerSorts
+    ? own
+    : own.map((c): DataColumn<T> => {
+        const value = sortValueOf(c);
+        if (!value) return c;
+        const on = sorted?.id === c.id ? sorted.order : undefined;
+        return {
+          ...c,
+          sort: {
+            direction: on === "desc" ? "descending" : on === "asc" ? "ascending" : undefined,
+            onToggle: () =>
+              setSorted({
+                id: c.id,
+                order: on ? (on === "asc" ? "desc" : "asc") : firstOrder(given, value),
+              }),
+            testId: testId ? `${testId}-sort-${c.id}` : undefined,
+          },
+        };
+      });
+  const sortedBy = sorted && !ownerSorts ? own.find((c) => c.id === sorted.id) : undefined;
+  const sortedValue = sortedBy ? sortValueOf(sortedBy) : null;
+  // The order is taken when a header is clicked and then held, the way a spreadsheet does it:
+  // changing a sorted cell (a select in Users) must not move its row out from under the cursor.
+  // It is taken again only when rows come or go.
+  const ids = given.map(getRowId);
+  const idsKey = [...ids].sort().join("\n");
+  const rank = useMemo(() => {
+    if (!sorted || !sortedValue) return null;
+    return new Map(sortRows(given, sortedValue, sorted.order).map((it, i) => [getRowId(it), i]));
+    // Held across edits on purpose: only a click (sorted) or a changed set of rows re-sorts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sorted, sortedBy?.id, idsKey]);
+  const items = rank
+    ? given
+        .map((it, i) => ({ it, at: rank.get(ids[i]) ?? i }))
+        .sort((a, b) => a.at - b.at)
+        .map((r) => r.it)
+    : given;
   const wrapRef = useRef<HTMLDivElement>(null);
   const [font, setFont] = useState<string | null>(null);
   // Measured until the web font has loaded, a width is the fallback font's: measure again then.

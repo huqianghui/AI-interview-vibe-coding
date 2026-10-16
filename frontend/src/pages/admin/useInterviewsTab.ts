@@ -26,7 +26,8 @@ function message(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-export type SortKey = "started_at" | "total_score";
+export type SortKey = admin.InterviewResultSort;
+const TEXT_SORTS = new Set<SortKey>(["username", "persona_name", "bank_name", "status", "outcome"]);
 
 export function useInterviewsTab(active: boolean) {
   const [filters, setFiltersState] = useState<InterviewResultFilters>({});
@@ -110,12 +111,13 @@ export function useInterviewsTab(active: boolean) {
     setPage(0);
   };
 
-  /** Click a sortable header: the same column flips direction, a new column starts descending. */
+  /** Click a sortable header: the same column flips direction; a new one starts newest or highest
+   * first for a time or a number, A to Z for text (as the shared table does it). */
   const toggleSort = (key: SortKey) => {
     if (key === sort) setOrder((o) => (o === "desc" ? "asc" : "desc"));
     else {
       setSort(key);
-      setOrder("desc");
+      setOrder(TEXT_SORTS.has(key) ? "asc" : "desc");
     }
     setPage(0);
   };

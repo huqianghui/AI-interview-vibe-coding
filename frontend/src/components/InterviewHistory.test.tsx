@@ -69,6 +69,25 @@ describe("InterviewHistoryTable", () => {
     expect(onOpen).toHaveBeenCalledWith("i1");
   });
 
+  it("sorts by when an interview started, not by the short date shown", async () => {
+    await i18n.changeLanguage("en-US");
+    const user = userEvent.setup();
+    // The short date drops the year: as text, Dec 2025 would sort after Oct 2026.
+    const old = { ...ITEM, id: "old", started_at: "2025-12-30T09:00:00", total_score: 90 };
+    const unscored = { ...ITEM, id: "none", started_at: "2026-10-08T09:00:00", total_score: null };
+    wrap(<InterviewHistoryTable items={[old, ITEM, unscored]} onOpen={vi.fn()} />);
+    const order = () =>
+      screen.getAllByTestId(/^history-row-/).map((r) => r.getAttribute("data-testid")?.slice(12));
+
+    await user.click(screen.getByTestId("history-table-sort-started")); // newest first
+    expect(order()).toEqual(["none", "i1", "old"]);
+    await user.click(screen.getByTestId("history-table-sort-started"));
+    expect(order()).toEqual(["old", "i1", "none"]);
+    await user.click(screen.getByTestId("history-table-sort-score")); // highest, unscored last
+    expect(order()).toEqual(["old", "i1", "none"]);
+    expect(screen.queryByTestId("history-table-sort-open")).toBeNull(); // the button column
+  });
+
   it("says so when there is nothing yet", async () => {
     await i18n.changeLanguage("en-US");
     wrap(<InterviewHistoryTable items={[]} onOpen={vi.fn()} />);

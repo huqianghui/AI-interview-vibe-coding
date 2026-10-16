@@ -191,22 +191,29 @@ function LibrarySection({
     setPage(0);
   };
   const hasFilters = Object.values(filters).some(Boolean);
-  const matching = sortDocuments(filterDocuments(docs, filters), sort.key, sort.order);
+  const note = columns.find((c) => c.id === "notes")?.text;
+  const matching = sortDocuments(filterDocuments(docs, filters), sort.key, sort.order, note);
   const shown = pageOf(matching, page, pageSize);
-  // The same column flips its order; a new one starts A to Z for names, largest first otherwise.
+  // The same column flips its order; a new one starts A to Z for text, largest first otherwise.
   const sortable = (key: SopSortKey): DataColumn<SopDocument>["sort"] => ({
     direction: sort.key === key ? (sort.order === "desc" ? "descending" : "ascending") : undefined,
     onToggle: () => {
       setSort((prev) =>
         prev.key === key
           ? { key, order: prev.order === "desc" ? "asc" : "desc" }
-          : { key, order: key === "name" ? "asc" : "desc" },
+          : { key, order: key === "name" || key === "notes" ? "asc" : "desc" },
       );
       setPage(0);
     },
     testId: `sop-sort-${key}-${id}`,
   });
-  const sortKeys: Record<string, SopSortKey> = { name: "name", sections: "sections", status: "status" };
+  const sortKeys: Record<string, SopSortKey> = {
+    name: "name",
+    conversion: "conversion",
+    sections: "sections",
+    status: "status",
+    notes: "notes",
+  };
   const tableColumns = columns.map((c) =>
     sortKeys[c.id] ? { ...c, sort: sortable(sortKeys[c.id]) } : c,
   );

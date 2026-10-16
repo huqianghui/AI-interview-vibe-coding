@@ -141,18 +141,22 @@ export function UsersTab({ state }: { state: UsersTabState }) {
       id: "interviewer",
       header: t("admin.users.colInterviewer"),
       width: 220,
+      // Sorted by the assigned name; on the default (or not a candidate) sorts last.
+      sortValue: (u) => state.personas.find((p) => p.id === u.assigned_persona_id)?.name,
       cell: (u) => (candidate(u) ? <PersonaSelect u={u} state={state} /> : null),
     },
     {
       id: "bank",
       header: t("admin.users.colBank"),
       width: 260,
+      sortValue: (u) => state.banks.find((b) => b.bank_id === u.assigned_bank_id)?.name,
       cell: (u) => (candidate(u) ? <BankSelect u={u} state={state} /> : null),
     },
     {
       id: "version",
       header: t("admin.users.bankVersion"),
       width: 200,
+      sortValue: (u) => (u.assigned_bank_id ? u.assigned_bank_version_no : null),
       cell: (u) => (candidate(u) ? <VersionSelect u={u} state={state} /> : null),
     },
   ];
