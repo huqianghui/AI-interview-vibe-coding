@@ -242,8 +242,10 @@ describe("Operation id lookup", () => {
     await user.clear(input);
     await user.paste(OTHER); // not typed key by key: 32 keystrokes alone ran past 1 s on CI
     await user.click(screen.getByTestId("performance-lookup"));
-    // A lookup and then the link: on a loaded CI runner this outlasted findBy's default 1 s.
-    const link = await screen.findByTestId("performance-transaction-link", {}, { timeout: 5000 });
+    // Step by step, so a failure says which step stalled (CI only; never reproduced locally).
+    await waitFor(() => expect(admin.lookupOperation).toHaveBeenLastCalledWith(OTHER));
+    await waitFor(() => expect(admin.getTransactionLink).toHaveBeenLastCalledWith(OTHER));
+    const link = await screen.findByTestId("performance-transaction-link", {}, { timeout: 3000 });
     expect(link).toHaveAttribute("href", "https://portal.azure.com/#view/new");
     releaseOld({ status: "found", url: "https://portal.azure.com/#view/old" });
     await new Promise((r) => setTimeout(r, 20));
