@@ -1403,6 +1403,17 @@
             "title": "Interview Session Id",
             "type": "string"
           },
+          "interview_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interview Title"
+          },
           "recording_retention_days": {
             "default": 0,
             "title": "Recording Retention Days",

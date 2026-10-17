@@ -1433,6 +1433,50 @@ async def test_entry_points_report_the_avatar_character_for_stage_backdrop(clien
 
 
 @pytest.mark.asyncio
+async def test_entry_points_report_the_interview_title_for_the_stage_strip(client, db_session):
+    # 2026-10-17: the stage's topic strip shows the interview's title, the pinned bank's name (its
+    # version's snapshot, else the bank's). Same contract: start + GET only, null on mutations.
+    from app.models.bank_version import BankVersion
+    from app.models.interview import InterviewSession
+    from app.models.question import QuestionBank
+    from app.services import persona_service as psvc
+    from app.services import question_service
+
+    await psvc.create_persona(db_session, name="Interviewer", is_default=True)
+    bank = await question_service.create_bank(
+        db_session, name=" Clinical Study Manager ", is_default=True
+    )
+    await question_service.add_question(
+        db_session, bank_id=bank.id, text="Describe your role.", order_index=0
+    )
+    await question_service.add_question(
+        db_session, bank_id=bank.id, text="Describe a deviation.", order_index=1
+    )
+    await db_session.commit()
+    headers = await _new_candidate_headers(client)
+    body = (await client.post("/candidate/interview/start", headers=headers)).json()
+    iv = body["interview_session_id"]
+    session = await db_session.get(InterviewSession, iv)
+    await db_session.refresh(session)
+    assert session.bank_id, "the start pins a bank"
+    expected = None
+    if session.bank_version_id:
+        expected = (await db_session.get(BankVersion, session.bank_version_id)).bank_name.strip()
+    expected = expected or (await db_session.get(QuestionBank, session.bank_id)).name.strip()
+    assert body["interview_title"] == expected == "Clinical Study Manager"  # trimmed
+    got = (await client.get(f"/candidate/interview/{iv}", headers=headers)).json()
+    assert got["interview_title"] == expected
+    answered = (
+        await client.post(
+            f"/candidate/interview/{iv}/answer",
+            headers=headers,
+            json={"text": "an answer", "source": "text"},
+        )
+    ).json()
+    assert answered["interview_title"] is None
+
+
+@pytest.mark.asyncio
 async def test_judge_dry_run_retired_verdict_is_never_applicable(
     client, db_session, scripted_judge
 ):

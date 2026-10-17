@@ -26,9 +26,11 @@ from app.interview.external_runner import ExternalTurnConflict
 from app.interview.state_machine import ANSWER_SOURCES, InterviewStateError
 from app.jobs import queue, runner
 from app.models.anonymous_session import AnonymousCandidateSession
+from app.models.bank_version import BankVersion
 from app.models.interview import InterviewSession
 from app.models.job import Job
 from app.models.judge_event import JUDGE_TRIGGERS
+from app.models.question import QuestionBank
 from app.services import (
     assignment_service,
     performance_service,
@@ -101,6 +103,11 @@ class InterviewOut(BaseModel):
     # same public id the avatar picker shows. Same reporting contract: entry points only, ``None``
     # on mutations, latched by the UI. ``""`` when the persona has no avatar (voice-only / none).
     voice_avatar_character: str | None = None
+    # The interview's title for the stage's topic strip (owner, 2026-10-17): the name of the bank
+    # this session is pinned to (its version's own snapshot of the name, else the bank's). The
+    # admin names banks, so this is the name the organizer chose. ``None`` for external sessions
+    # (no bank) and on mutations; same reporting contract as above.
+    interview_title: str | None = None
 
 
 class JudgeIn(BaseModel):
@@ -223,6 +230,7 @@ def _to_interview_out(
     voice_linear_turns: bool | None = None,
     voice_judge_silence_seconds: int | None = None,
     voice_avatar_character: str | None = None,
+    interview_title: str | None = None,
 ) -> InterviewOut:
     is_external = session.brain_mode == "external"
     return InterviewOut(
@@ -238,7 +246,21 @@ def _to_interview_out(
         voice_linear_turns=voice_linear_turns,
         voice_judge_silence_seconds=voice_judge_silence_seconds,
         voice_avatar_character=voice_avatar_character,
+        interview_title=interview_title,
     )
+
+
+async def _interview_title(db: AsyncSession, session: InterviewSession) -> str | None:
+    """The pinned bank's name: its version's snapshot (what this session runs on), else the
+    bank's current name. ``None`` for an external session or a session with no bank."""
+    if session.brain_mode == "external" or not session.bank_id:
+        return None
+    if session.bank_version_id:
+        version = await db.get(BankVersion, session.bank_version_id)
+        if version is not None and version.bank_name.strip():
+            return version.bank_name.strip()
+    bank = await db.get(QuestionBank, session.bank_id)
+    return bank.name.strip() if bank is not None and bank.name.strip() else None
 
 
 async def _persona_voice_flags(db: AsyncSession, session: InterviewSession) -> dict:
@@ -259,6 +281,7 @@ async def _persona_voice_flags(db: AsyncSession, session: InterviewSession) -> d
     """
     persona = await persona_service.get_session_persona(db, session)
     judged = session.turn_mode == "judged"
+    title = await _interview_title(db, session)
     if persona is None:
         return {
             "voice_default": False,
@@ -266,8 +289,10 @@ async def _persona_voice_flags(db: AsyncSession, session: InterviewSession) -> d
             "voice_linear_turns": True,
             "voice_judge_silence_seconds": 0,
             "voice_avatar_character": "",
+            "interview_title": title,
         }
     return {
+        "interview_title": title,
         "voice_default": has_configured_voice(persona.voice_map),
         "voice_auto_submit_seconds": persona.voice_auto_submit_seconds_for(session.brain_mode),
         "voice_linear_turns": persona.linear_turns_for(session.brain_mode),
