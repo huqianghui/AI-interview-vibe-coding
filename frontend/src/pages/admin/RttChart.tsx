@@ -1,4 +1,4 @@
-/** The Performance tab's live API round-trip chart: the last minute of samples as one line, with
+/** The Performance tab's live API round-trip chart: the last 5 minutes of samples as one line, with
  * the median and p95 as dashed guides and a crosshair tooltip on hover. One series, so no legend:
  * the caption names it. A failed sample breaks the line and is marked on the baseline. */
 import { useState } from "react";

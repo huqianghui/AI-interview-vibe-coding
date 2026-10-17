@@ -388,7 +388,7 @@ describe("live network check", () => {
       // Grade A suits a video avatar; Sakura is a photo avatar: a note, not a must.
       expect(advice).toHaveTextContent(/Sakura has no video avatar/);
       const live = screen.getByTestId("performance-live-grade");
-      expect(live).toHaveTextContent(/Recomputed every 2 s/);
+      expect(live).toHaveTextContent(/recomputed every 2 s/);
     } finally {
       LIVE_CHECK.rttMs = saved;
     }
@@ -422,16 +422,93 @@ describe("live network check", () => {
     visibility.mockRestore();
   });
 
-  it("does not run on any other tab", async () => {
-    renderAt("/admin?tab=results");
+  it("starts on any admin tab, so the Performance tab opens on history", async () => {
+    const user = userEvent.setup();
     vi.spyOn(admin, "listInterviewResults").mockResolvedValue({
       items: [],
       total: 0,
       limit: 20,
       offset: 0,
     });
+    renderAt("/admin?tab=results");
     await screen.findByTestId("results-tab");
-    expect(probe.apiRttOnce).not.toHaveBeenCalled();
+    // The round trip runs on another tab (owner, 2026-10-17)...
+    await waitFor(() => expect(probe.apiRttOnce).toHaveBeenCalled());
+    // ...but not the checks with one current reading each, nor the tab's own reads: the
+    // voice-connection probe carries the token in its URL, STUN goes to Microsoft's relay, and
+    // the downlink check is 2 MiB.
+    expect(probe.measureWs).not.toHaveBeenCalled();
+    expect(probe.measureStun).not.toHaveBeenCalled();
+    expect(probe.measureDownlink).not.toHaveBeenCalled();
+    expect(admin.getPerformanceLinks).not.toHaveBeenCalled();
+
+    await user.click(screen.getByTestId("admin-tab-performance"));
+    // The chart already has what was measured on the other tab...
+    expect(await screen.findByTestId("performance-rtt-chart")).toBeInTheDocument();
+    expect(screen.queryByText("Measuring…")).toBeNull();
+    // ...and the rest run at once.
+    await waitFor(() => expect(probe.measureWs).toHaveBeenCalled());
+    await waitFor(() => expect(probe.measureStun).toHaveBeenCalled());
+    await waitFor(() => expect(probe.measureDownlink).toHaveBeenCalled());
+  });
+
+  it("grades the last minute while the chart keeps five", async () => {
+    const { liveGrade, LIVE_CHECK } = await import("./usePerformanceTab");
+    const at = Date.now();
+    // Four bad minutes, then a good last minute: the grade follows the last minute.
+    const old = Array.from({ length: LIVE_CHECK.chartSamples - LIVE_CHECK.samples }, (_, i) => ({
+      at: at + i,
+      ms: 900,
+    }));
+    const recent = Array.from({ length: LIVE_CHECK.samples }, (_, i) => ({
+      at: at + 1000 + i,
+      ms: 40,
+    }));
+    const live = {
+      rtt: [...old, ...recent],
+      ws: null,
+      stun: { ok: true as const, ms: 30 },
+      stunFailures: 0,
+      downKbps: null,
+    };
+    const onlyRecent = { ...live, rtt: recent };
+    expect(liveGrade(live)?.grade).toBe(liveGrade(onlyRecent)?.grade);
+    // And the old minutes alone would grade worse, so the window is what made the difference.
+    expect(liveGrade({ ...live, rtt: old })?.grade).not.toBe(liveGrade(onlyRecent)?.grade);
+    expect(LIVE_CHECK.chartSamples * LIVE_CHECK.rttMs).toBe(300_000); // 5 minutes
+  });
+
+  it("counts a sample as recent by its time, not its place", async () => {
+    // A tab hidden for an hour keeps its samples: they must not count as "the last minute".
+    const { recentRtts, LIVE_CHECK } = await import("./usePerformanceTab");
+    const now = 10_000_000;
+    const beforeHiding = Array.from({ length: 20 }, (_, i) => ({
+      at: now - 3_600_000 + i,
+      ms: 900,
+    }));
+    const sinceBack = [{ at: now - 4000, ms: 40 }, { at: now - 2000, ms: 41 }];
+    expect(recentRtts([...beforeHiding, ...sinceBack], now)).toEqual(sinceBack);
+    expect(LIVE_CHECK.gradeWindowMs).toBe(60_000);
+    expect(LIVE_CHECK.chartWindowMs).toBe(300_000);
+  });
+
+  it("skips the voice-connection probe once the sign-in is gone", async () => {
+    const { LIVE_CHECK } = await import("./usePerformanceTab");
+    const saved = LIVE_CHECK.wsMs;
+    LIVE_CHECK.wsMs = 20;
+    try {
+      renderAt("/admin?tab=performance");
+      // Repeating while signed in...
+      await waitFor(() => expect(vi.mocked(probe.measureWs).mock.calls.length).toBeGreaterThan(2));
+      auth.clearAdminToken();
+      await new Promise((r) => setTimeout(r, 60)); // let a run already under way finish
+      vi.mocked(probe.measureWs).mockClear();
+      await new Promise((r) => setTimeout(r, 120)); // several 20 ms periods
+      // ...and not once the token is gone.
+      expect(probe.measureWs).not.toHaveBeenCalled();
+    } finally {
+      LIVE_CHECK.wsMs = saved;
+    }
   });
 
   it("the chart shows a sample's time and value on hover", async () => {

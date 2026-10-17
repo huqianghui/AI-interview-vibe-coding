@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.77.1.0 (2026-10-17)
+
+### Changed
+- **The live round-trip check starts as soon as `/admin` opens, on any tab.** It runs while the
+  admin page is open and visible, whichever tab you are on, so the Performance tab opens on a
+  stretch of history instead of an empty chart. It still pauses while the browser tab is hidden.
+  The other checks (voice connection, UDP to Azure's relay, the 2 MiB downlink test) each show one
+  current reading and still run only while the Performance tab is open, at once when it opens:
+  the voice-connection check carries the admin token in its URL, and the UDP check reaches out to
+  Microsoft's relay, so neither should run from every admin tab.
+- **The round-trip chart shows the last 5 minutes** (150 samples, was 1 minute). The estimated
+  grade, and the "now · median · p95 · failed" line under the chart, still read the last minute,
+  so they follow the link as it is now. Samples count by when they were taken: after the browser
+  tab has been hidden, readings from before do not count as recent.
+- **No voice-connection probe once the sign-in has expired**, instead of one failing every 15 s.
+
 ## 0.77.0.0 (2026-10-16)
 
 ### Added

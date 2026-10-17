@@ -520,7 +520,7 @@ export const resources = {
           notConfigured: "Application Insights links are not configured for this deployment.",
           live: "Live · updates every 2 s",
           paused: "Paused while this tab is hidden",
-          rttChart: "API round trip, last minute (ms)",
+          rttChart: "API round trip, last 5 minutes (ms)",
           rttNow: "{{now}} ms now · median {{median}} · p95 {{p95}} · {{failed}} failed",
           rttWaiting: "Measuring…",
           chartTooltip: "{{time}} · {{ms}}",
@@ -569,8 +569,9 @@ export const resources = {
           noteRelay: "Ran through the TURN relay: the RTT includes the relay hop.",
           gradesDoc: "Grades and settings: docs/network-grades.md",
           liveCadence:
-            "Recomputed every 2 s from the last minute (RTT p95 of 30 samples); STUN every 60 s, " +
-            "downlink every 2 min.",
+            "Round trip measured from when the admin page opens, on any tab; recomputed every 2 s " +
+            "from the last minute (RTT p95 of 30 samples; the chart shows 5 minutes). While this " +
+            "tab is open: voice connection every 15 s, STUN every 60 s, downlink every 2 min.",
           interviewCadence:
             "From the whole interview's telemetry, read when you look it up (it arrives a few " +
             "minutes late: look it up again right after an interview).",
@@ -1186,7 +1187,7 @@ export const resources = {
           notConfigured: "这个部署没有配置 Application Insights 链接。",
           live: "实时 · 每 2 秒更新",
           paused: "此页签隐藏时暂停",
-          rttChart: "API 往返时间，最近一分钟（ms）",
+          rttChart: "API 往返时间，最近 5 分钟（ms）",
           rttNow: "当前 {{now}} ms · 中位数 {{median}} · p95 {{p95}} · 失败 {{failed}} 次",
           rttWaiting: "测量中…",
           chartTooltip: "{{time}} · {{ms}}",
@@ -1229,7 +1230,9 @@ export const resources = {
           noteDownNotGraded: "下行未参与分级：照片数字人只发约 0.8 Mbit/s，这个估计反映不了链路容量。",
           noteRelay: "经过 TURN 中继：RTT 包含中继这一跳。",
           gradesDoc: "分级与配置：docs/network-grades.md",
-          liveCadence: "每 2 秒按最近一分钟重新计算（RTT 取 30 个采样的 p95）；STUN 每 60 秒，下行每 2 分钟。",
+          liveCadence:
+            "往返时间从打开管理页起测量，任何页签都在测；每 2 秒按最近一分钟重新计算（RTT 取 30 个采样的 " +
+            "p95；图表显示最近 5 分钟）。本页签打开时：语音连接每 15 秒，STUN 每 60 秒，下行每 2 分钟。",
           interviewCadence:
             "取自整场面试的遥测，在查询时读取（数据会晚几分钟到达：面试刚结束时请稍后再查一次）。",
           why: "{{grade}} 级的原因：{{reasons}}",

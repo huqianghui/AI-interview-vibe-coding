@@ -36,11 +36,19 @@ export function normalizeOperationId(raw: string): string | null {
 export const LIVE_CHECK = {
   rttMs: 2000,
   wsMs: 15_000,
-  // 2 MiB each: often enough to follow the link, rare enough for ~60 MB an hour per open tab.
+  // 2 MiB each: often enough to follow the link, rare enough for ~60 MB an hour. Only while the
+  // Performance tab is open; only the round trip runs on every /admin tab.
   downMs: 120_000,
   stunMs: 60_000,
-  /** The chart's window: 30 samples = the last minute. */
+  /** The grade's window: 30 samples = the last minute. */
   samples: 30,
+  /** The same windows in time: a sample from before the page was hidden must not count as recent
+   * (samples are kept by count, and an hour hidden would otherwise leave them "last"). */
+  gradeWindowMs: 60_000,
+  chartWindowMs: 300_000,
+  /** The chart's window: 150 samples = the last 5 minutes, measured on any /admin tab, so the
+   * Performance tab opens on a stretch of history rather than an empty chart (owner, 2026-10-17). */
+  chartSamples: 150,
 };
 
 export interface RttSample {
@@ -71,6 +79,12 @@ export const STUN_FAILURES_FOR_CLOSED = 2;
 const RECENT = 5;
 const RECENT_FAILED = 3;
 
+/** The samples of the grade's window: the last minute, by time and by count. */
+export function recentRtts(samples: RttSample[], now: number = Date.now()): RttSample[] {
+  const since = now - LIVE_CHECK.gradeWindowMs;
+  return samples.filter((s) => s.at >= since).slice(-LIVE_CHECK.samples);
+}
+
 /** The RTTs that answered, oldest first. */
 export function okRtts(samples: RttSample[]): number[] {
   return samples.flatMap((s) => (s.ms === null ? [] : [s.ms]));
@@ -79,9 +93,11 @@ export function okRtts(samples: RttSample[]): number[] {
 /** This browser's estimated grade: TCP RTT to the region (a lower bound for the media path), no
  * UDP loss reading, the STUN answer as the UDP gate. */
 export function liveGrade(live: LiveNetwork): GradeResult | null {
-  const rtts = okRtts(live.rtt);
+  // The last minute only: the chart keeps five, and a grade should follow the link as it is now.
+  const recent = recentRtts(live.rtt);
+  const rtts = okRtts(recent);
   if (rtts.length < 3) return null;
-  if (live.rtt.slice(-RECENT).filter((s) => s.ms === null).length >= RECENT_FAILED) return null;
+  if (recent.slice(-RECENT).filter((s) => s.ms === null).length >= RECENT_FAILED) return null;
   let udpOk: boolean | null = null;
   if (live.stun?.ok) udpOk = true;
   else if (live.stunFailures >= STUN_FAILURES_FOR_CLOSED) udpOk = false;
@@ -174,7 +190,10 @@ function useEvery(on: boolean, ms: number, fn: (live: () => boolean) => Promise<
   }, [on, ms]);
 }
 
-export function usePerformanceTab(active: boolean) {
+/** `signedIn`: the admin page is open and signed in, on any tab; the API round trip runs then, so
+ * its chart has history when the tab opens. `active`: the Performance tab itself is open; the
+ * other checks, which each show one current reading, and the tab's own reads wait for it. */
+export function usePerformanceTab(active: boolean, signedIn: boolean = active) {
   const [links, setLinks] = useState<PerformanceLinks | null>(null);
   const [live, setLive] = useState<LiveNetwork>(EMPTY_LIVE);
   const [input, setInput] = useState("");
@@ -200,26 +219,36 @@ export function usePerformanceTab(active: boolean) {
     admin.getCurrentConfig().then(setDefaultConfig, () => undefined);
   }, [active]);
 
-  // The live check runs only while someone is looking at it: the tab is open and the page visible.
+  // Only the round trip runs on every admin tab (it is the one with history to show). The others
+  // run while the Performance tab is open, and at once when it opens (owner, 2026-10-17): the
+  // voice-connection probe carries the admin token in its URL, so on every tab it would put
+  // thousands more copies in the access log a day; STUN sends UDP to Microsoft's relay; and the
+  // downlink check is 2 MiB a run.
   const visible = useVisible();
-  const running = active && visible;
+  const running = signedIn && visible;
+  const tabRunning = active && visible;
   useEvery(running, LIVE_CHECK.rttMs, async (isLive) => {
     const ms = await apiRttOnce();
     if (!isLive()) return;
     setLive((l) => ({
       ...l,
-      rtt: [...l.rtt, { at: Date.now(), ms }].slice(-LIVE_CHECK.samples),
+      rtt: [...l.rtt, { at: Date.now(), ms }]
+        .filter((s) => s.at >= Date.now() - LIVE_CHECK.chartWindowMs)
+        .slice(-LIVE_CHECK.chartSamples),
     }));
   });
-  useEvery(running, LIVE_CHECK.wsMs, async (isLive) => {
-    const ws = await measureWs(auth.getAdminToken());
+  useEvery(tabRunning, LIVE_CHECK.wsMs, async (isLive) => {
+    // An expired sign-in clears the token: no probe that can only fail (and log) every 15 s.
+    const token = auth.getAdminToken();
+    if (!token) return;
+    const ws = await measureWs(token);
     if (isLive()) setLive((l) => ({ ...l, ws }));
   });
-  useEvery(running, LIVE_CHECK.downMs, async (isLive) => {
+  useEvery(tabRunning, LIVE_CHECK.downMs, async (isLive) => {
     const downKbps = await measureDownlink();
     if (isLive()) setLive((l) => ({ ...l, downKbps }));
   });
-  useEvery(running, LIVE_CHECK.stunMs, async (isLive) => {
+  useEvery(tabRunning, LIVE_CHECK.stunMs, async (isLive) => {
     const stun = await measureStun();
     if (!isLive()) return;
     setLive((l) => ({ ...l, stun, stunFailures: stun.ok ? 0 : l.stunFailures + 1 }));

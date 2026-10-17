@@ -31,6 +31,7 @@ import {
   isVideoAvatar,
   liveGrade,
   okRtts,
+  recentRtts,
   type PerformanceTabState,
 } from "./usePerformanceTab";
 
@@ -345,7 +346,9 @@ export function PerformanceTab({
     interviewNetwork.kind === "done" && interviewNetwork.network.legacy
       ? (interviewNetwork.network.operations ?? [])
       : null;
-  const rtts = okRtts(live.rtt);
+  // The line under the chart reads the grade's window (the last minute), so the two agree.
+  const recent = recentRtts(live.rtt);
+  const rtts = okRtts(recent);
   const lastRtt = live.rtt.length ? live.rtt[live.rtt.length - 1].ms : null;
   const net = interviewNetwork.kind === "done" ? interviewNetwork.network : null;
 
@@ -579,7 +582,7 @@ export function PerformanceTab({
             {state.running ? t("admin.performance.live") : t("admin.performance.paused")}
           </Text>
           <Text className={local.label}>{t("admin.performance.rttChart")}</Text>
-          <RttChart samples={live.rtt} capacity={LIVE_CHECK.samples} />
+          <RttChart samples={live.rtt} capacity={LIVE_CHECK.chartSamples} />
           <div className={local.rows} data-testid="performance-network">
             <Text className={local.label}>{t("admin.performance.apiRtt")}</Text>
             <Text data-testid="performance-api">
@@ -588,7 +591,7 @@ export function PerformanceTab({
                     now: lastRtt === null ? "—" : Math.round(lastRtt),
                     median: Math.round(percentile(rtts, 50)),
                     p95: Math.round(percentile(rtts, 95)),
-                    failed: live.rtt.length - rtts.length,
+                    failed: recent.length - rtts.length,
                   })
                 : t("admin.performance.rttWaiting")}
             </Text>

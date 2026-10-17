@@ -86,7 +86,8 @@ export function AdminPage() {
   const results = useInterviewsTab(authed && tab === "results");
   const jobs = useJobsTab(authed && tab === "jobs");
   const sop = useSopTab(authed && tab === "sop");
-  const performance = usePerformanceTab(authed && tab === "performance");
+  // The live round-trip check starts on any tab, so the Performance tab opens on its history.
+  const performance = usePerformanceTab(authed && tab === "performance", authed);
   const { lookup: lookupOperation } = performance;
   const { refreshBanks } = content;
   const { refreshConfig, refreshExternalConfig } = connection;
