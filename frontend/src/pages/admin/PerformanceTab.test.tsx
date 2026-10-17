@@ -422,16 +422,55 @@ describe("live network check", () => {
     visibility.mockRestore();
   });
 
-  it("does not run on any other tab", async () => {
-    renderAt("/admin?tab=results");
+  it("starts on any admin tab, so the Performance tab opens on history", async () => {
+    const user = userEvent.setup();
     vi.spyOn(admin, "listInterviewResults").mockResolvedValue({
       items: [],
       total: 0,
       limit: 20,
       offset: 0,
     });
+    renderAt("/admin?tab=results");
     await screen.findByTestId("results-tab");
-    expect(probe.apiRttOnce).not.toHaveBeenCalled();
+    // The cheap checks run on another tab (owner, 2026-10-17)...
+    await waitFor(() => expect(probe.apiRttOnce).toHaveBeenCalled());
+    await waitFor(() => expect(probe.measureWs).toHaveBeenCalled());
+    await waitFor(() => expect(probe.measureStun).toHaveBeenCalled());
+    // ...but not the 2 MiB downlink check, nor the tab's own reads.
+    expect(probe.measureDownlink).not.toHaveBeenCalled();
+    expect(admin.getPerformanceLinks).not.toHaveBeenCalled();
+
+    await user.click(screen.getByTestId("admin-tab-performance"));
+    // The chart already has what was measured on the other tab.
+    expect(await screen.findByTestId("performance-rtt-chart")).toBeInTheDocument();
+    expect(screen.queryByText("Measuring…")).toBeNull();
+    await waitFor(() => expect(probe.measureDownlink).toHaveBeenCalled());
+  });
+
+  it("grades the last minute while the chart keeps five", async () => {
+    const { liveGrade, LIVE_CHECK } = await import("./usePerformanceTab");
+    const at = Date.now();
+    // Four bad minutes, then a good last minute: the grade follows the last minute.
+    const old = Array.from({ length: LIVE_CHECK.chartSamples - LIVE_CHECK.samples }, (_, i) => ({
+      at: at + i,
+      ms: 900,
+    }));
+    const recent = Array.from({ length: LIVE_CHECK.samples }, (_, i) => ({
+      at: at + 1000 + i,
+      ms: 40,
+    }));
+    const live = {
+      rtt: [...old, ...recent],
+      ws: null,
+      stun: { ok: true as const, ms: 30 },
+      stunFailures: 0,
+      downKbps: null,
+    };
+    const onlyRecent = { ...live, rtt: recent };
+    expect(liveGrade(live)?.grade).toBe(liveGrade(onlyRecent)?.grade);
+    // And the old minutes alone would grade worse, so the window is what made the difference.
+    expect(liveGrade({ ...live, rtt: old })?.grade).not.toBe(liveGrade(onlyRecent)?.grade);
+    expect(LIVE_CHECK.chartSamples * LIVE_CHECK.rttMs).toBe(300_000); // 5 minutes
   });
 
   it("the chart shows a sample's time and value on hover", async () => {
