@@ -108,7 +108,11 @@ status legend shows the live voice state (ready / listening / speaking / muted).
 reads each question **exactly as it appears on the card**: the text is spoken by server-side TTS,
 with no model in between to reword it.
 
-Form 2, the photo avatar (Sakura), on real Azure:
+Form 1, the video avatar (Lisa, grade A), on real Azure:
+
+![Voice mode — live video avatar (Lisa, grade A), 1080p 16:9, having read the question, transcript on the right](docs/images/09a-live-avatar-video.png)
+
+Form 2, the photo avatar (Sakura, grade B), on real Azure:
 
 ![Voice mode — live photo avatar (Sakura, grade B) having read the question, transcript on the right](docs/images/09-live-avatar-voice.png)
 

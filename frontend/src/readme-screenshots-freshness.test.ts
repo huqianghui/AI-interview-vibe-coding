@@ -94,9 +94,15 @@ describe("README screenshot freshness", () => {
     const readme = execFileSync("git", ["show", "HEAD:README.md"], { cwd: REPO, encoding: "utf8" });
     const referenced = [...readme.matchAll(/docs\/images\/([a-z0-9.-]+\.png)/g)].map((m) => m[1]);
     const mapped = new Set(Object.keys(DEPICTS));
-    // The live-avatar shot needs real Azure and a persona, so it is captured by a different spec and
-    // tracked separately; it is named here so the exemption is deliberate rather than accidental.
-    const EXEMPT = new Set(["09-live-avatar-voice.png", "07-admin-rubric-editor.png", "08-admin-agent-editor.png"]);
+    // The live-avatar shots need real Azure and a persona, so they are captured by a different spec
+    // and tracked separately; they are named here so the exemption is deliberate rather than
+    // accidental. 09a is the video avatar (Lisa, grade A), 09 the photo avatar (Sakura, grade B).
+    const EXEMPT = new Set([
+      "09-live-avatar-voice.png",
+      "09a-live-avatar-video.png",
+      "07-admin-rubric-editor.png",
+      "08-admin-agent-editor.png",
+    ]);
     const unmapped = [...new Set(referenced)].filter((f) => !mapped.has(f) && !EXEMPT.has(f));
     expect(unmapped, `add these to DEPICTS or EXEMPT: ${unmapped.join(", ")}`).toEqual([]);
   });
