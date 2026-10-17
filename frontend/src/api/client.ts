@@ -67,6 +67,9 @@ export interface Interview {
   /** Default persona's avatar character id (e.g. "amira"); the stage is painted in that photo's own
    * backdrop colour. Entry points only, null on mutations, latched per session. "" = no avatar. */
   voice_avatar_character?: string | null;
+  /** The interview's title for the stage's topic strip: the pinned bank's name. Entry points only,
+   * null on mutations and for external sessions; latched per session. */
+  interview_title?: string | null;
   // Spoken answers are recorded (the microphone only) and kept this many days; the page says so
   // before the voice interview starts.
   audio_recorded?: boolean;

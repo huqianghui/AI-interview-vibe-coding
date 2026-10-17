@@ -45,7 +45,8 @@ import { CandidateIdle } from "../components/CandidateIdle";
 import { MyInterviews } from "../components/MyInterviews";
 import { CandidateOrientation } from "../components/CandidateOrientation";
 import { palette } from "../theme";
-import { AVATAR_CHARACTER_MAP } from "../data/avatarCharacters";
+import { AVATAR_CHARACTER_MAP, interviewerIdentity } from "../data/avatarCharacters";
+import { NamePlate, TopicStrip } from "../components/BroadcastChrome";
 import { QuestionProgress } from "../components/QuestionProgress";
 import { MicPermissionDialog } from "../components/MicPermissionDialog";
 import { Transcript } from "../components/Transcript";
@@ -215,6 +216,15 @@ export function InterviewPage() {
   // fills the stage with the colour it reads from the decoded picture, so the two match exactly.
   // Video avatars keep the ground, for the reason above.
   const photoBackdrop = AVATAR_CHARACTER_MAP.get(avatarCharacterRef.current ?? "")?.backdrop;
+  // The interview's title for the topic strip: reported on start/resume only (null on mutations),
+  // so latched like the character above.
+  const interviewTitleRef = useRef<string | null>(null);
+  if (typeof interview?.interview_title === "string") {
+    interviewTitleRef.current = interview.interview_title;
+  }
+  // Whether a photo avatar's picture is what the stage shows: then the broadcast layout (framed
+  // window, name plate, topic strip, studio set); otherwise the plain stage with the orb.
+  const [photoStage, setPhotoStage] = useState(false);
   const avatarBackground = photoBackdrop ?? palette.ground;
   const judgeInFlightRef = useRef(false);
   const submitSeqRef = useRef(0);
@@ -986,8 +996,13 @@ export function InterviewPage() {
                 square, so the full head-and-shoulders framing is kept whatever the stage's shape
                 and the stage gradient fills the letterbox. */}
             <div
-              className={mergeClasses(styles.stage, styles.stageOrderNarrow)}
+              className={mergeClasses(
+                styles.stage,
+                styles.stageOrderNarrow,
+                photoStage && styles.broadcastStage,
+              )}
               data-testid="interview-stage"
+              data-broadcast={photoStage}
             >
               <div className={styles.stageAvatar}>
                 {/* Once the digital human is streaming, keep it visible — do NOT gate on the
@@ -1001,6 +1016,17 @@ export function InterviewPage() {
                   mediaMode={voice.mediaMode}
                   character={avatarCharacterRef.current}
                   backdrop={photoBackdrop}
+                  framed
+                  onPhotoStage={setPhotoStage}
+                  photoOverlay={
+                    <NamePlate name={interviewerIdentity(avatarCharacterRef.current).name} />
+                  }
+                  photoBelow={
+                    <TopicStrip
+                      title={interviewTitleRef.current}
+                      total={questionTotalRef.current || null}
+                    />
+                  }
                 />
               </div>
             </div>

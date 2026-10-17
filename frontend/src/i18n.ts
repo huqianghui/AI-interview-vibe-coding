@@ -37,6 +37,20 @@ export const resources = {
         loginFailed: "Sign-in failed ({{status}}): {{detail}}",
         loginFailedNoDetail: "Sign-in failed ({{status}}).",
       },
+      // The interview stage's broadcast layout around a photo avatar (BroadcastChrome.tsx):
+      // the name plate and the topic strip. Guidance from the orientation screen, never dialogue.
+      stage: {
+        role: "Your interviewer",
+        roleNote: "Reads every question exactly as written",
+        kicker: "Interview",
+        questions_one: "{{count}} question",
+        questions_other: "{{count}} questions",
+        guided: "Guided",
+        untitled: "Interview",
+        chipChannel: "Speak or type, switch anytime",
+        chipDone: "You decide when each answer is done",
+        chipPace: "At your pace",
+      },
       orientation: {
         title: "Before we begin",
         body: "You'll answer {{total}} questions. Take your time — you can speak or type, and you decide when each answer is finished.",
@@ -735,6 +749,20 @@ export const resources = {
         wrongCredentials: "用户名或密码错误。",
         loginFailed: "登录失败 ({{status}}):{{detail}}",
         loginFailedNoDetail: "登录失败 ({{status}})。",
+      },
+      // 面试舞台围绕照片数字人的演播室式布局（BroadcastChrome.tsx）：名牌与主题条。
+      // 内容取自开始前的说明页，只是指引，不是对话。
+      stage: {
+        role: "您的面试官",
+        roleNote: "每道题都按原文朗读",
+        kicker: "面试",
+        questions_one: "共 {{count}} 题",
+        questions_other: "共 {{count}} 题",
+        guided: "由面试官引导",
+        untitled: "面试",
+        chipChannel: "可说可写，随时切换",
+        chipDone: "每题由您决定何时答完",
+        chipPace: "按您的节奏",
       },
       orientation: {
         title: "开始之前",
