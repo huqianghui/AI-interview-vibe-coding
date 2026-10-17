@@ -36,11 +36,15 @@ export function normalizeOperationId(raw: string): string | null {
 export const LIVE_CHECK = {
   rttMs: 2000,
   wsMs: 15_000,
-  // 2 MiB each: often enough to follow the link, rare enough for ~60 MB an hour per open tab.
+  // 2 MiB each: often enough to follow the link, rare enough for ~60 MB an hour. Only while the
+  // Performance tab is open; the other checks run on every /admin tab.
   downMs: 120_000,
   stunMs: 60_000,
-  /** The chart's window: 30 samples = the last minute. */
+  /** The grade's window: 30 samples = the last minute. */
   samples: 30,
+  /** The chart's window: 150 samples = the last 5 minutes, measured on any /admin tab, so the
+   * Performance tab opens on a stretch of history rather than an empty chart (owner, 2026-10-17). */
+  chartSamples: 150,
 };
 
 export interface RttSample {
@@ -79,7 +83,8 @@ export function okRtts(samples: RttSample[]): number[] {
 /** This browser's estimated grade: TCP RTT to the region (a lower bound for the media path), no
  * UDP loss reading, the STUN answer as the UDP gate. */
 export function liveGrade(live: LiveNetwork): GradeResult | null {
-  const rtts = okRtts(live.rtt);
+  // The last minute only: the chart keeps five, and a grade should follow the link as it is now.
+  const rtts = okRtts(live.rtt.slice(-LIVE_CHECK.samples));
   if (rtts.length < 3) return null;
   if (live.rtt.slice(-RECENT).filter((s) => s.ms === null).length >= RECENT_FAILED) return null;
   let udpOk: boolean | null = null;
@@ -174,7 +179,10 @@ function useEvery(on: boolean, ms: number, fn: (live: () => boolean) => Promise<
   }, [on, ms]);
 }
 
-export function usePerformanceTab(active: boolean) {
+/** `signedIn`: the admin page is open and signed in, on any tab; the cheap live checks (API round
+ * trip, WebSocket, STUN) run then. `active`: the Performance tab itself is open; the rest of the
+ * tab's reads, and the 2 MiB downlink check, wait for it. */
+export function usePerformanceTab(active: boolean, signedIn: boolean = active) {
   const [links, setLinks] = useState<PerformanceLinks | null>(null);
   const [live, setLive] = useState<LiveNetwork>(EMPTY_LIVE);
   const [input, setInput] = useState("");
@@ -200,22 +208,24 @@ export function usePerformanceTab(active: boolean) {
     admin.getCurrentConfig().then(setDefaultConfig, () => undefined);
   }, [active]);
 
-  // The live check runs only while someone is looking at it: the tab is open and the page visible.
+  // The live check runs while the admin page is open on any tab and visible, so the Performance
+  // tab opens on history; the downlink check, 2 MiB a run, only while that tab is open.
   const visible = useVisible();
-  const running = active && visible;
+  const running = signedIn && visible;
+  const downRunning = active && visible;
   useEvery(running, LIVE_CHECK.rttMs, async (isLive) => {
     const ms = await apiRttOnce();
     if (!isLive()) return;
     setLive((l) => ({
       ...l,
-      rtt: [...l.rtt, { at: Date.now(), ms }].slice(-LIVE_CHECK.samples),
+      rtt: [...l.rtt, { at: Date.now(), ms }].slice(-LIVE_CHECK.chartSamples),
     }));
   });
   useEvery(running, LIVE_CHECK.wsMs, async (isLive) => {
     const ws = await measureWs(auth.getAdminToken());
     if (isLive()) setLive((l) => ({ ...l, ws }));
   });
-  useEvery(running, LIVE_CHECK.downMs, async (isLive) => {
+  useEvery(downRunning, LIVE_CHECK.downMs, async (isLive) => {
     const downKbps = await measureDownlink();
     if (isLive()) setLive((l) => ({ ...l, downKbps }));
   });

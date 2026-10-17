@@ -579,7 +579,7 @@ export function PerformanceTab({
             {state.running ? t("admin.performance.live") : t("admin.performance.paused")}
           </Text>
           <Text className={local.label}>{t("admin.performance.rttChart")}</Text>
-          <RttChart samples={live.rtt} capacity={LIVE_CHECK.samples} />
+          <RttChart samples={live.rtt} capacity={LIVE_CHECK.chartSamples} />
           <div className={local.rows} data-testid="performance-network">
             <Text className={local.label}>{t("admin.performance.apiRtt")}</Text>
             <Text data-testid="performance-api">
