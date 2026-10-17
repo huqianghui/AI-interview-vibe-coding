@@ -13,7 +13,11 @@ import { act, render, screen } from "@testing-library/react";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import "../i18n";
 import { AvatarView } from "./AvatarView";
-import { AVATAR_PORTRAIT_STORAGE_KEY, portraitKeyFor } from "./avatarPortraitCache";
+import {
+  AVATAR_PORTRAIT_STORAGE_KEY,
+  portraitKeyFor,
+  readCachedPortrait,
+} from "./avatarPortraitCache";
 
 const JPEG = (tag: string) => `data:image/jpeg;base64,${tag}`;
 
@@ -50,6 +54,21 @@ describe("portraitKeyFor", () => {
       expect(portraitKeyFor(c)).toBe(`${AVATAR_PORTRAIT_STORAGE_KEY}:none`);
       expect(portraitKeyFor(c)).not.toBe(AVATAR_PORTRAIT_STORAGE_KEY);
     }
+  });
+});
+
+describe("readCachedPortrait", () => {
+  it("drops earlier versions' stills (captured on the old wall) and keeps this version's", () => {
+    const still = "data:image/jpeg;base64,AAAA";
+    localStorage.setItem("avatar-portrait-v2:sakura", still);
+    localStorage.setItem("avatar-portrait-v2:lisa", still);
+    localStorage.setItem(portraitKeyFor("sakura"), still);
+    localStorage.setItem("unrelated", "kept");
+    expect(readCachedPortrait("sakura")).toBe(still);
+    expect(localStorage.getItem("avatar-portrait-v2:sakura")).toBeNull();
+    expect(localStorage.getItem("avatar-portrait-v2:lisa")).toBeNull();
+    expect(localStorage.getItem("unrelated")).toBe("kept");
+    localStorage.clear();
   });
 });
 
