@@ -37,7 +37,7 @@ export const LIVE_CHECK = {
   rttMs: 2000,
   wsMs: 15_000,
   // 2 MiB each: often enough to follow the link, rare enough for ~60 MB an hour. Only while the
-  // Performance tab is open; the other checks run on every /admin tab.
+  // Performance tab is open; only the round trip runs on every /admin tab.
   downMs: 120_000,
   stunMs: 60_000,
   /** The grade's window: 30 samples = the last minute. */
@@ -81,7 +81,8 @@ const RECENT_FAILED = 3;
 
 /** The samples of the grade's window: the last minute, by time and by count. */
 export function recentRtts(samples: RttSample[], now: number = Date.now()): RttSample[] {
-  return samples.filter((s) => s.at >= now - LIVE_CHECK.gradeWindowMs).slice(-LIVE_CHECK.samples);
+  const since = now - LIVE_CHECK.gradeWindowMs;
+  return samples.filter((s) => s.at >= since).slice(-LIVE_CHECK.samples);
 }
 
 /** The RTTs that answered, oldest first. */
@@ -189,9 +190,9 @@ function useEvery(on: boolean, ms: number, fn: (live: () => boolean) => Promise<
   }, [on, ms]);
 }
 
-/** `signedIn`: the admin page is open and signed in, on any tab; the cheap live checks (API round
- * trip, WebSocket, STUN) run then. `active`: the Performance tab itself is open; the rest of the
- * tab's reads, and the 2 MiB downlink check, wait for it. */
+/** `signedIn`: the admin page is open and signed in, on any tab; the API round trip runs then, so
+ * its chart has history when the tab opens. `active`: the Performance tab itself is open; the
+ * other checks, which each show one current reading, and the tab's own reads wait for it. */
 export function usePerformanceTab(active: boolean, signedIn: boolean = active) {
   const [links, setLinks] = useState<PerformanceLinks | null>(null);
   const [live, setLive] = useState<LiveNetwork>(EMPTY_LIVE);
@@ -218,11 +219,14 @@ export function usePerformanceTab(active: boolean, signedIn: boolean = active) {
     admin.getCurrentConfig().then(setDefaultConfig, () => undefined);
   }, [active]);
 
-  // The live check runs while the admin page is open on any tab and visible, so the Performance
-  // tab opens on history; the downlink check, 2 MiB a run, only while that tab is open.
+  // Only the round trip runs on every admin tab (it is the one with history to show). The others
+  // run while the Performance tab is open, and at once when it opens (owner, 2026-10-17): the
+  // voice-connection probe carries the admin token in its URL, so on every tab it would put
+  // thousands more copies in the access log a day; STUN sends UDP to Microsoft's relay; and the
+  // downlink check is 2 MiB a run.
   const visible = useVisible();
   const running = signedIn && visible;
-  const downRunning = active && visible;
+  const tabRunning = active && visible;
   useEvery(running, LIVE_CHECK.rttMs, async (isLive) => {
     const ms = await apiRttOnce();
     if (!isLive()) return;
@@ -233,18 +237,18 @@ export function usePerformanceTab(active: boolean, signedIn: boolean = active) {
         .slice(-LIVE_CHECK.chartSamples),
     }));
   });
-  useEvery(running, LIVE_CHECK.wsMs, async (isLive) => {
+  useEvery(tabRunning, LIVE_CHECK.wsMs, async (isLive) => {
     // An expired sign-in clears the token: no probe that can only fail (and log) every 15 s.
     const token = auth.getAdminToken();
     if (!token) return;
     const ws = await measureWs(token);
     if (isLive()) setLive((l) => ({ ...l, ws }));
   });
-  useEvery(downRunning, LIVE_CHECK.downMs, async (isLive) => {
+  useEvery(tabRunning, LIVE_CHECK.downMs, async (isLive) => {
     const downKbps = await measureDownlink();
     if (isLive()) setLive((l) => ({ ...l, downKbps }));
   });
-  useEvery(running, LIVE_CHECK.stunMs, async (isLive) => {
+  useEvery(tabRunning, LIVE_CHECK.stunMs, async (isLive) => {
     const stun = await measureStun();
     if (!isLive()) return;
     setLive((l) => ({ ...l, stun, stunFailures: stun.ok ? 0 : l.stunFailures + 1 }));
