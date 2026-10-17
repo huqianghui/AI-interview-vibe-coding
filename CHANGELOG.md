@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.78.0.0 (2026-10-17)
+## 0.77.1.0 (2026-10-17)
 
 ### Changed
 - **The live network check starts as soon as `/admin` opens, on any tab.** The API round trip,
