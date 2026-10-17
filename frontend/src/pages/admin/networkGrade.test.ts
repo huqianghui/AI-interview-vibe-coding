@@ -179,7 +179,8 @@ describe("an interview's grade", () => {
 
 describe("this browser's grade", () => {
   const live = (rtts: (number | null)[], over: Partial<LiveNetwork> = {}): LiveNetwork => ({
-    rtt: rtts.map((ms, i) => ({ at: i, ms })),
+    // Taken just now, 2 s apart: the grade reads the last minute by time.
+    rtt: rtts.map((ms, i) => ({ at: Date.now() - (rtts.length - i) * 2000, ms })),
     ws: null,
     stun: { ok: true, ms: 80 },
     stunFailures: 0,
