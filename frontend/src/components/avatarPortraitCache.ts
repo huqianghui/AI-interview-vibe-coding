@@ -23,8 +23,13 @@
  * use, so a stale slot shows the figure on a colour that no longer matches the page — and it is
  * shown FIRST on every visit, before the live stream arrives, which is exactly when a mismatched
  * rectangle is most visible. Bumping the key discards those instead of waiting for a successful
- * session to overwrite them. */
-export const AVATAR_PORTRAIT_STORAGE_KEY = "avatar-portrait-v2";
+ * session to overwrite them.
+ *
+ * v2 → v3 (2026-10-17): photo avatars are now painted on their portrait's own wall colour, with the
+ * whole stage filled to match (avatarBackdrop.ts). A v2 still of a photo avatar carries the old
+ * near-white wall, and the stage is first painted from the still's edges, so it would open
+ * near-white and then jump to the new colour when the live picture arrives. Discard them. */
+export const AVATAR_PORTRAIT_STORAGE_KEY = "avatar-portrait-v3";
 
 /** Storage key for one character's still. ALWAYS suffixed — including `:none` for a persona with no
  * avatar — so the pre-keying slot can never be read by anything. That matters: the un-suffixed slot
