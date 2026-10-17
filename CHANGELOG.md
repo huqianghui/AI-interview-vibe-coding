@@ -9,7 +9,10 @@
   They still pause while the browser tab is hidden. The 2 MiB downlink test still runs only while
   the Performance tab is open.
 - **The round-trip chart shows the last 5 minutes** (150 samples, was 1 minute). The estimated
-  grade still reads the last minute, so it follows the link as it is now.
+  grade, and the "now · median · p95 · failed" line under the chart, still read the last minute,
+  so they follow the link as it is now. Samples count by when they were taken: after the browser
+  tab has been hidden, readings from before do not count as recent.
+- **No voice-connection probe once the sign-in has expired**, instead of one failing every 15 s.
 
 ## 0.77.0.0 (2026-10-16)
 
