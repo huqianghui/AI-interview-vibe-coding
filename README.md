@@ -51,8 +51,9 @@ starting form and settings that grade calls for ([`docs/network-grades.md`](docs
 and its Logs and end-to-end links. It also shows a live network check from the admin's browser
 (round trip chart of the last 5 minutes, voice connection, UDP to Azure's relay, downlink) with an
 estimated grade; the round-trip check starts as soon as `/admin` opens, on any tab, so the chart
-already has history when the tab is opened (the other checks run only on this tab). In the workbook, pick an interview (the newest is selected by default) or paste an
-**Operation id**.
+already has history when the tab is opened (the other checks run only on this tab). Which form each
+grade calls for: [section 3](#3-the-interview--four-forms-matched-to-the-candidates-network). In the
+workbook, pick an interview (the newest is selected by default) or paste an **Operation id**.
 What each metric means: [`docs/voice-performance-telemetry.md`](docs/voice-performance-telemetry.md).
 
 ## Key scenarios
@@ -82,26 +83,40 @@ with a rail previewing them:
 
 ![Orientation — the question count and how answering works](docs/images/01b-orientation.png)
 
-### 3. The interview — digital-human interviewer, voice mode
+### 3. The interview — four forms, matched to the candidate's network
 
-In voice mode the candidate is interviewed face-to-face: Azure Voice Live streams a live 1080p
-digital-human avatar that **speaks each question aloud**, the candidate answers by speaking, and the
-conversation transcript builds on the right. A status legend shows the live voice state
-(ready / listening / speaking / muted).
+The same interview runs in one of four forms. Which one fits depends on the candidate's network, and
+the admin **Performance** tab grades a network **A to D** and names the form each grade calls for
+(the same legend as on that tab; the measurements behind it:
+[`docs/network-grades.md`](docs/network-grades.md)):
 
-The avatar reads each question **exactly as it appears on the card**: the text is spoken by
-server-side TTS, with no model in between to reword it.
+| Form | Performance grade | Network | What the candidate sees |
+|---|---|---|---|
+| **1. Video avatar** (e.g. Lisa) | **A** | RTT ≤ 150 ms, loss ≤ 0.5%, ≥ 4 Mbit/s | A 1080p 16:9 digital human |
+| **2. Photo avatar** (Sakura, the default) | **B** | RTT ≤ 500 ms, loss ≤ 1%, ≥ 1.5 Mbit/s | A 512×512 photoreal digital human, shown uncropped; its video bitrate is picked per session |
+| **3. Voice only** | **C** | loss ≥ 3%, RTT ≥ 600 ms, or < 1 Mbit/s | No picture, still over WebRTC: the candidate turns video off, or is assigned an interviewer without a digital human |
+| | **D** | UDP 3478 blocked | No picture, voice over the **WebSocket**: no digital human can connect, so the app falls back to this by itself |
+| **4. Text** | any | any network | The candidate types each answer ([3b](#3b-text-mode--answer-by-typing)) |
 
-Two avatar families are available: photoreal **photo** avatars (shown here, Sakura, the default
-interviewer) in a 512×512 square, shown uncropped, and **video** avatars (e.g. Lisa) in 1080p
-16:9. The persona editor picks either from the live Azure roster.
+Grades C and D look the same to the candidate (the audio orb and the transcript, as in 3b's
+screenshot); only the transport differs. The persona editor picks an interviewer's digital human
+(video, photo or none) from the live Azure roster.
 
-![Voice mode — live digital-human avatar (Sakura) having read the question, transcript on the right](docs/images/09-live-avatar-voice.png)
+In every voice form the candidate is interviewed by speaking: the interviewer **speaks each question
+aloud**, the candidate answers by speaking, and the conversation transcript builds on the right. A
+status legend shows the live voice state (ready / listening / speaking / muted). The interviewer
+reads each question **exactly as it appears on the card**: the text is spoken by server-side TTS,
+with no model in between to reword it.
+
+Form 2, the photo avatar (Sakura), on real Azure:
+
+![Voice mode — live photo avatar (Sakura, grade B) having read the question, transcript on the right](docs/images/09-live-avatar-voice.png)
 
 ### 3b. Text mode — answer by typing
 
-Every question can also be answered by typing. Scoring and the judge still run on Azure AI Foundry;
-when there is no live avatar, the stage shows the audio orb instead:
+Form 4. Every question can also be answered by typing, on any network. Scoring and the judge still
+run on Azure AI Foundry; when there is no live digital human, the stage shows the audio orb instead
+(the same stage a voice-only interview, grade C or D, shows):
 
 ![Interview page in text mode — question, orb fallback, progress rail](docs/images/02-interview-question.png)
 
