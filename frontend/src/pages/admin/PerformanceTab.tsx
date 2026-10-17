@@ -31,6 +31,7 @@ import {
   isVideoAvatar,
   liveGrade,
   okRtts,
+  recentRtts,
   type PerformanceTabState,
 } from "./usePerformanceTab";
 
@@ -345,7 +346,9 @@ export function PerformanceTab({
     interviewNetwork.kind === "done" && interviewNetwork.network.legacy
       ? (interviewNetwork.network.operations ?? [])
       : null;
-  const rtts = okRtts(live.rtt);
+  // The line under the chart reads the grade's window (the last minute), so the two agree.
+  const recent = recentRtts(live.rtt);
+  const rtts = okRtts(recent);
   const lastRtt = live.rtt.length ? live.rtt[live.rtt.length - 1].ms : null;
   const net = interviewNetwork.kind === "done" ? interviewNetwork.network : null;
 
@@ -588,7 +591,7 @@ export function PerformanceTab({
                     now: lastRtt === null ? "—" : Math.round(lastRtt),
                     median: Math.round(percentile(rtts, 50)),
                     p95: Math.round(percentile(rtts, 95)),
-                    failed: live.rtt.length - rtts.length,
+                    failed: recent.length - rtts.length,
                   })
                 : t("admin.performance.rttWaiting")}
             </Text>

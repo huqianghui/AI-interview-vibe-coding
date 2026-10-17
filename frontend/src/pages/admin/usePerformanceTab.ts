@@ -42,6 +42,10 @@ export const LIVE_CHECK = {
   stunMs: 60_000,
   /** The grade's window: 30 samples = the last minute. */
   samples: 30,
+  /** The same windows in time: a sample from before the page was hidden must not count as recent
+   * (samples are kept by count, and an hour hidden would otherwise leave them "last"). */
+  gradeWindowMs: 60_000,
+  chartWindowMs: 300_000,
   /** The chart's window: 150 samples = the last 5 minutes, measured on any /admin tab, so the
    * Performance tab opens on a stretch of history rather than an empty chart (owner, 2026-10-17). */
   chartSamples: 150,
@@ -75,6 +79,11 @@ export const STUN_FAILURES_FOR_CLOSED = 2;
 const RECENT = 5;
 const RECENT_FAILED = 3;
 
+/** The samples of the grade's window: the last minute, by time and by count. */
+export function recentRtts(samples: RttSample[], now: number = Date.now()): RttSample[] {
+  return samples.filter((s) => s.at >= now - LIVE_CHECK.gradeWindowMs).slice(-LIVE_CHECK.samples);
+}
+
 /** The RTTs that answered, oldest first. */
 export function okRtts(samples: RttSample[]): number[] {
   return samples.flatMap((s) => (s.ms === null ? [] : [s.ms]));
@@ -84,9 +93,10 @@ export function okRtts(samples: RttSample[]): number[] {
  * UDP loss reading, the STUN answer as the UDP gate. */
 export function liveGrade(live: LiveNetwork): GradeResult | null {
   // The last minute only: the chart keeps five, and a grade should follow the link as it is now.
-  const rtts = okRtts(live.rtt.slice(-LIVE_CHECK.samples));
+  const recent = recentRtts(live.rtt);
+  const rtts = okRtts(recent);
   if (rtts.length < 3) return null;
-  if (live.rtt.slice(-RECENT).filter((s) => s.ms === null).length >= RECENT_FAILED) return null;
+  if (recent.slice(-RECENT).filter((s) => s.ms === null).length >= RECENT_FAILED) return null;
   let udpOk: boolean | null = null;
   if (live.stun?.ok) udpOk = true;
   else if (live.stunFailures >= STUN_FAILURES_FOR_CLOSED) udpOk = false;
@@ -218,11 +228,16 @@ export function usePerformanceTab(active: boolean, signedIn: boolean = active) {
     if (!isLive()) return;
     setLive((l) => ({
       ...l,
-      rtt: [...l.rtt, { at: Date.now(), ms }].slice(-LIVE_CHECK.chartSamples),
+      rtt: [...l.rtt, { at: Date.now(), ms }]
+        .filter((s) => s.at >= Date.now() - LIVE_CHECK.chartWindowMs)
+        .slice(-LIVE_CHECK.chartSamples),
     }));
   });
   useEvery(running, LIVE_CHECK.wsMs, async (isLive) => {
-    const ws = await measureWs(auth.getAdminToken());
+    // An expired sign-in clears the token: no probe that can only fail (and log) every 15 s.
+    const token = auth.getAdminToken();
+    if (!token) return;
+    const ws = await measureWs(token);
     if (isLive()) setLive((l) => ({ ...l, ws }));
   });
   useEvery(downRunning, LIVE_CHECK.downMs, async (isLive) => {
