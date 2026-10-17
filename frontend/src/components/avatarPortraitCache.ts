@@ -40,12 +40,25 @@ export function portraitKeyFor(character?: string | null): string {
   return `${AVATAR_PORTRAIT_STORAGE_KEY}:${c || "none"}`;
 }
 
+/** Earlier versions' slots are never read again: free their quota (one 480 px JPEG per face). */
+function dropOlderVersions() {
+  const stale: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && /^avatar-portrait-v\d+/.test(key) && !key.startsWith(AVATAR_PORTRAIT_STORAGE_KEY)) {
+      stale.push(key);
+    }
+  }
+  stale.forEach((key) => localStorage.removeItem(key));
+}
+
 export function readCachedPortrait(character?: string | null): string | null {
   try {
     // Self-cleaning migration: the un-suffixed slot predates per-character keying and can only hold a
     // face that may not be this persona's. Nothing reads it now, so free the quota instead of leaving
     // a stale 480px JPEG behind for ever.
     localStorage.removeItem(AVATAR_PORTRAIT_STORAGE_KEY);
+    dropOlderVersions();
     const v = localStorage.getItem(portraitKeyFor(character));
     return v && v.startsWith("data:image/") ? v : null;
   } catch {

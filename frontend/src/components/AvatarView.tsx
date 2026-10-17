@@ -202,6 +202,8 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
   // Media aspect (w/h) of whatever is showing — the live stream once it has frames, else the cached
   // still — drives the hug box below so the root is exactly the media's shape.
   const [videoRatio, setVideoRatio] = useState<number | null>(null);
+  // The stream's own size, as state so a photo avatar's box follows a resolution change.
+  const [videoSize, setVideoSize] = useState<{ width: number; height: number } | null>(null);
   const [portraitRatio, setPortraitRatio] = useState<number | null>(null);
   const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -210,6 +212,11 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
     const reflect = () => {
       setVideoFit(fitFor(video.videoWidth, video.videoHeight));
       setVideoRatio(video.videoWidth > 0 && video.videoHeight > 0 ? video.videoWidth / video.videoHeight : null);
+      setVideoSize(
+        video.videoWidth > 0 && video.videoHeight > 0
+          ? { width: video.videoWidth, height: video.videoHeight }
+          : null,
+      );
     };
     reflect();
     video.addEventListener("loadedmetadata", reflect);
@@ -401,9 +408,10 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
   // ends at the shoulders, which must meet the stage's bottom edge rather than stop in mid-air.
   // A video avatar keeps its hug/cover behaviour unchanged.
   const photoStage = (showVideo || showPortrait) && mediaFit === "contain" && !!mediaRatio;
+  // The live stream's own size; the still (stored smaller) is drawn at the size the stream has.
   const nativeVideo =
-    innerRef.current && innerRef.current.videoWidth > 0
-      ? { width: innerRef.current.videoWidth, height: innerRef.current.videoHeight }
+    showVideo && videoSize
+      ? videoSize
       : { width: PHOTO_NATIVE_PX, height: Math.round(PHOTO_NATIVE_PX / (mediaRatio || 1)) };
   const photo = photoStage && parent ? photoBox(parent.w, parent.h, nativeVideo) : null;
   const ratio = hugRatioFor(mediaFit, mediaRatio);
