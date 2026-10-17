@@ -473,6 +473,39 @@ describe("live network check", () => {
     expect(LIVE_CHECK.chartSamples * LIVE_CHECK.rttMs).toBe(300_000); // 5 minutes
   });
 
+  it("counts a sample as recent by its time, not its place", async () => {
+    // A tab hidden for an hour keeps its samples: they must not count as "the last minute".
+    const { recentRtts, LIVE_CHECK } = await import("./usePerformanceTab");
+    const now = 10_000_000;
+    const beforeHiding = Array.from({ length: 20 }, (_, i) => ({
+      at: now - 3_600_000 + i,
+      ms: 900,
+    }));
+    const sinceBack = [{ at: now - 4000, ms: 40 }, { at: now - 2000, ms: 41 }];
+    expect(recentRtts([...beforeHiding, ...sinceBack], now)).toEqual(sinceBack);
+    expect(LIVE_CHECK.gradeWindowMs).toBe(60_000);
+    expect(LIVE_CHECK.chartWindowMs).toBe(300_000);
+  });
+
+  it("skips the voice-connection probe once the sign-in is gone", async () => {
+    const { LIVE_CHECK } = await import("./usePerformanceTab");
+    const saved = LIVE_CHECK.wsMs;
+    LIVE_CHECK.wsMs = 20;
+    try {
+      renderAt("/admin?tab=performance");
+      // Repeating while signed in...
+      await waitFor(() => expect(vi.mocked(probe.measureWs).mock.calls.length).toBeGreaterThan(2));
+      auth.clearAdminToken();
+      await new Promise((r) => setTimeout(r, 60)); // let a run already under way finish
+      vi.mocked(probe.measureWs).mockClear();
+      await new Promise((r) => setTimeout(r, 120)); // several 20 ms periods
+      // ...and not once the token is gone.
+      expect(probe.measureWs).not.toHaveBeenCalled();
+    } finally {
+      LIVE_CHECK.wsMs = saved;
+    }
+  });
+
   it("the chart shows a sample's time and value on hover", async () => {
     renderAt("/admin?tab=performance");
     await screen.findByTestId("performance-api");
