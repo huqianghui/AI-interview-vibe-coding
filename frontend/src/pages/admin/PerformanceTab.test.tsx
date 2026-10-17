@@ -388,7 +388,7 @@ describe("live network check", () => {
       // Grade A suits a video avatar; Sakura is a photo avatar: a note, not a must.
       expect(advice).toHaveTextContent(/Sakura has no video avatar/);
       const live = screen.getByTestId("performance-live-grade");
-      expect(live).toHaveTextContent(/Recomputed every 2 s/);
+      expect(live).toHaveTextContent(/recomputed every 2 s/);
     } finally {
       LIVE_CHECK.rttMs = saved;
     }
@@ -432,18 +432,23 @@ describe("live network check", () => {
     });
     renderAt("/admin?tab=results");
     await screen.findByTestId("results-tab");
-    // The cheap checks run on another tab (owner, 2026-10-17)...
+    // The round trip runs on another tab (owner, 2026-10-17)...
     await waitFor(() => expect(probe.apiRttOnce).toHaveBeenCalled());
-    await waitFor(() => expect(probe.measureWs).toHaveBeenCalled());
-    await waitFor(() => expect(probe.measureStun).toHaveBeenCalled());
-    // ...but not the 2 MiB downlink check, nor the tab's own reads.
+    // ...but not the checks with one current reading each, nor the tab's own reads: the
+    // voice-connection probe carries the token in its URL, STUN goes to Microsoft's relay, and
+    // the downlink check is 2 MiB.
+    expect(probe.measureWs).not.toHaveBeenCalled();
+    expect(probe.measureStun).not.toHaveBeenCalled();
     expect(probe.measureDownlink).not.toHaveBeenCalled();
     expect(admin.getPerformanceLinks).not.toHaveBeenCalled();
 
     await user.click(screen.getByTestId("admin-tab-performance"));
-    // The chart already has what was measured on the other tab.
+    // The chart already has what was measured on the other tab...
     expect(await screen.findByTestId("performance-rtt-chart")).toBeInTheDocument();
     expect(screen.queryByText("Measuring…")).toBeNull();
+    // ...and the rest run at once.
+    await waitFor(() => expect(probe.measureWs).toHaveBeenCalled());
+    await waitFor(() => expect(probe.measureStun).toHaveBeenCalled());
     await waitFor(() => expect(probe.measureDownlink).toHaveBeenCalled());
   });
 
