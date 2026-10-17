@@ -92,11 +92,11 @@ conversation transcript builds on the right. A status legend shows the live voic
 The avatar reads each question **exactly as it appears on the card**: the text is spoken by
 server-side TTS, with no model in between to reword it.
 
-Two avatar families are available: **video** avatars (shown here, Lisa) in 1080p 16:9, and
-photoreal **photo** avatars (e.g. Amira, Adrian) in a 512×512 square, shown uncropped. The persona
-editor picks either from the live Azure roster.
+Two avatar families are available: photoreal **photo** avatars (shown here, Sakura, the default
+interviewer) in a 512×512 square, shown uncropped, and **video** avatars (e.g. Lisa) in 1080p
+16:9. The persona editor picks either from the live Azure roster.
 
-![Voice mode — live digital-human avatar speaking the question, transcript streaming](docs/images/09-live-avatar-voice.png)
+![Voice mode — live digital-human avatar (Sakura) having read the question, transcript on the right](docs/images/09-live-avatar-voice.png)
 
 ### 3b. Text mode — answer by typing
 
