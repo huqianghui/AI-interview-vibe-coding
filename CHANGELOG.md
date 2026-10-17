@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.78.0.0 (2026-10-18)
+
+### Added
+- **A broadcast-style interview stage around a photo avatar.** The digital human now appears in one
+  framed window near the top of the stage, centred, so the candidate meets her eyes level instead
+  of looking down at her. She stays at her own 512 px (smaller only when the screen is too short
+  for what sits under her, never enlarged). A name plate over the window's bottom edge says who she
+  is ("Sakura · Your interviewer · reads every question exactly as written") and covers where her
+  picture ends at mid-chest. Directly under it, a topic strip names the interview (the question
+  bank's name), its question count, and the three things the orientation screen says about
+  answering (speak or type; you decide when each answer is done; at your pace). Behind it all is a
+  studio-style set in the app's own colours. Interviews run by an external interviewer, which have
+  no fixed question count, show "Guided" instead. Without a picture (text mode, voice only) the
+  stage keeps the orb as before.
+- **The interview's title on start and resume** (`interview_title`): the name of the bank the
+  session runs on, as its version recorded it.
+
 ## 0.77.2.0 (2026-10-17)
 
 ### Changed
