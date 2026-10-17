@@ -23,8 +23,13 @@
  * use, so a stale slot shows the figure on a colour that no longer matches the page — and it is
  * shown FIRST on every visit, before the live stream arrives, which is exactly when a mismatched
  * rectangle is most visible. Bumping the key discards those instead of waiting for a successful
- * session to overwrite them. */
-export const AVATAR_PORTRAIT_STORAGE_KEY = "avatar-portrait-v2";
+ * session to overwrite them.
+ *
+ * v2 → v3 (2026-10-17): photo avatars are now painted on their portrait's own wall colour, with the
+ * whole stage filled to match (avatarBackdrop.ts). A v2 still of a photo avatar carries the old
+ * near-white wall, and the stage is first painted from the still's edges, so it would open
+ * near-white and then jump to the new colour when the live picture arrives. Discard them. */
+export const AVATAR_PORTRAIT_STORAGE_KEY = "avatar-portrait-v3";
 
 /** Storage key for one character's still. ALWAYS suffixed — including `:none` for a persona with no
  * avatar — so the pre-keying slot can never be read by anything. That matters: the un-suffixed slot
@@ -35,12 +40,25 @@ export function portraitKeyFor(character?: string | null): string {
   return `${AVATAR_PORTRAIT_STORAGE_KEY}:${c || "none"}`;
 }
 
+/** Earlier versions' slots are never read again: free their quota (one 480 px JPEG per face). */
+function dropOlderVersions() {
+  const stale: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && /^avatar-portrait-v\d+/.test(key) && !key.startsWith(AVATAR_PORTRAIT_STORAGE_KEY)) {
+      stale.push(key);
+    }
+  }
+  stale.forEach((key) => localStorage.removeItem(key));
+}
+
 export function readCachedPortrait(character?: string | null): string | null {
   try {
     // Self-cleaning migration: the un-suffixed slot predates per-character keying and can only hold a
     // face that may not be this persona's. Nothing reads it now, so free the quota instead of leaving
     // a stale 480px JPEG behind for ever.
     localStorage.removeItem(AVATAR_PORTRAIT_STORAGE_KEY);
+    dropOlderVersions();
     const v = localStorage.getItem(portraitKeyFor(character));
     return v && v.startsWith("data:image/") ? v : null;
   } catch {

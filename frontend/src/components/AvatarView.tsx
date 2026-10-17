@@ -27,6 +27,12 @@ import { useTranslation } from "react-i18next";
 import type { MediaMode } from "../hooks/avatarHealth";
 import { AudioOrb } from "./AudioOrb";
 import { fitBox, fitFor, hugRatioFor } from "./avatarFit";
+import {
+  BACKDROP_SAMPLE_SIZE,
+  backdropMoved,
+  edgeBackdrop,
+  photoBox,
+} from "./avatarBackdrop";
 import { portraitKeyFor, readCachedPortrait } from "./avatarPortraitCache";
 import {
   BLANK_SAMPLE_HEIGHT,
@@ -138,9 +144,12 @@ const useStyles = makeStyles({
   },
 });
 
-/** Observe the element's PARENT size and return the hug box for the given media aspect (null until
- * both are known, or when ResizeObserver is unavailable — then the root just fills the parent). */
-function useHugBox(el: HTMLElement | null, ratio: number | null) {
+/** A photo avatar streams this square (live-verified); the cached still is stored smaller, so it is
+ * drawn at this size too and the live face fades in over it without a jump. */
+const PHOTO_NATIVE_PX = 512;
+
+/** Observe the element's PARENT size (null until known, or when ResizeObserver is unavailable). */
+function useParentSize(el: HTMLElement | null) {
   const [parent, setParent] = useState<{ w: number; h: number } | null>(null);
   useEffect(() => {
     const target = el?.parentElement;
@@ -151,7 +160,7 @@ function useHugBox(el: HTMLElement | null, ratio: number | null) {
     ro.observe(target);
     return () => ro.disconnect();
   }, [el]);
-  return parent && ratio ? fitBox(parent.w, parent.h, ratio) : null;
+  return parent;
 }
 
 interface AvatarViewProps {
@@ -167,11 +176,14 @@ interface AvatarViewProps {
   /** Which avatar is configured, so the cached still belongs to the right face. Omit it and the slot
    * stays un-keyed — the pre-2026-10-03 behaviour, which is correct for a persona with no character. */
   character?: string | null;
+  /** The wall colour Azure was asked to paint behind a photo avatar (`avatar_bg`). The stage is
+   * painted this until the picture's own edge colour has been read, then that (see avatarBackdrop). */
+  backdrop?: string | null;
 }
 
 /** Ref is the `<video>` element the voice hook attaches the avatar stream to (via `videoRef`). */
 export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function AvatarView(
-  { audioState, isAvatarConnected, mediaMode = "video", character = null },
+  { audioState, isAvatarConnected, mediaMode = "video", character = null, backdrop = null },
   ref,
 ) {
   const styles = useStyles();
@@ -190,6 +202,8 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
   // Media aspect (w/h) of whatever is showing — the live stream once it has frames, else the cached
   // still — drives the hug box below so the root is exactly the media's shape.
   const [videoRatio, setVideoRatio] = useState<number | null>(null);
+  // The stream's own size, as state so a photo avatar's box follows a resolution change.
+  const [videoSize, setVideoSize] = useState<{ width: number; height: number } | null>(null);
   const [portraitRatio, setPortraitRatio] = useState<number | null>(null);
   const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -198,6 +212,11 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
     const reflect = () => {
       setVideoFit(fitFor(video.videoWidth, video.videoHeight));
       setVideoRatio(video.videoWidth > 0 && video.videoHeight > 0 ? video.videoWidth / video.videoHeight : null);
+      setVideoSize(
+        video.videoWidth > 0 && video.videoHeight > 0
+          ? { width: video.videoWidth, height: video.videoHeight }
+          : null,
+      );
     };
     reflect();
     video.addEventListener("loadedmetadata", reflect);
@@ -245,6 +264,33 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
     }
   }, []);
 
+  // The wall colour as the browser actually draws it: read from the frame's edges (avatarBackdrop).
+  const [sampledBackdrop, setSampledBackdrop] = useState<string | null>(null);
+  const sampledRef = useRef<string | null>(null);
+  const readBackdrop = useCallback((source: CanvasImageSource) => {
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = BACKDROP_SAMPLE_SIZE;
+      canvas.height = BACKDROP_SAMPLE_SIZE;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return;
+      ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+      const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const color = edgeBackdrop(data, canvas.width, canvas.height);
+      if (color && backdropMoved(sampledRef.current, color)) {
+        sampledRef.current = color;
+        setSampledBackdrop(color);
+      }
+    } catch {
+      /* this browser cannot read the frame: the requested colour stays */
+    }
+  }, []);
+  // A different face (or no face) has a different wall: start again from the requested colour.
+  useEffect(() => {
+    sampledRef.current = null;
+    setSampledBackdrop(null);
+  }, [character, backdrop]);
+
   // Watch for the picture going empty while we are still claiming it works. When it does, the stage
   // falls back to the cached still or the orb — the three-state contract (owner, 2026-10-02: "it is
   // either the cached frame, the digital human, or the audio orb; a black screen is not our design").
@@ -256,6 +302,11 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
     }
     const tick = () => {
       const { status, luma } = sampleLuma();
+      // A photo avatar's stage follows its picture's wall; read it while the picture has content.
+      const video = innerRef.current;
+      if (status === "ok" && !isBlankFrame(luma) && video && fitFor(video.videoWidth, video.videoHeight) === "contain") {
+        readBackdrop(video);
+      }
       const prev = pictureRef.current;
       const next = nextPictureState(prev, status, luma);
       pictureRef.current = next;
@@ -298,7 +349,7 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
     tick();
     const timer = setInterval(tick, BLANK_SAMPLE_INTERVAL_MS);
     return () => clearInterval(timer);
-  }, [isAvatarConnected, mediaMode, sampleLuma]);
+  }, [isAvatarConnected, mediaMode, sampleLuma, readBackdrop]);
 
   // Refresh the portrait slot from the LIVE stream so the next visit shows the person instantly.
   // Best-effort: a failed capture (no frames yet, canvas unavailable, storage quota) just keeps
@@ -350,16 +401,53 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
   // therefore fills the column instead and crops its own margins, which is what `fitFor` has always
   // said to do with it. Owner, 2026-10-02: "the top lines up, the bottom doesn't — is it the aspect
   // ratio?" It was.
-  const hug = useHugBox(rootEl, hugRatioFor(mediaFit, mediaRatio));
+  const parent = useParentSize(rootEl);
+  // A PHOTO avatar (owner, 2026-10-17): drawn at its own 512 px, never enlarged (enlarging is what
+  // softened the face), and the whole stage around it painted the picture's own wall colour so
+  // there is no colour step and nothing that reads as a frame. Anchored bottom-centre: the frame
+  // ends at the shoulders, which must meet the stage's bottom edge rather than stop in mid-air.
+  // A video avatar keeps its hug/cover behaviour unchanged.
+  const photoStage = (showVideo || showPortrait) && mediaFit === "contain" && !!mediaRatio;
+  // The live stream's own size; the still (stored smaller) is drawn at the size the stream has.
+  const nativeVideo =
+    showVideo && videoSize
+      ? videoSize
+      : { width: PHOTO_NATIVE_PX, height: Math.round(PHOTO_NATIVE_PX / (mediaRatio || 1)) };
+  const photo = photoStage && parent ? photoBox(parent.w, parent.h, nativeVideo) : null;
+  const ratio = hugRatioFor(mediaFit, mediaRatio);
+  const hug = !photoStage && parent && ratio ? fitBox(parent.w, parent.h, ratio) : null;
+  const stageFill = photoStage ? (sampledBackdrop ?? backdrop ?? undefined) : undefined;
+  const photoMedia = photo
+    ? {
+        inset: "auto",
+        bottom: 0,
+        left: "50%",
+        transform: "translateX(-50%)",
+        width: photo.width,
+        height: photo.height,
+        borderRadius: 0,
+        // The still is normally dimmed while connecting; on a painted stage that dimming would show
+        // as a darker square. The "connecting" pill already says it is not live yet.
+        filter: "none",
+      }
+    : undefined;
   return (
     <div
       ref={setRootEl}
       className={styles.root}
-      style={hug ? { width: hug.width, height: hug.height } : undefined}
+      style={
+        hug
+          ? { width: hug.width, height: hug.height }
+          : stageFill
+            ? { backgroundColor: stageFill }
+            : undefined
+      }
       data-testid="avatar-view"
       data-avatar-connected={isAvatarConnected}
       data-picture={picture.verdict}
       data-media-mode={mediaMode}
+      data-photo-stage={photoStage}
+      data-backdrop={stageFill ?? ""}
     >
       <video
         ref={setVideoRef}
@@ -371,6 +459,7 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
           videoFit === "cover" ? styles.fitCover : styles.fitContain,
           showVideo ? styles.shown : styles.hidden,
         )}
+        style={showVideo ? photoMedia : undefined}
         data-fit={videoFit}
         data-testid="avatar-video"
       />
@@ -383,10 +472,13 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
               styles.portrait,
               portraitFit === "cover" ? styles.fitCover : styles.fitContain,
             )}
+            style={photoMedia}
             onLoad={(e) => {
               const { naturalWidth: w, naturalHeight: h } = e.currentTarget;
               setPortraitFit(fitFor(w, h));
               setPortraitRatio(w > 0 && h > 0 ? w / h : null);
+              // The still is a frame of the same stream: its edges give the wall before it is live.
+              if (fitFor(w, h) === "contain") readBackdrop(e.currentTarget);
             }}
             data-fit={portraitFit}
             data-testid="avatar-portrait"

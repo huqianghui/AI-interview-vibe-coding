@@ -30,7 +30,7 @@ import { describe, expect, it } from "vitest";
  */
 const KNOWN_OFFENDERS = new Set([
   "src/components/agent-editor/AvatarGrid.tsx:190",
-  "src/components/agent-editor/PlaygroundPanel.tsx:261",
+  "src/components/agent-editor/PlaygroundPanel.tsx:262",
 ]);
 
 function walk(dir: string, out: string[] = []): string[] {

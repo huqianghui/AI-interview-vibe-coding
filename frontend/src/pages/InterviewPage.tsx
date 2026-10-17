@@ -45,6 +45,7 @@ import { CandidateIdle } from "../components/CandidateIdle";
 import { MyInterviews } from "../components/MyInterviews";
 import { CandidateOrientation } from "../components/CandidateOrientation";
 import { palette } from "../theme";
+import { AVATAR_CHARACTER_MAP } from "../data/avatarCharacters";
 import { QuestionProgress } from "../components/QuestionProgress";
 import { MicPermissionDialog } from "../components/MicPermissionDialog";
 import { Transcript } from "../components/Transcript";
@@ -208,7 +209,13 @@ export function InterviewPage() {
   if (typeof interview?.voice_avatar_character === "string") {
     avatarCharacterRef.current = interview.voice_avatar_character;
   }
-  const avatarBackground = palette.ground;
+  // A PHOTO avatar (owner, 2026-10-17) is the exception: its stage is painted the portrait's own
+  // wall colour (the roster's measured backdrop, which Azure is asked to paint too), so the face
+  // looks as it does in its portrait rather than on the near-white page ground. AvatarView then
+  // fills the stage with the colour it reads from the decoded picture, so the two match exactly.
+  // Video avatars keep the ground, for the reason above.
+  const photoBackdrop = AVATAR_CHARACTER_MAP.get(avatarCharacterRef.current ?? "")?.backdrop;
+  const avatarBackground = photoBackdrop ?? palette.ground;
   const judgeInFlightRef = useRef(false);
   const submitSeqRef = useRef(0);
   const [nudgeText, setNudgeText] = useState<string | null>(null);
@@ -993,6 +1000,7 @@ export function InterviewPage() {
                   isAvatarConnected={voice.isAvatarConnected}
                   mediaMode={voice.mediaMode}
                   character={avatarCharacterRef.current}
+                  backdrop={photoBackdrop}
                 />
               </div>
             </div>

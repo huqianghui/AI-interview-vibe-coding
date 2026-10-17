@@ -36,14 +36,18 @@ describe("InterviewPage manual video/audio-only toggle", () => {
     vi.restoreAllMocks();
   });
 
-  async function startOnVoiceQuestion(voiceMock: Record<string, unknown>) {
+  async function startOnVoiceQuestion(
+    voiceMock: Record<string, unknown>,
+    start: Record<string, unknown> = {},
+  ) {
     await i18n.changeLanguage("en-US");
     const user = userEvent.setup();
     vi.spyOn(client, "startInterview").mockResolvedValue({
       interview_session_id: "iv1",
       status: "in_progress",
       current_question: { question_id: "q1", prompt: "Question one?", index: 0, total: 2 },
-    });
+      ...start,
+    } as never);
     const voiceModule = await import("../hooks/useInterviewVoice");
     const hookSpy = vi.spyOn(voiceModule, "useInterviewVoice").mockReturnValue(voiceMock as never);
 
@@ -211,5 +215,16 @@ describe("InterviewPage manual video/audio-only toggle", () => {
     // And it must be a full six-digit hex: `buildWsUrl` strips the '#' and validates the digits,
     // so a token that ever resolved to `rgb()` or a 3-digit shorthand would be dropped silently.
     expect(options?.avatarBackground).toMatch(/^#[0-9A-Fa-f]{6}$/);
+  });
+
+  it("asks for a PHOTO avatar's own portrait wall, the colour its stage is then filled with", async () => {
+    // Owner, 2026-10-17: Sakura looked sallow on the near-white page ground, unlike her portrait.
+    // A photo avatar's wall is now its roster backdrop (measured from the portrait), and AvatarView
+    // fills the whole stage to match what it reads back from the picture.
+    const { hookSpy } = await startOnVoiceQuestion(baseVoiceMock(), {
+      voice_avatar_character: "sakura",
+    });
+    const options = hookSpy.mock.calls.at(-1)?.[1] as { avatarBackground?: string } | undefined;
+    expect(options?.avatarBackground).toBe("#bbad9c");
   });
 });

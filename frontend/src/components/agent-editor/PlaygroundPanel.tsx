@@ -237,6 +237,7 @@ export function PlaygroundPanel({ personaId, character, style, locale }: Playgro
               isAvatarConnected={voice.isAvatarConnected}
               mediaMode={voice.mediaMode}
               character={character}
+              backdrop={avatarBackground}
             />
           </div>
           {/* The weak-network degrade can drop the picture here too (this panel drives the same voice

@@ -93,7 +93,7 @@ the admin **Performance** tab grades a network **A to D** and names the form eac
 | Form | Performance grade | Network | What the candidate sees |
 |---|---|---|---|
 | **1. Video avatar** (e.g. Lisa) | **A** | RTT ≤ 150 ms, loss ≤ 0.5%, ≥ 4 Mbit/s | A 1080p 16:9 digital human |
-| **2. Photo avatar** (Sakura, the default) | **B** | RTT ≤ 500 ms, loss ≤ 1%, ≥ 1.5 Mbit/s | A 512×512 photoreal digital human, shown uncropped; its video bitrate is picked per session |
+| **2. Photo avatar** (Sakura, the default) | **B** | RTT ≤ 500 ms, loss ≤ 1%, ≥ 1.5 Mbit/s | A 512×512 photoreal digital human at its own size (never enlarged), on a stage filled with its portrait's own wall colour so there is no frame around it; its video bitrate is picked per session |
 | **3. Voice only** | **C** | loss ≥ 3%, RTT ≥ 600 ms, or < 1 Mbit/s | No picture, still over WebRTC: the candidate turns video off, or is assigned an interviewer without a digital human |
 | | **D** | UDP 3478 blocked | No picture, voice over the **WebSocket**: no digital human can connect, so the app falls back to this by itself |
 | **4. Text** | any | any network | The candidate types each answer ([3b](#3b-text-mode--answer-by-typing)) |
