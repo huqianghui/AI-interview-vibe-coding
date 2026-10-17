@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.78.0.0 (2026-10-17)
+
+### Changed
+- **The live network check starts as soon as `/admin` opens, on any tab.** The API round trip,
+  voice connection and UDP-to-relay checks run while the admin page is open and visible, whichever
+  tab you are on, so the Performance tab opens on a stretch of history instead of an empty chart.
+  They still pause while the browser tab is hidden. The 2 MiB downlink test still runs only while
+  the Performance tab is open.
+- **The round-trip chart shows the last 5 minutes** (150 samples, was 1 minute). The estimated
+  grade still reads the last minute, so it follows the link as it is now.
+
 ## 0.77.0.0 (2026-10-16)
 
 ### Added

@@ -48,9 +48,10 @@ Every interview is one operation, and its **Operation id** is the interview id w
 In the app, the admin **Performance** tab looks an Operation id up (Interview results shows the id
 on every row, one click away): the interview, the network it ran on graded **A to D** with the
 starting form and settings that grade calls for ([`docs/network-grades.md`](docs/network-grades.md)),
-and its Logs and end-to-end links. While the tab is open it also runs a live network check from the
-admin's browser (round trip chart, voice connection, UDP to Azure's relay, downlink) with an
-estimated grade. In the workbook, pick an interview (the newest is selected by default) or paste an
+and its Logs and end-to-end links. It also shows a live network check from the admin's browser
+(round trip chart of the last 5 minutes, voice connection, UDP to Azure's relay, downlink) with an
+estimated grade; the check starts as soon as `/admin` opens, on any tab, so the chart already has
+history when the tab is opened (the 2 MiB downlink test runs only on this tab). In the workbook, pick an interview (the newest is selected by default) or paste an
 **Operation id**.
 What each metric means: [`docs/voice-performance-telemetry.md`](docs/voice-performance-telemetry.md).
 
