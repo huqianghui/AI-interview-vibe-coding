@@ -2,36 +2,36 @@
   "00-signin.png": {
     "sha256": "30c24cbb329d11b588dbb720d35c57ad22fdfdfa803bb86b21a641254179f7ce",
     "sources": "98373053487ae0d0bb4bcc1bf0541c14f036a5cb88aa86b812ac5b3002c1adfd",
-    "capturedAt": "2026-10-18T08:10:05.355Z"
+    "capturedAt": "2026-10-18T08:32:11.653Z"
   },
   "01-landing.png": {
     "sha256": "3e3e84e1d53a1ea9d2defb926beb0dd7bd9668a74468dce29ba84ce8216f7563",
     "sources": "dac85aa484e4f56dfaf027fb276754fc5d0b8ef81803e69c987d8374b016cbae",
-    "capturedAt": "2026-10-18T08:10:07.912Z"
+    "capturedAt": "2026-10-18T08:32:16.278Z"
   },
   "01b-orientation.png": {
     "sha256": "937bbd71340179536c2ea2d8c8ae1516bfb771c431d1ac002fd3046b0f82d5d4",
     "sources": "0be3d8f9b0e2d732ea5a16d0774ed8f25ca90e5ec432d3bb3805d5a3371238ba",
-    "capturedAt": "2026-10-18T08:10:08.239Z"
+    "capturedAt": "2026-10-18T08:32:16.605Z"
   },
   "02-interview-question.png": {
-    "sha256": "6e33bb82649ce949476b1bb607bb000f17426972ef964e5fef8c7780e87f2f47",
-    "sources": "0816206723c4446497fd1940f9f924e77308c7c1f1c4c06a8fa554837e2365e6",
-    "capturedAt": "2026-10-18T08:10:12.238Z"
+    "sha256": "f67412fa03c241800e6ced776dd89bc0c3220192794a0333a2976d42ba6e0f35",
+    "sources": "59f54ed3ce69ba39f18368ec06fb850caf53e184fa8995779d896d63e624c96b",
+    "capturedAt": "2026-10-18T08:32:20.929Z"
   },
   "04-review-before-scoring.png": {
     "sha256": "ca7864a27abdbb41795c5e7914e3f2e32789cfc363df47e9265ebd7650c2717d",
     "sources": "63ba66763da0a9886251b35d8be24b42b3972af401ce7c0d56463ef2e08ee2fd",
-    "capturedAt": "2026-10-18T08:10:13.214Z"
+    "capturedAt": "2026-10-18T08:32:21.906Z"
   },
   "05-report-executive.png": {
-    "sha256": "db74678357c44f386dd47214d25ab6fd954373d091f5346ebecd3ddf5c3503c8",
+    "sha256": "0632b96fa660d4412148c7737a89c8cacde09738658120a5752d05e223099a35",
     "sources": "fc129f68cad289788c04bfee039bba93195abacbde3cb791636997d2f18235fc",
-    "capturedAt": "2026-10-18T08:10:19.151Z"
+    "capturedAt": "2026-10-18T08:32:28.866Z"
   },
   "06-report-detail.png": {
-    "sha256": "0ad376de94999147b1a7c0d70662bedd2427b685c52916dbf8fc758e15e9138e",
+    "sha256": "2ac22e017d4b194d00434d7483a9a16b19ec8861da77ae4e0b223f112a167f81",
     "sources": "fc129f68cad289788c04bfee039bba93195abacbde3cb791636997d2f18235fc",
-    "capturedAt": "2026-10-18T08:10:19.574Z"
+    "capturedAt": "2026-10-18T08:32:29.275Z"
   }
 }
