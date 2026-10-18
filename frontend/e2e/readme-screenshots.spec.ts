@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { test, expect, request as pwRequest } from "@playwright/test";
+import { test, expect, request as pwRequest, type Page } from "@playwright/test";
 import { primeCandidateLogin } from "./helpers/candidateLogin";
 import { DEPICTS, sha256, sourcesFingerprint, type CaptureEntry } from "../src/readmeScreenshots";
 
@@ -46,12 +46,31 @@ function recordCapture(name: string): void {
   const sorted = Object.fromEntries(Object.entries(ledger).sort(([x], [y]) => x.localeCompare(y)));
   writeFileSync(LEDGER, `${JSON.stringify(sorted, null, 2)}\n`);
 }
+/**
+ * Wait until the interviewer portrait has painted. Sign-in and idle look the interviewer up before
+ * rendering the `<img>`, so it mounts after the page's `load` event and `goto` no longer waits for it:
+ * without this the shot shows an empty frame with a name under it.
+ */
+async function portraitLoaded(page: Page, testId: string): Promise<void> {
+  const img = page.getByTestId(testId).locator("img");
+  await expect(img).toBeVisible();
+  // The thumbnail comes from the Azure docs CDN, a 1.8 MB image that took ~30s on a slow network.
+  await expect
+    .poll(() => img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0), {
+      timeout: 60_000,
+    })
+    .toBe(true);
+}
+
 const ADMIN_USER = "admin";
 const ADMIN_PW = "e2e-admin-pw";
 
 test.skip(!ENABLED, "README screenshot capture is opt-in: set SCREENSHOTS=1");
 
 test.use({ viewport: { width: 1440, height: 900 } });
+// The portrait waits below can take most of a minute on a slow network; the default 60s per test
+// would end the candidate flow before its last shot.
+test.setTimeout(180_000);
 
 /**
  * Clear the mic-permission dialog if it appears (recorded learning, 2026-09-24).
@@ -106,6 +125,7 @@ test("capture the sign-in screen", async ({ page }) => {
   // the unauthenticated shot needs its own page.
   await page.goto("/interview");
   await expect(page.getByRole("button", { name: /登录|sign in/i })).toBeVisible();
+  await portraitLoaded(page, "signin-portrait");
   await page.screenshot({ path: `${OUT}/00-signin.png` });
   recordCapture("00-signin.png");
 });
@@ -114,6 +134,7 @@ test("capture candidate flow: idle → orientation → interview → review → 
   await primeCandidateLogin(page); // #102: /interview is login-gated
   await page.goto("/interview");
   await expect(page.getByRole("button", { name: /开始面试|start interview/i })).toBeVisible();
+  await portraitLoaded(page, "interviewer-portrait");
   await page.screenshot({ path: `${OUT}/01-landing.png` });
   recordCapture("01-landing.png");
 
