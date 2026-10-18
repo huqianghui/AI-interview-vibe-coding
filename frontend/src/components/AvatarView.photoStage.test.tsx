@@ -187,4 +187,24 @@ describe("AvatarView photo stage", () => {
       localStorage.removeItem(portraitKeyFor("sakura"));
     }
   });
+
+  it("framed with a masthead: the window sits below it, and the layer around it gets the gutter", async () => {
+    const around = vi.fn(() => <span data-testid="around-child" />);
+    renderStage({ width: 512, height: 512 }, "#bbad9c", {
+      framed: true,
+      framedTopPx: 60,
+      photoAround: around,
+      photoBelow: <div />,
+    });
+    const root = screen.getByTestId("avatar-view");
+    await waitFor(() => expect(root.style.width).toBe("512px"), SETTLE);
+    expect(root.style.marginTop).toBe("60px");
+    // The layer covers the window exactly: centred in the 710 px stage, 60 px from its top.
+    const layer = screen.getByTestId("avatar-photo-around");
+    expect(layer.style.top).toBe("60px");
+    expect(layer.style.left).toBe("99px");
+    expect(layer.style.width).toBe("512px");
+    expect(layer).toContainElement(screen.getByTestId("around-child"));
+    expect(around).toHaveBeenLastCalledWith({ gutter: 99 });
+  });
 });

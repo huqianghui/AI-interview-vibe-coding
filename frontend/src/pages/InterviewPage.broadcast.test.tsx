@@ -76,6 +76,8 @@ describe("InterviewPage broadcast stage", () => {
     expect(screen.getByTestId("stage-name-plate")).toHaveTextContent("Sakura");
     expect(screen.getByTestId("stage-topic-title")).toHaveTextContent("Clinical Study Manager");
     expect(screen.getByTestId("stage-topic-strip")).toHaveTextContent("2 questions");
+    // Template B's masthead: the question, the language, and the voice's state (text mode: Ready).
+    expect(screen.getByTestId("stage-masthead")).toHaveTextContent("No. 01 / 02 · English · Ready");
 
     // An answer's response carries no title (mutations report none): the strip keeps it.
     vi.spyOn(client, "submitAnswer").mockResolvedValue({
@@ -101,5 +103,6 @@ describe("InterviewPage broadcast stage", () => {
     await startOn({ voice_avatar_character: "sakura", interview_title: "T" });
     expect(screen.getByTestId("interview-stage")).toHaveAttribute("data-broadcast", "false");
     expect(screen.queryByTestId("stage-topic-strip")).toBeNull();
+    expect(screen.queryByTestId("stage-masthead")).toBeNull(); // template B is the photo stage only
   });
 });
