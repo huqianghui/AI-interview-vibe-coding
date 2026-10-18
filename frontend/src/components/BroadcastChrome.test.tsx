@@ -1,6 +1,6 @@
 /** The broadcast layout's name plate and topic strip (owner, 2026-10-17). */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import i18n from "../i18n";
 import {
@@ -83,7 +83,7 @@ describe("BroadcastChrome", () => {
 
   describe("template B: the brief under the strip", () => {
     afterEach(() => vi.unstubAllGlobals());
-    const withRoom = (height: number) => {
+    const withRoom = (height: number, content = 0) => {
       vi.stubGlobal(
         "ResizeObserver",
         class {
@@ -98,9 +98,15 @@ describe("BroadcastChrome", () => {
         configurable: true,
         get: () => height,
       });
+      // What the rendered words need; 0 = they fit.
+      Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+        configurable: true,
+        get: () => content || height,
+      });
     };
     afterEach(() => {
       delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight;
+      delete (HTMLElement.prototype as { scrollHeight?: number }).scrollHeight;
     });
 
     it("on a tall stage: the three tips and the closing line", async () => {
@@ -114,7 +120,7 @@ describe("BroadcastChrome", () => {
 
     it("with less room: the tips only; with none: nothing (fewer words, never clipped ones)", async () => {
       await i18n.changeLanguage("en-US");
-      withRoom(180);
+      withRoom(200); // 150 px of content once its own 50 px of padding is set aside
       const { unmount } = wrap(<StageBrief />);
       expect(screen.getByTestId("stage-tips")).toBeInTheDocument();
       expect(screen.queryByTestId("stage-quote")).toBeNull();
@@ -123,5 +129,60 @@ describe("BroadcastChrome", () => {
       wrap(<StageBrief />);
       expect(screen.queryByTestId("stage-tips")).toBeNull();
     });
+
+    it("steps down when the words it shows do not fit after all (tips wrap on a narrow stage)", async () => {
+      await i18n.changeLanguage("en-US");
+      withRoom(300, 420); // the height says tips and closing line; the content needs more
+      wrap(<StageBrief />);
+      await waitFor(() => expect(screen.getByTestId("stage-brief")).toHaveAttribute("data-level", "0"));
+      expect(screen.queryByTestId("stage-quote")).toBeNull();
+    });
+  });
+
+  it("template B: side notes appear exactly when the gutter holds them; every voice state reads calm", async () => {
+    await i18n.changeLanguage("en-US");
+    const { rerender } = wrap(<SideNotes gutter={219} index={1} total={9} voice="ready" />);
+    expect(screen.queryByTestId("stage-side-voice")).toBeNull();
+    const notes: Record<string, string> = {
+      ready: "Ready when you are. Speak, or type if you prefer.",
+      listening: "Listening. Take the time you need.",
+      speaking: "The question is being read. Listen first, then answer.",
+      muted: "Your microphone is off. Unmute when you are ready.",
+    };
+    for (const [voice, text] of Object.entries(notes)) {
+      rerender(
+        <FluentProvider theme={webLightTheme}>
+          <SideNotes gutter={220} index={1} total={9} voice={voice as "ready"} />
+        </FluentProvider>,
+      );
+      expect(screen.getByTestId("stage-side-voice")).toHaveTextContent(text);
+    }
+    // No count (an external interviewer): the question note steps aside, the voice note stays.
+    rerender(
+      <FluentProvider theme={webLightTheme}>
+        <SideNotes gutter={260} index={null} total={null} voice="ready" />
+      </FluentProvider>,
+    );
+    expect(screen.queryByTestId("stage-side-question")).toBeNull();
+    expect(screen.getByTestId("stage-side-voice")).toBeInTheDocument();
+  });
+
+  it("template B: with no question number the masthead keeps only the language and voice", async () => {
+    await i18n.changeLanguage("zh-CN");
+    wrap(<Masthead index={null} total={null} language="中文" voice="speaking" />);
+    expect(screen.getByTestId("stage-masthead")).toHaveTextContent("面试进行中");
+    expect(screen.getByTestId("stage-masthead")).toHaveTextContent("中文 · 朗读中");
+    expect(screen.getByTestId("stage-masthead")).not.toHaveTextContent("第");
+    await i18n.changeLanguage("en-US");
+  });
+
+  it("every stage string has its Chinese counterpart", () => {
+    const keys = (o: unknown, at = ""): string[] =>
+      o && typeof o === "object"
+        ? Object.entries(o).flatMap(([k, v]) => keys(v, at ? `${at}.${k}` : k))
+        : [at];
+    const en = keys(i18n.getResourceBundle("en-US", "translation").stage);
+    const zh = keys(i18n.getResourceBundle("zh-CN", "translation").stage);
+    expect(zh.sort()).toEqual(en.sort());
   });
 });

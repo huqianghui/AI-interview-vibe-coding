@@ -207,4 +207,13 @@ describe("AvatarView photo stage", () => {
     expect(layer).toContainElement(screen.getByTestId("around-child"));
     expect(around).toHaveBeenLastCalledWith({ gutter: 99 });
   });
+
+  it("unframed (the editor) never draws the layer around the window", async () => {
+    const around = vi.fn(() => <span data-testid="around-child" />);
+    renderStage({ width: 512, height: 512 }, "#bbad9c", { photoAround: around });
+    const root = screen.getByTestId("avatar-view");
+    await waitFor(() => expect(root).toHaveAttribute("data-photo-stage", "true"), SETTLE);
+    expect(screen.queryByTestId("avatar-photo-around")).toBeNull();
+    expect(around).not.toHaveBeenCalled();
+  });
 });
