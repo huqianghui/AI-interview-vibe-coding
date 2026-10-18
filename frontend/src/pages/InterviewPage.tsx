@@ -49,7 +49,7 @@ import { AVATAR_CHARACTER_MAP, interviewerIdentity } from "../data/avatarCharact
 import {
   CropMarks,
   Masthead,
-  MASTHEAD_PX,
+  MASTHEAD_CLEARANCE_PX,
   NamePlate,
   SideNotes,
   StageBrief,
@@ -1049,7 +1049,7 @@ export function InterviewPage() {
                   character={avatarCharacterRef.current}
                   backdrop={photoBackdrop}
                   framed
-                  framedTopPx={MASTHEAD_PX + 14}
+                  framedTopPx={MASTHEAD_CLEARANCE_PX}
                   onPhotoStage={setPhotoStage}
                   photoAround={({ gutter }) => (
                     <>
@@ -1071,10 +1071,7 @@ export function InterviewPage() {
                   }
                   photoBelow={
                     <>
-                      <TopicStrip
-                        title={interviewTitleRef.current}
-                        total={questionTotalRef.current || null}
-                      />
+                      <TopicStrip title={interviewTitleRef.current} total={stageTotal} />
                       <StageBrief />
                     </>
                   }

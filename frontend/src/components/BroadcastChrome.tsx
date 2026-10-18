@@ -4,7 +4,7 @@
  * (what this interview is and how it works, taken from the orientation screen: guidance, never
  * the conversation). Modelled on a broadcast lower third, in the app's own palette.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { makeStyles, mergeClasses, Text, tokens } from "@fluentui/react-components";
 import { useTranslation } from "react-i18next";
 import { fonts, palette } from "../theme";
@@ -16,11 +16,17 @@ export const STRIP_MAX_PX = 114;
 /** Template B: the masthead's height (the window sits below it), and the side notes' width and
  * gap; they show only when the free width beside the window holds them (`SideNotes`). */
 export const MASTHEAD_PX = 46;
+/** The masthead's distance from the stage's top edge, and the room the window leaves for both. */
+export const MASTHEAD_TOP_PX = 14;
+export const MASTHEAD_CLEARANCE_PX = MASTHEAD_PX + MASTHEAD_TOP_PX;
 const SIDE_NOTE_PX = 170;
 const SIDE_GAP_PX = 34;
-/** The tips need this much height under the strip, the closing line this much more. */
-const TIPS_MIN_PX = 150;
-const QUOTE_MIN_PX = 240;
+/** Content heights (the brief's own padding excluded) the tips need, and the tips plus the closing
+ * line. Only a first guess: the brief then checks that what it shows really fits (wrapped tips on a
+ * narrow stage are taller) and steps down until it does. */
+const TIPS_MIN_PX = 130;
+const QUOTE_MIN_PX = 200;
+const BRIEF_PAD_Y_PX = 50;
 const CROP_LINE = `1px solid ${palette.textFaint}`;
 
 const useStyles = makeStyles({
@@ -117,7 +123,7 @@ const useStyles = makeStyles({
   masthead: {
     fontFamily: fonts.display,
     position: "absolute",
-    top: "14px",
+    top: `${MASTHEAD_TOP_PX}px`,
     left: "40px",
     right: "40px",
     zIndex: 1,
@@ -134,7 +140,9 @@ const useStyles = makeStyles({
     textTransform: "uppercase",
     whiteSpace: "nowrap",
   },
-  mastheadTitle: { color: palette.ink, letterSpacing: "0.22em" },
+  mastheadTitle: { color: palette.ink, letterSpacing: "0.22em", flexShrink: 0 },
+  // On a narrow stage the status gives way with an ellipsis rather than run off the edge.
+  mastheadStatus: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" },
   crop: { position: "absolute", width: "20px", height: "20px" },
   // 14 px outside the window: clear of its 7 px frame, and of the masthead's rule above and the
   // topic strip below (22 px under the window).
@@ -178,7 +186,7 @@ const useStyles = makeStyles({
     display: "flex",
     flexDirection: "column",
     justifyContent: "space-between",
-    padding: "26px 40px 24px",
+    padding: `26px 40px ${BRIEF_PAD_Y_PX - 26}px`,
     overflow: "hidden",
   },
   tips: {
@@ -273,6 +281,8 @@ export function TopicStrip({ title, total }: { title: string | null; total: numb
 
 export type StageVoice = "ready" | "listening" | "speaking" | "muted";
 
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
 /** Template B's masthead: the page's name for itself, and where the candidate is. */
 export function Masthead({
   index,
@@ -287,12 +297,13 @@ export function Masthead({
 }) {
   const styles = useStyles();
   const { t } = useTranslation();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const where = index && total ? `${t("stage.issue")} ${pad(index)} / ${pad(total)} · ` : "";
+  const where = index && total ? `${t("stage.issue")} ${pad2(index)} / ${pad2(total)} · ` : "";
   return (
     <div className={styles.masthead} data-testid="stage-masthead">
       <span className={styles.mastheadTitle}>{t("stage.masthead")}</span>
-      <span>{`${where}${language} · ${t(`stage.voice.${voice}`)}`}</span>
+      <span className={styles.mastheadStatus}>
+        {`${where}${language} · ${t(`stage.voice.${voice}`)}`}
+      </span>
     </div>
   );
 }
@@ -303,7 +314,11 @@ export function CropMarks() {
   return (
     <>
       {(["cropTL", "cropTR", "cropBL", "cropBR"] as const).map((k) => (
-        <span key={k} className={mergeClasses(styles.crop, styles[k])} data-testid="stage-crop-mark" />
+        <span
+          key={k}
+          className={mergeClasses(styles.crop, styles[k])}
+          data-testid="stage-crop-mark"
+        />
       ))}
     </>
   );
@@ -328,10 +343,13 @@ export function SideNotes({
   return (
     <>
       {index && total ? (
-        <div className={mergeClasses(styles.side, styles.sideLeft)} data-testid="stage-side-question">
+        <div
+          className={mergeClasses(styles.side, styles.sideLeft)}
+          data-testid="stage-side-question"
+        >
           <span className={styles.sideKicker}>{t("stage.thisQuestion")}</span>
-          <span className={styles.sideBig}>{String(index).padStart(2, "0")}</span>
-          {t("stage.ofTotal", { count: total })}
+          <span className={styles.sideBig}>{pad2(index)}</span>
+          {t("stage.ofTotal", { total })}
         </div>
       ) : null}
       <div className={mergeClasses(styles.side, styles.sideRight)} data-testid="stage-side-voice">
@@ -348,18 +366,29 @@ export function StageBrief() {
   const styles = useStyles();
   const { t } = useTranslation();
   const ref = useRef<HTMLDivElement>(null);
-  const [room, setRoom] = useState(0);
+  // 0 = nothing, 1 = the tips, 2 = the tips and the closing line.
+  const [level, setLevel] = useState(0);
   useEffect(() => {
     const el = ref.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const measure = () => setRoom(el.clientHeight);
+    const measure = () => {
+      const room = el.clientHeight - BRIEF_PAD_Y_PX;
+      setLevel(room >= QUOTE_MIN_PX ? 2 : room >= TIPS_MIN_PX ? 1 : 0);
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+  // The height guess said it fits; the rendered content may still not (tips wrap on a narrow
+  // stage). Step down until it does, before the browser paints the clipped version.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el && level > 0 && el.scrollHeight > el.clientHeight + 1) setLevel((l) => l - 1);
+  }, [level]);
+  const room = level === 2 ? QUOTE_MIN_PX : level === 1 ? TIPS_MIN_PX : 0;
   return (
-    <div ref={ref} className={styles.brief} data-testid="stage-brief">
+    <div ref={ref} className={styles.brief} data-testid="stage-brief" data-level={level}>
       {room >= TIPS_MIN_PX && (
         <div className={styles.tips} data-testid="stage-tips">
           {([1, 2, 3] as const).map((n) => (

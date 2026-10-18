@@ -55,8 +55,7 @@ export const resources = {
         issue: "No.",
         voice: { ready: "Ready", listening: "Listening", speaking: "Speaking", muted: "Muted" },
         thisQuestion: "This question",
-        ofTotal_one: "of {{count}}. One at a time, no rush.",
-        ofTotal_other: "of {{count}}. One at a time, no rush.",
+        ofTotal: "of {{total}}. One at a time, no rush.",
         yourVoice: "Your voice",
         voiceNote: {
           ready: "Ready when you are. Speak, or type if you prefer.",
@@ -789,8 +788,7 @@ export const resources = {
         issue: "第",
         voice: { ready: "就绪", listening: "聆听中", speaking: "朗读中", muted: "已静音" },
         thisQuestion: "当前题目",
-        ofTotal_one: "共 {{count}} 题。一题一题来，不用着急。",
-        ofTotal_other: "共 {{count}} 题。一题一题来，不用着急。",
+        ofTotal: "共 {{total}} 题。一题一题来，不用着急。",
         yourVoice: "您的声音",
         voiceNote: {
           ready: "准备好了就开始。可以说，也可以写。",

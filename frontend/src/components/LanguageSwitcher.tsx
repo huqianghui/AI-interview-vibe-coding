@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { Dropdown, Option } from "@fluentui/react-components";
 import { LANGUAGE_LABELS, SUPPORTED_LANGUAGES } from "../i18n";
 
-const LABELS = LANGUAGE_LABELS;
 
 export function LanguageSwitcher() {
   const { i18n, t } = useTranslation();
@@ -16,13 +15,13 @@ export function LanguageSwitcher() {
   return (
     <Dropdown
       aria-label={t("language")}
-      value={LABELS[i18n.language] ?? i18n.language}
+      value={LANGUAGE_LABELS[i18n.language] ?? i18n.language}
       selectedOptions={[i18n.language]}
       onOptionSelect={(_, d) => d.optionValue && onSelect(d.optionValue)}
     >
       {SUPPORTED_LANGUAGES.map((lang) => (
         <Option key={lang} value={lang}>
-          {LABELS[lang]}
+          {LANGUAGE_LABELS[lang]}
         </Option>
       ))}
     </Dropdown>

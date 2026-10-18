@@ -616,7 +616,8 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
           style={{
             position: "absolute",
             top: framedTopPx,
-            left: Math.round((parent.w - photo.width) / 2),
+            // Unrounded, like the flex centring of the window itself, so the two line up exactly.
+            left: (parent.w - photo.width) / 2,
             width: photo.width,
             height: photo.height,
             pointerEvents: "none",
