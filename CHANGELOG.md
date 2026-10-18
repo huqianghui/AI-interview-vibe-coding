@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.78.1.0 (2026-10-18)
+
+### Changed
+- **The photo-avatar stage now looks like a calm printed page.** Chosen from three template
+  mockups, it puts the candidate at ease with words about answering well rather than about the
+  interview's subject:
+  - **The page:** the stage is warm paper. A masthead across the top shows the question number, the
+    language and the voice's state ("No. 01 / 09 · English · Ready"), and fine crop marks frame the
+    window's corners.
+  - **Side notes:** when there is room beside the window, one note says which question this is ("01
+    of 9. One at a time, no rush."). The other gives the voice's state in plain words ("Ready when
+    you are", "Listening. Take the time you need.").
+  - **Under the topic strip:** three numbered tips ("Think first", "Use an example", "Finish on your
+    terms") and a closing line ("Take your time. A good answer often starts with a pause."). They
+    appear only when the screen is tall enough, so a laptop shows fewer words rather than clipped
+    ones.
+
+  The digital human stays at her own 512 px. A video avatar, voice only and text mode keep their
+  stages as before.
+
 ## 0.78.0.0 (2026-10-18)
 
 ### Added
