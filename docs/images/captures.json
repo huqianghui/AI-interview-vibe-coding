@@ -6,32 +6,32 @@
   },
   "01-landing.png": {
     "sha256": "3e3e84e1d53a1ea9d2defb926beb0dd7bd9668a74468dce29ba84ce8216f7563",
-    "sources": "da2ee040dd1d88efebaf39b6960a3a3c9d1df054a9d4313935c94f37d621f19d",
-    "capturedAt": "2026-10-17T23:58:45.616Z"
+    "sources": "1787ee5e7939bb628dceee758ebc23e6c6bafed0fd8c1b58b25adb70af69e88d",
+    "capturedAt": "2026-10-18T00:14:51.575Z"
   },
   "01b-orientation.png": {
     "sha256": "937bbd71340179536c2ea2d8c8ae1516bfb771c431d1ac002fd3046b0f82d5d4",
-    "sources": "ab810ec322f19a9b2f4fa3df2237e3d1a993183e4ecf6f128ad958db8af66d76",
-    "capturedAt": "2026-10-17T23:58:45.958Z"
+    "sources": "0a14b5513e0e16a13e68b0a2236c185d5c76f891b573ae7f36d41c7e3d1a708a",
+    "capturedAt": "2026-10-18T00:14:51.916Z"
   },
   "02-interview-question.png": {
-    "sha256": "da65fa8adf6091f166a1c1f92b191b6a23e81466176e0139a272b050dea937fa",
-    "sources": "8c78532a4ded2e9ad78967d179a9416b8ee1a01344ae8c1821c0511534ec71f2",
-    "capturedAt": "2026-10-17T23:58:50.967Z"
+    "sha256": "e85210cbadb2ad315dbeeb080d3df64c25ba306c529710751d4031d86aa54c3d",
+    "sources": "9e6dd7f9825dd9dc6667983fc51f60c0c45f19a87e1f20d76f03b1692e5fcc70",
+    "capturedAt": "2026-10-18T00:14:56.260Z"
   },
   "04-review-before-scoring.png": {
     "sha256": "ca7864a27abdbb41795c5e7914e3f2e32789cfc363df47e9265ebd7650c2717d",
-    "sources": "3a56f7438d5d97e92c529b9da2ab1f00d97e48f45f93448e0937ce4e389f9ca5",
-    "capturedAt": "2026-10-17T23:58:51.952Z"
+    "sources": "8b57f51db95f5504acf763f51a6bf4665e3965478567966299385ffbd0295312",
+    "capturedAt": "2026-10-18T00:14:57.260Z"
   },
   "05-report-executive.png": {
-    "sha256": "c3985f02625be631e9a3fa89f4593ab5ee61dc030a13653f2c88f756fe1c76ab",
-    "sources": "ca93ceeb0d1a76dec539e4f21eb78a2f68e76ceda82cc355c20e8944468b2f70",
-    "capturedAt": "2026-10-17T23:58:57.386Z"
+    "sha256": "8794eb1b340c34aa6ca722d2d41a61526f1f996210a9b159d17a42d91ae4c06f",
+    "sources": "c754b7d1785d5901ba2a8c3275897346c71aec3836bdf4febfb59123978a8880",
+    "capturedAt": "2026-10-18T00:15:03.701Z"
   },
   "06-report-detail.png": {
-    "sha256": "f0b356fdbd4172dcdb62c38c496c88be0dbf5ce416fbb72c71b83ca750760544",
-    "sources": "ca93ceeb0d1a76dec539e4f21eb78a2f68e76ceda82cc355c20e8944468b2f70",
-    "capturedAt": "2026-10-17T23:58:57.810Z"
+    "sha256": "c12323dbf978a8aaceadbf358f5d963a1aff15fc4b277189f9bd5f553e490dae",
+    "sources": "c754b7d1785d5901ba2a8c3275897346c71aec3836bdf4febfb59123978a8880",
+    "capturedAt": "2026-10-18T00:15:04.127Z"
   }
 }
