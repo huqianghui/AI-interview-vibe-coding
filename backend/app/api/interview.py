@@ -302,7 +302,7 @@ async def _persona_voice_flags(db: AsyncSession, session: InterviewSession) -> d
         "voice_linear_turns": persona.linear_turns_for(session.brain_mode),
         # The judge is a per-session snapshot decision (turn_mode); only its SECONDS are live-read.
         "voice_judge_silence_seconds": persona.judge_silence_seconds if judged else 0,
-        "voice_avatar_character": ((persona.character or "").strip().lower()),
+        "voice_avatar_character": persona_service.avatar_character(persona),
     }
 
 

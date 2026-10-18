@@ -1661,6 +1661,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/candidate/interviewer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** My Interviewer */
+        get: operations["my_interviewer_candidate_interviewer_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/candidate/interviews": {
         parameters: {
             query?: never;
@@ -1790,6 +1807,23 @@ export interface paths {
          * @description Despite the `/public` path segment (kept for URL stability), this route REQUIRES `Authorization: Bearer <candidate JWT>` from `/auth/login` with a `user`-role account: 401 when missing/invalid/inactive, 403 for admin accounts. Idempotent per account — an unexpired, unrevoked session is returned again (fresh token, same session).
          */
         post: operations["create_session_public_candidate_session_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/public/interviewer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Default Interviewer */
+        get: operations["default_interviewer_public_interviewer_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2452,6 +2486,11 @@ export interface components {
             offset: number;
             /** Total */
             total: number;
+        };
+        /** InterviewerIdentityOut */
+        InterviewerIdentityOut: {
+            /** Character */
+            character: string;
         };
         /** InterviewerOut */
         InterviewerOut: {
@@ -6173,6 +6212,37 @@ export interface operations {
             };
         };
     };
+    my_interviewer_candidate_interviewer_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Anon-Session"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InterviewerIdentityOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     my_interviews_candidate_interviews_get: {
         parameters: {
             query?: never;
@@ -6358,6 +6428,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionCreateResponse"];
+                };
+            };
+        };
+    };
+    default_interviewer_public_interviewer_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InterviewerIdentityOut"];
                 };
             };
         };

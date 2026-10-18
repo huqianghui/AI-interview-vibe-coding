@@ -1685,6 +1685,19 @@
         "title": "InterviewResultsPage",
         "type": "object"
       },
+      "InterviewerIdentityOut": {
+        "properties": {
+          "character": {
+            "title": "Character",
+            "type": "string"
+          }
+        },
+        "required": [
+          "character"
+        ],
+        "title": "InterviewerIdentityOut",
+        "type": "object"
+      },
       "InterviewerOut": {
         "properties": {
           "avatar": {
@@ -8853,6 +8866,55 @@
         ]
       }
     },
+    "/candidate/interviewer": {
+      "get": {
+        "operationId": "my_interviewer_candidate_interviewer_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Anon-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Anon-Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewerIdentityOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "My Interviewer",
+        "tags": [
+          "interviewer"
+        ]
+      }
+    },
     "/candidate/interviews": {
       "get": {
         "description": "The caller's interviews, newest first, every status.",
@@ -9139,6 +9201,27 @@
         "summary": "Mint the candidate session token (requires a candidate login)",
         "tags": [
           "candidate-session"
+        ]
+      }
+    },
+    "/public/interviewer": {
+      "get": {
+        "operationId": "default_interviewer_public_interviewer_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewerIdentityOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Default Interviewer",
+        "tags": [
+          "interviewer"
         ]
       }
     }
