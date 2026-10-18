@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.78.2.0 (2026-10-18)
+
+### Fixed
+- **The sign-in and "ready when you are" screens now show the interviewer you configured.** They
+  used to show Sakura, the built-in default, whoever the admin had picked, so a candidate met Lisa
+  on the sign-in page as Sakura and only saw Lisa after pressing Start. Now:
+  - **Sign-in** shows the default interviewer persona's avatar (who most candidates will meet).
+  - **After sign-in** the screen names and shows the candidate's own assigned interviewer, chosen
+    the same way the interview then chooses it: a disabled or deleted assignment falls back to the
+    default on both.
+  - **No wrong face first.** Until the answer arrives the portrait and name stay blank rather than
+    show someone who may be the wrong person, and a failed lookup stays blank too. Coming back to
+    this screen (after Start over, or a finished interview) asks again, so a changed assignment
+    shows.
+  - **An expired candidate login** found on this screen now goes straight back to the sign-in card
+    with the reason, instead of leaving the page looking signed in until Start was pressed.
+
+### Added
+- **Two read-only routes for the interviewer shown before an interview exists:**
+  `GET /public/interviewer` (no sign-in; the default persona's avatar character id and nothing
+  else) and `GET /candidate/interviewer` (the signed-in candidate's own). A blank `character`
+  means the default avatar.
+
+### Changed
+- **README screenshots:** the signed-in landing and interview shots are recaptured from this
+  version, and the capture script now waits for the interviewer's portrait to finish loading.
+
 ## 0.78.1.0 (2026-10-18)
 
 ### Changed
