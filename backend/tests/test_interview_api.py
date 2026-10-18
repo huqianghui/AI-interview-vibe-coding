@@ -1477,6 +1477,46 @@ async def test_entry_points_report_the_interview_title_for_the_stage_strip(clien
 
 
 @pytest.mark.asyncio
+async def test_interview_title_falls_back_and_is_blank_without_a_bank(db_session):
+    # The lookup's own cases, without re-deriving them: external and bank-less sessions have no
+    # title ("" resets the page's latch), a version's blank snapshot falls back to the bank's name.
+    from types import SimpleNamespace
+
+    from app.api.interview import _interview_title
+    from app.models.bank_version import BankVersion
+    from app.services import question_service
+
+    bank = await question_service.create_bank(db_session, name="Live Name", is_default=False)
+    version = BankVersion(
+        bank_id=bank.id, version_no=1, bank_name="  ", content_json="{}", content_hash="h1"
+    )
+    named = BankVersion(
+        bank_id=bank.id, version_no=2, bank_name="Pinned Name", content_json="{}", content_hash="h2"
+    )
+    db_session.add_all([version, named])
+    await db_session.commit()
+
+    def session(**over):
+        base = {"brain_mode": "bank", "bank_id": bank.id, "bank_version_id": None}
+        return SimpleNamespace(**{**base, **over})
+
+    assert await _interview_title(db_session, session(brain_mode="external")) == ""
+    assert await _interview_title(db_session, session(bank_id=None)) == ""
+    assert await _interview_title(db_session, session(bank_version_id=named.id)) == "Pinned Name"
+    assert await _interview_title(db_session, session(bank_version_id=version.id)) == "Live Name"
+    assert await _interview_title(db_session, session(bank_version_id="gone")) == "Live Name"
+    assert await _interview_title(db_session, session()) == "Live Name"
+
+
+@pytest.mark.asyncio
+async def test_interview_title_is_reported_with_no_persona(client, db_session):
+    # The no-persona branch of the entry-point flags carries the title too.
+    headers = await _new_candidate_headers(client)
+    body = (await client.post("/candidate/interview/start", headers=headers)).json()
+    assert "interview_title" in body and body["interview_title"] is not None
+
+
+@pytest.mark.asyncio
 async def test_judge_dry_run_retired_verdict_is_never_applicable(
     client, db_session, scripted_judge
 ):

@@ -105,8 +105,9 @@ class InterviewOut(BaseModel):
     voice_avatar_character: str | None = None
     # The interview's title for the stage's topic strip (owner, 2026-10-17): the name of the bank
     # this session is pinned to (its version's own snapshot of the name, else the bank's). The
-    # admin names banks, so this is the name the organizer chose. ``None`` for external sessions
-    # (no bank) and on mutations; same reporting contract as above.
+    # admin names banks, so this is the name the organizer chose. Same reporting contract as above:
+    # entry points only, ``None`` on mutations; ``""`` at an entry point when there is no title
+    # (an external session, no bank), like ``voice_avatar_character``, so the page's latch resets.
     interview_title: str | None = None
 
 
@@ -250,17 +251,17 @@ def _to_interview_out(
     )
 
 
-async def _interview_title(db: AsyncSession, session: InterviewSession) -> str | None:
+async def _interview_title(db: AsyncSession, session: InterviewSession) -> str:
     """The pinned bank's name: its version's snapshot (what this session runs on), else the
-    bank's current name. ``None`` for an external session or a session with no bank."""
+    bank's current name. ``""`` for an external session or a session with no bank."""
     if session.brain_mode == "external" or not session.bank_id:
-        return None
+        return ""
     if session.bank_version_id:
         version = await db.get(BankVersion, session.bank_version_id)
         if version is not None and version.bank_name.strip():
             return version.bank_name.strip()
     bank = await db.get(QuestionBank, session.bank_id)
-    return bank.name.strip() if bank is not None and bank.name.strip() else None
+    return bank.name.strip() if bank is not None else ""
 
 
 async def _persona_voice_flags(db: AsyncSession, session: InterviewSession) -> dict:
@@ -278,6 +279,9 @@ async def _persona_voice_flags(db: AsyncSession, session: InterviewSession) -> d
     ``voice_linear_turns``: whether the voice channel runs LINEAR TURNS for this session's engine —
     always ``True`` for external sessions (no brain of their own); for bank sessions the persona's
     admin-set ``bank_turn_mode`` (default linear). With no persona the engine alone decides.
+
+    ``interview_title``: not a voice flag, but reported by the same entry points on the same
+    contract: the pinned bank's name for the stage's topic strip (``_interview_title``).
     """
     persona = await persona_service.get_session_persona(db, session)
     judged = session.turn_mode == "judged"
