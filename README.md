@@ -93,7 +93,7 @@ the admin **Performance** tab grades a network **A to D** and names the form eac
 | Form | Performance grade | Network | What the candidate sees |
 |---|---|---|---|
 | **1. Video avatar** (e.g. Lisa) | **A** | RTT ≤ 150 ms, loss ≤ 0.5%, ≥ 4 Mbit/s | A 1080p 16:9 digital human |
-| **2. Photo avatar** (Sakura, the default) | **B** | RTT ≤ 500 ms, loss ≤ 1%, ≥ 1.5 Mbit/s | A 512×512 photoreal digital human at its own size (never enlarged), on a stage filled with its portrait's own wall colour so there is no frame around it; its video bitrate is picked per session |
+| **2. Photo avatar** (Sakura, the default) | **B** | RTT ≤ 500 ms, loss ≤ 1%, ≥ 1.5 Mbit/s | A 512×512 photoreal digital human at its own size (never enlarged), in a broadcast-style stage: a framed window near the top, a name plate, and a topic strip with the interview's title and how answering works; its video bitrate is picked per session |
 | **3. Voice only** | **C** | loss ≥ 3%, RTT ≥ 600 ms, or < 1 Mbit/s | No picture, still over WebRTC: the candidate turns video off, or is assigned an interviewer without a digital human |
 | | **D** | UDP 3478 blocked | No picture, voice over the **WebSocket**: no digital human can connect, so the app falls back to this by itself |
 | **4. Text** | any | any network | The candidate types each answer ([3b](#3b-text-mode--answer-by-typing)) |
@@ -112,9 +112,12 @@ Form 1, the video avatar (Lisa, grade A), on real Azure:
 
 ![Voice mode — live video avatar (Lisa, grade A), 1080p 16:9, having read the question, transcript on the right](docs/images/09a-live-avatar-video.png)
 
-Form 2, the photo avatar (Sakura, grade B), on real Azure:
+Form 2, the photo avatar (Sakura, grade B), on real Azure. Around a photo avatar the stage is laid
+out like a broadcast studio: one framed window, her name plate over its bottom edge, and under it a
+strip naming the interview (the question bank's name), its question count and how answering works.
+It is guidance from the orientation screen, never the conversation, which stays on the right:
 
-![Voice mode — live photo avatar (Sakura, grade B) having read the question, transcript on the right](docs/images/09-live-avatar-voice.png)
+![Voice mode — live photo avatar (Sakura, grade B) in a framed window with her name plate and the interview's topic strip, on a studio-style set; question and transcript on the right](docs/images/09-live-avatar-voice.png)
 
 ### 3b. Text mode — answer by typing
 

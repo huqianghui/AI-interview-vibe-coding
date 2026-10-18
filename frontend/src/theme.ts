@@ -43,6 +43,15 @@ export const palette = {
    * instead of a literal.
    */
   action: "#5C2E91",
+
+  /** The interview stage's broadcast set around a photo avatar (BroadcastChrome, owner 2026-10-17):
+   *  the frame's light inner line and the strip's kicker, the set's ground and its two gradient
+   *  ends, and the "+" marks. */
+  lilac: "#D6C4F0",
+  setGround: "#F3EEEA",
+  setTop: "#F6F2EC",
+  setBottom: "#EEE7EF",
+  setMark: "#AAA0BE",
   actionHover: "#4A2375",
   /** The action colour at panel strength — for a surface that must read as "this is the
    *  authoritative side" without competing with the text on it (the report's SOP quote panels). */

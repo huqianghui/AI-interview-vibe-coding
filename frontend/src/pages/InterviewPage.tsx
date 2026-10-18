@@ -45,7 +45,8 @@ import { CandidateIdle } from "../components/CandidateIdle";
 import { MyInterviews } from "../components/MyInterviews";
 import { CandidateOrientation } from "../components/CandidateOrientation";
 import { palette } from "../theme";
-import { AVATAR_CHARACTER_MAP } from "../data/avatarCharacters";
+import { AVATAR_CHARACTER_MAP, interviewerIdentity } from "../data/avatarCharacters";
+import { NamePlate, TopicStrip } from "../components/BroadcastChrome";
 import { QuestionProgress } from "../components/QuestionProgress";
 import { MicPermissionDialog } from "../components/MicPermissionDialog";
 import { Transcript } from "../components/Transcript";
@@ -119,6 +120,16 @@ export function InterviewPage() {
   // null once the interview completes, so the scoring-progress copy would otherwise show "/ 0".
   // We latch the last-known total here and fall back to it (then the report's actual count).
   const questionTotalRef = useRef(0);
+  // What is latched per SESSION starts again with a new one (Restart, or an interview run by an
+  // external interviewer after a bank one): an old count or title must not carry over.
+  const interviewTitleRef = useRef<string | null>(null);
+  const latchedSessionRef = useRef<string | null>(null);
+  const sessionId = interview?.interview_session_id;
+  if (sessionId && sessionId !== latchedSessionRef.current) {
+    latchedSessionRef.current = sessionId;
+    questionTotalRef.current = 0;
+    interviewTitleRef.current = null;
+  }
   if (interview?.current_question?.total) {
     questionTotalRef.current = interview.current_question.total;
   }
@@ -215,6 +226,14 @@ export function InterviewPage() {
   // fills the stage with the colour it reads from the decoded picture, so the two match exactly.
   // Video avatars keep the ground, for the reason above.
   const photoBackdrop = AVATAR_CHARACTER_MAP.get(avatarCharacterRef.current ?? "")?.backdrop;
+  // The interview's title for the topic strip: reported on start/resume only (null on mutations),
+  // so latched like the character above ("" = none; reset per session where it is declared).
+  if (typeof interview?.interview_title === "string") {
+    interviewTitleRef.current = interview.interview_title;
+  }
+  // Whether a photo avatar's picture is what the stage shows: then the broadcast layout (framed
+  // window, name plate, topic strip, studio set); otherwise the plain stage with the orb.
+  const [photoStage, setPhotoStage] = useState(false);
   const avatarBackground = photoBackdrop ?? palette.ground;
   const judgeInFlightRef = useRef(false);
   const submitSeqRef = useRef(0);
@@ -986,8 +1005,13 @@ export function InterviewPage() {
                 square, so the full head-and-shoulders framing is kept whatever the stage's shape
                 and the stage gradient fills the letterbox. */}
             <div
-              className={mergeClasses(styles.stage, styles.stageOrderNarrow)}
+              className={mergeClasses(
+                styles.stage,
+                styles.stageOrderNarrow,
+                photoStage && styles.broadcastStage,
+              )}
               data-testid="interview-stage"
+              data-broadcast={photoStage}
             >
               <div className={styles.stageAvatar}>
                 {/* Once the digital human is streaming, keep it visible — do NOT gate on the
@@ -1001,6 +1025,21 @@ export function InterviewPage() {
                   mediaMode={voice.mediaMode}
                   character={avatarCharacterRef.current}
                   backdrop={photoBackdrop}
+                  framed
+                  onPhotoStage={setPhotoStage}
+                  // Only for a character the roster knows: `interviewerIdentity` falls back to the
+                  // default face's name, which would mislabel anyone else.
+                  photoOverlay={
+                    AVATAR_CHARACTER_MAP.has(avatarCharacterRef.current ?? "") ? (
+                      <NamePlate name={interviewerIdentity(avatarCharacterRef.current).name} />
+                    ) : null
+                  }
+                  photoBelow={
+                    <TopicStrip
+                      title={interviewTitleRef.current}
+                      total={questionTotalRef.current || null}
+                    />
+                  }
                 />
               </div>
             </div>

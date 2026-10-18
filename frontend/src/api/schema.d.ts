@@ -2378,6 +2378,8 @@ export interface components {
             external_phase?: string | null;
             /** Interview Session Id */
             interview_session_id: string;
+            /** Interview Title */
+            interview_title?: string | null;
             /**
              * Recording Retention Days
              * @default 0

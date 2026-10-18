@@ -3,6 +3,12 @@ import { makeStyles, tokens } from "@fluentui/react-components";
 import { palette } from "../../theme";
 import type { AudioState } from "../../types/voice";
 
+/** The broadcast set's "+" marks: one 14×90 tile, repeated down each side of the stage. */
+const PLUS_MARKS =
+  `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='90'%3E` +
+  `%3Cpath d='M7 38v14M0 45h14' stroke='${encodeURIComponent(palette.setMark)}' ` +
+  `stroke-width='1.6'/%3E%3C/svg%3E")`;
+
 export const useInterviewStyles = makeStyles({
   // Stack for the non-live phases (idle / orientation / scoring / report). WIDTH AND PADDING ARE
   // NOT SET HERE any more: this used to be `maxWidth: 760px; margin: 0 auto; padding: 24px`, and
@@ -198,13 +204,36 @@ export const useInterviewStyles = makeStyles({
     width: "100%",
     flex: 1,
     display: "flex",
+    // A column, so the broadcast layout's topic strip sits directly under the framed window
+    // (AvatarView renders it as the window's next sibling). With one child it reads as before.
+    flexDirection: "column",
+    minHeight: 0,
     // TOP-aligned, not centred (owner, 2026-10-02: "it needs to line up with the question"). The
     // avatar box is sized to the stream's exact aspect by `AvatarView`, so centring it left a gap
     // above the figure and the stage started ~96px BELOW the question card on the right — the two
-    // columns visibly disagreed about where the content began. Flex-start puts the top edge of the
-    // media on the same line as the card's top. Horizontal centring is kept.
-    alignItems: "flex-start",
-    justifyContent: "center",
+    // columns visibly disagreed about where the content began. In this column `justifyContent:
+    // flex-start` keeps the media's top edge on the card's top line, and `alignItems: center`
+    // keeps it centred left to right.
+    alignItems: "center",
+    justifyContent: "flex-start",
+  },
+  // The broadcast set behind a photo avatar's framed window (owner, 2026-10-17, after a broadcast
+  // studio reference): a warm-to-lilac ground, a soft diagonal light, a faint dot grid and "+"
+  // marks down both sides, in the app's own palette. Only while her picture shows; the orb keeps
+  // the plain stage.
+  broadcastStage: {
+    borderRadius: "12px",
+    backgroundColor: palette.setGround,
+    backgroundImage: [
+      PLUS_MARKS,
+      PLUS_MARKS,
+      "radial-gradient(circle, rgba(170, 160, 190, 0.45) 1px, transparent 1.4px)",
+      "linear-gradient(115deg, transparent 38%, rgba(255, 255, 255, 0.4) 50%, transparent 62%)",
+      `linear-gradient(160deg, ${palette.setTop} 0%, ${palette.setBottom} 100%)`,
+    ].join(", "),
+    backgroundRepeat: "repeat-y, repeat-y, repeat, no-repeat, no-repeat",
+    backgroundPosition: "18px 0, calc(100% - 18px) 0, 0 0, 0 0, 0 0",
+    backgroundSize: "14px 90px, 14px 90px, 28px 28px, 100% 100%, 100% 100%",
   },
   // Right: the control column — a flex column so the transcript can grow to fill leftover height.
   controls: {

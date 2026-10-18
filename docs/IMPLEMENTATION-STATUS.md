@@ -113,6 +113,7 @@ acknowledgement, never a local report.
 | Per-session photo-avatar bitrate from the page's network hint (300 kbit/s when RTT > 300 ms or loss > 0.5%); grades A to D | ✅ Done | v0.76.0.0 | ✅ live 2026-10-15 (cab21c1): weak hint (RTT 430 ms) → 300 kbit/s `auto`, Azure echoed 300000; good hint (RTT 120 ms) → default, Azure echoed 2000000 |
 | Live round-trip check starts when `/admin` opens (any tab; voice connection, STUN and downlink only on Performance); chart keeps 5 minutes, grade reads the last minute | ✅ Done | v0.77.1.0 | ⏳ live check pending after deploy |
 | Photo avatar at its own 512 px, stage filled with the colour read from the decoded picture (portrait wall requested as `avatar_bg`) | ✅ Done | v0.77.2.0 | ✅ local dev on real Azure 2026-10-17: stage (186,172,157) vs picture edge (187,172,157); deploy check pending |
+| Broadcast-style stage around a photo avatar: framed 512 window near the top, name plate, topic strip (`interview_title` + count + orientation facts), studio set; orb unchanged | ✅ Done | v0.78.0.0 | ✅ local dev on real Azure 2026-10-18 at 1440×900 (window ~480 px: the strip keeps room for two rows of chips) and 1920×1200 (512 px); deploy check pending |
 
 ## Background jobs + scale-out ([`planning/spec-jobs-and-scale-out.md`](planning/spec-jobs-and-scale-out.md))
 
