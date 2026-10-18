@@ -8,7 +8,10 @@ import { makeStyles, Text, tokens } from "@fluentui/react-components";
 import { useTranslation } from "react-i18next";
 import { palette } from "../theme";
 
-const LILAC = "#D6C4F0";
+/** The gap above the topic strip, and the most room the strip takes (its chips on two rows): the
+ * framed window leaves this much under itself (AvatarView), so the strip is never pushed off. */
+export const STRIP_GAP_PX = 22;
+export const STRIP_MAX_PX = 114;
 
 const useStyles = makeStyles({
   plate: {
@@ -54,7 +57,7 @@ const useStyles = makeStyles({
     alignItems: "stretch",
     width: "100%",
     maxWidth: "760px",
-    marginTop: "22px",
+    marginTop: `${STRIP_GAP_PX}px`,
     borderRadius: "10px",
     overflow: "hidden",
     backgroundColor: palette.ink,
@@ -73,7 +76,7 @@ const useStyles = makeStyles({
     backgroundColor: palette.action,
   },
   stripKicker: {
-    color: LILAC,
+    color: palette.lilac,
     fontSize: tokens.fontSizeBase100,
     fontWeight: tokens.fontWeightSemibold,
     letterSpacing: "0.12em",
@@ -136,7 +139,12 @@ export function TopicStrip({ title, total }: { title: string | null; total: numb
         </Text>
       </div>
       <div className={styles.stripBody}>
-        <Text size={400} className={styles.stripTitle} data-testid="stage-topic-title">
+        <Text
+          size={400}
+          className={styles.stripTitle}
+          title={title || undefined}
+          data-testid="stage-topic-title"
+        >
           {title || t("stage.untitled")}
         </Text>
         <div className={styles.chips}>

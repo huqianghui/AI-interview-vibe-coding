@@ -120,6 +120,16 @@ export function InterviewPage() {
   // null once the interview completes, so the scoring-progress copy would otherwise show "/ 0".
   // We latch the last-known total here and fall back to it (then the report's actual count).
   const questionTotalRef = useRef(0);
+  // What is latched per SESSION starts again with a new one (Restart, or an interview run by an
+  // external interviewer after a bank one): an old count or title must not carry over.
+  const interviewTitleRef = useRef<string | null>(null);
+  const latchedSessionRef = useRef<string | null>(null);
+  const sessionId = interview?.interview_session_id;
+  if (sessionId && sessionId !== latchedSessionRef.current) {
+    latchedSessionRef.current = sessionId;
+    questionTotalRef.current = 0;
+    interviewTitleRef.current = null;
+  }
   if (interview?.current_question?.total) {
     questionTotalRef.current = interview.current_question.total;
   }
@@ -217,8 +227,7 @@ export function InterviewPage() {
   // Video avatars keep the ground, for the reason above.
   const photoBackdrop = AVATAR_CHARACTER_MAP.get(avatarCharacterRef.current ?? "")?.backdrop;
   // The interview's title for the topic strip: reported on start/resume only (null on mutations),
-  // so latched like the character above.
-  const interviewTitleRef = useRef<string | null>(null);
+  // so latched like the character above ("" = none; reset per session where it is declared).
   if (typeof interview?.interview_title === "string") {
     interviewTitleRef.current = interview.interview_title;
   }
@@ -1018,8 +1027,12 @@ export function InterviewPage() {
                   backdrop={photoBackdrop}
                   framed
                   onPhotoStage={setPhotoStage}
+                  // Only for a character the roster knows: `interviewerIdentity` falls back to the
+                  // default face's name, which would mislabel anyone else.
                   photoOverlay={
-                    <NamePlate name={interviewerIdentity(avatarCharacterRef.current).name} />
+                    AVATAR_CHARACTER_MAP.has(avatarCharacterRef.current ?? "") ? (
+                      <NamePlate name={interviewerIdentity(avatarCharacterRef.current).name} />
+                    ) : null
                   }
                   photoBelow={
                     <TopicStrip
