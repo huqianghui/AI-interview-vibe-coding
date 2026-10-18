@@ -13,6 +13,7 @@ import { FluentProvider } from "@fluentui/react-components";
 import "../i18n";
 import { CandidateIdle } from "./CandidateIdle";
 import { appTheme, palette } from "../theme";
+import { resolveThumbnailUrl } from "../data/avatarCharacters";
 
 function renderIdle(props: Partial<React.ComponentProps<typeof CandidateIdle>> = {}) {
   const onStart = props.onStart ?? vi.fn();
@@ -47,6 +48,24 @@ describe("CandidateIdle composition", () => {
     expect(figure.querySelector("img")).not.toBeNull();
     expect(figure).toHaveTextContent("READY");
     expect(figure).toHaveTextContent("Your interviewer");
+  });
+
+  it("introduces the candidate's assigned interviewer by name and portrait", () => {
+    renderIdle({ character: "lisa" });
+    expect(screen.getByTestId("idle-headline")).toHaveTextContent("Lisa is ready");
+    const figure = screen.getByTestId("interviewer-portrait");
+    expect(figure.querySelector("img")!.getAttribute("src")).toBe(resolveThumbnailUrl("lisa", ""));
+    expect(figure).toHaveTextContent("Lisa");
+  });
+
+  it("keeps the portrait and the name hidden while the interviewer is looked up", () => {
+    renderIdle({ pending: true });
+    const figure = screen.getByTestId("interviewer-portrait");
+    expect(figure.querySelector("img")).toBeNull();
+    expect(getComputedStyle(screen.getByTestId("idle-headline").firstElementChild!).visibility).toBe(
+      "hidden",
+    );
+    expect(screen.getByTestId("idle-headline")).toHaveAttribute("aria-busy", "true");
   });
 
   it("states the three facts that hold without an interview existing yet", () => {

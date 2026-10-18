@@ -217,15 +217,20 @@ const useStyles = makeStyles({
 export type CandidateSignInProps = Pick<
   LoginCardProps,
   "error" | "busy" | "onSubmit"
->;
+> & {
+  /** The default persona's avatar character (`/public/interviewer`); blank = the default avatar. */
+  character?: string | null;
+  /** Still looking it up: leave the portrait and name blank rather than flash the wrong person. */
+  pending?: boolean;
+};
 
-export function CandidateSignIn({ error, busy, onSubmit }: CandidateSignInProps) {
+export function CandidateSignIn({ error, busy, onSubmit, character, pending }: CandidateSignInProps) {
   const styles = useStyles();
   const { t } = useTranslation();
 
-  // The sign-in screen is pre-auth, so there is no session and no persona yet — the portrait shows
-  // the deployment's DEFAULT interviewer, the same constant the backend falls back to.
-  const { name: interviewerName, portraitUrl, isPhoto } = interviewerIdentity();
+  // Pre-auth, so the candidate's own assignment is unknown: this is the deployment's DEFAULT
+  // persona, which is who most candidates will meet.
+  const { name: interviewerName, portraitUrl, isPhoto } = interviewerIdentity(character);
 
   return (
     <div className={styles.split} data-testid="candidate-signin-split">
@@ -243,11 +248,13 @@ export function CandidateSignIn({ error, busy, onSubmit }: CandidateSignInProps)
 
         <figure className={styles.frame} data-testid="signin-portrait">
           <div className={styles.mat}>
-            <img
-              className={mergeClasses(styles.portrait, isPhoto && styles.portraitPhoto)}
-              src={portraitUrl}
-              alt=""
-            />
+            {!pending && (
+              <img
+                className={mergeClasses(styles.portrait, isPhoto && styles.portraitPhoto)}
+                src={portraitUrl}
+                alt=""
+              />
+            )}
             <span className={styles.livePill}>
               <i className={styles.liveDot} aria-hidden />
               {t("candidate.livePill")}
@@ -256,7 +263,7 @@ export function CandidateSignIn({ error, busy, onSubmit }: CandidateSignInProps)
           <figcaption className={styles.caption}>
             <span>{t("voice.roleInterviewer")}</span>
             <span className={styles.captionName}>
-              {interviewerName}
+              {pending ? "" : interviewerName}
             </span>
           </figcaption>
         </figure>

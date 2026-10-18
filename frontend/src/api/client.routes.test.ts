@@ -70,6 +70,7 @@ const ROUTES: Array<[string, Call, string, string, unknown]> = [
   ["getReview", () => client.getReview("iv1"), "GET", "/api/candidate/interview/iv1/review", undefined],
   ["listMyInterviews", () => client.listMyInterviews(), "GET", "/api/candidate/interviews", undefined],
   ["getMyInterview", () => client.getMyInterview("iv1"), "GET", "/api/candidate/interviews/iv1", undefined],
+  ["getMyInterviewer", () => client.getMyInterviewer(), "GET", "/api/candidate/interviewer", undefined],
   [
     "fetchMySopDocument",
     () => client.fetchMySopDocument("iv1", "doc/1"),
@@ -119,6 +120,17 @@ describe("candidate route wrappers", () => {
     vi.stubGlobal("fetch", okJson({ interview_session_id: "iv9", status: "in_progress" }));
     await client.startInterview();
     expect(localStorage.getItem(INTERVIEW_KEY)).toBe("iv9");
+  });
+
+  it("getDefaultInterviewer is a public GET that sends no credentials", async () => {
+    const fetchSpy = okJson({ character: "lisa" });
+    vi.stubGlobal("fetch", fetchSpy);
+    await expect(client.getDefaultInterviewer()).resolves.toEqual({ character: "lisa" });
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe("/api/public/interviewer");
+    const headers = init.headers as Headers;
+    expect(headers.has("X-Anon-Session")).toBe(false);
+    expect(headers.has("Authorization")).toBe(false);
   });
 });
 

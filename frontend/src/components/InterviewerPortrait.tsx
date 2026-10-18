@@ -108,6 +108,8 @@ export interface InterviewerPortraitProps {
   state?: "ready" | "live";
   /** The session's avatar character once known; blank = the deployment's default interviewer. */
   character?: string | null;
+  /** The character is still being looked up: blank portrait and name, never the wrong person. */
+  pending?: boolean;
   className?: string;
 }
 
@@ -115,14 +117,15 @@ export function InterviewerPortrait({
   shape = "square",
   state = "ready",
   character,
+  pending = false,
   className,
 }: InterviewerPortraitProps) {
   const styles = useStyles();
   const { t } = useTranslation();
 
-  // Sign-in and idle are pre-auth or pre-`startInterview()`, so no persona is loaded and they show
-  // the deployment's DEFAULT interviewer (the constant the backend falls back to). Orientation runs
-  // after start and passes the session's real character. Name and picture both come from the roster.
+  // Idle runs before `startInterview()` and passes the candidate's assigned character (looked up
+  // ahead of the session); orientation passes the session's own. Blank = the default interviewer.
+  // Name and picture both come from the roster.
   const { name, portraitUrl: src, isPhoto } = interviewerIdentity(character);
   const tall = shape === "tall";
 
@@ -132,14 +135,16 @@ export function InterviewerPortrait({
       data-testid="interviewer-portrait"
     >
       <div className={mergeClasses(styles.mat, tall ? styles.tall : styles.square)}>
-        <img
-          className={mergeClasses(
-            styles.img,
-            isPhoto ? styles.imgPhoto : tall ? styles.imgTall : styles.imgSquare,
-          )}
-          src={src}
-          alt=""
-        />
+        {!pending && (
+          <img
+            className={mergeClasses(
+              styles.img,
+              isPhoto ? styles.imgPhoto : tall ? styles.imgTall : styles.imgSquare,
+            )}
+            src={src}
+            alt=""
+          />
+        )}
         <span className={styles.pill}>
           <i className={styles.dot} aria-hidden />
           {state === "live" ? t("candidate.livePill") : t("candidate.readyPill")}
@@ -147,7 +152,7 @@ export function InterviewerPortrait({
       </div>
       <figcaption className={styles.cap}>
         <span>{t("candidate.yourInterviewer")}</span>
-        <span className={styles.capName}>{name}</span>
+        <span className={styles.capName}>{pending ? "" : name}</span>
       </figcaption>
     </figure>
   );
