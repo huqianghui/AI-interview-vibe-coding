@@ -78,6 +78,7 @@ export type ApiContract = [
   // Interview history (#187). The saved report is an untyped dict on the backend.
   Holds<Refines<Client.InterviewHistoryItem, Schemas["InterviewHistoryItem"]>>,
   Holds<Refines<Client.TranscriptTurn, Schemas["TranscriptTurn"]>>,
+  Holds<Refines<Client.Interviewer, Schemas["InterviewerIdentityOut"]>>,
   Holds<Refines<Admin.Assignment, Schemas["AssignmentIn"]>>,
   Holds<Refines<Admin.InterviewResultItem, Schemas["InterviewResultItem"]>>,
   Holds<Refines<Admin.InterviewResultsPage, Schemas["InterviewResultsPage"]>>,

@@ -11,8 +11,9 @@
  * hero and the product's actual promise is on screen instead of a button on a void.
  *
  * What this screen can HONESTLY say is constrained: the interview does not exist until
- * `startInterview()` runs, so there is no question count and no persona here. It states the three
- * facts that hold regardless, and points forward for the count rather than inventing one.
+ * `startInterview()` runs, so there is no question count here. It states the three facts that hold
+ * regardless, and points forward for the count rather than inventing one. The interviewer IS known:
+ * the page looks up the candidate's assigned persona ahead of the session (`character`).
  */
 import { useTranslation } from "react-i18next";
 import {
@@ -71,6 +72,8 @@ const useStyles = makeStyles({
     margin: 0,
   },
   clause: { display: "block" },
+  /** Holds the line's height while the name is looked up, so the headline does not jump. */
+  hidden: { visibility: "hidden" },
   accent: { display: "block", color: palette.action },
   lede: {
     display: "block",
@@ -138,9 +141,13 @@ const useStyles = makeStyles({
 export interface CandidateIdleProps {
   busy: boolean;
   onStart: () => void;
+  /** The candidate's assigned avatar character; blank = the default interviewer. */
+  character?: string | null;
+  /** Still looking it up: the portrait and the name stay blank. */
+  pending?: boolean;
 }
 
-export function CandidateIdle({ busy, onStart }: CandidateIdleProps) {
+export function CandidateIdle({ busy, onStart, character, pending = false }: CandidateIdleProps) {
   const styles = useStyles();
   const { t } = useTranslation();
 
@@ -152,12 +159,21 @@ export function CandidateIdle({ busy, onStart }: CandidateIdleProps) {
 
   return (
     <div className={styles.split} data-testid="candidate-idle-split">
-      <InterviewerPortrait shape="tall" state="ready" className={styles.portrait} />
+      <InterviewerPortrait
+        shape="tall"
+        state="ready"
+        character={character}
+        pending={pending}
+        className={styles.portrait}
+      />
 
       <section className={styles.brief}>
         <p className={styles.kicker}>{t("candidate.idle.kicker")}</p>
-        <h2 className={styles.headline} data-testid="idle-headline">
-          <span className={styles.clause}>{t("candidate.idle.headlineLead", { name: interviewerIdentity().name })}</span>
+        {/* While the name is looked up its clause is hidden, so the heading is incomplete. */}
+        <h2 className={styles.headline} data-testid="idle-headline" aria-busy={pending}>
+          <span className={mergeClasses(styles.clause, pending && styles.hidden)}>
+            {t("candidate.idle.headlineLead", { name: interviewerIdentity(character).name })}
+          </span>
           <span className={styles.accent}>{t("candidate.idle.headlineAccent")}</span>
         </h2>
         <Body1 className={styles.lede}>{t("candidate.idle.lede")}</Body1>

@@ -12,7 +12,7 @@
  * {@link CandidateAuthError} is thrown for the page to react to (back to the login card).
  */
 import { clearCandidateToken, getCandidateToken } from "./auth";
-import { apiFetch, HttpError, readJson } from "./http";
+import { apiFetch, HttpError, readJson, requestJson } from "./http";
 import { tokenStore } from "./tokenStore";
 
 const TOKEN_KEY = "anon_session_token";
@@ -660,6 +660,22 @@ export async function fetchMySopDocument(interviewId: string, documentId: string
     { json: false },
   );
   return URL.createObjectURL(await resp.blob());
+}
+
+/** The interviewer's avatar character before an interview exists. `""` = the default avatar. */
+export interface Interviewer {
+  character: string;
+}
+
+/** Sign-in screen: no auth, so only the deployment's default persona. */
+export async function getDefaultInterviewer(): Promise<Interviewer> {
+  return requestJson<Interviewer>("/public/interviewer");
+}
+
+/** Idle screen: the signed-in candidate's own interviewer, as a fresh start would pin it. */
+export async function getMyInterviewer(): Promise<Interviewer> {
+  await ensureSession();
+  return request<Interviewer>("/candidate/interviewer");
 }
 
 export const _internal = { TOKEN_KEY, getToken, setToken };

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.anonymous_session import AnonymousCandidateSession
 from app.models.persona import InterviewerPersona
+from app.models.user import User
 from app.services import (
     bank_version_service,
     persona_service,
@@ -29,21 +30,30 @@ class StartAssignment:
     bank_version_id: str | None = None
 
 
-async def resolve_for_candidate(
+async def resolve_persona_for_candidate(
     db: AsyncSession, candidate: AnonymousCandidateSession
-) -> StartAssignment:
+) -> InterviewerPersona | None:
+    """The interviewer a fresh start would pin, for the screens shown before one exists."""
     user = await user_service.get_user(db, candidate.user_id) if candidate.user_id else None
+    return await _persona_for(db, user)
 
-    persona = None
+
+async def _persona_for(db: AsyncSession, user: User | None) -> InterviewerPersona | None:
     if user is not None and user.assigned_persona_id:
         try:
             assigned = await persona_service.get_persona(db, user.assigned_persona_id)
         except persona_service.PersonaNotFound:
             assigned = None
         if assigned is not None and assigned.enabled:
-            persona = assigned
-    if persona is None:
-        persona = await persona_service.get_default_persona(db)
+            return assigned
+    return await persona_service.get_default_persona(db)
+
+
+async def resolve_for_candidate(
+    db: AsyncSession, candidate: AnonymousCandidateSession
+) -> StartAssignment:
+    user = await user_service.get_user(db, candidate.user_id) if candidate.user_id else None
+    persona = await _persona_for(db, user)
 
     bank = None
     if user is not None and user.assigned_bank_id:

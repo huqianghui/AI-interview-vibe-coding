@@ -122,6 +122,21 @@ describe("CandidateSignIn composition", () => {
     expect(figure).toHaveTextContent("LIVE");
   });
 
+  it("shows the default persona's character once it is known, not the roster default", () => {
+    renderSignIn({ character: "lisa" });
+    const figure = screen.getByTestId("signin-portrait");
+    expect(figure.querySelector("img")!.getAttribute("src")).toBe(resolveThumbnailUrl("lisa", ""));
+    expect(figure).toHaveTextContent("Lisa");
+  });
+
+  it("leaves the portrait and name blank while the interviewer is looked up", () => {
+    // Showing the roster default first and then swapping it is the bug this replaced.
+    renderSignIn({ character: "", pending: true });
+    const figure = screen.getByTestId("signin-portrait");
+    expect(figure.querySelector("img")).toBeNull();
+    expect(figure).not.toHaveTextContent(AVATAR_CHARACTER_MAP.get(DEFAULT_AVATAR_CHARACTER)!.displayName);
+  });
+
   it("still renders the working sign-in form with its contract intact", () => {
     // The composition changed; the testids E2E and the login specs depend on must not.
     renderSignIn();

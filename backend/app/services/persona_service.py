@@ -139,6 +139,16 @@ async def list_personas(
     return (await db.execute(stmt)).scalars().all()
 
 
+def avatar_character(persona: InterviewerPersona | None) -> str:
+    """The persona's avatar character id as the page reads it: trimmed, lowercase, ``""`` if none.
+
+    One rule for every place that reports it (the session's ``voice_avatar_character`` and the
+    pre-session ``/interviewer`` routes), so the screen before Start names the same interviewer
+    the interview then shows.
+    """
+    return ((persona.character if persona else "") or "").strip().lower()
+
+
 async def get_default_persona(db: AsyncSession) -> InterviewerPersona | None:
     """The single enabled default persona, or None if none is set."""
     return (

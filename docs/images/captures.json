@@ -1,13 +1,13 @@
 {
   "00-signin.png": {
     "sha256": "30c24cbb329d11b588dbb720d35c57ad22fdfdfa803bb86b21a641254179f7ce",
-    "sources": "98373053487ae0d0bb4bcc1bf0541c14f036a5cb88aa86b812ac5b3002c1adfd",
-    "capturedAt": "2026-10-18T08:32:11.653Z"
+    "sources": "bca0c281dd537f6d3a77957c2780bc5afec377d75b19a002413135d5736dfc37",
+    "capturedAt": "2026-10-18T12:13:01.446Z"
   },
   "01-landing.png": {
-    "sha256": "3e3e84e1d53a1ea9d2defb926beb0dd7bd9668a74468dce29ba84ce8216f7563",
-    "sources": "dac85aa484e4f56dfaf027fb276754fc5d0b8ef81803e69c987d8374b016cbae",
-    "capturedAt": "2026-10-18T08:32:16.278Z"
+    "sha256": "1a1cff59084af8bac21ff5cf8b7ac110c7f1cf99e3944a0abe2b18147ad151ee",
+    "sources": "9f76d7db12f66028f9020aa8dca7169f2cee5e8f637d8830d724881671bbb0c9",
+    "capturedAt": "2026-10-18T12:13:10.821Z"
   },
   "01b-orientation.png": {
     "sha256": "937bbd71340179536c2ea2d8c8ae1516bfb771c431d1ac002fd3046b0f82d5d4",
@@ -15,9 +15,9 @@
     "capturedAt": "2026-10-18T08:32:16.605Z"
   },
   "02-interview-question.png": {
-    "sha256": "f67412fa03c241800e6ced776dd89bc0c3220192794a0333a2976d42ba6e0f35",
-    "sources": "59f54ed3ce69ba39f18368ec06fb850caf53e184fa8995779d896d63e624c96b",
-    "capturedAt": "2026-10-18T08:32:20.929Z"
+    "sha256": "c8139517f381cc94207ae0b7ebc85739b01141f3bf73216cdc094920fe61480e",
+    "sources": "27bf7cbf69ba6d234e01cd5917d36965371a27dadb220451bb8b8b834b5e6c2f",
+    "capturedAt": "2026-10-18T12:13:17.026Z"
   },
   "04-review-before-scoring.png": {
     "sha256": "ca7864a27abdbb41795c5e7914e3f2e32789cfc363df47e9265ebd7650c2717d",

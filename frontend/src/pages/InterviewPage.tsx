@@ -41,6 +41,7 @@ import type { AudioState, TranscriptSegment } from "../types/voice";
 import { AvatarView } from "../components/AvatarView";
 import { AppShell } from "../components/AppShell";
 import { CandidateSignIn } from "../components/CandidateSignIn";
+import { InterviewerLookup } from "../components/InterviewerLookup";
 import { CandidateIdle } from "../components/CandidateIdle";
 import { MyInterviews } from "../components/MyInterviews";
 import { CandidateOrientation } from "../components/CandidateOrientation";
@@ -325,6 +326,15 @@ export function InterviewPage() {
     },
   });
 
+  // #102: ensureSession() refused the candidate token (401) or an admin account (403) and has
+  // already cleared both tokens — back to the login card with the backend's detail verbatim.
+  function onCandidateAuthLost(e: CandidateAuthError) {
+    setCandidateAuthed(false);
+    setInterview(null);
+    setPhase("idle");
+    setCandidateLoginError(e.detail);
+  }
+
   async function guard(fn: () => Promise<void>) {
     busyRef.current = true;
     setBusy(true);
@@ -332,15 +342,9 @@ export function InterviewPage() {
     try {
       await fn();
     } catch (e) {
-      // #102: ensureSession() rejects a missing/expired/inactive candidate token (401) or an admin
-      // account (403) with CandidateAuthError. Either way both tokens are already cleared (client.ts)
-      // — drop back to the login card showing the backend's detail verbatim, rather than the
-      // generic error banner (there is no page left to show the error on).
+      // A refused candidate login is not an error banner: there is no page left to show it on.
       if (e instanceof CandidateAuthError) {
-        setCandidateAuthed(false);
-        setInterview(null);
-        setPhase("idle");
-        setCandidateLoginError(e.detail);
+        onCandidateAuthLost(e);
       } else {
         setError(e instanceof Error ? e.message : String(e));
       }
@@ -923,11 +927,17 @@ export function InterviewPage() {
       // sets the tagline as its own display headline. Routing this through `narrow` is what
       // flattened it into a centred card in v0.41.0.0.
       <AppShell measure="bare" showTagline={false}>
-        <CandidateSignIn
-          error={candidateLoginError}
-          busy={candidateLoginBusy}
-          onSubmit={onCandidateLogin}
-        />
+        <InterviewerLookup signedIn={false}>
+          {(interviewer) => (
+            <CandidateSignIn
+              character={interviewer.character}
+              pending={interviewer.pending}
+              error={candidateLoginError}
+              busy={candidateLoginBusy}
+              onSubmit={onCandidateLogin}
+            />
+          )}
+        </InterviewerLookup>
       </AppShell>
     );
   }
@@ -938,7 +948,16 @@ export function InterviewPage() {
     return (
       <>
         <AppShell measure="bare" showTagline={false} actions={candidateActions}>
-          <CandidateIdle busy={busy} onStart={onStart} />
+          <InterviewerLookup signedIn onAuthLost={onCandidateAuthLost}>
+            {(interviewer) => (
+              <CandidateIdle
+                busy={busy}
+                onStart={onStart}
+                character={interviewer.character}
+                pending={interviewer.pending}
+              />
+            )}
+          </InterviewerLookup>
           <MyInterviews />
         </AppShell>
         {errorBanner}

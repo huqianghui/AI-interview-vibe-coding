@@ -1156,6 +1156,44 @@ describe("InterviewPage candidate login gate (#102)", () => {
     expect(screen.queryByRole("button", { name: /start interview/i })).not.toBeInTheDocument();
   });
 
+  it("introduces the configured interviewer, not the roster default, before and after sign-in", async () => {
+    // The bug: sign-in and idle showed Sakura (the roster default) while the admin had picked
+    // Lisa, and only the screen after Start showed Lisa.
+    await i18n.changeLanguage("en-US");
+    sessionStorage.removeItem("candidate_access_token");
+    vi.spyOn(client, "getDefaultInterviewer").mockResolvedValue({ character: "lisa" });
+    vi.spyOn(client, "getMyInterviewer").mockResolvedValue({ character: "harry" });
+    vi.spyOn(client, "resumeInterview").mockResolvedValue(null);
+    vi.spyOn(auth, "loginCandidate").mockResolvedValue("jwt-token");
+    vi.spyOn(client, "ensureSession").mockResolvedValue("anon-token");
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() => expect(screen.getByTestId("signin-portrait")).toHaveTextContent("Lisa"));
+
+    await user.type(screen.getByTestId("candidate-username-input"), "c1");
+    await user.type(screen.getByTestId("candidate-password-input"), "pw");
+    await user.click(screen.getByTestId("candidate-login"));
+
+    await waitFor(() => expect(screen.getByTestId("idle-headline")).toHaveTextContent("Harry is ready"));
+    expect(screen.getByTestId("interviewer-portrait")).toHaveTextContent("Harry");
+  });
+
+  it("returns to the login card when the idle lookup finds the candidate login refused", async () => {
+    // A stale candidate token: the lookup mints the session, which refuses it and clears both
+    // tokens. Staying on idle would look signed in with nothing behind it.
+    await i18n.changeLanguage("en-US");
+    sessionStorage.setItem("candidate_access_token", "expired");
+    vi.spyOn(client, "resumeInterview").mockResolvedValue(null);
+    vi.spyOn(client, "getMyInterviewer").mockRejectedValue(
+      new client.CandidateAuthError("Session expired", 401),
+    );
+    vi.spyOn(client, "getDefaultInterviewer").mockResolvedValue({ character: "lisa" });
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("candidate-login")).toBeInTheDocument());
+    expect(screen.getByText("Session expired")).toBeInTheDocument();
+  });
+
   it("logs in and reveals the start button on success", async () => {
     await i18n.changeLanguage("en-US");
     sessionStorage.removeItem("candidate_access_token");

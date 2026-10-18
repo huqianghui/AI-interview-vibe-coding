@@ -25,6 +25,7 @@ from app.api import (
     client_config,
     health,
     interview,
+    interviewer,
     voice_live_ws,
 )
 from app.config import get_settings
@@ -219,6 +220,7 @@ async def _database_unavailable(_request: Request, exc: DatabaseUnavailableError
 app.include_router(health.router)
 app.include_router(candidate_session.router)
 app.include_router(client_config.router)
+app.include_router(interviewer.router)
 app.include_router(interview.router)
 app.include_router(admin_personas.router)
 app.include_router(admin_sop.router)
