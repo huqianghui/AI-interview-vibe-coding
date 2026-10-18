@@ -46,7 +46,17 @@ import { MyInterviews } from "../components/MyInterviews";
 import { CandidateOrientation } from "../components/CandidateOrientation";
 import { palette } from "../theme";
 import { AVATAR_CHARACTER_MAP, interviewerIdentity } from "../data/avatarCharacters";
-import { NamePlate, TopicStrip } from "../components/BroadcastChrome";
+import {
+  CropMarks,
+  Masthead,
+  MASTHEAD_CLEARANCE_PX,
+  NamePlate,
+  SideNotes,
+  StageBrief,
+  TopicStrip,
+  type StageVoice,
+} from "../components/BroadcastChrome";
+import { LANGUAGE_LABELS } from "../i18n";
 import { QuestionProgress } from "../components/QuestionProgress";
 import { MicPermissionDialog } from "../components/MicPermissionDialog";
 import { Transcript } from "../components/Transcript";
@@ -962,6 +972,11 @@ export function InterviewPage() {
   if (phase === "interviewing" && q) {
     const voiceActive = channel === "voice";
     const badgeState: AudioState = voiceActive ? voice.audioState : "idle";
+    // Template B's live words (photo stage only): where the candidate is, and the voice's state.
+    const stageVoice: StageVoice = badgeState === "idle" ? "ready" : badgeState;
+    const stageIndex = q.index + 1;
+    const stageTotal = q.total || questionTotalRef.current || null;
+    const stageLanguage = LANGUAGE_LABELS[i18n.language] ?? i18n.language;
     return (
       <>
         <AppShell measure="fill" actions={candidateActions}>
@@ -1013,6 +1028,14 @@ export function InterviewPage() {
               data-testid="interview-stage"
               data-broadcast={photoStage}
             >
+              {photoStage && (
+                <Masthead
+                  index={stageIndex}
+                  total={stageTotal}
+                  language={stageLanguage}
+                  voice={stageVoice}
+                />
+              )}
               <div className={styles.stageAvatar}>
                 {/* Once the digital human is streaming, keep it visible — do NOT gate on the
                     channel tab. Gating on voiceActive hid a LIVE avatar the moment the candidate
@@ -1026,7 +1049,19 @@ export function InterviewPage() {
                   character={avatarCharacterRef.current}
                   backdrop={photoBackdrop}
                   framed
+                  framedTopPx={MASTHEAD_CLEARANCE_PX}
                   onPhotoStage={setPhotoStage}
+                  photoAround={({ gutter }) => (
+                    <>
+                      <CropMarks />
+                      <SideNotes
+                        gutter={gutter}
+                        index={stageIndex}
+                        total={stageTotal}
+                        voice={stageVoice}
+                      />
+                    </>
+                  )}
                   // Only for a character the roster knows: `interviewerIdentity` falls back to the
                   // default face's name, which would mislabel anyone else.
                   photoOverlay={
@@ -1035,10 +1070,10 @@ export function InterviewPage() {
                     ) : null
                   }
                   photoBelow={
-                    <TopicStrip
-                      title={interviewTitleRef.current}
-                      total={questionTotalRef.current || null}
-                    />
+                    <>
+                      <TopicStrip title={interviewTitleRef.current} total={stageTotal} />
+                      <StageBrief />
+                    </>
                   }
                 />
               </div>

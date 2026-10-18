@@ -3,12 +3,6 @@ import { makeStyles, tokens } from "@fluentui/react-components";
 import { palette } from "../../theme";
 import type { AudioState } from "../../types/voice";
 
-/** The broadcast set's "+" marks: one 14×90 tile, repeated down each side of the stage. */
-const PLUS_MARKS =
-  `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='90'%3E` +
-  `%3Cpath d='M7 38v14M0 45h14' stroke='${encodeURIComponent(palette.setMark)}' ` +
-  `stroke-width='1.6'/%3E%3C/svg%3E")`;
-
 export const useInterviewStyles = makeStyles({
   // Stack for the non-live phases (idle / orientation / scoring / report). WIDTH AND PADDING ARE
   // NOT SET HERE any more: this used to be `maxWidth: 760px; margin: 0 auto; padding: 24px`, and
@@ -201,6 +195,8 @@ export const useInterviewStyles = makeStyles({
     "@media (max-width: 900px)": { minHeight: "360px" },
   },
   stageAvatar: {
+    // Positioned: AvatarView draws the crop marks and side notes in a layer over the window.
+    position: "relative",
     width: "100%",
     flex: 1,
     display: "flex",
@@ -217,23 +213,16 @@ export const useInterviewStyles = makeStyles({
     alignItems: "center",
     justifyContent: "flex-start",
   },
-  // The broadcast set behind a photo avatar's framed window (owner, 2026-10-17, after a broadcast
-  // studio reference): a warm-to-lilac ground, a soft diagonal light, a faint dot grid and "+"
-  // marks down both sides, in the app's own palette. Only while her picture shows; the orb keeps
-  // the plain stage.
+  // Template B, "Editorial Calm", behind a photo avatar's framed window (owner, 2026-10-18; photo
+  // avatars only — a video avatar, voice only and text keep their own stages): the stage as warm
+  // paper with a hairline edge and a faint grain, so the masthead, crop marks, side notes and tips
+  // (BroadcastChrome) read as one printed page around her.
   broadcastStage: {
     borderRadius: "12px",
-    backgroundColor: palette.setGround,
-    backgroundImage: [
-      PLUS_MARKS,
-      PLUS_MARKS,
-      "radial-gradient(circle, rgba(170, 160, 190, 0.45) 1px, transparent 1.4px)",
-      "linear-gradient(115deg, transparent 38%, rgba(255, 255, 255, 0.4) 50%, transparent 62%)",
-      `linear-gradient(160deg, ${palette.setTop} 0%, ${palette.setBottom} 100%)`,
-    ].join(", "),
-    backgroundRepeat: "repeat-y, repeat-y, repeat, no-repeat, no-repeat",
-    backgroundPosition: "18px 0, calc(100% - 18px) 0, 0 0, 0 0, 0 0",
-    backgroundSize: "14px 90px, 14px 90px, 28px 28px, 100% 100%, 100% 100%",
+    backgroundColor: palette.paper,
+    backgroundImage:
+      "repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.012) 0 1px, transparent 1px 3px)",
+    boxShadow: `inset 0 0 0 1px ${palette.line}`,
   },
   // Right: the control column — a flex column so the transcript can grow to fill leftover height.
   controls: {

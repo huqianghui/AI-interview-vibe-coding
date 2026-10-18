@@ -112,10 +112,13 @@ Form 1, the video avatar (Lisa, grade A), on real Azure:
 
 ![Voice mode — live video avatar (Lisa, grade A), 1080p 16:9, having read the question, transcript on the right](docs/images/09a-live-avatar-video.png)
 
-Form 2, the photo avatar (Sakura, grade B), on real Azure. Around a photo avatar the stage is laid
-out like a broadcast studio: one framed window, her name plate over its bottom edge, and under it a
-strip naming the interview (the question bank's name), its question count and how answering works.
-It is guidance from the orientation screen, never the conversation, which stays on the right:
+Form 2, the photo avatar (Sakura, grade B), on real Azure. Around a photo avatar the stage reads
+like a printed page meant to put the candidate at ease: a masthead with the question, language and
+voice state; one framed window with crop marks at its corners and her name plate over its bottom
+edge; side notes beside it when there is room; and under it a strip naming the interview (the
+question bank's name), its question count and how answering works, then three numbered tips and a
+closing line when the screen is tall enough. It is guidance, never the conversation, which stays on
+the right. A video avatar, voice only and text mode keep their own stages:
 
 ![Voice mode — live photo avatar (Sakura, grade B) in a framed window with her name plate and the interview's topic strip, on a studio-style set; question and transcript on the right](docs/images/09-live-avatar-voice.png)
 

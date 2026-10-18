@@ -114,6 +114,7 @@ acknowledgement, never a local report.
 | Live round-trip check starts when `/admin` opens (any tab; voice connection, STUN and downlink only on Performance); chart keeps 5 minutes, grade reads the last minute | ✅ Done | v0.77.1.0 | ⏳ live check pending after deploy |
 | Photo avatar at its own 512 px, stage filled with the colour read from the decoded picture (portrait wall requested as `avatar_bg`) | ✅ Done | v0.77.2.0 | ✅ local dev on real Azure 2026-10-17: stage (186,172,157) vs picture edge (187,172,157); deploy check pending |
 | Broadcast-style stage around a photo avatar: framed 512 window near the top, name plate, topic strip (`interview_title` + count + orientation facts), studio set; orb unchanged | ✅ Done | v0.78.0.0 | ✅ local dev on real Azure 2026-10-18 at 1440×900 (window ~480 px: the strip keeps room for two rows of chips) and 1920×1200 (512 px); deploy check pending |
+| Photo-avatar stage template B "Editorial Calm": paper, masthead (question · language · voice), crop marks, side notes (with room), numbered tips + closing line (when tall enough); video/voice-only/text unchanged | ✅ Done | v0.78.1.0 | ✅ local dev on real Azure 2026-10-18 at 1920×1200 (all elements) and 1440×900 (side notes and tips step aside); deploy check pending |
 
 ## Background jobs + scale-out ([`planning/spec-jobs-and-scale-out.md`](planning/spec-jobs-and-scale-out.md))
 
