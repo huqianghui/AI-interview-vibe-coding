@@ -50,6 +50,27 @@ export const resources = {
         chipChannel: "Speak or type, switch anytime",
         chipDone: "You decide when each answer is done",
         chipPace: "At your pace",
+        // Template B, "Editorial Calm" (photo avatars only): words to put the candidate at ease.
+        masthead: "The interview",
+        issue: "No.",
+        voice: { ready: "Ready", listening: "Listening", speaking: "Speaking", muted: "Muted" },
+        thisQuestion: "This question",
+        ofTotal_one: "of {{count}}. One at a time, no rush.",
+        ofTotal_other: "of {{count}}. One at a time, no rush.",
+        yourVoice: "Your voice",
+        voiceNote: {
+          ready: "Ready when you are. Speak, or type if you prefer.",
+          listening: "Listening. Take the time you need.",
+          speaking: "The question is being read. Listen first, then answer.",
+          muted: "Your microphone is off. Unmute when you are ready.",
+        },
+        tip1Title: "Think first",
+        tip1Body: "A short pause before you answer is normal, and it usually makes the answer better.",
+        tip2Title: "Use an example",
+        tip2Body: "A real situation you handled says more than a general statement.",
+        tip3Title: "Finish on your terms",
+        tip3Body: "Nothing moves on until you say the answer is done.",
+        quote: "Take your time. A good answer often starts with a pause.",
       },
       orientation: {
         title: "Before we begin",
@@ -763,6 +784,27 @@ export const resources = {
         chipChannel: "可说可写，随时切换",
         chipDone: "每题由您决定何时答完",
         chipPace: "按您的节奏",
+        // 模板 B「编辑风·从容」（仅照片数字人）：让候选人安心的话。
+        masthead: "面试进行中",
+        issue: "第",
+        voice: { ready: "就绪", listening: "聆听中", speaking: "朗读中", muted: "已静音" },
+        thisQuestion: "当前题目",
+        ofTotal_one: "共 {{count}} 题。一题一题来，不用着急。",
+        ofTotal_other: "共 {{count}} 题。一题一题来，不用着急。",
+        yourVoice: "您的声音",
+        voiceNote: {
+          ready: "准备好了就开始。可以说，也可以写。",
+          listening: "正在聆听，您慢慢说。",
+          speaking: "正在朗读题目，先听完再作答。",
+          muted: "麦克风已关闭，准备好后再打开。",
+        },
+        tip1Title: "先想一想",
+        tip1Body: "回答前停顿片刻很正常，往往还能答得更好。",
+        tip2Title: "举个例子",
+        tip2Body: "讲一个您亲身处理过的情况，比泛泛而谈更有说服力。",
+        tip3Title: "由您决定何时答完",
+        tip3Body: "在您说答完之前，不会进入下一题。",
+        quote: "慢慢来。好的回答，常常从一次停顿开始。",
       },
       orientation: {
         title: "开始之前",
@@ -1381,6 +1423,8 @@ export const resources = {
 } as const;
 
 export const SUPPORTED_LANGUAGES = ["zh-CN", "en-US"] as const;
+/** Each supported language in its own name (the language switcher, the stage's masthead). */
+export const LANGUAGE_LABELS: Record<string, string> = { "zh-CN": "中文", "en-US": "English" };
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
 
 const stored =

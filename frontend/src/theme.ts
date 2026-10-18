@@ -44,14 +44,13 @@ export const palette = {
    */
   action: "#5C2E91",
 
-  /** The interview stage's broadcast set around a photo avatar (BroadcastChrome, owner 2026-10-17):
-   *  the frame's light inner line and the strip's kicker, the set's ground and its two gradient
-   *  ends, and the "+" marks. */
+  /** The photo-avatar stage (BroadcastChrome, owner 2026-10-17): the window frame's light inner
+   *  line and the strip's kicker. */
   lilac: "#D6C4F0",
-  setGround: "#F3EEEA",
-  setTop: "#F6F2EC",
-  setBottom: "#EEE7EF",
-  setMark: "#AAA0BE",
+  /** Template B, "Editorial Calm" (photo-avatar stage, owner 2026-10-18): the warm paper it is
+   *  printed on, and the gold of its closing rule. */
+  paper: "#FBF7F0",
+  gold: "#C9A24A",
   actionHover: "#4A2375",
   /** The action colour at panel strength — for a surface that must read as "this is the
    *  authoritative side" without competing with the text on it (the report's SOP quote panels). */

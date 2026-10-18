@@ -217,6 +217,13 @@ interface AvatarViewProps {
   photoOverlay?: ReactNode;
   /** Shown directly UNDER the framed window (the topic strip); the window leaves room for it. */
   photoBelow?: ReactNode;
+  /** Drawn AROUND the framed window (crop marks, side notes): a layer exactly over the window's
+   * box, so its children position themselves against the window's edges. Given the free width on
+   * each side, so side notes can step aside on a narrow stage. */
+  photoAround?: (geometry: { gutter: number }) => ReactNode;
+  /** Room above the framed window (default: just its frame). A page that draws something over the
+   * top of the stage (a masthead) asks for more. */
+  framedTopPx?: number;
   /** Told whether a photo avatar's picture (live or its cached still) is what is showing, so the
    * page can show the broadcast layout around it, and the plain stage around the orb. */
   onPhotoStage?: (photo: boolean) => void;
@@ -233,6 +240,8 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
     framed = false,
     photoOverlay,
     photoBelow,
+    photoAround,
+    framedTopPx = FRAMED_TOP_PX,
     onPhotoStage,
   },
   ref,
@@ -475,7 +484,7 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
       ? framed
         ? photoBox(
             parent.w - 2 * FRAMED_SIDE_PX,
-            narrow ? Number.POSITIVE_INFINITY : parent.h - FRAMED_TOP_PX - FRAMED_BELOW_PX,
+            narrow ? Number.POSITIVE_INFINITY : parent.h - framedTopPx - FRAMED_BELOW_PX,
             nativeVideo,
           )
         : photoBox(parent.w, parent.h, nativeVideo)
@@ -522,7 +531,7 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
                 // The broadcast window's frame: drawn as a shadow so it takes no layout space and the
                 // picture keeps exactly its own size inside it.
                 ...(framedPhoto
-                  ? { boxShadow: FRAME_SHADOW, flexShrink: 0, marginTop: FRAMED_TOP_PX }
+                  ? { boxShadow: FRAME_SHADOW, flexShrink: 0, marginTop: framedTopPx }
                   : {}),
               }
             : stageFill
@@ -598,6 +607,24 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
           </div>
         )}
       </div>
+      {framedPhoto && photoAround && photo && parent && (
+        // Over the window's box (the parent is the positioned stage column; the window is centred
+        // in it, `framedTopPx` from its top), never in the way of the picture or its controls.
+        <div
+          aria-hidden
+          data-testid="avatar-photo-around"
+          style={{
+            position: "absolute",
+            top: framedTopPx,
+            left: Math.round((parent.w - photo.width) / 2),
+            width: photo.width,
+            height: photo.height,
+            pointerEvents: "none",
+          }}
+        >
+          {photoAround({ gutter: Math.max(0, Math.floor((parent.w - photo.width) / 2)) })}
+        </div>
+      )}
       {framedPhoto && photoBelow}
     </>
   );
