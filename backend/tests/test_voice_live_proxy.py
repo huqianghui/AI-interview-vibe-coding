@@ -839,3 +839,65 @@ async def test_toggles_saved_off_on_the_orm_row_reach_the_session(db_session):
     s = _session(persona, playground=True)
     for key in ("input_audio_noise_reduction", "input_audio_echo_cancellation", "interim_response"):
         assert key not in s
+
+
+# --- the idle keep-alive (Voice Live closes a session after 900 s idle) -------------------------
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def test_keepalive_is_due_only_after_the_interval_without_an_azure_event():
+    from app.services.voice_live_proxy import IdleKeepAlive
+
+    clock = _Clock()
+    ka = IdleKeepAlive(600, clock=clock)
+    clock.now = 599
+    assert not ka.due()
+    clock.now = 600
+    assert ka.due()
+    # Any Azure event restarts the clock: an active session never gets one.
+    ka.note_event()
+    clock.now = 1199
+    assert not ka.due()
+
+
+def test_keepalive_restarts_the_clock_when_sent():
+    from app.services.voice_live_proxy import IdleKeepAlive
+
+    clock = _Clock()
+    ka = IdleKeepAlive(600, clock=clock)
+    clock.now = 600
+    ka.sent()
+    assert not ka.due()
+    clock.now = 1200
+    assert ka.due()
+
+
+def test_only_a_keepalive_echo_is_swallowed_and_each_once():
+    from app.services.voice_live_proxy import IdleKeepAlive
+
+    ka = IdleKeepAlive(600)
+    # No keep-alive in flight: the session's own session.updated frames reach the page.
+    assert not ka.is_echo("session.updated")
+    ka.sent()
+    assert not ka.is_echo("response.done")
+    assert ka.is_echo("session.updated")
+    assert not ka.is_echo("session.updated")
+
+
+def test_keepalive_event_changes_nothing_in_the_session():
+    from app.services.voice_live_proxy import KEEPALIVE_EVENT
+
+    assert KEEPALIVE_EVENT == {"type": "session.update", "session": {}}
+
+
+def test_keepalive_interval_defaults_below_azures_900_s_idle_limit():
+    from app.config import Settings
+
+    assert 0 < Settings().voice_live_keepalive_seconds < 900

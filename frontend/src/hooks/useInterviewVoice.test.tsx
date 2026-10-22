@@ -1109,6 +1109,29 @@ describe("useInterviewVoice speakQuestion cancel-then-speak", () => {
     vi.unstubAllGlobals();
   });
 
+  it("does not call Azure's idle close 'non-fatal': the session is ending and onclose reconnects", async () => {
+    const { ws, unmount } = await connectHook();
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await act(async () => {
+      ws().receive({
+        type: "error",
+        error: {
+          code: "session_idle_timeout",
+          message: "The session was closed because it was idle for more than 900 seconds.",
+        },
+      });
+    });
+    expect(info.mock.calls.some((c) => String(c[0]).includes("Azure closed the idle session"))).toBe(
+      true,
+    );
+    expect(warn.mock.calls.some((c) => String(c[0]).includes("session stays up"))).toBe(false);
+    info.mockRestore();
+    warn.mockRestore();
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
   it("reads a question exactly ONCE even when response.done fires repeatedly (读三遍 fix)", async () => {
     // The regression: every `response.done` fires the pending-speak flush, and several routes lead
     // back into emitSpeak — so a single backend question was re-emitted on successive done events
