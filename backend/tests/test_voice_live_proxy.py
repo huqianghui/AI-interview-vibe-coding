@@ -901,3 +901,41 @@ def test_keepalive_interval_defaults_below_azures_900_s_idle_limit():
     from app.config import Settings
 
     assert 0 < Settings().voice_live_keepalive_seconds < 900
+
+
+class _FakeConn:
+    def __init__(self, fail: bool = False) -> None:
+        import asyncio
+
+        self.sent: list[dict] = []
+        self.fail = fail
+        self.got_one = asyncio.Event()
+
+    async def send(self, event: dict) -> None:
+        if self.fail:
+            raise ConnectionError("closed")
+        self.sent.append(event)
+        self.got_one.set()
+
+
+async def test_keep_alive_loop_sends_the_no_op_once_due_and_marks_its_echo():
+    import asyncio
+
+    from app.services.voice_live_proxy import KEEPALIVE_EVENT, IdleKeepAlive, _keep_alive
+
+    conn = _FakeConn()
+    ka = IdleKeepAlive(0.01)
+    task = asyncio.create_task(_keep_alive(conn, ka))
+    await asyncio.wait_for(conn.got_one.wait(), timeout=5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert conn.sent[0] == KEEPALIVE_EVENT
+    assert ka.is_echo("session.updated")
+
+
+async def test_keep_alive_loop_ends_quietly_when_the_connection_fails():
+    from app.services.voice_live_proxy import IdleKeepAlive, _keep_alive
+
+    # Returns instead of raising: the forwarding loops own ending the relay.
+    await _keep_alive(_FakeConn(fail=True), IdleKeepAlive(0.01))
