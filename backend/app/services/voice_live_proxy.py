@@ -23,6 +23,8 @@ import asyncio
 import base64
 import json
 import logging
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -48,6 +50,9 @@ logger = logging.getLogger(__name__)
 PROXY_CONNECTED_TYPE = "proxy.connected"
 AUDIO_APPEND_TYPE = "input_audio_buffer.append"
 ERROR_TYPE = "error"
+# Resets Voice Live's 900 s idle clock without changing the session (measured live 2026-10-22).
+KEEPALIVE_EVENT = {"type": "session.update", "session": {}}
+AZURE_IDLE_CLOSE_S = 900
 
 # Human-readable names for the locales the UI offers (frontend/src/i18n.ts SUPPORTED_LANGUAGES).
 # Unknown locales fall back to the tag itself, which models read fine ("fr-FR").
@@ -779,16 +784,93 @@ async def run_proxy(
         logger.info("Voice Live proxy: client disconnected")
 
 
+class IdleKeepAlive:
+    """When to send :data:`KEEPALIVE_EVENT`, and which ``session.updated`` is its echo.
+
+    Voice Live closes a session after 900 s without activity, and a silent microphone stream is
+    not activity (``Settings.voice_live_keepalive_seconds``). Any event from Azure means the
+    session is active, so the clock restarts on each one; after ``interval_s`` of none, one
+    keep-alive is due. Its ``session.updated`` echo is not forwarded: the page treats every
+    ``session.updated`` as a (re)connected session and resets its turn state on it.
+
+    At most one echo is ever expected, and only for ``ECHO_WAIT_S``: a keep-alive Azure answers
+    with an error (or not at all) must not swallow a later, real ``session.updated``.
+    """
+
+    ECHO_WAIT_S = 30.0
+
+    def __init__(self, interval_s: float, clock: Callable[[], float] = time.monotonic):
+        self.interval_s = interval_s
+        self._clock = clock
+        self._last = clock()
+        self._echo_until: float | None = None
+
+    def note_event(self) -> None:
+        self._last = self._clock()
+
+    def due(self) -> bool:
+        return self._clock() - self._last >= self.interval_s
+
+    def sent(self) -> None:
+        self._echo_until = self._clock() + self.ECHO_WAIT_S
+        self._last = self._clock()
+
+    def is_echo(self, event_type: str) -> bool:
+        """Whether ``event_type`` is the keep-alive's echo (consumed once, expected for a while)."""
+        if self._echo_until is None:
+            return False
+        if self._clock() > self._echo_until:
+            self._echo_until = None
+            return False
+        if event_type.endswith("session.updated"):
+            self._echo_until = None
+            return True
+        return False
+
+
+async def _keep_alive(conn: Any, keepalive: IdleKeepAlive) -> None:  # pragma: no cover — live relay
+    """Send a keep-alive whenever one is due, until cancelled or the connection fails."""
+    check_s = min(30.0, keepalive.interval_s)
+    while True:
+        await asyncio.sleep(check_s)
+        if not keepalive.due():
+            continue
+        try:
+            await conn.send(KEEPALIVE_EVENT)
+        except Exception as exc:
+            # A closed connection ends the relay, which cancels this task; anything else is worth
+            # seeing, and the next check tries again.
+            logger.warning("Voice Live proxy: keep-alive send failed: %s", exc)
+            continue
+        keepalive.sent()
+        logger.info(
+            "Voice Live proxy: no Azure event for %ss, sent a keep-alive", keepalive.interval_s
+        )
+
+
 async def _relay(
     ws: WebSocket, conn: Any, connection_closed: type, sent_voice: Any = None, recorder: Any = None
 ) -> None:  # pragma: no cover — live relay
     """Run the two forwarding loops; return as soon as either side ends."""
+    interval_s = get_settings().voice_live_keepalive_seconds
+    if interval_s >= AZURE_IDLE_CLOSE_S:
+        logger.warning(
+            "Voice Live proxy: VOICE_LIVE_KEEPALIVE_SECONDS=%s is not under Azure's %s s idle "
+            "close, so idle sessions will still be closed",
+            interval_s,
+            AZURE_IDLE_CLOSE_S,
+        )
+    keepalive = IdleKeepAlive(interval_s) if interval_s > 0 else None
     tasks = [
         asyncio.create_task(_forward_client_to_azure(ws, conn, connection_closed, recorder)),
-        asyncio.create_task(_forward_azure_to_client(conn, ws, connection_closed, sent_voice)),
+        asyncio.create_task(
+            _forward_azure_to_client(conn, ws, connection_closed, sent_voice, keepalive)
+        ),
     ]
+    # Not one of `tasks`: the relay ends with the forwarding loops, never because of it.
+    pinger = asyncio.create_task(_keep_alive(conn, keepalive)) if keepalive else None
     _, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-    for task in pending:
+    for task in [*pending, *([pinger] if pinger else [])]:
         task.cancel()
         try:
             await task
@@ -880,16 +962,22 @@ async def _forward_azure_to_client(
     ws: WebSocket,
     connection_closed: type,
     sent_voice: Any = None,
+    keepalive: IdleKeepAlive | None = None,
 ) -> None:  # pragma: no cover — live relay
     """Azure -> browser: forward every server event (incl. avatar ICE/SDP) as JSON text.
 
     Also checks the first ``session.updated`` against the voice we asked for — see
-    :func:`applied_voice_mismatch` for the silence that check exists to make audible.
+    :func:`applied_voice_mismatch` for the silence that check exists to make audible — and keeps
+    a keep-alive's echo from the browser (:class:`IdleKeepAlive`).
     """
     checked_voice = False
     try:
         async for event in conn:
             event_dict = event.as_dict() if hasattr(event, "as_dict") else dict(event)
+            if keepalive is not None:
+                keepalive.note_event()
+                if keepalive.is_echo(str(event_dict.get("type", ""))):
+                    continue
             if not checked_voice and str(event_dict.get("type", "")).endswith("session.updated"):
                 checked_voice = True
                 problem = applied_voice_mismatch(

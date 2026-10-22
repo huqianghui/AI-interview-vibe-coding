@@ -96,10 +96,10 @@ sessions**, both with zero failures and zero avatar offers. Against the avatar's
       plus a second vite on :5174 via `E2E_API_TARGET`), then fill A to 5 and try B. This decides whether
       adding resources raises the ceiling on CONCURRENT interviews, which is the binding production
       constraint — more important than the rate limit.
-- [ ] **Verify the 5-minute idle disconnect.** Documented: the real-time avatar API disconnects after
-      5 minutes idle or 30 minutes connected. A candidate thinking for over 5 minutes on one question
-      would be disconnected, and the reconnect then spends from the 2/minute allowance. Not yet
-      measured.
+- [x] **~~Verify the 5-minute idle disconnect~~ — measured 2026-10-22, fixed in v0.78.3.0.** The avatar
+      was not dropped after 5 minutes idle (7½ minutes, still streaming). The real limit was Voice Live
+      closing the whole session after 900 s idle (`session_idle_timeout`); the backend keep-alive now
+      prevents it. The 30-minute avatar connection cap is still unmeasured (pure idle cannot reach it).
 - [x] **~~Raising the quota~~ — settled: there is nothing to request.** The regional usages API tracks
       287 quota items for this subscription+region and not one is avatar or speech; they are model
       deployment capacity plus an account count. So a support request can only ask for a service-side

@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.78.3.0 (2026-10-22)
+
+### Fixed
+- **A candidate who stays silent for more than 15 minutes no longer gets disconnected.** Azure
+  Voice Live closes a session after 900 seconds without activity (error `session_idle_timeout`,
+  measured live twice), and the candidate's silent microphone audio does not count as activity.
+  Reading the intro or thinking over one question for 15 minutes used to bring a ~5 second
+  "reconnecting" and a new avatar connection. Now:
+  - **The backend keeps the session open.** After `VOICE_LIVE_KEEPALIVE_SECONDS` (default 600)
+    with no event from Azure, it sends a `session.update` that changes nothing, which Azure counts
+    as activity (measured: the close moved to 15 minutes after it). Its reply never reaches the
+    page. An active interview never needs one, since every Azure event restarts the count.
+  - **Verified against real Azure:** 17½ minutes of silence on one connection, no close, no
+    reconnect.
+  - **If the keep-alive is off** (`0`) or Azure closes the session anyway, the existing automatic
+    reconnect still recovers it, and the browser log now says "Azure closed the idle session;
+    reconnecting" instead of calling it a non-fatal error that leaves the session up.
+
+### Added
+- **`VOICE_LIVE_KEEPALIVE_SECONDS`** backend setting (default 600, `0` turns it off; a value of
+  900 or more logs a warning, since it cannot beat Azure's idle close). Documented in
+  `backend/.env.example`.
+- **`frontend/e2e/scripts/avatar-idle-probe.mjs`**: a live probe that holds an interview silent
+  and logs every voice-connection close, error and WebRTC state change, with an optional one-off
+  keep-alive event to test what resets Azure's idle clock. The measurements are in
+  `docs/avatar-rate-limit.md`.
+
 ## 0.78.2.0 (2026-10-18)
 
 ### Fixed

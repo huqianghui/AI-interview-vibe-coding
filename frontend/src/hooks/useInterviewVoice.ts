@@ -965,6 +965,14 @@ export function useInterviewVoice(
           // (the "数字人有时候不出现" bug). Log and keep the session; only a pre-connect error is
           // fatal (the connect() promise must reject so callers can fall back).
           if (sessionLiveRef.current) {
+            const code = errInfo?.code as string | undefined;
+            // The one in-band error that does end the session: Azure closes the socket right after
+            // it (measured 2 s), and the reconnect in `onclose` takes over. The backend's keep-alive
+            // should prevent it (voice_live_keepalive_seconds), so seeing it means that is off.
+            if (code === "session_idle_timeout") {
+              console.info("[voice] Azure closed the idle session; reconnecting:", error.message);
+              break;
+            }
             console.warn(
               "[voice] non-fatal Voice Live error event (session stays up):",
               error.message,
@@ -974,7 +982,6 @@ export function useInterviewVoice(
             // (e.g. a server-VAD auto-response started between our check and send). Mark it active
             // and re-queue the just-attempted question so it retries on the next `response.done`,
             // instead of being silently dropped (the bug: the next question never got spoken).
-            const code = errInfo?.code as string | undefined;
             if (code === "conversation_already_has_active_response") {
               activeResponseRef.current = true;
               // Our response.create was REJECTED, so any response id claimed since emitSpeak

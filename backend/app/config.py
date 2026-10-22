@@ -168,6 +168,12 @@ class Settings(BaseSettings):
     # for every session. The weak-network probe (2026-09-30) showed the sender ignores a
     # receiver-side SDP b=AS cap, so this is the only bandwidth lever, honoured at session creation.
     voice_live_avatar_video_bitrate: int | None = None
+    # Voice Live closes a session after 900 s with no activity (error ``session_idle_timeout``,
+    # measured live 2026-10-22: docs/avatar-rate-limit.md), and the candidate's silent microphone
+    # audio does not count. After this many seconds without an event from Azure, the proxy sends
+    # a no-op ``session.update`` (which does count) and keeps its echo from the browser. 0 turns
+    # it off.
+    voice_live_keepalive_seconds: int = 600
 
     # Application Insights in the Azure portal, for the admin Performance tab's links
     # (docs/planning/spec-admin-performance-tab.md). The deployment sets them

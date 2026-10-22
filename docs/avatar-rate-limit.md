@@ -670,8 +670,23 @@ owner 在 Foundry 的 **Manage → Quota** 页按 `tts` 过滤，看到两行（
 - **30 分钟数字人上限这样量不出来**：每 15 分钟就被空闲超时重置一次，单个连接到不了 30 分钟。
   要量它，需要让面试官定期说话保持会话活跃。
 
-对候选人的实际影响：**只要候选人在一个页面上超过 15 分钟没说话**（看开场说明、或某道题想很久），
+对候选人的实际影响（修复前）：**只要候选人在一个页面上超过 15 分钟没说话**（看开场说明、或某道题想很久），
 就会看到一次约 5 秒的重连。
+
+### 修复：后端保活（keep-alive）
+
+同一个脚本又做了一组对照（两个账号并行，各在静默第 5 分 27 秒发一次事件）：
+`session.update`（空 session）和 `input_audio_buffer.clear` **都会重置** 900 秒计时，
+两个会话都在 20:29 才被断开，正好是那次事件之后 15 分 02 秒。
+
+现在后端代理在**连续 `VOICE_LIVE_KEEPALIVE_SECONDS`（默认 600）秒没有收到 Azure 任何事件**时，
+发一次 `{"type":"session.update","session":{}}`，并把它引起的那一条 `session.updated` 拦下，
+不转给浏览器（页面会把每条 `session.updated` 当作"刚重连上"，重置答题状态）。选它而不选
+`input_audio_buffer.clear`，是因为后者理论上可能丢掉候选人正在说的那段音频。
+
+本地连真实 Azure 验证：静默 17 分 28 秒，始终是同一条 WebSocket、同一个数字人连接，没有
+`session_idle_timeout`，浏览器也没有收到任何多余的 `session.updated`。设为 `0` 即关闭保活，
+那时退回到上面的被动重连。
 
 ```bash
 cd frontend
@@ -721,6 +736,6 @@ AU=.. AP=.. MODE=rate        node e2e/scripts/avatar-limits.mjs                 
 4. **账本跨刷新持久化**（第 3 条）—— 需要设计决策：`sessionStorage` 只能护住同一标签页，
    护不住"两位候选人同时开始"，那种情况只有提配额或排队能解。
 5. ~~实测 5 分钟空闲断开~~ —— 已测（2026-10-22）：空闲 7 分 34 秒未断开，见"顺带确认的两个硬时限"。
-   另测出 Voice Live 会话**空闲 900 秒**（`session_idle_timeout`）必断，现有重连约 5 秒自动恢复。
-6. **改正 `session_idle_timeout` 的日志**：现在记成"non-fatal, session stays up"，实际会话随即关闭。
+   另测出 Voice Live 会话**空闲 900 秒**（`session_idle_timeout`）必断，已由后端保活解决。
+6. ~~改正 `session_idle_timeout` 的日志~~ —— 已改：现在记为"Azure closed the idle session; reconnecting"。
 7. **30 分钟数字人连接上限仍未实测**（需要保持会话活跃的测法）。
