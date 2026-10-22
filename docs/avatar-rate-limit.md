@@ -621,9 +621,63 @@ owner 在 Foundry 的 **Manage → Quota** 页按 `tts` 过滤，看到两行（
 [实时合成文档](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/text-to-speech-avatar/real-time-synthesis-avatar)
 原文："The real-time API disconnects after 5 minutes of idle or after 30 minutes of connection."
 
-**5 分钟空闲断开**是个现实风险：候选人在某道题上思考超过 5 分钟（简历类、情景类题目完全可能），
-数字人连接会被 Azure 主动断开。断开后重连又要花一次 2 次/分钟的配额。这一条**尚未实测**，
-列为待验。
+**5 分钟空闲断开**原本被当作现实风险：候选人在某道题上思考超过 5 分钟（简历类、情景类题目完全可能），
+数字人连接会被 Azure 主动断开，重连又要花一次配额。
+
+### 实测：空闲 7 分 34 秒没有被断开（2026-10-22，线上环境）
+
+用 `frontend/e2e/scripts/avatar-idle-probe.mjs` 在线上跑了一场真实面试（user1，照片数字人），
+麦克风喂**静音** WAV（Chromium 默认的假麦克风会周期性发出提示音，VAD 可能把它当成说话），
+停在"Before we begin"页面不点"I'm ready"，所以数字人连上之后**一个字都没说**：
+
+| 数字人连上后 | WebRTC 状态 | 累计收到的视频 |
+|---|---|---|
+| 0:33 | connected | 0.4 MB |
+| 4:03 | connected | 7.0 MB |
+| 5:03（已过文档说的 5 分钟） | connected | 8.1 MB |
+| 7:34（测试结束） | connected | 15.9 MB |
+
+全程没有 WebSocket 关闭、没有 error 帧，视频字节稳定增长（约 300 kbps），画面没有冻结。
+**在我们的资源上，文档写的"空闲 5 分钟断开"没有出现**，至少 7 分半之内没有。
+
+两点说明：
+
+- 测的是**开场前**的空闲（数字人从未说过话）。读完题之后的空闲（候选人思考）理论上是同一种状态，
+  但没有单独测。
+- 测试网络 RTT 约 370 ms，开头 6 秒触发了弱网保护：先降成纯语音，65 秒后恢复视频，相当于一分钟内
+  重建了两次会话、用掉两次数字人建连。这是 v0.40 的设计行为，但在临界网络上会来回切换。
+
+### 实测：真正的限制是 Voice Live 会话空闲 15 分钟（2026-10-22，线上环境）
+
+本来想量"30 分钟连接上限"，同样的脚本空闲挂 33 分钟。结果先撞上的是一个文档里没写的限制，
+而且**两次都准时出现**：
+
+| 空闲时长 | 事件 |
+|---|---|
+| 15:29 | Azure 发来 error 帧 `session_idle_timeout`：*"The session was closed because it was idle for more than 900 seconds."*，2 秒后 WebSocket 关闭 |
+| 15:34 | 前端自动重连，15:37 新的数字人连上 |
+| 31:06 | 第二次 `session_idle_timeout`（距上一次会话建立约 900 秒） |
+| 31:11 | 再次自动重连成功 |
+
+结论：
+
+- **断的是 Voice Live 会话本身（900 秒空闲），不是数字人。** 数字人自己从没因为空闲断开过。
+- **持续发送的静音麦克风音频不算"活动"**，只有真正的说话 / 回复才算。
+- **现有的被动重连能自己恢复**：约 5 秒的"reconnecting"，换一个新的数字人连接。当前题目不会丢：
+  已确认读过的题不重读，答了一半的草稿保留。
+- 前端日志把这个 error 记成 `non-fatal Voice Live error event (session stays up)`，**这是错的**：
+  会话 2 秒后就被关闭了。恢复本身没问题，只是日志误导人。
+- **30 分钟数字人上限这样量不出来**：每 15 分钟就被空闲超时重置一次，单个连接到不了 30 分钟。
+  要量它，需要让面试官定期说话保持会话活跃。
+
+对候选人的实际影响：**只要候选人在一个页面上超过 15 分钟没说话**（看开场说明、或某道题想很久），
+就会看到一次约 5 秒的重连。
+
+```bash
+cd frontend
+BASE=https://<前端> API=https://<前端>/api AU=admin AP=<seed admin 密码> \
+  SILENCE=/path/to/silence.wav HOLD_MIN=8 HOLD_FROM=connect node e2e/scripts/avatar-idle-probe.mjs
+```
 
 ---
 
@@ -666,4 +720,7 @@ AU=.. AP=.. MODE=rate        node e2e/scripts/avatar-limits.mjs                 
 3. **补一条限流专用日志**，因为 Azure 侧观测不到（第 5 条）。
 4. **账本跨刷新持久化**（第 3 条）—— 需要设计决策：`sessionStorage` 只能护住同一标签页，
    护不住"两位候选人同时开始"，那种情况只有提配额或排队能解。
-5. **实测 5 分钟空闲断开**，以及断开后我们的自动重连是否会立刻撞上配额。
+5. ~~实测 5 分钟空闲断开~~ —— 已测（2026-10-22）：空闲 7 分 34 秒未断开，见"顺带确认的两个硬时限"。
+   另测出 Voice Live 会话**空闲 900 秒**（`session_idle_timeout`）必断，现有重连约 5 秒自动恢复。
+6. **改正 `session_idle_timeout` 的日志**：现在记成"non-fatal, session stays up"，实际会话随即关闭。
+7. **30 分钟数字人连接上限仍未实测**（需要保持会话活跃的测法）。
