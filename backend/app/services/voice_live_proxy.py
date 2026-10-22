@@ -52,6 +52,7 @@ AUDIO_APPEND_TYPE = "input_audio_buffer.append"
 ERROR_TYPE = "error"
 # Resets Voice Live's 900 s idle clock without changing the session (measured live 2026-10-22).
 KEEPALIVE_EVENT = {"type": "session.update", "session": {}}
+AZURE_IDLE_CLOSE_S = 900
 
 # Human-readable names for the locales the UI offers (frontend/src/i18n.ts SUPPORTED_LANGUAGES).
 # Unknown locales fall back to the tag itself, which models read fine ("fr-FR").
@@ -791,13 +792,18 @@ class IdleKeepAlive:
     session is active, so the clock restarts on each one; after ``interval_s`` of none, one
     keep-alive is due. Its ``session.updated`` echo is not forwarded: the page treats every
     ``session.updated`` as a (re)connected session and resets its turn state on it.
+
+    At most one echo is ever expected, and only for ``ECHO_WAIT_S``: a keep-alive Azure answers
+    with an error (or not at all) must not swallow a later, real ``session.updated``.
     """
+
+    ECHO_WAIT_S = 30.0
 
     def __init__(self, interval_s: float, clock: Callable[[], float] = time.monotonic):
         self.interval_s = interval_s
         self._clock = clock
         self._last = clock()
-        self._echoes = 0
+        self._echo_until: float | None = None
 
     def note_event(self) -> None:
         self._last = self._clock()
@@ -806,13 +812,18 @@ class IdleKeepAlive:
         return self._clock() - self._last >= self.interval_s
 
     def sent(self) -> None:
-        self._echoes += 1
+        self._echo_until = self._clock() + self.ECHO_WAIT_S
         self._last = self._clock()
 
     def is_echo(self, event_type: str) -> bool:
-        """Whether ``event_type`` is a keep-alive's echo (each echo is consumed once)."""
-        if self._echoes and event_type.endswith("session.updated"):
-            self._echoes -= 1
+        """Whether ``event_type`` is the keep-alive's echo (consumed once, expected for a while)."""
+        if self._echo_until is None:
+            return False
+        if self._clock() > self._echo_until:
+            self._echo_until = None
+            return False
+        if event_type.endswith("session.updated"):
+            self._echo_until = None
             return True
         return False
 
@@ -820,21 +831,21 @@ class IdleKeepAlive:
 async def _keep_alive(conn: Any, keepalive: IdleKeepAlive) -> None:  # pragma: no cover — live relay
     """Send a keep-alive whenever one is due, until cancelled or the connection fails."""
     check_s = min(30.0, keepalive.interval_s)
-    try:
-        while True:
-            await asyncio.sleep(check_s)
-            if keepalive.due():
-                await conn.send(KEEPALIVE_EVENT)
-                keepalive.sent()
-                logger.info(
-                    "Voice Live proxy: no Azure event for %ss, sent a keep-alive",
-                    keepalive.interval_s,
-                )
-    except asyncio.CancelledError:
-        raise
-    except Exception as exc:
-        # The forwarding loops see the same failure and end the relay; nothing to add here.
-        logger.debug("Voice Live proxy: keep-alive stopped: %s", exc)
+    while True:
+        await asyncio.sleep(check_s)
+        if not keepalive.due():
+            continue
+        try:
+            await conn.send(KEEPALIVE_EVENT)
+        except Exception as exc:
+            # A closed connection ends the relay, which cancels this task; anything else is worth
+            # seeing, and the next check tries again.
+            logger.warning("Voice Live proxy: keep-alive send failed: %s", exc)
+            continue
+        keepalive.sent()
+        logger.info(
+            "Voice Live proxy: no Azure event for %ss, sent a keep-alive", keepalive.interval_s
+        )
 
 
 async def _relay(
@@ -842,6 +853,13 @@ async def _relay(
 ) -> None:  # pragma: no cover — live relay
     """Run the two forwarding loops; return as soon as either side ends."""
     interval_s = get_settings().voice_live_keepalive_seconds
+    if interval_s >= AZURE_IDLE_CLOSE_S:
+        logger.warning(
+            "Voice Live proxy: VOICE_LIVE_KEEPALIVE_SECONDS=%s is not under Azure's %s s idle "
+            "close, so idle sessions will still be closed",
+            interval_s,
+            AZURE_IDLE_CLOSE_S,
+        )
     keepalive = IdleKeepAlive(interval_s) if interval_s > 0 else None
     tasks = [
         asyncio.create_task(_forward_client_to_azure(ws, conn, connection_closed, recorder)),

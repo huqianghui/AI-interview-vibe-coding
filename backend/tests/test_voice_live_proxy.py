@@ -904,16 +904,18 @@ def test_keepalive_interval_defaults_below_azures_900_s_idle_limit():
 
 
 class _FakeConn:
-    def __init__(self, fail: bool = False) -> None:
+    def __init__(self, fails: int = 0) -> None:
         import asyncio
 
         self.sent: list[dict] = []
-        self.fail = fail
+        self.fails = fails
+        self.attempts = 0
         self.got_one = asyncio.Event()
 
     async def send(self, event: dict) -> None:
-        if self.fail:
-            raise ConnectionError("closed")
+        self.attempts += 1
+        if self.attempts <= self.fails:
+            raise ConnectionError("send failed")
         self.sent.append(event)
         self.got_one.set()
 
@@ -934,8 +936,38 @@ async def test_keep_alive_loop_sends_the_no_op_once_due_and_marks_its_echo():
     assert ka.is_echo("session.updated")
 
 
-async def test_keep_alive_loop_ends_quietly_when_the_connection_fails():
-    from app.services.voice_live_proxy import IdleKeepAlive, _keep_alive
+async def test_keep_alive_loop_retries_after_a_failed_send():
+    import asyncio
 
-    # Returns instead of raising: the forwarding loops own ending the relay.
-    await _keep_alive(_FakeConn(fail=True), IdleKeepAlive(0.01))
+    from app.services.voice_live_proxy import KEEPALIVE_EVENT, IdleKeepAlive, _keep_alive
+
+    # One failed send must not end the keep-alive for the rest of the session.
+    conn = _FakeConn(fails=1)
+    task = asyncio.create_task(_keep_alive(conn, IdleKeepAlive(0.01)))
+    await asyncio.wait_for(conn.got_one.wait(), timeout=5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert conn.attempts >= 2
+    assert conn.sent[0] == KEEPALIVE_EVENT
+
+
+def test_an_unanswered_keepalive_stops_expecting_its_echo():
+    from app.services.voice_live_proxy import IdleKeepAlive
+
+    clock = _Clock()
+    ka = IdleKeepAlive(600, clock=clock)
+    ka.sent()
+    # Azure answered with an error, or not at all: a later real session.updated reaches the page.
+    clock.now = IdleKeepAlive.ECHO_WAIT_S + 1
+    assert not ka.is_echo("session.updated")
+
+
+def test_two_keepalives_expect_one_echo_not_two():
+    from app.services.voice_live_proxy import IdleKeepAlive
+
+    ka = IdleKeepAlive(600)
+    ka.sent()
+    ka.sent()
+    assert ka.is_echo("session.updated")
+    assert not ka.is_echo("session.updated")
