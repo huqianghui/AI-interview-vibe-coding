@@ -18,6 +18,9 @@
  * seconds into the hold, to see whether it resets Voice Live's 900 s idle clock (session_idle_timeout).
  * USER_NAME=user2 picks the candidate account (one live seat per account, so parallel runs need different ones).
  *
+ * FORCE_TRACK_END_AT_S=30: fire `ended` on the received video track that many seconds into the
+ * hold, the signal the page treats as a media drop, to watch the rebuild that follows.
+ *
  * It signs in as USER_NAME (default user1), so it resumes user1's live interview if one is open. Costs Azure time.
  */
 import { chromium } from "@playwright/test";
@@ -69,8 +72,9 @@ const log = (...a) => console.log(stamp(), ...a);
 
 const ctx = await browser.newContext({ viewport: { width: 900, height: 700 }, permissions: ["microphone"] });
 await ctx.addInitScript(([k, v]) => sessionStorage.setItem(k, v), ["candidate_access_token", token]);
-// The voice WebSocket, so the keep-alive test can send on it.
-await ctx.addInitScript(() => {
+// The voice WebSocket, so the keep-alive test can send on it. NO_WS_WRAP=1 leaves the page's
+// WebSocket untouched (to rule the wrapper out when a connection misbehaves).
+if (!process.env.NO_WS_WRAP) await ctx.addInitScript(() => {
   const Orig = window.WebSocket;
   window.__wss = [];
   window.WebSocket = function (...args) {
@@ -149,6 +153,7 @@ for (const name of clicks) {
 const KEEPALIVE = process.env.KEEPALIVE;
 const KEEPALIVE_AT_S = Number(process.env.KEEPALIVE_AT_S || 300);
 let keepaliveSent = false;
+let trackEnded = false;
 const deadline = () => holdAt && Date.now() - holdAt > HOLD_MIN * 60_000;
 const startedAt = Date.now();
 while (!deadline()) {
@@ -166,6 +171,18 @@ while (!deadline()) {
       return true;
     }, KEEPALIVE);
     log(`KEEPALIVE sent=${sent}: ${KEEPALIVE}`);
+  }
+  if (process.env.FORCE_TRACK_END_AT_S && !trackEnded && holdAt &&
+      Date.now() - holdAt > Number(process.env.FORCE_TRACK_END_AT_S) * 1000) {
+    trackEnded = true;
+    const fired = await page.evaluate(() => {
+      const pc = (window.__pcs || []).at(-1)?.pc;
+      const track = pc?.getReceivers().map((r) => r.track).find((t) => t?.kind === "video");
+      if (!track) return false;
+      track.dispatchEvent(new Event("ended"));
+      return true;
+    });
+    log(`FORCED video track ended: fired=${fired}`);
   }
   const hb = await page
     .evaluate(async () => {

@@ -16,6 +16,7 @@ import { render, act } from "@testing-library/react";
 
 const disconnectSpy = vi.fn();
 const cleanupMicSpy = vi.fn();
+const prepareAudioContextSpy = vi.fn();
 
 /** Captures the `onModeSwitchRequest` callback the real hook wires into `useAvatarStream`, so a
  * test can call it directly — exactly like a weak-network downgrade or the manual toggle would. */
@@ -56,7 +57,7 @@ vi.mock("./useVoiceAudio", () => ({
     cleanupMic: cleanupMicSpy,
     playAudio: vi.fn(),
     stopAudio: vi.fn(),
-    prepareAudioContext: vi.fn(),
+    prepareAudioContext: prepareAudioContextSpy,
   }),
 }));
 
@@ -303,4 +304,159 @@ describe("useInterviewVoice restartForMediaMode", () => {
     unmount();
   });
 
+  // The watchdog (REBUILD_STALL_MS = 15 s): once, live, a rebuild never created its socket, so neither
+  // the connect timeout nor the reconnect loop ran and the interview sat silent.
+  it("retries a rebuild that is not live after 15 s, and gives up with an error after a second stall", async () => {
+    vi.useFakeTimers();
+    const onError = vi.fn();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { getHook, unmount } = await connectFor({ onError });
+    const oldWs = FakeWebSocket.last!;
+
+    act(() => {
+      avatarBridge.onModeSwitchRequest!("video");
+    });
+    await act(async () => {
+      for (let i = 0; i < 20 && FakeWebSocket.last === oldWs; i++) await Promise.resolve();
+    });
+    const stalled = FakeWebSocket.last!;
+    expect(stalled).not.toBe(oldWs);
+
+    // No session.updated on the rebuilt socket: at 15 s the watchdog replaces it once.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    expect(warn.mock.calls.some((c) => String(c[0]).includes("retrying once"))).toBe(true);
+    expect(stalled.onclose).toBeNull(); // detached, so its close cannot start the reconnect loop
+    const retry = FakeWebSocket.last!;
+    expect(retry).not.toBe(stalled);
+
+    // The retry stalls too: an error the page can show, not a silent interview.
+    cleanupMicSpy.mockClear();
+    disconnectSpy.mockClear();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    expect(warn.mock.calls.some((c) => String(c[0]).includes("giving up"))).toBe(true);
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "The voice connection could not be rebuilt" }),
+    );
+    expect(getHook().connectionState).toBe("error");
+    // Giving up releases the mic and the avatar, as the reconnect loop's terminal path does.
+    expect(cleanupMicSpy).toHaveBeenCalled();
+    expect(disconnectSpy).toHaveBeenCalled();
+    // The stalled attempt's own 30 s connect timeout fired at the same moment: superseded, it must
+    // neither tear down the retry nor report a second, different error.
+    expect(onError).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+    unmount();
+  });
+
+  it("recovers a rebuild that never even created its socket (the live 2026-10-22 shape)", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { getHook, unmount } = await connectFor();
+    const oldWs = FakeWebSocket.last!;
+
+    // The rebuild hangs before `new WebSocket` and never gets past it.
+    prepareAudioContextSpy.mockReturnValueOnce(new Promise(() => {}));
+    act(() => {
+      avatarBridge.onModeSwitchRequest!("video");
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(14_000);
+    });
+    expect(FakeWebSocket.last).toBe(oldWs); // no socket: the connect timeout never even started
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(warn.mock.calls.some((c) => String(c[0]).includes("retrying once"))).toBe(true);
+    await act(async () => {
+      for (let i = 0; i < 20 && FakeWebSocket.last === oldWs; i++) await Promise.resolve();
+    });
+    const retry = FakeWebSocket.last!;
+    expect(retry).not.toBe(oldWs);
+    await act(async () => {
+      retry.receive({ type: "session.updated", session: {} });
+    });
+    expect(getHook().connectionState).toBe("connected");
+    warn.mockRestore();
+    unmount();
+  });
+
+  it("leaves a rebuild Azure refused for good alone, keeping Azure's own message", async () => {
+    vi.useFakeTimers();
+    const onError = vi.fn();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { unmount } = await connectFor({ onError });
+    const oldWs = FakeWebSocket.last!;
+
+    act(() => {
+      avatarBridge.onModeSwitchRequest!("video");
+    });
+    await act(async () => {
+      for (let i = 0; i < 20 && FakeWebSocket.last === oldWs; i++) await Promise.resolve();
+      FakeWebSocket.last!.receive({
+        type: "error",
+        error: { code: "invalid_model", message: "The model is not supported in this region." },
+      });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(warn.mock.calls.some((c) => String(c[0]).includes("not live after"))).toBe(false);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "The model is not supported in this region." }),
+    );
+    warn.mockRestore();
+    unmount();
+  });
+
+  it("does nothing once the rebuilt session is live", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { getHook, unmount } = await connectFor();
+    const oldWs = FakeWebSocket.last!;
+
+    act(() => {
+      avatarBridge.onModeSwitchRequest!("audio-only");
+    });
+    await act(async () => {
+      for (let i = 0; i < 20 && FakeWebSocket.last === oldWs; i++) await Promise.resolve();
+      FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(warn.mock.calls.some((c) => String(c[0]).includes("not live after"))).toBe(false);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(getHook().connectionState).toBe("connected");
+    warn.mockRestore();
+    unmount();
+  });
+
+  it("stops the watchdog when the candidate leaves during a rebuild", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { getHook, unmount } = await connectFor();
+    const oldWs = FakeWebSocket.last!;
+
+    act(() => {
+      avatarBridge.onModeSwitchRequest!("video");
+    });
+    await act(async () => {
+      for (let i = 0; i < 20 && FakeWebSocket.last === oldWs; i++) await Promise.resolve();
+    });
+    act(() => {
+      getHook().disconnect();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(warn.mock.calls.some((c) => String(c[0]).includes("not live after"))).toBe(false);
+    warn.mockRestore();
+    unmount();
+  });
 });

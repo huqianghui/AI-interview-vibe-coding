@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.78.4.0 (2026-10-23)
+
+### Fixed
+- **A voice session that gets stuck while reconnecting now recovers instead of going silent.**
+  When the avatar's video drops or the network forces a media switch, the page rebuilds the voice
+  session, which normally takes 1 to 3 seconds. Once, in a live test, a rebuild never opened its
+  connection, and nothing noticed: the interview sat with no voice until the page was reloaded. Now:
+  - **15 seconds without a live session** means the rebuild is replaced and tried once more, keeping
+    whatever the candidate has already said.
+  - **A second stall** shows the page's voice error instead of an interview that stays silent.
+  - **A stuck attempt can no longer cut off the retry** that replaced it when its own 30 second
+    timeout runs out.
+
+### Added
+- **`voice.rebuild_stalled`** in App Insights, sent on each stall with `elapsed_ms`, `late_ms`,
+  `mode` and `attempt`. A large `late_ms` means the page itself was frozen rather than the
+  connection stuck. Documented in `docs/voice-performance-telemetry.md`.
+- **The idle probe** (`frontend/e2e/scripts/avatar-idle-probe.mjs`) can force a video drop
+  (`FORCE_TRACK_END_AT_S`) and run without its WebSocket wrapper (`NO_WS_WRAP=1`).
+
 ## 0.78.3.0 (2026-10-22)
 
 ### Fixed

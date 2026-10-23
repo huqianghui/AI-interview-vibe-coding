@@ -299,6 +299,14 @@ export class VoiceMetrics {
     });
   }
 
+  /** A session rebuild did not reach `session.updated` in time. `late_ms` is how much later than
+   * asked the check ran: a large one means the page itself was frozen, not just the connection. */
+  rebuildStalled(measurements: { elapsed_ms: number; late_ms: number }, props: Properties): void {
+    guarded("rebuildStalled", () => {
+      this.emit("voice.rebuild_stalled", measurements, { ...this.context, ...props });
+    });
+  }
+
   /** The connection is going away: send whatever is open. */
   flush(): void {
     guarded("flush", () => {
