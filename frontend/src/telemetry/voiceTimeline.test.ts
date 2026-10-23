@@ -92,6 +92,20 @@ describe("VoiceMetrics voice-only fallback", () => {
   });
 });
 
+describe("VoiceMetrics rebuild stall", () => {
+  it("sends voice.rebuild_stalled with how late the check ran, under the session's context", () => {
+    const h = harness();
+    const vm = new VoiceMetrics(h.emit, h.clock);
+    vm.setContext({ interview_id: "iv-1" });
+    vm.rebuildStalled({ elapsed_ms: 1_020_000, late_ms: 1_005_000 }, { mode: "video", attempt: 1 });
+    expect(h.sent[0]).toEqual({
+      name: "voice.rebuild_stalled",
+      m: { elapsed_ms: 1_020_000, late_ms: 1_005_000 },
+      p: { interview_id: "iv-1", mode: "video", attempt: 1 },
+    });
+  });
+});
+
 describe("iceFailureKind", () => {
   it("names what a failed ICE got as far as", () => {
     expect(iceFailureKind({ srflx: false, relay: false }, true)).toBe("stun_unreachable");

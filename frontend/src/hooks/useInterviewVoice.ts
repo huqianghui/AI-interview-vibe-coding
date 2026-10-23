@@ -200,6 +200,11 @@ const RECONNECT_DELAYS = [1000, 2000, 4000];
  * legitimate switches, so no honest flow trips it. */
 const MAX_CONNECTS_WITHOUT_LIVE = 6;
 const CONNECT_TIMEOUT_MS = 30_000;
+/** A media-mode rebuild that has not reached `session.updated` by now is stalled. Once (2026-10-22,
+ * live) a rebuild logged "opening WS proxy" and never created its socket, so neither the connect
+ * timeout (it starts with the socket) nor the reconnect loop (it needs a close) ever ran. A rebuild
+ * normally goes live in 1 to 3 s. */
+const REBUILD_STALL_MS = 15_000;
 // Upper bound on how long `commitAnswer()` waits for the STT round-trip after "I'm done": the
 // user transcript only arrives asynchronously via `conversation.item.input_audio_transcription
 // .completed`, on a server round-trip AFTER the commit. If it never lands (WS hiccup, no speech),
@@ -338,6 +343,10 @@ export function useInterviewVoice(
    * rest of this hook uses to break the useCallback dependency cycle. */
   const connectRef = useRef<((locale?: string, opts?: ConnectOptions) => Promise<void>) | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** The stall check for the media-mode rebuild in flight (see REBUILD_STALL_MS). */
+  const rebuildWatchRef = useRef<{ timer: ReturnType<typeof setTimeout>; retried: boolean } | null>(
+    null,
+  );
   // Set when a PRE-CONNECT Azure `error` frame (e.g. `invalid_model` — the configured Voice Live
   // model isn't supported in this region) rejects the initial connect. Such a session never went
   // live, so retrying is futile: Azure will reject the same model every time. Without this flag the
@@ -526,7 +535,13 @@ export function useInterviewVoice(
     assistantLiveTranscriptRef.current.clear();
   }, [draft, firstReadGate, readWatch, speakQueue]);
 
+  const clearRebuildWatch = useCallback(() => {
+    if (rebuildWatchRef.current) clearTimeout(rebuildWatchRef.current.timer);
+    rebuildWatchRef.current = null;
+  }, []);
+
   const cleanup = useCallback(() => {
+    clearRebuildWatch();
     voiceMetrics.flush();
     // The session is over: nothing it read is a question a later session should repeat.
     lastReadTextRef.current = null;
@@ -541,7 +556,7 @@ export function useInterviewVoice(
     avatarStartedRef.current = false;
     sessionLiveRef.current = false;
     resetTurnState();
-  }, [audio, avatarStream, resetTurnState]);
+  }, [audio, avatarStream, clearRebuildWatch, resetTurnState]);
 
   /** WS message handler — Azure Voice Live realtime events, relayed near-verbatim by the backend
    * proxy (plus its own `proxy.connected` bootstrap frame). */
@@ -706,6 +721,7 @@ export function useInterviewVoice(
           const iceServers = toRtcIceServers(avatarConf?.ice_servers);
 
           sessionLiveRef.current = true;
+          clearRebuildWatch();
           wsTraceRef.current?.markLive();
           voiceMetrics.setup("session_updated");
           // A session that reached `session.updated` works, whatever it took to get here.
@@ -1050,6 +1066,7 @@ export function useInterviewVoice(
       assistantBubbleKey,
       audio,
       avatarStream,
+      clearRebuildWatch,
       send,
       sendPcm,
       setAudio,
@@ -1236,14 +1253,20 @@ export function useInterviewVoice(
         };
 
         setTimeout(() => {
-          if (!resolved) {
+          if (resolved) return;
+          if (wsRef.current !== ws) {
+            // Superseded (the rebuild watchdog replaced this socket): settle this attempt only. A
+            // cleanup() here would tear down the session that replaced it.
             resolved = true;
-            cleanup();
-            const error = new Error("Voice connection timeout (30s)");
-            setConn("error");
-            optionsRef.current.onError?.(error);
-            reject(error);
+            reject(new Error("Voice connection attempt superseded"));
+            return;
           }
+          resolved = true;
+          cleanup();
+          const error = new Error("Voice connection timeout (30s)");
+          setConn("error");
+          optionsRef.current.onError?.(error);
+          reject(error);
         }, CONNECT_TIMEOUT_MS);
       });
 
@@ -1369,6 +1392,50 @@ export function useInterviewVoice(
     isMutedRef.current = false;
   }, [audio, cleanup, policy, setConn]);
 
+  /** Start the stall check for a rebuild into `mode` (REBUILD_STALL_MS). A stalled rebuild is retried
+   * once; a second stall is an error the page can show, rather than an interview that stays silent. */
+  const armRebuildWatch = useCallback(
+    (mode: MediaMode, retried: boolean) => {
+      clearRebuildWatch();
+      const startedAt = performance.now();
+      const timer = setTimeout(() => {
+        rebuildWatchRef.current = null;
+        if (sessionLiveRef.current || policy.wasIntentionalClose()) return;
+        const elapsed = performance.now() - startedAt;
+        voiceMetrics.rebuildStalled(
+          { elapsed_ms: Math.round(elapsed), late_ms: Math.round(elapsed - REBUILD_STALL_MS) },
+          { mode, attempt: retried ? 2 : 1 },
+        );
+        console.warn(
+          `[voice] session rebuild (${mode}) not live after ${Math.round(elapsed / 1000)}s` +
+            (retried ? "; giving up" : "; retrying once"),
+        );
+        // Whatever the stalled attempt left (a socket that never went live) is replaced, not joined.
+        if (wsRef.current) {
+          wsRef.current.onclose = null;
+          wsRef.current.onmessage = null;
+          wsRef.current.onerror = null;
+          wsRef.current.close();
+          wsRef.current = null;
+          wsTraceRef.current?.end(1000, false, "rebuild_stalled");
+        }
+        if (retried) {
+          setConn("error");
+          optionsRef.current.onError?.(new Error("The voice connection could not be rebuilt"));
+          return;
+        }
+        void connectRef.current
+          ?.(lastLocaleRef.current, { keepDraft: true, replaceInFlight: true })
+          .catch((err: unknown) => {
+            console.warn("[voice] retry of a stalled session rebuild failed", err);
+          });
+        armRebuildWatch(mode, true);
+      }, REBUILD_STALL_MS);
+      rebuildWatchRef.current = { timer, retried };
+    },
+    [clearRebuildWatch, policy, setConn],
+  );
+
   /**
    * Rebuild the Voice Live session for the avatar media hook: the media mode changed (weak-network
    * degrade, or the candidate's manual toggle), or its self-heal is recovering a media drop, which Azure
@@ -1429,11 +1496,12 @@ export function useInterviewVoice(
         .catch((err: unknown) => {
           console.warn("[voice] media-mode session rebuild failed", err);
         });
+      armRebuildWatch(next, false);
     },
     // No resetTurnState here on purpose: connect() runs the keepDraft-preserving reset itself, so
     // listing it would claim a dependency this callback does not have. `connect` is reached through
     // `connectRef` rather than captured, which is what keeps this out of a dependency cycle with it.
-    [audio, draft, policy, setConn],
+    [armRebuildWatch, audio, draft, policy, setConn],
   );
   restartForMediaModeRef.current = restartForMediaMode;
 
