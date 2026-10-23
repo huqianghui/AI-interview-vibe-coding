@@ -347,6 +347,9 @@ export function useInterviewVoice(
   const rebuildWatchRef = useRef<{ timer: ReturnType<typeof setTimeout>; retried: boolean } | null>(
     null,
   );
+  /** Bumped by every session open: an attempt that is no longer the latest stops before it opens a
+   * socket, and the rebuild watchdog stands down for a newer attempt it did not start. */
+  const connectGenRef = useRef(0);
   // Set when a PRE-CONNECT Azure `error` frame (e.g. `invalid_model` — the configured Voice Live
   // model isn't supported in this region) rejects the initial connect. Such a session never went
   // live, so retrying is futile: Azure will reject the same model every time. Without this flag the
@@ -1084,6 +1087,7 @@ export function useInterviewVoice(
   const openSession = useCallback(
     async (locale?: string, opts: ConnectOptions = {}): Promise<void> => {
       const { isReconnect = false, keepDraft = false } = opts;
+      const gen = ++connectGenRef.current;
       const effectiveLocale = locale ?? optionsRef.current.locale ?? "en-US";
       lastLocaleRef.current = effectiveLocale;
       // Counted before the branch below, because that branch is exactly what this survives: the
@@ -1116,6 +1120,9 @@ export function useInterviewVoice(
       // Step 0: unlock autoplay for the assistant-audio AudioContext inside this user gesture,
       // before any async WS event tries to call playAudio() (Chrome autoplay policy).
       await audio.prepareAudioContext();
+      // A newer attempt replaced this one while it waited (the rebuild watchdog's retry): opening a
+      // socket now would put a second session next to it.
+      if (gen !== connectGenRef.current) throw new Error("Voice connection attempt superseded");
 
       // Step 1: resolve the WS auth token (anon session token by default; admin editor Playground
       // passes its own tokenProvider). Not a network broker call anymore — the WS itself is the
@@ -1395,12 +1402,23 @@ export function useInterviewVoice(
   /** Start the stall check for a rebuild into `mode` (REBUILD_STALL_MS). A stalled rebuild is retried
    * once; a second stall is an error the page can show, rather than an interview that stays silent. */
   const armRebuildWatch = useCallback(
-    (mode: MediaMode, retried: boolean) => {
+    (mode: MediaMode, retried: boolean, followLatest = false) => {
       clearRebuildWatch();
       const startedAt = performance.now();
+      const gen = connectGenRef.current;
       const timer = setTimeout(() => {
         rebuildWatchRef.current = null;
-        if (sessionLiveRef.current || policy.wasIntentionalClose()) return;
+        // Not ours to recover: live, the candidate left, Azure refused it for good (its own message is
+        // on the page), the reconnect loop owns a drop, or a newer attempt replaced this one.
+        if (sessionLiveRef.current || policy.wasIntentionalClose() || policy.isFatal()) return;
+        if (reconnectTimerRef.current) return;
+        if (!followLatest && connectGenRef.current !== gen) return;
+        // A deliberate wait out of Azure's avatar allowance (openWithAvatarAllowance, up to ~15.5 s)
+        // is not a stall: look again once it has had its turn.
+        if (rateLimitWaitRef.current) {
+          armRebuildWatch(mode, retried, true);
+          return;
+        }
         const elapsed = performance.now() - startedAt;
         voiceMetrics.rebuildStalled(
           { elapsed_ms: Math.round(elapsed), late_ms: Math.round(elapsed - REBUILD_STALL_MS) },
@@ -1420,6 +1438,8 @@ export function useInterviewVoice(
           wsTraceRef.current?.end(1000, false, "rebuild_stalled");
         }
         if (retried) {
+          // Release the mic and the avatar too, as the reconnect loop's terminal path does.
+          cleanup();
           setConn("error");
           optionsRef.current.onError?.(new Error("The voice connection could not be rebuilt"));
           return;
@@ -1433,7 +1453,7 @@ export function useInterviewVoice(
       }, REBUILD_STALL_MS);
       rebuildWatchRef.current = { timer, retried };
     },
-    [clearRebuildWatch, policy, setConn],
+    [cleanup, clearRebuildWatch, policy, setConn],
   );
 
   /**
