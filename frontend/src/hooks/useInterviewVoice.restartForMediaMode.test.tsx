@@ -16,6 +16,7 @@ import { render, act } from "@testing-library/react";
 
 const disconnectSpy = vi.fn();
 const cleanupMicSpy = vi.fn();
+const prepareAudioContextSpy = vi.fn();
 
 /** Captures the `onModeSwitchRequest` callback the real hook wires into `useAvatarStream`, so a
  * test can call it directly — exactly like a weak-network downgrade or the manual toggle would. */
@@ -56,7 +57,7 @@ vi.mock("./useVoiceAudio", () => ({
     cleanupMic: cleanupMicSpy,
     playAudio: vi.fn(),
     stopAudio: vi.fn(),
-    prepareAudioContext: vi.fn(),
+    prepareAudioContext: prepareAudioContextSpy,
   }),
 }));
 
@@ -342,6 +343,39 @@ describe("useInterviewVoice restartForMediaMode", () => {
     // The stalled attempt's own 30 s connect timeout fired at the same moment: superseded, it must
     // neither tear down the retry nor report a second, different error.
     expect(onError).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+    unmount();
+  });
+
+  it("recovers a rebuild that never even created its socket (the live 2026-10-22 shape)", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { getHook, unmount } = await connectFor();
+    const oldWs = FakeWebSocket.last!;
+
+    // The rebuild hangs before `new WebSocket` and never gets past it.
+    prepareAudioContextSpy.mockReturnValueOnce(new Promise(() => {}));
+    act(() => {
+      avatarBridge.onModeSwitchRequest!("video");
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(14_000);
+    });
+    expect(FakeWebSocket.last).toBe(oldWs); // no socket: the connect timeout never even started
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(warn.mock.calls.some((c) => String(c[0]).includes("retrying once"))).toBe(true);
+    await act(async () => {
+      for (let i = 0; i < 20 && FakeWebSocket.last === oldWs; i++) await Promise.resolve();
+    });
+    const retry = FakeWebSocket.last!;
+    expect(retry).not.toBe(oldWs);
+    await act(async () => {
+      retry.receive({ type: "session.updated", session: {} });
+    });
+    expect(getHook().connectionState).toBe("connected");
     warn.mockRestore();
     unmount();
   });
