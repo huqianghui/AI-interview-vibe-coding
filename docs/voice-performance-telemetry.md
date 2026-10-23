@@ -228,6 +228,24 @@ No measurements; properties are the event context plus:
 WebRTC never names the reason a network blocked it; these are the nearest thing to an error code a
 browser has, and they are for diagnosis — the page's decision does not depend on them.
 
+### `voice.rebuild_stalled`: a session rebuild that never went live
+
+Sent when a session rebuild (a media-mode switch, or the avatar self-heal recovering a drop) has not
+reached `session.updated` 15 s after it started. A rebuild normally goes live in 1 to 3 s. The first
+stall replaces whatever the attempt left and retries once (`attempt = 1`); a second stall
+(`attempt = 2`) ends with an error the page shows, instead of an interview that stays silent.
+
+| Field | What |
+|---|---|
+| `elapsed_ms` (measurement) | time from the rebuild starting to the check running |
+| `late_ms` (measurement) | how much later than 15 s the check ran. Near 0: the connection stalled. Large (minutes): the page itself was frozen, since a frozen page runs no timers until it wakes |
+| `mode` | the media mode being rebuilt into: `video`, `audio-only` or `voice-only` |
+| `attempt` | `1` (retried) or `2` (gave up) |
+
+Why it exists: once (2026-10-22, live) a rebuild logged "opening WS proxy" and never created its
+socket. The 30 s connect timeout starts with the socket and the reconnect loop needs a close, so
+nothing recovered it.
+
 ### Voice-only playback gaps (on `voice.turn`)
 
 Without an avatar, the interviewer's audio is PCM on the WebSocket and plays through the page's
