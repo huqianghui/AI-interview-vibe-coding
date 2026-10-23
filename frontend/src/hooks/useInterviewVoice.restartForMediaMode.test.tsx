@@ -414,6 +414,111 @@ describe("useInterviewVoice restartForMediaMode", () => {
     unmount();
   });
 
+  /** A rebuild Azure refuses over the avatar allowance, asking for a wait just past the watchdog's 15 s
+   * (14.8 s + the hook's 0.5 s margin = 15.3 s), so the watchdog fires DURING the deliberate wait. */
+  async function rebuildRefusedByRateLimit() {
+    const { getHook, unmount } = await connectFor();
+    const oldWs = FakeWebSocket.last!;
+    act(() => {
+      avatarBridge.onModeSwitchRequest!("video");
+    });
+    await act(async () => {
+      for (let i = 0; i < 20 && FakeWebSocket.last === oldWs; i++) await Promise.resolve();
+      FakeWebSocket.last!.receive({
+        type: "error",
+        error: {
+          code: "rate_limit_exceeded",
+          message: "Avatar request was rate-limited. Retry after 14.8s.",
+        },
+      });
+    });
+    const refused = FakeWebSocket.last!;
+    return { getHook, unmount, refused };
+  }
+
+  it("does not count a wait out of the avatar allowance as a stall", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { getHook, unmount, refused } = await rebuildRefusedByRateLimit();
+    const before = FakeWebSocket.instances.length;
+
+    // 15 s: still inside the 15.3 s wait. Not a stall, and no retry of its own.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    expect(warn.mock.calls.some((c) => String(c[0]).includes("not live after"))).toBe(false);
+    expect(FakeWebSocket.instances.length).toBe(before);
+
+    // The wait ends: exactly ONE new session (the allowance attempt), not two.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+      for (let i = 0; i < 20 && FakeWebSocket.last === refused; i++) await Promise.resolve();
+    });
+    expect(FakeWebSocket.instances.length).toBe(before + 1);
+    await act(async () => {
+      FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(warn.mock.calls.some((c) => String(c[0]).includes("not live after"))).toBe(false);
+    expect(FakeWebSocket.instances.length).toBe(before + 1);
+    expect(getHook().connectionState).toBe("connected");
+    warn.mockRestore();
+    unmount();
+  });
+
+  it("still catches a stall in the attempt that follows the allowance wait", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { unmount, refused } = await rebuildRefusedByRateLimit();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_500);
+      for (let i = 0; i < 20 && FakeWebSocket.last === refused; i++) await Promise.resolve();
+    });
+    const afterWait = FakeWebSocket.last!;
+    expect(afterWait).not.toBe(refused);
+
+    // That attempt never goes live: the re-armed check (15 s after it looked again) retries it.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    expect(warn.mock.calls.some((c) => String(c[0]).includes("retrying once"))).toBe(true);
+    expect(FakeWebSocket.last).not.toBe(afterWait);
+    warn.mockRestore();
+    unmount();
+  });
+
+  it("leaves a drop after the rebuild went live to the reconnect loop alone", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { unmount } = await connectFor();
+    const oldWs = FakeWebSocket.last!;
+    act(() => {
+      avatarBridge.onModeSwitchRequest!("video");
+    });
+    await act(async () => {
+      for (let i = 0; i < 20 && FakeWebSocket.last === oldWs; i++) await Promise.resolve();
+      FakeWebSocket.last!.receive({ type: "session.updated", session: {} });
+    });
+    const rebuilt = FakeWebSocket.last!;
+
+    // The rebuilt session drops: the onclose loop reconnects (1 s backoff) and owns the recovery.
+    await act(async () => {
+      rebuilt.close();
+      await vi.advanceTimersByTimeAsync(1_000);
+      for (let i = 0; i < 20 && FakeWebSocket.last === rebuilt; i++) await Promise.resolve();
+    });
+    const reconnecting = FakeWebSocket.last!;
+    expect(reconnecting).not.toBe(rebuilt);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000);
+    });
+    expect(warn.mock.calls.some((c) => String(c[0]).includes("not live after"))).toBe(false);
+    expect(FakeWebSocket.last).toBe(reconnecting); // no second session from the watchdog
+    warn.mockRestore();
+    unmount();
+  });
+
   it("does nothing once the rebuilt session is live", async () => {
     vi.useFakeTimers();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
