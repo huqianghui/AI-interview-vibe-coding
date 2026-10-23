@@ -1409,9 +1409,9 @@ export function useInterviewVoice(
       const timer = setTimeout(() => {
         rebuildWatchRef.current = null;
         // Not ours to recover: live, the candidate left, Azure refused it for good (its own message is
-        // on the page), the reconnect loop owns a drop, or a newer attempt replaced this one.
+        // on the page), or a newer attempt replaced this one (a reconnect the onclose loop started is
+        // one: it can only follow a session that went live, which already cleared this watch).
         if (sessionLiveRef.current || policy.wasIntentionalClose() || policy.isFatal()) return;
-        if (reconnectTimerRef.current) return;
         if (!followLatest && connectGenRef.current !== gen) return;
         // A deliberate wait out of Azure's avatar allowance (openWithAvatarAllowance, up to ~15.5 s)
         // is not a stall: look again once it has had its turn.

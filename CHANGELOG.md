@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.78.4.1 (2026-10-23)
+
+### For contributors
+- **The stall watchdog's remaining paths are tested:** a wait out of Azure's avatar allowance that
+  runs past 15 s is not counted as a stall and opens exactly one session; a stall in the attempt
+  after that wait is still caught; a drop after the rebuild went live is left to the reconnect loop.
+  An unreachable "reconnect pending" check was removed.
+
 ## 0.78.4.0 (2026-10-23)
 
 ### Fixed
