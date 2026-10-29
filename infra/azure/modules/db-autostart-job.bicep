@@ -10,6 +10,12 @@ targetScope = 'resourceGroup'
 // The identity gets a custom role on the server ONLY: read it and start it — not stop, not modify.
 // (On the live public environment the role and the job were first created with the az CLI on
 // 2026-10-09, under the same names; see docs/database.md.)
+//
+// It also gets a custom role on the job ONLY: read, write and start it. Azure now requires
+// jobs/write as well as jobs/start/action to start a job with container or init-container overrides
+// (owner decision 2026-10-29, after Azure's notice). Nothing starts this job by hand today; it runs on
+// its schedule, which is unaffected. (Live role and assignment first created with the az CLI on
+// 2026-10-29, under the same name.)
 
 param namePrefix string
 param environmentName string
@@ -109,6 +115,36 @@ resource job 'Microsoft.App/jobs@2024-03-01' = {
         }
       ]
     }
+  }
+}
+
+resource jobStarterRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' = {
+  name: guid(resourceGroup().id, 'aca-job-start-overrides')
+  properties: {
+    roleName: 'Container Apps Job Start With Overrides'
+    description: 'Start a Container Apps job, including starts with container/initContainer overrides (jobs/write + jobs/start/action).'
+    type: 'CustomRole'
+    assignableScopes: [ resourceGroup().id ]
+    permissions: [
+      {
+        actions: [
+          'Microsoft.App/jobs/read'
+          'Microsoft.App/jobs/write'
+          'Microsoft.App/jobs/start/action'
+        ]
+        notActions: []
+      }
+    ]
+  }
+}
+
+resource jobStarterAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(job.id, backendIdentityPrincipalId, 'aca-job-start-overrides')
+  scope: job
+  properties: {
+    principalId: backendIdentityPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: jobStarterRole.id
   }
 }
 
