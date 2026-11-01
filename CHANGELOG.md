@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.79.0.0 (2026-11-01)
+
+### Added
+- **The voice-only orb now moves with the voice.** When there is no digital-human picture, the
+  interviewer's orb used to pulse on a fixed CSS rhythm per state, whatever was actually being said.
+  It is now drawn on a canvas and follows the real sound:
+  - **It swells with loudness, and its outline ripples by pitch range:** low voice energy makes broad
+    lobes, higher energy finer ones. Syllables land at once and fade gently instead of flickering.
+  - **It follows what the candidate hears.** The interviewer's level is read after the playback
+    buffer, so the orb moves exactly as long as the voice is audible, not on Azure's
+    "response done" event, which arrives seconds before the audio finishes playing.
+  - **While listening it also follows the candidate's own microphone**, so they can see they are
+    being heard.
+  - **Same colours, same meaning:** purple when ready, magenta when listening, green when speaking,
+    grey when muted. A muted orb still moves when the interviewer speaks, and the colours cross-fade
+    between states.
+
+### Changed
+- **The orb is sharp on high-DPI screens and keeps its 160 px footprint**, so no page layout moves.
+- **With "reduce motion" turned on in the operating system**, the orb is drawn once per state, still
+  and round, instead of pulsing.
+- **The orb can never cost the interview.** If the canvas cannot draw, the orb stays blank; if a
+  level cannot be read, it is drawn as silence. The microphone and the interviewer's voice are wired
+  before the level taps and do not depend on them.
+
+### For contributors
+- **`useVoiceAudio.readAudioLevels("mic" | "playback")`** returns `{ level, bands }` (0..1 each)
+  from `AnalyserNode` side branches; `useInterviewVoice` exposes it and `AvatarView` passes it to
+  `AudioOrb` as `readAudioLevels`.
+- **Drawing lives in `frontend/src/components/audioOrbRender.ts`**, free of React and unit-tested;
+  the canvas size is derived from the largest swell (`ORB_MAX_SCALE`, `ORB_MAX_SHADOW_PX`) and the
+  band count is one constant (`ORB_BAND_COUNT`) that the analyser read is tested against.
+
 ## 0.78.4.1 (2026-10-23)
 
 ### For contributors
