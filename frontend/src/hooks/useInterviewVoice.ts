@@ -1867,6 +1867,8 @@ export function useInterviewVoice(
     isMuted,
     connectionState,
     audioState,
+    /** Live mic / playback levels for the audio orb (see `useVoiceAudio.readAudioLevels`). */
+    readAudioLevels: audio.readAudioLevels,
     isAvatarConnected: avatarStream.isConnected,
     /** `"audio-only"` once the picture has been given up to protect the voice on a weak link. */
     mediaMode: avatarStream.mediaMode,

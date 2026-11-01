@@ -1,6 +1,6 @@
 /** AvatarView (SPEC F5/F9): shows the avatar video when connected, the audio orb otherwise. */
 import { createRef } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import "../i18n";
@@ -143,5 +143,28 @@ describe("AvatarView", () => {
     expect(fitBox(600, 900, 16 / 9)).toEqual({ width: 600, height: 338 });
     expect(fitBox(0, 600, 1)).toBeNull();
     expect(fitBox(600, 600, 0)).toBeNull();
+  });
+});
+
+describe("AvatarView audio levels", () => {
+  it("hands the level reader to the orb it falls back to", () => {
+    const reader = vi.fn(() => null);
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => frames.push(cb));
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    const ctx = { setTransform: vi.fn() };
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
+      ctx as unknown as CanvasRenderingContext2D,
+    );
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <AvatarView audioState="speaking" isAvatarConnected={false} readAudioLevels={reader} />
+      </FluentProvider>,
+    );
+    act(() => frames.forEach((cb) => cb(16)));
+    expect(reader).toHaveBeenCalledWith("playback");
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 });

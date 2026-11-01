@@ -17,6 +17,7 @@
  */
 import { useCallback, useEffect, useRef } from "react";
 import { voiceMetrics } from "../telemetry/voiceTimeline";
+import type { AudioLevelReader, AudioLevels } from "../types/voice";
 
 /**
  * Mic capture rate, in Hz. MUST equal the backend's `input_audio_sampling_rate`
@@ -87,15 +88,96 @@ export function encodePcmToBase64(pcm: ArrayBuffer): string {
   return btoa(binary);
 }
 
+/** Analyser FFT size: 1024 samples is ~43 ms at 24 kHz (~64 ms at 16 kHz) — one orb frame's worth of
+ * signal, and fine enough bins (~23 Hz at 24 kHz) to split the voice range into bands. */
+const ANALYSER_FFT_SIZE = 1024;
+
+/** RMS dBFS mapped onto the orb's 0..1 level: quieter than the floor is silence, louder than the
+ * ceiling is full. Conversational speech on both paths sits between them. */
+const LEVEL_FLOOR_DB = -50;
+const LEVEL_CEIL_DB = -10;
+
+/** Band edges in Hz for the orb's edge ripples — log-spaced over the voice range, where the energy
+ * that moves when someone talks actually lives. */
+const BAND_EDGES_HZ = [90, 250, 600, 1400, 3500];
+
+/** Hang an analyser off `node` for the audio orb, or null if it cannot be made. Called only after
+ * the audio path itself is wired, and never allowed to throw: the orb is a picture of the audio, so
+ * it must never be the reason the candidate or the interviewer goes unheard. */
+function tapAnalyser(ctx: AudioContext, node: AudioNode): AnalyserNode | null {
+  try {
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = ANALYSER_FFT_SIZE;
+    // The orb smooths in time itself, with separate attack and release, so the analyser's own
+    // symmetric smoothing would only add lag on the attack.
+    analyser.smoothingTimeConstant = 0.3;
+    node.connect(analyser);
+    return analyser;
+  } catch (err) {
+    console.debug("[voice-audio] analyser tap unavailable — the orb will not follow the voice", err);
+    return null;
+  }
+}
+
+/** 0..1, and 0 for anything that is not a finite number. One NaN sample would otherwise stay in the
+ * orb's smoothing forever (NaN in, NaN out) and reach the canvas, whose gradients throw on it. */
+function clampUnit(v: number): number {
+  return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0;
+}
+
+/** Read buffers, one pair per analyser: the orb reads up to two analysers every animation frame, and
+ * allocating fresh ones each time is steady garbage on the thread that also runs the call. */
+const analyserScratch = new WeakMap<
+  AnalyserNode,
+  { time: Float32Array<ArrayBuffer>; freq: Uint8Array<ArrayBuffer> }
+>();
+
+/** Overall level + per-band energy of whatever is flowing through `analyser` right now. Exported for
+ * its unit test. */
+export function readAnalyser(analyser: AnalyserNode, sampleRate: number): AudioLevels {
+  let scratch = analyserScratch.get(analyser);
+  if (!scratch || scratch.time.length !== analyser.fftSize) {
+    scratch = {
+      time: new Float32Array(analyser.fftSize),
+      freq: new Uint8Array(analyser.frequencyBinCount),
+    };
+    analyserScratch.set(analyser, scratch);
+  }
+  const { time, freq } = scratch;
+  analyser.getFloatTimeDomainData(time);
+  let sum = 0;
+  for (const v of time) sum += v * v;
+  const rms = Math.sqrt(sum / time.length);
+  const db = rms > 0 ? 20 * Math.log10(rms) : -Infinity;
+  const level = clampUnit((db - LEVEL_FLOOR_DB) / (LEVEL_CEIL_DB - LEVEL_FLOOR_DB));
+
+  analyser.getByteFrequencyData(freq);
+  const binHz = sampleRate / analyser.fftSize;
+  const bands: number[] = [];
+  for (let b = 0; b + 1 < BAND_EDGES_HZ.length; b++) {
+    const lo = Math.max(1, Math.floor(BAND_EDGES_HZ[b] / binHz));
+    const hi = Math.min(freq.length, Math.max(lo + 1, Math.ceil(BAND_EDGES_HZ[b + 1] / binHz)));
+    let bandSum = 0;
+    for (let i = lo; i < hi; i++) bandSum += freq[i];
+    bands.push(clampUnit(bandSum / ((hi - lo) * 255)));
+  }
+  return { level, bands };
+}
+
 export function useVoiceAudio() {
   // ── Mic capture ──────────────────────────────────────────────────────────
   const micContextRef = useRef<AudioContext | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
+  /** A tap beside the recorder, read by the audio orb. A side branch only: it never feeds the uplink. */
+  const micAnalyserRef = useRef<AnalyserNode | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
 
   // ── Playback ─────────────────────────────────────────────────────────────
   const playbackContextRef = useRef<AudioContext | null>(null);
   const playbackNodeRef = useRef<AudioWorkletNode | null>(null);
+  /** Taps the jitter buffer's OUTPUT, so the orb follows what the candidate actually hears — not
+   * Azure's events, which mark a response done seconds before its audio has finished playing. */
+  const playbackAnalyserRef = useRef<AnalyserNode | null>(null);
   /** In flight while the playback worklet module loads. `playAudio` can be called before it
    * resolves (the first `response.audio.delta` races the module fetch), so chunks that arrive
    * meanwhile wait in `pendingPlaybackRef` instead of being dropped. */
@@ -124,6 +206,7 @@ export function useVoiceAudio() {
     void micContextRef.current?.close().catch(() => undefined);
     micContextRef.current = null;
     workletNodeRef.current = null;
+    micAnalyserRef.current = null;
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         sampleRate: MIC_SAMPLE_RATE,
@@ -146,6 +229,7 @@ export function useVoiceAudio() {
     source.connect(workletNode);
     // Not connected to ctx.destination: we don't want to hear our own mic locally.
     workletNodeRef.current = workletNode;
+    micAnalyserRef.current = tapAnalyser(ctx, source);
   }, []);
 
   /** Start streaming mic frames; `onFrame` receives each batch as raw Int16 PCM.
@@ -190,6 +274,7 @@ export function useVoiceAudio() {
     void micContextRef.current?.close().catch(() => undefined);
     micContextRef.current = null;
     workletNodeRef.current = null;
+    micAnalyserRef.current = null;
   }, [stopRecording]);
 
   /** Lazily create the playback AudioContext (matches Voice Live's PCM16 OUTPUT rate, which is
@@ -262,6 +347,7 @@ export function useVoiceAudio() {
           // Hand over whatever arrived while the module was loading, in order.
           for (const pcm of pendingPlaybackRef.current) node.port.postMessage({ pcm }, [pcm]);
           pendingPlaybackRef.current = [];
+          playbackAnalyserRef.current = tapAnalyser(ctx, node);
         })
         .catch((err: unknown) => {
           // Audio is the whole product here, so a load failure has to be loud rather than silent.
@@ -339,6 +425,14 @@ export function useVoiceAudio() {
   /** Latest buffer depth + underrun count from the worklet (see PlaybackStats). */
   const getPlaybackStats = useCallback((): PlaybackStats => playbackStatsRef.current, []);
 
+  /** What the audio orb draws from: the candidate's mic or the interviewer's playback, as heard
+   * right now. Null until that side's graph exists. Cheap enough to call once per animation frame. */
+  const readAudioLevels = useCallback<AudioLevelReader>((source) => {
+    const analyser = source === "mic" ? micAnalyserRef.current : playbackAnalyserRef.current;
+    if (!analyser) return null;
+    return readAnalyser(analyser, analyser.context.sampleRate);
+  }, []);
+
   /** Resume the playback AudioContext inside a user-gesture handler (Chrome autoplay policy) —
    * call this synchronously in the click handler that starts the session, before any async WS
    * event tries to call `playAudio`. */
@@ -371,6 +465,7 @@ export function useVoiceAudio() {
     flushPlayback,
     endPlaybackStream,
     getPlaybackStats,
+    readAudioLevels,
     prepareAudioContext,
   };
 }

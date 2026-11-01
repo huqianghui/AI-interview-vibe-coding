@@ -18,6 +18,7 @@ function fakeVoice(overrides: Record<string, unknown> = {}) {
     mediaMode: "video",
     canEnableVideo: true,
     videoEnableAtMs: null,
+    readAudioLevels: () => null,
     toggleMute: vi.fn(),
     setVideoPreference: vi.fn(),
     ...overrides,

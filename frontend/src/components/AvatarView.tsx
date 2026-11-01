@@ -49,7 +49,7 @@ import {
   type PictureState,
   type SampleStatus,
 } from "./avatarFrameHealth";
-import type { AudioState } from "../types/voice";
+import type { AudioLevelReader, AudioState } from "../types/voice";
 
 /** Give the stream a beat after the first frames so the captured pose is settled, not mid-fade. */
 const PORTRAIT_CAPTURE_DELAY_MS = 2000;
@@ -195,6 +195,8 @@ function useParentSize(el: HTMLElement | null) {
 
 interface AvatarViewProps {
   audioState: AudioState;
+  /** Live audio levels for the orb, so it moves with the voice rather than on a fixed pulse. */
+  readAudioLevels?: AudioLevelReader;
   /** True once a real avatar video track is playing → show video, hide the orb. */
   isAvatarConnected: boolean;
   /** `"audio-only"` once the media layer gave up the picture to protect the interviewer's voice on a
@@ -233,6 +235,7 @@ interface AvatarViewProps {
 export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function AvatarView(
   {
     audioState,
+    readAudioLevels,
     isAvatarConnected,
     mediaMode = "video",
     character = null,
@@ -590,7 +593,7 @@ export const AvatarView = forwardRef<HTMLVideoElement, AvatarViewProps>(function
             </div>
           </>
         )}
-        {!showVideo && !showPortrait && <AudioOrb audioState={audioState} />}
+        {!showVideo && !showPortrait && <AudioOrb audioState={audioState} readAudioLevels={readAudioLevels} />}
         {framedPhoto && photoOverlay}
         {audioOnly && (
           // role=status + aria-live so a screen-reader user is TOLD the picture was dropped. Losing the
