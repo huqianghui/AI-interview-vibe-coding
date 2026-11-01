@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.79.2.0 (2026-11-01)
+
+### Fixed
+- **On a network that blocks the digital human, the first question is heard within seconds instead
+  of after a minute of silence.** On such a network (a corporate secure-access client, for example)
+  the interviewer's picture can never connect. Two things made the candidate wait:
+  - **The first question was read into a connection that could not carry it.** In audio-only mode
+    the page treated the interviewer as ready as soon as Azure answered, before any audio could
+    flow. It now waits until the connection is actually up.
+  - **Nothing gave up on the dead connection for over a minute** (75 s measured live), because it
+    never reported a failure. A connection that has not come up 6 seconds after Azure answers now
+    switches straight to voice-only, and the question is read there. Real connections, direct or
+    relayed, come up in under 0.7 s (61 live sessions).
+
+  Measured on a blocking network against real Azure: the first interviewer audio arrives after
+  18.6 s instead of 30.8 s, and the longer stalls (one more attempt after a timed-out handshake) are
+  cut short the same way.
+
 ## 0.79.1.0 (2026-11-01)
 
 ### Changed
