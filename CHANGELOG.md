@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.79.1.0 (2026-11-01)
+
+### Changed
+- **The voice-only orb is now a glass sphere with a liquid that follows the voice**, after the
+  Foundry Voice Live orb. The sphere itself stays still: pale glass at the top, and a liquid in the
+  state's colour below. When the interviewer speaks, or the candidate while listening:
+  - **the liquid rises and its surface ripples**, broad waves for low voice energy and finer ripples
+    for high, under a bright crest line;
+  - **a soft aura glows around the glass**, and a ring spreads outward on each loud syllable.
+- **The state colours keep their meaning:** purple when ready, magenta when listening, green when
+  speaking. Muted calms the liquid flat and grey as the colour fades, and still moves if the
+  interviewer speaks.
+- **"Reduce motion" draws the orb once per state**, with a calm surface and no rings.
+- **The interview screenshot in the README shows the new orb.**
+
+### Fixed
+- **The orb no longer flickers for a frame when it wakes from a muted pause**, and a single bad
+  audio reading can no longer leave it blank for the rest of the interview.
+
 ## 0.79.0.0 (2026-11-01)
 
 ### Added
