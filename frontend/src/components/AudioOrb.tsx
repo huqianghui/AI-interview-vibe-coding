@@ -1,15 +1,46 @@
 /**
  * AudioOrb (SPEC F9) — the interviewer's visual presence during a voice turn.
  *
- * A pulsating sphere whose state tracks the Voice Live audio lifecycle (idle / listening /
- * speaking / muted). This is the "avatar dominant" element of the interview layout (P11) when no
- * digital-human video track is present — WebRTC audio transport doesn't carry avatar video in
- * preview, so the orb is the primary presence. Pure CSS animation, no RAF loop.
+ * A sphere drawn on a canvas, whose colour tracks the Voice Live audio lifecycle (idle / listening /
+ * speaking / muted) and whose outline moves with the actual sound: the candidate's mic while
+ * listening, the interviewer's playback whenever it is audible. This is the "avatar dominant"
+ * element of the interview layout (P11) when no digital-human video track is present.
+ *
+ * Levels are read from analysers on our own Web Audio graphs (`useVoiceAudio.readAudioLevels`),
+ * not from Azure's events: the playback tap sits after the jitter buffer, so the orb moves exactly
+ * as long as the candidate hears the interviewer — Azure marks a response done seconds earlier.
+ * Without a reader (the agent editor's static preview) the orb breathes on its own.
+ *
+ * The drawing itself lives in `audioOrbRender.ts`. The loop stops once a muted orb has settled, and
+ * under `prefers-reduced-motion` the orb is drawn once per state, still and round.
  */
-import { makeStyles, mergeClasses, tokens, Text } from "@fluentui/react-components";
-import { palette } from "../theme";
+import { useEffect, useRef, useState } from "react";
+import { makeStyles, tokens, Text } from "@fluentui/react-components";
 import { useTranslation } from "react-i18next";
-import type { AudioState } from "../types/voice";
+import type { AudioLevelReader, AudioState } from "../types/voice";
+import {
+  drawOrb,
+  follow,
+  mixLook,
+  ORB_FALL_MS,
+  ORB_LOOK_FADE_MS,
+  ORB_BAND_COUNT,
+  ORB_LOOKS,
+  ORB_MAX_SCALE,
+  ORB_MAX_SHADOW_PX,
+  ORB_RISE_MS,
+  type OrbLook,
+} from "./audioOrbRender";
+
+/** The sphere's resting diameter — the same 160 px the CSS orb had, so layouts don't shift. */
+const ORB_REST_RADIUS = 80;
+/** The canvas is larger than the sphere so the loudest swell and its glow are never cut off (the
+ * halo is capped at the canvas edge by drawOrb); the negative margin gives that room back, so the orb
+ * still occupies 160 px in the layout. */
+const CANVAS_PX = 2 * Math.ceil(ORB_REST_RADIUS * ORB_MAX_SCALE + ORB_MAX_SHADOW_PX);
+const CANVAS_BLEED_PX = (CANVAS_PX - 2 * ORB_REST_RADIUS) / 2;
+/** Beyond 2× the edge is already sharp at this size, and a 3× canvas is 2.25× the pixels to fill. */
+const MAX_DPR = 2;
 
 const useStyles = makeStyles({
   root: {
@@ -19,62 +50,18 @@ const useStyles = makeStyles({
     justifyContent: "center",
     gap: "20px",
   },
-  orbWrap: { position: "relative", display: "flex", alignItems: "center", justifyContent: "center" },
-  orb: {
-    width: "160px",
-    height: "160px",
-    borderRadius: "50%",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    transition: "transform 150ms ease, box-shadow 300ms ease",
+  orbWrap: {
+    position: "relative",
+    width: `${2 * ORB_REST_RADIUS}px`,
+    height: `${2 * ORB_REST_RADIUS}px`,
   },
-  idle: {
-    background: `radial-gradient(circle at 35% 30%, ${palette.violet}, ${palette.action} 70%)`,
-    boxShadow: "0 0 25px rgba(92,46,145,0.20)",
-    animationName: {
-      "0%": { transform: "scale(1)" },
-      "50%": { transform: "scale(1.04)" },
-      "100%": { transform: "scale(1)" },
-    },
-    animationDuration: "3.5s",
-    animationIterationCount: "infinite",
-    animationTimingFunction: "ease-in-out",
+  canvas: {
+    display: "block",
+    width: `${CANVAS_PX}px`,
+    height: `${CANVAS_PX}px`,
+    margin: `-${CANVAS_BLEED_PX}px`,
+    pointerEvents: "none",
   },
-  listening: {
-    background: `radial-gradient(circle at 35% 30%, ${palette.magenta}, ${palette.action} 70%)`,
-    boxShadow: "0 0 55px rgba(194,57,179,0.40)",
-    animationName: {
-      "0%": { transform: "scale(1)" },
-      "50%": { transform: "scale(1.09)" },
-      "100%": { transform: "scale(1)" },
-    },
-    animationDuration: "1.4s",
-    animationIterationCount: "infinite",
-    animationTimingFunction: "ease-in-out",
-  },
-  speaking: {
-    background: `radial-gradient(circle at 35% 30%, #5FAE8F, ${palette.ok} 70%)`,
-    boxShadow: "0 0 55px rgba(30,122,92,0.38)",
-    animationName: {
-      "0%": { transform: "scale(1)" },
-      "50%": { transform: "scale(1.07)" },
-      "100%": { transform: "scale(1)" },
-    },
-    animationDuration: "0.9s",
-    animationIterationCount: "infinite",
-    animationTimingFunction: "ease-in-out",
-  },
-  // Re-tinted onto the approved palette (2026-10-03). These four gradients were off-palette
-  // one-offs (#7c3aed violet, #6d28d9, and — against this direction's one hard rule — the COOL
-  // GREYS #64748b / #334155 for muted). The orb is the voice-only fallback, so it appears during a
-  // live interview on the warm page: left alone it read as a foreign element pasted onto the app.
-  // Each state keeps its OWN hue, because the colour vocabulary is what the status legend teaches.
-  muted: {
-    background: `radial-gradient(circle at 35% 30%, ${palette.textFaint}, ${palette.textMuted} 70%)`,
-    boxShadow: "none",
-  },
-  dot: { width: "16px", height: "16px", borderRadius: "50%", background: "rgba(255,255,255,0.85)" },
   label: { color: tokens.colorNeutralForeground3 },
 });
 
@@ -85,17 +72,187 @@ const STATUS_KEY: Record<AudioState, string> = {
   muted: "voice.muted",
 };
 
-export function AudioOrb({ audioState }: { audioState: AudioState }) {
+/** How often a parked (muted, settled) orb checks whether the interviewer has started speaking, and
+ * how loud they must be to wake it. */
+const PARKED_CHECK_MS = 250;
+const PARKED_WAKE_LEVEL = 0.02;
+
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+
+function usePrefersReducedMotion(): boolean {
+  const get = () => typeof window !== "undefined" && !!window.matchMedia?.(REDUCED_MOTION_QUERY).matches;
+  const [reduced, setReduced] = useState(get);
+  useEffect(() => {
+    const mq = typeof window !== "undefined" ? window.matchMedia?.(REDUCED_MOTION_QUERY) : undefined;
+    if (!mq) return;
+    const onChange = () => setReduced(mq.matches);
+    mq.addEventListener?.("change", onChange);
+    return () => mq.removeEventListener?.("change", onChange);
+  }, []);
+  return reduced;
+}
+
+const SILENT = { level: 0, bands: [] as readonly number[] };
+
+/** What the orb should be showing right now: the louder of what the candidate hears and (only
+ * while listening) what they are saying. Muted silences the candidate's side only: the interviewer
+ * can still be heard while the candidate is muted, so the grey orb still moves with them. */
+function readTarget(reader: AudioLevelReader | undefined, state: AudioState) {
+  if (!reader) return SILENT;
+  const playback = reader("playback");
+  const mic = state === "listening" ? reader("mic") : null;
+  const pick = (mic?.level ?? 0) > (playback?.level ?? 0) ? mic : playback;
+  return { level: pick?.level ?? 0, bands: pick?.bands ?? [] };
+}
+
+export function AudioOrb({
+  audioState,
+  readAudioLevels,
+}: {
+  audioState: AudioState;
+  readAudioLevels?: AudioLevelReader;
+}) {
   const styles = useStyles();
   const { t } = useTranslation();
-  const stateClass = styles[audioState];
+  const reducedMotion = usePrefersReducedMotion();
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // The loop reads these through refs so a state change never restarts it (and never resets the
+  // smoothing or the colour cross-fade mid-way).
+  const stateRef = useRef(audioState);
+  stateRef.current = audioState;
+  const readerRef = useRef(readAudioLevels);
+  readerRef.current = readAudioLevels;
+  /** Restarts a loop that stopped on a settled muted orb. Set by the effect below. */
+  const wakeRef = useRef<() => void>(() => undefined);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    // jsdom (unit tests) has no 2D context; the orb's state attributes still render.
+    const ctx = canvas?.getContext?.("2d") ?? null;
+    if (!canvas || !ctx) return;
+    // The orb is decoration: a canvas that cannot draw (a lost GPU context, a partial stub) must
+    // leave a blank circle and a working interview, never an exception out of a React effect.
+    let failed = false;
+    let readFailed = false; // only to log a failing reader once, not 60 times a second
+    const safely = (draw: () => void) => {
+      if (failed) return;
+      try {
+        draw();
+      } catch (err) {
+        failed = true;
+        console.warn("[audio-orb] canvas drawing failed — the orb stays blank", err);
+      }
+    };
+    const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+    canvas.width = Math.round(CANVAS_PX * dpr);
+    canvas.height = Math.round(CANVAS_PX * dpr);
+    safely(() => ctx.setTransform(dpr, 0, 0, dpr, 0, 0));
+
+    let look: OrbLook = ORB_LOOKS[stateRef.current];
+    let level = 0;
+    const bands = new Array<number>(ORB_BAND_COUNT).fill(0);
+    const start = performance.now();
+    let last = start;
+    let raf = 0;
+
+    if (reducedMotion) {
+      // One still frame per state; the effect below re-runs this through `wakeRef`.
+      let painted: AudioState | null = null;
+      const paint = () => {
+        if (painted === stateRef.current) return;
+        painted = stateRef.current;
+        safely(() =>
+          drawOrb(ctx, CANVAS_PX, ORB_REST_RADIUS, ORB_LOOKS[stateRef.current], {
+            timeS: 0,
+            level: 0,
+            bands,
+            motion: false,
+          }),
+        );
+      };
+      paint();
+      wakeRef.current = paint;
+      return () => {
+        wakeRef.current = () => undefined;
+      };
+    }
+
+    const frame = (now: number) => {
+      const dt = Math.min(100, now - last); // a backgrounded tab resumes without a jump
+      last = now;
+      const state = stateRef.current;
+      // Read outside `safely`, but never allowed to escape: a throw here would skip the reschedule
+      // below and leave the loop dead with a stale `raf`, so nothing could wake it again. A reader
+      // that fails reads as silence for this frame, and the orb keeps drawing.
+      let target = SILENT;
+      try {
+        target = readTarget(readerRef.current, state);
+      } catch (err) {
+        if (!readFailed) console.warn("[audio-orb] reading the audio level failed — drawing silence", err);
+        readFailed = true;
+      }
+      level = follow(level, target.level, dt, ORB_RISE_MS, ORB_FALL_MS);
+      for (let k = 0; k < ORB_BAND_COUNT; k++) {
+        bands[k] = follow(bands[k], target.bands[k] ?? 0, dt, ORB_RISE_MS, ORB_FALL_MS);
+      }
+      look = mixLook(look, ORB_LOOKS[state], 1 - Math.exp(-dt / (ORB_LOOK_FADE_MS / 3)));
+      safely(() =>
+        drawOrb(ctx, CANVAS_PX, ORB_REST_RADIUS, look, {
+          timeS: (now - start) / 1000,
+          level,
+          bands,
+          motion: true,
+        }),
+      );
+      // A muted orb is grey and still: once it has faded there and gone quiet, stop drawing, and
+      // only listen for the interviewer (who can still speak to a muted candidate) to start again.
+      const settled =
+        state === "muted" && level < 0.002 && Math.abs(look.glowAlpha - ORB_LOOKS.muted.glowAlpha) < 0.002;
+      if (failed) raf = 0;
+      else if (settled) {
+        raf = 0;
+        parkedTimer = setTimeout(checkParked, PARKED_CHECK_MS);
+      } else raf = requestAnimationFrame(frame);
+    };
+    /** While parked: a cheap look at the playback level, four times a second, instead of a redraw
+     * sixty times a second. */
+    const checkParked = () => {
+      parkedTimer = undefined;
+      let heard = 0;
+      try {
+        heard = readTarget(readerRef.current, stateRef.current).level;
+      } catch {
+        // the frame loop logs a failing reader; here it only means "nothing heard"
+      }
+      if (heard > PARKED_WAKE_LEVEL) wakeRef.current();
+      else parkedTimer = setTimeout(checkParked, PARKED_CHECK_MS);
+    };
+    let parkedTimer: ReturnType<typeof setTimeout> | undefined;
+    raf = requestAnimationFrame(frame);
+    wakeRef.current = () => {
+      if (raf || failed) return;
+      clearTimeout(parkedTimer);
+      parkedTimer = undefined;
+      last = performance.now();
+      raf = requestAnimationFrame(frame);
+    };
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(parkedTimer);
+      raf = 0;
+      wakeRef.current = () => undefined;
+    };
+  }, [reducedMotion]);
+
+  useEffect(() => {
+    wakeRef.current();
+  }, [audioState]);
 
   return (
     <div className={styles.root} role="img" aria-label={t(STATUS_KEY[audioState])} data-testid="audio-orb">
-      <div className={styles.orbWrap}>
-        <div className={mergeClasses(styles.orb, stateClass)} data-testid="orb-sphere" data-state={audioState}>
-          <span className={styles.dot} />
-        </div>
+      <div className={styles.orbWrap} data-testid="orb-sphere" data-state={audioState}>
+        <canvas ref={canvasRef} className={styles.canvas} aria-hidden="true" data-testid="orb-canvas" />
       </div>
       <Text weight="medium" className={styles.label} data-testid="orb-status-label">
         {t(STATUS_KEY[audioState])}

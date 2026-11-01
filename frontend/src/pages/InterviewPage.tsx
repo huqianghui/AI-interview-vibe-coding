@@ -1063,6 +1063,7 @@ export function InterviewPage() {
                 <AvatarView
                   ref={avatarVideoRef}
                   audioState={badgeState}
+                  readAudioLevels={voice.readAudioLevels}
                   isAvatarConnected={voice.isAvatarConnected}
                   mediaMode={voice.mediaMode}
                   character={avatarCharacterRef.current}

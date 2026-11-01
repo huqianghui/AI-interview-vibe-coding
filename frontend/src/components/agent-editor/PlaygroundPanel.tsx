@@ -234,6 +234,7 @@ export function PlaygroundPanel({ personaId, character, style, locale }: Playgro
             <AvatarView
               ref={avatarVideoRef}
               audioState={voice.audioState}
+              readAudioLevels={voice.readAudioLevels}
               isAvatarConnected={voice.isAvatarConnected}
               mediaMode={voice.mediaMode}
               character={character}
