@@ -113,6 +113,13 @@ const SERVER_SDP_TIMEOUT_MS = 15000;
  * as a real drop and rebuilding — so a momentary blip never flashes the fallback orb. `failed` is
  * terminal and skips this grace (it won't recover without a full renegotiation). */
 const DISCONNECTED_GRACE_MS = 3000;
+/** ICE must reach `connected` within this long of applying Azure's answer, or the connection is
+ * treated as one that never carried media and the session falls back to voice-only. Measured on 61
+ * live sessions (30 days to 2026-11-01): answer → connected p50 399 ms, p90 558 ms, max 612 ms, so
+ * this is ~10× the slowest real connect. Without it, a network that blocks the avatar outright left
+ * ICE in `checking` with no failure event, and the candidate sat in silence for 75 s (measured live)
+ * before anything gave up. */
+const ICE_CONNECT_LIMIT_MS = 6000;
 /** Drops of a connection whose media HAD flowed, with no stable stretch in between, before the
  * self-heal stops rebuilding avatar sessions and goes voice-only: 2 = one rebuild in the same mode.
  * Every avatar rebuild spends from Azure's allowance of 3 per 60 s (below), and a fourth inside the
@@ -234,6 +241,8 @@ export function useAvatarStream(
   /** The self-heal's pending session-rebuild request, held while the avatar allowance is spent. */
   const rebuildTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const graceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Armed when Azure's answer is applied, cleared when ICE connects (ICE_CONNECT_LIMIT_MS). */
+  const iceConnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Bumped by disconnect()/connect() so a stale in-flight recovery (or a dead PC's late event) can
   // detect it's been superseded and bail instead of clobbering the current connection.
   const genRef = useRef(0);
@@ -263,6 +272,9 @@ export function useAvatarStream(
   /** The avatar's AUDIO track is live. Only promoted to "ready" in audio-only mode — in video mode the
    * first-read gate must still wait for painted frames, or the opening words get clipped. */
   const [audioTrackLive, setAudioTrackLive] = useState(false);
+  /** ICE has connected on the current PeerConnection: the audio track can actually carry sound. The
+   * track itself arrives with the SDP answer, before (and even without) any connection. */
+  const [iceConnected, setIceConnected] = useState(false);
   /** When the current avatar session was created. Azure rate-limits avatar requests, so switching back
    * INTO video is held off until enough time has passed (see VIDEO_SWITCH_MIN_INTERVAL_MS). */
   const avatarConnectedAtRef = useRef<number | null>(null);
@@ -323,6 +335,10 @@ export function useAvatarStream(
       clearTimeout(graceTimerRef.current);
       graceTimerRef.current = null;
     }
+    if (iceConnectTimerRef.current) {
+      clearTimeout(iceConnectTimerRef.current);
+      iceConnectTimerRef.current = null;
+    }
     if (rebuildTimerRef.current) {
       clearTimeout(rebuildTimerRef.current);
       rebuildTimerRef.current = null;
@@ -361,6 +377,7 @@ export function useAvatarStream(
     }
     setIsConnected(false);
     setAudioTrackLive(false);
+    setIceConnected(false);
   }, [clearTimers, videoRef]);
 
   /** Attach a video MediaStream to the <video> element + flip `isConnected` once it paints real
@@ -589,6 +606,13 @@ export function useAvatarStream(
             clearTimeout(graceTimerRef.current);
             graceTimerRef.current = null;
           }
+          if (iceConnectTimerRef.current) {
+            clearTimeout(iceConnectTimerRef.current);
+            iceConnectTimerRef.current = null;
+          }
+          // An audio-only session is ready to be heard now, not when its track arrived.
+          if (!mediaFlowedRef.current && !wantVideoRef.current) voiceMetrics.setup("media_ready");
+          setIceConnected(true);
           // Media is flowing — the signal the self-heal's choices rest on. NOT the track's arrival: Azure
           // delivers that with the SDP answer even when ICE never connects. A drop is over (a fresh
           // budget) only once this has held for MEDIA_STABLE_MS, so a link that connects and dies within
@@ -665,10 +689,11 @@ export function useAvatarStream(
         stopAudibleRef.current = watchAudibleOnsets(event.receiver, () =>
           voiceMetrics.turn("first_audible"),
         );
-        if (!wantVideoRef.current) voiceMetrics.setup("media_ready");
         // Audio-only sessions never paint a frame, so `reflectDimensions` — which is where a normal
-        // session declares itself settled — never runs. The live audio track is the equivalent milestone
-        // for the first-question read. The failure count is cleared on ICE connected instead (see there).
+        // session declares itself settled — never runs. The equivalent milestone for the first-question
+        // read is this track AND a connected ICE (`isMediaReady`): Azure delivers the track with the SDP
+        // answer even on a network that will never carry it, and reading the opening question into
+        // that left the candidate in silence (live, 2026-11-01). `media_ready` is marked on connect.
       };
     },
     [attachStream, startSampling, stopSampling],
@@ -814,6 +839,17 @@ export function useAvatarStream(
       sdpResolverRef.current = null;
       await pc.setRemoteDescription({ type: "answer", sdp: serverSdp });
       handshake?.mark("answer_applied");
+      // ICE that has not connected by now never will on this network (ICE_CONNECT_LIMIT_MS). Handed to
+      // the self-heal, which sends a connection whose media never flowed straight to voice-only.
+      if (iceConnectTimerRef.current) clearTimeout(iceConnectTimerRef.current);
+      iceConnectTimerRef.current = setTimeout(() => {
+        iceConnectTimerRef.current = null;
+        if (pc !== pcRef.current || mediaFlowedRef.current) return;
+        console.warn(
+          `[avatar-stream] ICE still ${pc.iceConnectionState} ${ICE_CONNECT_LIMIT_MS} ms after the answer; giving up on it`,
+        );
+        attemptRecoveryRef.current?.("ice-never-connected");
+      }, ICE_CONNECT_LIMIT_MS);
       console.info("[avatar-stream] setRemoteDescription success; awaiting first video frame");
     },
     [avatarRequestWaitMs, noteAvatarRequest],
@@ -1026,6 +1062,7 @@ export function useAvatarStream(
       applyMode(decisionRef.current.mode);
       const wantVideo = decisionRef.current.mode === "video";
       setAudioTrackLive(false);
+      setIceConnected(false);
 
       pendingStreamRef.current = null;
       if (videoRef.current) videoRef.current.srcObject = null;
@@ -1153,7 +1190,7 @@ export function useAvatarStream(
      * audio-only session. This — not `isConnected` — is what the first-question read must wait for;
      * an audio-only session never paints a frame, so gating on `isConnected` made every audio-only
      * turn sit out the full gate timeout before speaking. */
-    isMediaReady: isConnected || (mediaMode === "audio-only" && audioTrackLive),
+    isMediaReady: isConnected || (mediaMode === "audio-only" && audioTrackLive && iceConnected),
     mediaMode,
     videoPreference,
     setVideoPreference,

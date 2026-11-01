@@ -272,6 +272,48 @@ describe("useAvatarStream self-heal", () => {
     expect(sendOffer, "one avatar session spent, not three").toHaveBeenCalledTimes(1);
   });
 
+  it("gives up on ICE that never connects within 6 s of the answer, even without a failure event", async () => {
+    // Live, 2026-11-01: ICE sat in `checking` with no `failed`/`disconnected` event, so nothing gave up
+    // and the candidate waited 75 s in silence before the voice-only fallback.
+    const fallback = vi.spyOn(voiceMetrics, "fallback");
+    const videoRef = makeVideoRef();
+    const sendOffer = vi.fn();
+    const { result, requests, infos } = renderWithConsumer(videoRef);
+    const pc = await newSession(result, sendOffer);
+    await act(async () => {
+      pc.emitTrack("audio");
+      pc.fireIce("checking");
+      await vi.advanceTimersByTimeAsync(5900);
+    });
+    expect(requests, "not before the limit").toEqual([]);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+    expect(requests).toEqual(["voice-only"]);
+    expect(infos).toEqual([{ mediaNeverFlowed: true }]);
+    expect(fallback).toHaveBeenCalledWith(
+      "ice_never_connected",
+      expect.objectContaining({ trigger: "ice-never-connected" }),
+    );
+    expect(sendOffer, "no second avatar session spent on a blocked network").toHaveBeenCalledTimes(1);
+  });
+
+  it("never abandons a connection that connects within the limit", async () => {
+    const videoRef = makeVideoRef();
+    const sendOffer = vi.fn();
+    const { result, requests } = renderWithConsumer(videoRef);
+    const pc = await newSession(result, sendOffer);
+    await act(async () => {
+      pc.fireIce("checking");
+      await vi.advanceTimersByTimeAsync(600); // the slowest real connect measured live: 612 ms
+      pc.fireIce("connected");
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(requests).toEqual([]);
+    expect(result.current.mediaMode).toBe("video");
+  });
+
   it("reports why it went voice-only, with what the ICE got as far as (voice.fallback)", async () => {
     const fallback = vi.spyOn(voiceMetrics, "fallback");
     const videoRef = makeVideoRef();
@@ -627,6 +669,34 @@ describe("useAvatarStream weak-network adaptation", () => {
     // Nothing paints, so the orb stays — but the read gate must be released by the live audio track,
     // otherwise every audio-only question sits out the full 6 s gate in silence.
     expect(result.current.isConnected).toBe(false);
+    expect(result.current.isMediaReady).toBe(true);
+  });
+
+  it("does NOT treat an audio-only track as ready until ICE has connected", async () => {
+    // Live, 2026-11-01: on a network that blocks the avatar, Azure still delivered the audio track with
+    // the SDP answer. Counting that as ready released the opening question into a connection that never
+    // carried a packet — the candidate heard nothing and the page sat in "Ready".
+    const videoRef = makeVideoRef();
+    const sendOffer = vi.fn();
+    const { result, requests } = renderStream(videoRef);
+    const pc = await bringUp(result, sendOffer, 0);
+    const c = counters();
+    for (let i = 0; i <= T.BAD_WINDOWS; i++) await tick(pc, wastingStep(c));
+    expect(requests).toEqual(["audio-only"]);
+
+    await act(async () => {
+      void result.current.connect([{ urls: "turn:relay.example.com" }], sendOffer);
+    });
+    const audioPc = FakePC.instances[1];
+    await completeHandshake(audioPc, result.current.handleServerSdp);
+    await act(async () => {
+      audioPc.emitTrack("audio"); // arrives with the answer; ICE is still checking
+    });
+    expect(result.current.isMediaReady, "a track alone is not something the candidate can hear").toBe(false);
+
+    await act(async () => {
+      audioPc.fireIce("connected");
+    });
     expect(result.current.isMediaReady).toBe(true);
   });
 
