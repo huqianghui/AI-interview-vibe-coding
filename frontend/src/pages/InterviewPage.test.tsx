@@ -383,6 +383,7 @@ describe("InterviewPage", () => {
       setVideoPreference: () => undefined,
       canEnableVideo: true,
       videoEnableAtMs: null,
+      readAudioLevels: () => null,
       speakAside: () => true,
       peekDraft: () => "",
     };
@@ -446,6 +447,7 @@ describe("InterviewPage", () => {
       setVideoPreference: () => undefined,
       canEnableVideo: true,
       videoEnableAtMs: null,
+      readAudioLevels: () => null,
       speakAside: () => true,
       peekDraft: () => "",
     };
@@ -504,6 +506,7 @@ describe("InterviewPage", () => {
       setVideoPreference: () => undefined,
       canEnableVideo: true,
       videoEnableAtMs: null,
+      readAudioLevels: () => null,
       speakAside: () => true,
       peekDraft: () => "",
     };
@@ -564,6 +567,7 @@ describe("InterviewPage", () => {
       setVideoPreference: () => undefined,
       canEnableVideo: true,
       videoEnableAtMs: null,
+      readAudioLevels: () => null,
       speakAside: () => true,
       peekDraft: () => "",
     };
@@ -626,6 +630,7 @@ describe("InterviewPage", () => {
       setVideoPreference: () => undefined,
       canEnableVideo: true,
       videoEnableAtMs: null,
+      readAudioLevels: () => null,
       speakAside: () => true,
       peekDraft: () => "",
     };
@@ -669,6 +674,7 @@ describe("InterviewPage", () => {
       setVideoPreference: () => undefined,
       canEnableVideo: true,
       videoEnableAtMs: null,
+      readAudioLevels: () => null,
       speakAside: () => true,
       peekDraft: () => "",
     };
@@ -718,6 +724,7 @@ describe("InterviewPage", () => {
       setVideoPreference: () => undefined,
       canEnableVideo: true,
       videoEnableAtMs: null,
+      readAudioLevels: () => null,
       speakAside: () => true,
       peekDraft: () => "",
     };
@@ -789,6 +796,7 @@ describe("InterviewPage", () => {
       setVideoPreference: () => undefined,
       canEnableVideo: true,
       videoEnableAtMs: null,
+      readAudioLevels: () => null,
       speakAside: () => true,
       peekDraft: () => "",
     };
@@ -864,6 +872,7 @@ describe("InterviewPage", () => {
       setVideoPreference: () => undefined,
       canEnableVideo: true,
       videoEnableAtMs: null,
+      readAudioLevels: () => null,
       speakAside: () => true,
       peekDraft: () => "",
     };
@@ -951,6 +960,7 @@ describe("InterviewPage", () => {
       setVideoPreference: () => undefined,
       canEnableVideo: true,
       videoEnableAtMs: null,
+      readAudioLevels: () => null,
       speakAside: () => true,
       peekDraft: () => "",
     };
@@ -1334,6 +1344,7 @@ describe("InterviewPage restart (start over, v0.38.3.0)", () => {
       setVideoPreference: () => undefined,
       canEnableVideo: true,
       videoEnableAtMs: null,
+      readAudioLevels: () => null,
       speakAside: () => true,
       peekDraft: () => "",
     });
@@ -1467,6 +1478,7 @@ describe("InterviewPage judged turns (issue #114)", () => {
       setVideoPreference: () => undefined,
       canEnableVideo: true,
       videoEnableAtMs: null,
+      readAudioLevels: () => null,
       ...over,
     };
   }

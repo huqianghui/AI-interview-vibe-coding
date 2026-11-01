@@ -78,6 +78,7 @@ describe("InterviewPage manual video/audio-only toggle", () => {
       setVideoPreference: () => undefined,
       canEnableVideo: true,
       videoEnableAtMs: null,
+      readAudioLevels: () => null,
       speakAside: () => true,
       peekDraft: () => "",
       ...overrides,
@@ -136,6 +137,7 @@ describe("InterviewPage manual video/audio-only toggle", () => {
         mediaMode: "audio-only",
         canEnableVideo: false,
         videoEnableAtMs: null,
+        readAudioLevels: () => null,
         setVideoPreference: (v: string) => calls.push(v),
       }),
     );
