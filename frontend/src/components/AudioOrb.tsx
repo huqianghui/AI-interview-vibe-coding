@@ -65,7 +65,8 @@ const useStyles = makeStyles({
     margin: `-${CANVAS_BLEED_PX}px`,
     pointerEvents: "none",
   },
-  label: { color: tokens.colorNeutralForeground3 },
+  // Positioned so it paints above the canvas, whose aura bleeds down over it.
+  label: { color: tokens.colorNeutralForeground3, position: "relative" },
 });
 
 const STATUS_KEY: Record<AudioState, string> = {
@@ -79,6 +80,9 @@ const STATUS_KEY: Record<AudioState, string> = {
  * how loud they must be to wake it. */
 const PARKED_CHECK_MS = 250;
 const PARKED_WAKE_LEVEL = 0.02;
+/** Below this a muted orb counts as quiet enough to park: under the wake level, so a faint floor
+ * between the two can neither keep it redrawing nor flip it in and out of park. */
+const PARKED_SETTLE_LEVEL = 0.01;
 
 const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 
@@ -186,7 +190,9 @@ export function AudioOrb({
     }
 
     const frame = (now: number) => {
-      const dt = Math.min(100, now - last); // a backgrounded tab resumes without a jump
+      // Capped so a backgrounded tab resumes without a jump, and floored because the first frame
+      // after a wake can be stamped before the `performance.now()` the wake recorded.
+      const dt = Math.max(0, Math.min(100, now - last));
       last = now;
       const state = stateRef.current;
       // Read outside `safely`, but never allowed to escape: a throw here would skip the reschedule
@@ -215,7 +221,7 @@ export function AudioOrb({
       // muted candidate) to start again.
       const settled =
         state === "muted" &&
-        level < 0.002 &&
+        level < PARKED_SETTLE_LEVEL &&
         aura.rings.length === 0 &&
         Math.abs(look.glowAlpha - ORB_LOOKS.muted.glowAlpha) < 0.002;
       if (failed) raf = 0;

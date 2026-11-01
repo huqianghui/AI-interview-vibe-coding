@@ -23,6 +23,16 @@ const C = 120;
 const still: OrbFrame = { timeS: 0, phase: 0, level: 0, bands: [], motion: true };
 
 describe("follow", () => {
+  it("reads a non-finite value as silence rather than carrying NaN into the next frame", () => {
+    expect(follow(NaN, 0.5, 16, ORB_RISE_MS, ORB_FALL_MS)).toBeGreaterThan(0);
+    expect(Number.isFinite(follow(0.5, NaN, 16, ORB_RISE_MS, ORB_FALL_MS))).toBe(true);
+    expect(Number.isFinite(follow(0.5, 1, Infinity, ORB_RISE_MS, ORB_FALL_MS))).toBe(true);
+  });
+
+  it("never overshoots on a negative frame time (a frame stamped before the wake)", () => {
+    expect(follow(0, 0.5, -16, ORB_RISE_MS, ORB_FALL_MS)).toBe(0);
+  });
+
   it("rises faster than it falls, so a syllable lands at once and fades gently", () => {
     const up = follow(0, 1, 50, ORB_RISE_MS, ORB_FALL_MS);
     const down = 1 - follow(1, 0, 50, ORB_RISE_MS, ORB_FALL_MS);
@@ -149,6 +159,28 @@ describe("aura rings", () => {
   });
 });
 
+describe("render edge cases", () => {
+  it("caps the live rings, dropping the oldest", () => {
+    const aura = newAura();
+    for (let i = 0; i < 12; i++) {
+      updateAura(aura, 0.1, i * 0.2);
+      updateAura(aura, 0.9, i * 0.2 + 0.1);
+    }
+    expect(aura.rings).toHaveLength(8);
+    expect(aura.rings[0].bornS).toBeCloseTo(4 * 0.2 + 0.1, 5);
+  });
+
+  it("wraps the phase instead of growing without bound", () => {
+    const big = 2 * Math.PI * 1000 - 0.01;
+    expect(advancePhase(big, 1000, 1, 1)).toBeLessThan(10);
+  });
+
+  it("ignores the level under reduced motion, so the surface is calm", () => {
+    const calm = liquidSurface(R, C, { ...still, level: 1, motion: false }, 1);
+    expect(calm).toEqual(liquidSurface(R, C, { ...still, level: 0, motion: false }, 1));
+  });
+});
+
 describe("drawOrb", () => {
   function fakeCtx() {
     const gradient = { addColorStop: vi.fn() };
@@ -209,6 +241,28 @@ describe("drawOrb", () => {
     const aura = newAura();
     updateAura(aura, 1, 0);
     draw(ctx, ORB_LOOKS.speaking, { ...still, motion: false, timeS: 0.5 }, aura);
-    expect(ctx.stroke.mock.calls.length).toBe(2); // the crest line and the glass rim only
+    const empty = fakeCtx();
+    draw(empty, ORB_LOOKS.speaking, { ...still, motion: false, timeS: 0.5 }, newAura());
+    // a live ring changes nothing when motion is off
+    expect(ctx.stroke.mock.calls.length).toBe(empty.stroke.mock.calls.length);
+  });
+
+  it("strokes one extra ring per live ring when motion is on", () => {
+    const ctx = fakeCtx();
+    const aura = newAura();
+    updateAura(aura, 0.9, 0);
+    updateAura(aura, 0.1, 0.3);
+    updateAura(aura, 0.9, 0.6);
+    draw(ctx, ORB_LOOKS.speaking, { ...still, timeS: 0.7 }, aura);
+    expect(ctx.stroke.mock.calls.length).toBe(2 + 2);
+  });
+
+  it("freezes the waves under reduced motion whatever phase is passed", () => {
+    const a = fakeCtx();
+    const b = fakeCtx();
+    draw(a, ORB_LOOKS.speaking, { ...still, motion: false, phase: 1 });
+    draw(b, ORB_LOOKS.speaking, { ...still, motion: false, phase: 4 });
+    expect(a.moveTo.mock.calls).toEqual(b.moveTo.mock.calls);
+    expect(a.lineTo.mock.calls).toEqual(b.lineTo.mock.calls);
   });
 });

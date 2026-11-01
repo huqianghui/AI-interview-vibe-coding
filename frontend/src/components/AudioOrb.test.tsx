@@ -130,6 +130,25 @@ describe("AudioOrb drawing", () => {
     expect(rec.swell()).toBeGreaterThan(notListening + 5);
   });
 
+  it("keeps a muted orb drawing until its last ring has spread out, then parks", () => {
+    withContext();
+    let level = 1;
+    const { rerender } = renderOrb("speaking", () => ({ level, bands: [] }));
+    step(10); // a loud syllable sends a ring outward
+    level = 0;
+    rerender(
+      <FluentProvider theme={webLightTheme}>
+        <AudioOrb audioState="muted" readAudioLevels={() => ({ level, bands: [] })} />
+      </FluentProvider>,
+    );
+    // ~1.3 s after muting: grey, and the level has decayed under the park threshold (~1.2 s), but the
+    // ring born ~1.4 s ago lives 1.6 s and is still travelling.
+    step(80);
+    expect(frames, "parked mid-ring would freeze the ring on the canvas").toHaveLength(1);
+    step(120);
+    expect(frames).toHaveLength(0);
+  });
+
   it("stops drawing once a muted orb has settled, and wakes when unmuted", () => {
     withContext();
     // The candidate's mic is loud, but muted ignores it: only the interviewer moves a muted orb.

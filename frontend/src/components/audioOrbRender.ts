@@ -71,6 +71,11 @@ export function mixLook(a: OrbLook, b: OrbLook, t: number): OrbLook {
 /** Exponential follow with separate rise and fall times: a syllable lands at once and the orb
  * settles back gently, instead of flickering with every sample. Frame-rate independent. */
 export function follow(current: number, target: number, dtMs: number, riseMs: number, fallMs: number) {
+  // A non-finite input would otherwise stick (NaN in, NaN out) until a gradient throws on it and the
+  // orb goes blank for the rest of the session; read it as silence instead.
+  if (!Number.isFinite(current)) current = 0;
+  if (!Number.isFinite(target)) target = 0;
+  if (!Number.isFinite(dtMs) || dtMs < 0) dtMs = 0;
   const tau = target > current ? riseMs : fallMs;
   return target + (current - target) * Math.exp(-dtMs / tau);
 }
@@ -201,10 +206,12 @@ function traceLiquid(
   closed: boolean,
 ) {
   ctx.beginPath();
+  let first = true;
   for (let x = c - r - SURFACE_STEP_PX; x <= c + r + SURFACE_STEP_PX; x += SURFACE_STEP_PX) {
     const y = surfaceY((x - (c - r)) / (2 * r), s, phase, offset);
-    if (x === c - r - SURFACE_STEP_PX) ctx.moveTo(x, y);
+    if (first) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
+    first = false;
   }
   if (closed) {
     ctx.lineTo(c + r + SURFACE_STEP_PX, c + r + SURFACE_STEP_PX);
