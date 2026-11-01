@@ -1,43 +1,46 @@
 /**
  * AudioOrb (SPEC F9) — the interviewer's visual presence during a voice turn.
  *
- * A sphere drawn on a canvas, whose colour tracks the Voice Live audio lifecycle (idle / listening /
- * speaking / muted) and whose outline moves with the actual sound: the candidate's mic while
- * listening, the interviewer's playback whenever it is audible. This is the "avatar dominant"
- * element of the interview layout (P11) when no digital-human video track is present.
+ * A glass sphere drawn on a canvas, after the Foundry Voice Live orb: its colour tracks the Voice
+ * Live audio lifecycle (idle / listening / speaking / muted), and the liquid inside it and the aura
+ * around it move with the actual sound — the candidate's mic while listening, the interviewer's
+ * playback whenever it is audible. This is the "avatar dominant" element of the interview layout
+ * (P11) when no digital-human video track is present.
  *
  * Levels are read from analysers on our own Web Audio graphs (`useVoiceAudio.readAudioLevels`),
  * not from Azure's events: the playback tap sits after the jitter buffer, so the orb moves exactly
  * as long as the candidate hears the interviewer — Azure marks a response done seconds earlier.
- * Without a reader (the agent editor's static preview) the orb breathes on its own.
+ * Without a reader (the agent editor's static preview) the liquid just sways.
  *
  * The drawing itself lives in `audioOrbRender.ts`. The loop stops once a muted orb has settled, and
- * under `prefers-reduced-motion` the orb is drawn once per state, still and round.
+ * under `prefers-reduced-motion` the orb is drawn once per state, with a calm surface and no rings.
  */
 import { useEffect, useRef, useState } from "react";
 import { makeStyles, tokens, Text } from "@fluentui/react-components";
 import { useTranslation } from "react-i18next";
 import type { AudioLevelReader, AudioState } from "../types/voice";
 import {
+  advancePhase,
   drawOrb,
   follow,
+  liveliness,
   mixLook,
+  newAura,
   ORB_FALL_MS,
   ORB_LOOK_FADE_MS,
   ORB_BAND_COUNT,
   ORB_LOOKS,
-  ORB_MAX_SCALE,
-  ORB_MAX_SHADOW_PX,
+  ORB_MAX_EXTENT,
   ORB_RISE_MS,
+  updateAura,
   type OrbLook,
 } from "./audioOrbRender";
 
 /** The sphere's resting diameter — the same 160 px the CSS orb had, so layouts don't shift. */
 const ORB_REST_RADIUS = 80;
-/** The canvas is larger than the sphere so the loudest swell and its glow are never cut off (the
- * halo is capped at the canvas edge by drawOrb); the negative margin gives that room back, so the orb
- * still occupies 160 px in the layout. */
-const CANVAS_PX = 2 * Math.ceil(ORB_REST_RADIUS * ORB_MAX_SCALE + ORB_MAX_SHADOW_PX);
+/** The canvas is larger than the sphere so the aura and its rings are never cut off; the negative
+ * margin gives that room back, so the orb still occupies 160 px in the layout. */
+const CANVAS_PX = 2 * Math.ceil(ORB_REST_RADIUS * ORB_MAX_EXTENT);
 const CANVAS_BLEED_PX = (CANVAS_PX - 2 * ORB_REST_RADIUS) / 2;
 /** Beyond 2× the edge is already sharp at this size, and a 3× canvas is 2.25× the pixels to fill. */
 const MAX_DPR = 2;
@@ -151,6 +154,8 @@ export function AudioOrb({
 
     let look: OrbLook = ORB_LOOKS[stateRef.current];
     let level = 0;
+    let phase = 0;
+    const aura = newAura();
     const bands = new Array<number>(ORB_BAND_COUNT).fill(0);
     const start = performance.now();
     let last = start;
@@ -163,12 +168,14 @@ export function AudioOrb({
         if (painted === stateRef.current) return;
         painted = stateRef.current;
         safely(() =>
-          drawOrb(ctx, CANVAS_PX, ORB_REST_RADIUS, ORB_LOOKS[stateRef.current], {
-            timeS: 0,
-            level: 0,
-            bands,
-            motion: false,
-          }),
+          drawOrb(
+            ctx,
+            CANVAS_PX,
+            ORB_REST_RADIUS,
+            ORB_LOOKS[stateRef.current],
+            { timeS: 0, phase: 0, level: 0, bands, motion: false },
+            aura,
+          ),
         );
       };
       paint();
@@ -197,18 +204,20 @@ export function AudioOrb({
         bands[k] = follow(bands[k], target.bands[k] ?? 0, dt, ORB_RISE_MS, ORB_FALL_MS);
       }
       look = mixLook(look, ORB_LOOKS[state], 1 - Math.exp(-dt / (ORB_LOOK_FADE_MS / 3)));
+      const timeS = (now - start) / 1000;
+      phase = advancePhase(phase, dt, level, liveliness(look));
+      updateAura(aura, level, timeS);
       safely(() =>
-        drawOrb(ctx, CANVAS_PX, ORB_REST_RADIUS, look, {
-          timeS: (now - start) / 1000,
-          level,
-          bands,
-          motion: true,
-        }),
+        drawOrb(ctx, CANVAS_PX, ORB_REST_RADIUS, look, { timeS, phase, level, bands, motion: true }, aura),
       );
-      // A muted orb is grey and still: once it has faded there and gone quiet, stop drawing, and
-      // only listen for the interviewer (who can still speak to a muted candidate) to start again.
+      // A muted orb is grey and still: once it has faded there, gone quiet and its last ring has
+      // spread out, stop drawing, and only listen for the interviewer (who can still speak to a
+      // muted candidate) to start again.
       const settled =
-        state === "muted" && level < 0.002 && Math.abs(look.glowAlpha - ORB_LOOKS.muted.glowAlpha) < 0.002;
+        state === "muted" &&
+        level < 0.002 &&
+        aura.rings.length === 0 &&
+        Math.abs(look.glowAlpha - ORB_LOOKS.muted.glowAlpha) < 0.002;
       if (failed) raf = 0;
       else if (settled) {
         raf = 0;

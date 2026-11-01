@@ -29,31 +29,37 @@ describe("AudioOrb", () => {
   });
 });
 
-/** A 2D context that records the largest x any outline point reached in the last frame — which,
- * the orb being centred, is how far it swelled. */
+/** A 2D context that records how high the liquid's surface rose in the last frame: the smallest y
+ * the surface path reached, as a height above the canvas centre. The voice raises and roughens the
+ * liquid, so this is how far the sound moved the orb. */
 function recordingContext() {
   const gradient = { addColorStop: vi.fn() };
-  let frameMaxX = 0;
+  let surfaceTopY = Infinity;
+  const CENTRE = 120; // half the orb's canvas
   const ctx = {
     setTransform: vi.fn(),
     clearRect: vi.fn(() => {
-      frameMaxX = 0;
+      surfaceTopY = Infinity;
     }),
     createRadialGradient: vi.fn(() => gradient),
+    createLinearGradient: vi.fn(() => gradient),
     beginPath: vi.fn(),
     arc: vi.fn(),
     fill: vi.fn(),
     fillRect: vi.fn(),
+    stroke: vi.fn(),
     moveTo: vi.fn(),
-    quadraticCurveTo: vi.fn((cpx: number) => {
-      frameMaxX = Math.max(frameMaxX, cpx);
+    lineTo: vi.fn((_x: number, y: number) => {
+      surfaceTopY = Math.min(surfaceTopY, y);
     }),
     closePath: vi.fn(),
     save: vi.fn(),
     restore: vi.fn(),
     clip: vi.fn(),
+    translate: vi.fn(),
+    scale: vi.fn(),
   };
-  return { ctx, frameMaxX: () => frameMaxX };
+  return { ctx, swell: () => CENTRE - surfaceTopY };
 }
 
 describe("AudioOrb drawing", () => {
@@ -103,10 +109,10 @@ describe("AudioOrb drawing", () => {
     const reader: AudioLevelReader = (src) => (src === "playback" ? { level, bands: [0, 0, 0, 0] } : null);
     renderOrb("speaking", reader);
     step(30);
-    const quiet = rec.frameMaxX();
+    const quiet = rec.swell();
     level = 1;
     step(30);
-    expect(rec.frameMaxX()).toBeGreaterThan(quiet + 5);
+    expect(rec.swell()).toBeGreaterThan(quiet + 5);
   });
 
   it("follows the mic only while listening", () => {
@@ -114,14 +120,14 @@ describe("AudioOrb drawing", () => {
     const reader: AudioLevelReader = (src) => (src === "mic" ? { level: 1, bands: [] } : null);
     const { rerender } = renderOrb("speaking", reader);
     step(30);
-    const notListening = rec.frameMaxX();
+    const notListening = rec.swell();
     rerender(
       <FluentProvider theme={webLightTheme}>
         <AudioOrb audioState="listening" readAudioLevels={reader} />
       </FluentProvider>,
     );
     step(30);
-    expect(rec.frameMaxX()).toBeGreaterThan(notListening + 5);
+    expect(rec.swell()).toBeGreaterThan(notListening + 5);
   });
 
   it("stops drawing once a muted orb has settled, and wakes when unmuted", () => {
@@ -142,12 +148,12 @@ describe("AudioOrb drawing", () => {
     const silent = withContext();
     const first = renderOrb("muted", () => null);
     step(30);
-    const quiet = silent.frameMaxX();
+    const quiet = silent.swell();
     first.unmount();
     const loud = withContext();
     renderOrb("muted", (src) => (src === "playback" ? { level: 1, bands: [] } : null));
     step(30);
-    expect(loud.frameMaxX()).toBeGreaterThan(quiet + 5);
+    expect(loud.swell()).toBeGreaterThan(quiet + 5);
     expect(frames, "an audible interviewer keeps the loop running").toHaveLength(1);
   });
 
@@ -219,11 +225,11 @@ describe("AudioOrb drawing", () => {
       src === "mic" ? { level: mic, bands: [] } : { level: 1, bands: [] };
     renderOrb("listening", reader);
     step(30);
-    const playbackWins = rec.frameMaxX();
+    const playbackWins = rec.swell();
     mic = 1;
     step(30);
     // Mic and playback are now equal: no jump beyond the outline's own drift.
-    expect(Math.abs(rec.frameMaxX() - playbackWins)).toBeLessThan(3); // level swell alone is ~10 px
+    expect(Math.abs(rec.swell() - playbackWins)).toBeLessThan(3); // level swell alone is ~10 px
   });
 
   it("switches to a still orb when prefers-reduced-motion turns on mid-session", () => {
